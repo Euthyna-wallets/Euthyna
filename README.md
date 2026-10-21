@@ -181,7 +181,7 @@ Current monorepo layout:
 MandateOS/
 ├── apps/
 │   ├── api/                   # Hono Guard, Base relayer and emergency cancellation endpoint
-│   └── console/               # React/Vite onboarding, treasury and agent console
+│   └── console/               # React/Vite console: overview, agents, payments, escalations, onboarding
 ├── config/
 │   └── clients/acme/          # Exact hackathon vendor registry
 ├── contracts/
@@ -196,6 +196,7 @@ MandateOS/
 │   └── deployer/              # viem Safe/Roles/Delay deployment
 ├── docs/
 │   ├── api.md
+│   ├── console/               # console screenshots
 │   ├── dao-spike.md
 │   └── vault-testnet.md
 ├── deployments/

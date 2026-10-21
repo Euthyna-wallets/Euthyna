@@ -4,6 +4,10 @@ import { base, baseSepolia } from "viem/chains";
 
 import type { NearClient } from "./near.js";
 
+function plain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item))) as T;
+}
+
 export class ConsoleDataService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -39,14 +43,14 @@ export class ConsoleDataService {
         safeBalance = null;
       }
     }
-    return {
+    return plain({
       treasury,
       registryVersion: registry?.version ?? 0,
       agents: { total: agents.length, active: agents.filter((agent) => agent.active).length },
       pendingEscalations: escalations.length,
       safeBalance,
       operations,
-    };
+    });
   }
 
   async operations(organizationId: string) {
@@ -55,14 +59,14 @@ export class ConsoleDataService {
       this.prisma.escalation.findMany({ where: { organizationId } }),
       this.prisma.paymentVisa.findMany({ where: { organizationId } }),
     ]);
-    return operations.map((operation) => ({
+    return plain(operations.map((operation) => ({
       ...operation,
       status:
         escalations.find((escalation) => escalation.opId === operation.opId)?.status === "pending"
           ? "Escalated"
           : operation.state,
       hasVisa: visas.some((visa) => visa.opId === operation.opId),
-    }));
+    })));
   }
 
   async operation(organizationId: string, opId: string) {
@@ -79,7 +83,7 @@ export class ConsoleDataService {
       { step: "Base broadcast", at: operation.broadcastAt, txHash: operation.txHash },
       { step: "Base revert", at: operation.revertedAt, txHash: operation.txHash },
     ];
-    return { operation, escalation, visa, timeline };
+    return plain({ operation, escalation, visa, timeline });
   }
 
   async agentDetail(organizationId: string, agentId: string) {
@@ -111,7 +115,7 @@ export class ConsoleDataService {
         }
       }
     }
-    return { agent, treasury, onChain, mandate, ethBalance, audit: audits };
+    return plain({ agent, treasury, onChain, mandate, ethBalance, audit: audits });
   }
 
   async governance(organizationId: string) {
@@ -122,7 +126,7 @@ export class ConsoleDataService {
         from_index: 0,
         limit: 20,
       });
-      return { proposals: proposals.reverse(), delay: { address: treasury.delayAddress, cooldownSeconds: 300 } };
+      return plain({ proposals: proposals.reverse(), delay: { address: treasury.delayAddress, cooldownSeconds: 300 } });
     } catch (error) {
       return { proposals: [], delay: null, error: error instanceof Error ? error.message : String(error) };
     }
