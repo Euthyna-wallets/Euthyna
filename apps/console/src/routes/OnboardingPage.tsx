@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE, api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
+import { generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -75,6 +76,7 @@ export function OnboardingPage() {
   useEffect(() => {
     if (!signedIn) return;
     refreshOrganizations().catch((cause: unknown) => setError(String(cause)));
+    void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch(() => undefined);
   }, [signedIn]);
 
   useEffect(() => {
@@ -182,7 +184,7 @@ export function OnboardingPage() {
                 className="ghost"
                 onClick={() => void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch((cause) => setError(String(cause)))}
               >
-                Use connected NEAR account
+                Use generated NEAR account
               </button>
             </div>
             <button
@@ -311,7 +313,7 @@ export function SignIn() {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", origin: window.location.origin },
-        body: JSON.stringify({ email, name }),
+        body: JSON.stringify({ email, name, nearPublicKey: generatedNearPublicKey() }),
       });
       if (!response.ok) {
         if (response.status === 409 || response.status === 422) {
@@ -321,6 +323,8 @@ export function SignIn() {
         }
         throw new Error((await response.json().catch(() => ({}))).message ?? "Registration failed");
       }
+      const payload = (await response.json().catch(() => ({}))) as { nearAccountId?: string };
+      if (payload.nearAccountId) setGeneratedNearAccountId(payload.nearAccountId);
       const passkey = await authClient.passkey.addPasskey({ name: "MandateOS console" });
       if (passkey?.error) setError(passkey.error.message ?? "Could not create the passkey");
     } catch (cause) {
@@ -465,6 +469,11 @@ function MemberWallets(props: {
   const [evmAddress, setEvmAddress] = useState("");
   const self = props.members[0];
 
+  useEffect(() => {
+    void nearAccounts().then((accounts) => setNearAccountId(accounts[0] ?? "")).catch(() => undefined);
+    void evmAccounts().then((accounts) => setEvmAddress(accounts[0] ?? "")).catch(() => undefined);
+  }, []);
+
   return (
     <div className="stack">
       <table>
@@ -494,7 +503,7 @@ function MemberWallets(props: {
             })()
           }
         >
-          Use connected NEAR account
+          Use generated NEAR account
         </button>
         <button
           className="ghost"
@@ -509,7 +518,7 @@ function MemberWallets(props: {
             })()
           }
         >
-          Use connected EVM account
+          Use generated EVM account
         </button>
       </div>
       <div className="row">
@@ -533,6 +542,11 @@ function MemberWallets(props: {
         >
           Link my wallets
         </button>
+      </div>
+      <div className="muted small">
+        These wallets are generated in this browser (non-custodial). Fund the NEAR implicit account
+        with testnet NEAR and the EVM address with Base Sepolia ETH before signing treasury
+        transactions. The server never sees the private keys.
       </div>
       {self?.nearAccountId && self?.evmAddress ? null : (
         <div className="muted small">Every member must link both wallets before a plan is built.</div>
@@ -633,18 +647,26 @@ function TreasuryWizard(props: {
           <div className="row">
             <button
               className="primary"
-              disabled={Boolean(props.busy) || !signerId}
+              disabled={Boolean(props.busy)}
               onClick={() => props.run("near-deploy", async () => {
-                const hashes = await signNearTransactions(signerId, [
-                  { receiverId: props.plan.vault.accountId, actions: props.plan.vault.actions },
-                  { receiverId: props.plan.relay.accountId, actions: props.plan.relay.actions },
-                ]);
-                setTransactionHashes((current) => [...current, ...hashes]);
+                const deployed = await api<{ vaultTxHash: string; relayTxHash: string }>(
+                  "/v1/console/treasury/deploy-contracts",
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      environment: props.plan.environment,
+                      daoName: props.plan.daoName,
+                      founderNearAccountId: props.plan.founderNearAccountId,
+                    }),
+                  },
+                );
+                setTransactionHashes((current) => [...current, deployed.vaultTxHash, deployed.relayTxHash]);
               })}
             >
-              Sign Vault + relay deployment
+              Deploy Vault + relay (MandateOS pays)
             </button>
           </div>
+          <div className="muted small">Signed by the MandateOS relayer; contracts remain owned by the DAO.</div>
           <div className="muted small">
             Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}
           </div>

@@ -25,6 +25,7 @@ export interface TreasuryConfig {
   mpcPath: string;
   budgetTokenAccountId: string;
   artifactsDir: string;
+  accountParent: string;
   environments: Record<string, TreasuryEnvironmentConfig>;
   vaultTtlBlocks: number;
   vaultDepositYocto: string;
@@ -56,6 +57,8 @@ export interface TreasuryPlan {
   nearNetwork: string;
   baseChainId: number;
   daoAccountId: string;
+  daoName: string;
+  founderNearAccountId: string;
   council: Array<{ memberId: string; nearAccountId: string; evmAddress: Address }>;
   threshold: number;
   policy: Record<string, unknown>;
@@ -147,6 +150,10 @@ export interface TreasuryGateway {
   linkWallets(organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }): Promise<void>;
   plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan>;
   register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView>;
+  deployContracts(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ vaultTxHash: string; relayTxHash: string }>;
   refresh(organizationId: string, actorId: string, environment: string): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
 }
@@ -415,8 +422,9 @@ export class TreasuryService {
 
     const slug = slugify(input.daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
-    const vaultAccountId = `${slug}-vault.${input.founderNearAccountId}`;
-    const relayAccountId = `${slug}-relay.${input.founderNearAccountId}`;
+    const short = slug.slice(0, 8);
+    const vaultAccountId = `${short}-v.${this.config.accountParent}`;
+    const relayAccountId = `${short}-r.${this.config.accountParent}`;
     for (const accountId of [daoAccountId, vaultAccountId, relayAccountId]) {
       if (accountId.length > 64) throw new TreasuryError(400, "account_id_too_long", `${accountId} exceeds 64 characters`);
     }
@@ -505,6 +513,8 @@ export class TreasuryService {
       nearNetwork: this.config.nearNetwork,
       baseChainId: environment.baseChainId,
       daoAccountId,
+      daoName: slug,
+      founderNearAccountId: input.founderNearAccountId,
       council,
       threshold,
       policy,
@@ -520,6 +530,16 @@ export class TreasuryService {
       govAddress,
       base,
     };
+  }
+
+  async deployContracts(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ vaultTxHash: string; relayTxHash: string }> {
+    const plan = await this.plan(organizationId, input);
+    const vaultTxHash = await this.near.executeActions(plan.vault.accountId, plan.vault.actions);
+    const relayTxHash = await this.near.executeActions(plan.relay.accountId, plan.relay.actions);
+    return { vaultTxHash, relayTxHash };
   }
 
   async register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView> {

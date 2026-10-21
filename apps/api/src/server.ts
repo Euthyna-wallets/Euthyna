@@ -28,6 +28,7 @@ const treasury = new TreasuryService(prisma, near, signer, {
   mpcPath: "governance/base-sepolia",
   budgetTokenAccountId: env.BUDGET_TOKEN_ACCOUNT_ID,
   artifactsDir: env.CONTRACT_ARTIFACTS_DIR,
+  accountParent: env.NEAR_ACCOUNT_PARENT,
   environments: {
     uat: {
       baseChainId: 84532,
@@ -66,6 +67,7 @@ const app = createApp({
   payments,
   consoleData,
   consoleOrigin: env.CONSOLE_ORIGIN,
+  nearParentAccount: env.NEAR_ACCOUNT_PARENT,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

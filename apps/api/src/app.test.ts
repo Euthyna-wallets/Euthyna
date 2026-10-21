@@ -195,6 +195,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       treasuryCalls.registers.push({ organizationId, actorId });
       return {} as TreasuryView;
     },
+    deployContracts: async () => ({ vaultTxHash: "v", relayTxHash: "r" }),
     refresh: async (organizationId: string, actorId: string) => {
       treasuryCalls.refreshes.push({ organizationId, actorId });
       return { status: "active" } as TreasuryView;
@@ -231,7 +232,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     agentDetail: async () => null,
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin });
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin, nearParentAccount: "mandateos.testnet" });
   return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 

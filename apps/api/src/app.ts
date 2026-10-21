@@ -135,6 +135,7 @@ export interface AppDependencies {
   payments: PaymentService;
   consoleData: ConsoleDataService;
   consoleOrigin: string;
+  nearParentAccount: string;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -233,6 +234,7 @@ export function createApp({
   payments,
   consoleData,
   consoleOrigin,
+  nearParentAccount,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -261,9 +263,26 @@ export function createApp({
     const input = await parseJsonPublic(context, z.object({
       email: z.string().email(),
       name: z.string().min(1).max(120),
+      nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/).optional(),
     }));
     const url = new URL(context.req.url);
-    return auth.registerPasswordless(`${url.protocol}//${url.host}`, consoleOrigin, input);
+    const response = await auth.registerPasswordless(`${url.protocol}//${url.host}`, consoleOrigin, input);
+    if (!response.ok || !input.nearPublicKey) return response;
+    const relayer = nearParentAccount;
+    if (/^[0-9a-f]{64}$/.test(relayer)) {
+      return context.json({ error: "relayer_must_be_named", message: "set a named NEAR relayer account to create wallets" }, 500);
+    }
+    const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+    const nearAccountId = `w-${suffix}.${relayer}`;
+    if (nearAccountId.length > 64) {
+      return context.json({ error: "near_account_too_long" }, 500);
+    }
+    await near.createSubaccount(nearAccountId, input.nearPublicKey, "9000000000000000000000000");
+    const payload = await response.json();
+    return new Response(JSON.stringify({ ...payload, nearAccountId }), {
+      status: response.status,
+      headers: response.headers,
+    });
   });
 
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -529,6 +548,20 @@ export function createApp({
       metadata: { environment: input.environment, status: refreshed.status },
     });
     return context.json(refreshed);
+  });
+
+  app.post("/v1/console/treasury/deploy-contracts", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, treasuryPlanSchema);
+    const deployed = await treasury.deployContracts(consoleIdentity.organizationId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "treasury.contracts_deployed",
+      metadata: deployed,
+    });
+    return context.json(deployed);
   });
 
   app.post("/v1/console/treasury/register", requireConsoleAdmin(auth, consoleLimiter), async (context) => {

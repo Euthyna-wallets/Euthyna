@@ -29,6 +29,7 @@ const config: TreasuryConfig = {
   mpcPath: "governance/base-sepolia",
   budgetTokenAccountId: "test-ft.testnet",
   artifactsDir,
+  accountParent: "mandateos.testnet",
   environments: {
     uat: {
       baseChainId: 84532,
@@ -178,7 +179,7 @@ describe("TreasuryService.plan", () => {
     expect(plan.daoAccountId).toBe("acme-treasury.sputnikv2.testnet");
     expect(plan.threshold).toBe(2);
     expect(plan.govAddress).toBe(govAddress);
-    expect(plan.vault.accountId).toBe("acme-treasury-vault.alice.testnet");
+    expect(plan.vault.accountId).toBe("acme-tre-v.mandateos.testnet");
     expect(plan.vault.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.delay_address).toBe(Buffer.from(govAddress.slice(2), "hex").toString("base64"));

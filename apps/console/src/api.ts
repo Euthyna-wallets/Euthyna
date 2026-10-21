@@ -20,7 +20,10 @@ export type NearAction =
   | { type: "FunctionCall"; methodName: string; args: Record<string, unknown>; gasTgas: number; description: string };
 
 export type TreasuryPlan = {
+  environment: string;
   daoAccountId: string;
+  daoName: string;
+  founderNearAccountId: string;
   threshold: number;
   govAddress: string;
   council: Array<{ nearAccountId: string; evmAddress: string }>;

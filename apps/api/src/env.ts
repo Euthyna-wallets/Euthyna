@@ -10,6 +10,7 @@ const schema = z.object({
   GUARD_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
   NEAR_RELAYER_ACCOUNT_ID: z.string().min(1),
   NEAR_RELAYER_PRIVATE_KEY: z.string().min(1),
+  NEAR_ACCOUNT_PARENT: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
@@ -23,12 +24,16 @@ const schema = z.object({
 
 type ParsedEnv = z.infer<typeof schema>;
 
-export type Env = Omit<ParsedEnv, "PASSKEY_RP_ID"> & { PASSKEY_RP_ID: string };
+export type Env = Omit<ParsedEnv, "PASSKEY_RP_ID" | "NEAR_ACCOUNT_PARENT"> & {
+  PASSKEY_RP_ID: string;
+  NEAR_ACCOUNT_PARENT: string;
+};
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
   return {
     ...parsed,
     PASSKEY_RP_ID: parsed.PASSKEY_RP_ID ?? new URL(parsed.CONSOLE_ORIGIN).hostname,
+    NEAR_ACCOUNT_PARENT: parsed.NEAR_ACCOUNT_PARENT ?? parsed.NEAR_RELAYER_ACCOUNT_ID,
   };
 }
