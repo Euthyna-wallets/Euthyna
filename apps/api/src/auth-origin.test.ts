@@ -9,7 +9,6 @@ const authEnv: AuthEnvironment = {
   BETTER_AUTH_URL: "http://api.example.com",
   CONSOLE_ORIGIN: "http://console.example.com",
   PASSKEY_RP_ID: "console.example.com",
-  AUTH_E2E_PASSWORD: "1",
 };
 
 describe("console passkey origin", () => {

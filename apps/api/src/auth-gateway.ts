@@ -77,6 +77,11 @@ export interface AuthGateway {
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
   listMembers(organizationId: string): Promise<MemberView[]>;
+  registerPasswordless(
+    baseUrl: string,
+    consoleOrigin: string,
+    input: { email: string; name: string },
+  ): Promise<Response>;
   createAgent(input: CreateAgentInput): Promise<CreatedAgent>;
   revokeAgent(organizationId: string, agentId: string): Promise<boolean>;
   recordAudit(event: AuditEvent): Promise<void>;
@@ -163,6 +168,29 @@ export class BetterAuthGateway implements AuthGateway {
       organizationId: member.organizationId,
       role: member.role,
     };
+  }
+
+  async registerPasswordless(
+    baseUrl: string,
+    consoleOrigin: string,
+    input: { email: string; name: string },
+  ): Promise<Response> {
+    const password = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const response = await this.auth.handler(
+      new Request(`${baseUrl}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { origin: consoleOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ email: input.email, name: input.name, password }),
+      }),
+    );
+    if (!response.ok) return response;
+    const payload = (await response.clone().json()) as { user?: { id?: string } };
+    if (payload.user?.id) {
+      await this.prisma.account.deleteMany({
+        where: { userId: payload.user.id, providerId: "credential" },
+      });
+    }
+    return response;
   }
 
   async getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {

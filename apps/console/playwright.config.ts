@@ -9,6 +9,6 @@ export default defineConfig({
     command: "pnpm dev",
     port: 5173,
     reuseExistingServer: true,
-    env: { ...process.env, VITE_E2E: "1", NODE_ENV: "test", AUTH_E2E_PASSWORD: "1" },
+    env: { ...process.env, VITE_E2E: "1" },
   },
 });

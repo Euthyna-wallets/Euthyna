@@ -135,7 +135,6 @@ export interface AppDependencies {
   payments: PaymentService;
   consoleData: ConsoleDataService;
   consoleOrigin: string;
-  passwordAuthEnabled: boolean;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -197,6 +196,18 @@ function requireConsoleRequest(consoleOrigin: string) {
   };
 }
 
+async function parseJsonPublic<T>(context: Context, schema: z.ZodType<T>): Promise<T> {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "invalid JSON body" });
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  return parsed.data;
+}
+
 async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<T> {
   let body: unknown;
   try {
@@ -222,7 +233,6 @@ export function createApp({
   payments,
   consoleData,
   consoleOrigin,
-  passwordAuthEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -241,10 +251,19 @@ export function createApp({
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", (context) => {
     const path = context.req.path;
-    if (!passwordAuthEnabled && (path.endsWith("/sign-up/email") || path.endsWith("/sign-in/email"))) {
+    if (path.endsWith("/sign-up/email") || path.endsWith("/sign-in/email")) {
       return context.json({ error: "not_found" }, 404);
     }
     return auth.handler(context.req.raw);
+  });
+
+  app.post("/api/register/passkey-start", async (context) => {
+    const input = await parseJsonPublic(context, z.object({
+      email: z.string().email(),
+      name: z.string().min(1).max(120),
+    }));
+    const url = new URL(context.req.url);
+    return auth.registerPasswordless(`${url.protocol}//${url.host}`, consoleOrigin, input);
   });
 
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {

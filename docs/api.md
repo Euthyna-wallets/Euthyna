@@ -253,8 +253,9 @@ Admin only. Verifies on-chain state before inserting `treasury`:
 - organizations and active organization (`/api/auth/organization/*`);
 - sessions (`/api/auth/get-session`).
 
-Email/password is enabled only to bootstrap a human account; the console then adds
-a passkey and uses it as the primary credential. The passkey relying party is
+There is no password credential. `POST /api/register/passkey-start` creates the
+user, returns a session cookie, immediately deletes the generated credential row,
+and the console adds the passkey. `/sign-up/email` and `/sign-in/email` return 404. The passkey relying party is
 `PASSKEY_RP_ID` and the expected origin is `BETTER_AUTH_URL`.
 
 ## Errors

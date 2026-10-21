@@ -34,7 +34,7 @@ export interface MandateAuth {
 
 export type AuthEnvironment = Pick<
   Env,
-  "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID" | "CONSOLE_ORIGIN" | "AUTH_E2E_PASSWORD"
+  "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID" | "CONSOLE_ORIGIN"
 >;
 
 export function passkeyRelyingParty(env: AuthEnvironment) {
@@ -59,12 +59,10 @@ export function buildAuthOptions(
     baseURL: env.BETTER_AUTH_URL,
     basePath: "/api/auth",
     trustedOrigins: [env.CONSOLE_ORIGIN],
-    // Password bootstrap exists only for the E2E harness. Passkeys remain the
-    // normal credential; production startup rejects AUTH_E2E_PASSWORD=1.
-    emailAndPassword: {
-      enabled: env.AUTH_E2E_PASSWORD === "1",
-      requireEmailVerification: false,
-    },
+    // The email/password routes are blocked publicly. Better Auth still needs
+    // this provider internally for the passwordless registration endpoint,
+    // which deletes the generated credential account immediately.
+    emailAndPassword: { enabled: true, requireEmailVerification: false },
     plugins: [
       passkey(passkeyRelyingParty(env)),
       organization(),

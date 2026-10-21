@@ -146,6 +146,10 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve(agentId === "agent-a" && organizationId === "org-1");
   }
 
+  registerPasswordless(): Promise<Response> {
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  }
+
   recordAudit(event: AuditEvent): Promise<void> {
     this.audits.push(event);
     return Promise.resolve();
@@ -227,7 +231,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     agentDetail: async () => null,
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin, passwordAuthEnabled: false });
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin });
   return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 
@@ -356,8 +360,19 @@ describe("treasury refresh", () => {
   });
 });
 
-describe("email/password gating", () => {
-  it("returns 404 for sign-up/email when password auth is disabled", async () => {
+describe("passwordless registration", () => {
+  it("creates a session without exposing a password route", async () => {
+    const { app } = testApp();
+    const response = await app.request("/api/register/passkey-start", {
+      method: "POST",
+      headers: headers({ origin: consoleOrigin }),
+      body: JSON.stringify({ email: "new@example.test", name: "New User" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("returns 404 for the password sign-up route", async () => {
     const { app } = testApp();
     const response = await app.request("/api/auth/sign-up/email", {
       method: "POST",

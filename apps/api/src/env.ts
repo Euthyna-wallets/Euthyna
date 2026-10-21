@@ -19,8 +19,6 @@ const schema = z.object({
   MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
   BUDGET_TOKEN_ACCOUNT_ID: z.string().min(1),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
-  NODE_ENV: z.string().optional(),
-  AUTH_E2E_PASSWORD: z.enum(["0", "1"]).default("0"),
 });
 
 type ParsedEnv = z.infer<typeof schema>;
@@ -29,9 +27,6 @@ export type Env = Omit<ParsedEnv, "PASSKEY_RP_ID"> & { PASSKEY_RP_ID: string };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
-  if (parsed.AUTH_E2E_PASSWORD === "1" && parsed.NODE_ENV !== "test") {
-    throw new Error("AUTH_E2E_PASSWORD=1 is only allowed with NODE_ENV=test");
-  }
   return {
     ...parsed,
     PASSKEY_RP_ID: parsed.PASSKEY_RP_ID ?? new URL(parsed.CONSOLE_ORIGIN).hostname,

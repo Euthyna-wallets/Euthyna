@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
+import { API_BASE, api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -281,21 +281,45 @@ export function OnboardingPage() {
 }
 
 export function SignIn() {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"passkey" | "signup" | "password">("passkey");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function attempt(
-    action: () => Promise<{ error?: { message?: string | undefined } | null }>,
-  ) {
+  async function signInWithPasskey() {
     setBusy(true);
     setError(null);
     try {
-      const result = await action();
-      if (result.error) setError(result.error.message ?? "authentication failed");
+      const result = await authClient.signIn.passkey();
+      if (result?.error) setError(result.error.message ?? "Passkey sign-in failed");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function register(email: string, name: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/register/passkey-start`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", origin: window.location.origin },
+        body: JSON.stringify({ email, name }),
+      });
+      if (!response.ok) {
+        if (response.status === 409 || response.status === 422) {
+          setError("This email already has an account. Sign in with your passkey instead.");
+          setMode("login");
+          return;
+        }
+        throw new Error((await response.json().catch(() => ({}))).message ?? "Registration failed");
+      }
+      const passkey = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+      if (passkey?.error) setError(passkey.error.message ?? "Could not create the passkey");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -305,53 +329,43 @@ export function SignIn() {
 
   return (
     <div className="auth">
+      <aside className="auth-intro">
+        <div className="brand">MandateOS</div>
+        <h2>AI agents move company funds. Humans keep the keys and the limits.</h2>
+        <ul>
+          <li>Guard visa bound to one exact transaction</li>
+          <li>Vault role, budget and idempotence on NEAR</li>
+          <li>Zodiac permissions on a 2/3 Safe</li>
+        </ul>
+        <p className="small muted">Non-custodial by design. The server never holds a key that can move funds.</p>
+      </aside>
       <div className="auth-card">
         <div className="brand">MandateOS</div>
-        <h1>Company console</h1>
-        <p className="muted">Sign in with a passkey. No password leaves the browser after setup.</p>
+        <h1>{mode === "login" ? "Sign in" : "Create your account"}</h1>
+        <p className="muted">
+          {mode === "login"
+            ? "Use the passkey stored on this device. No password, no seed phrase."
+            : "Your email identifies the organization account. Access is protected by a passkey created on this device."}
+        </p>
         {error ? <div className="alert error">{error}</div> : null}
         <div className="tabs">
-          <button className={mode === "passkey" ? "tab active" : "tab"} onClick={() => setMode("passkey")}>Passkey</button>
-          <button className={mode === "signup" ? "tab active" : "tab"} onClick={() => setMode("signup")}>Create account</button>
-          <button className={mode === "password" ? "tab active" : "tab"} onClick={() => setMode("password")}>Password</button>
+          <button className={mode === "login" ? "tab active" : "tab"} onClick={() => { setMode("login"); setError(null); }}>Sign in</button>
+          <button className={mode === "register" ? "tab active" : "tab"} onClick={() => { setMode("register"); setError(null); }}>Create account</button>
         </div>
-        {mode === "passkey" ? (
-          <button className="primary" disabled={busy} onClick={() => attempt(() => authClient.signIn.passkey())}>
-            {busy ? "Waiting for authenticator…" : "Continue with passkey"}
+        {mode === "login" ? (
+          <button className="primary" disabled={busy} onClick={() => void signInWithPasskey()}>
+            {busy ? "Waiting for your authenticator…" : "Continue with passkey"}
           </button>
-        ) : null}
-        {mode === "signup" ? (
+        ) : (
           <>
-            <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() =>
-                attempt(async () => {
-                  const result = await authClient.signUp.email({ email, name, password });
-                  if (!result.error) {
-                    const passkey = await authClient.passkey.addPasskey({ name: "MandateOS console" });
-                    if (passkey?.error) return passkey;
-                  }
-                  return result;
-                })
-              }
-            >
-              Create account and passkey
+            <label>Full name<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <label>Work email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <button className="primary" disabled={busy || !email || !name} onClick={() => void register(email, name)}>
+              {busy ? "Creating your passkey…" : "Create account with passkey"}
             </button>
+            <p className="muted small">No password is created. The email is only an identifier in this UAT.</p>
           </>
-        ) : null}
-        {mode === "password" ? (
-          <>
-            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <button className="primary" disabled={busy} onClick={() => attempt(() => authClient.signIn.email({ email, password }))}>
-              Sign in
-            </button>
-          </>
-        ) : null}
+        )}
       </div>
     </div>
   );

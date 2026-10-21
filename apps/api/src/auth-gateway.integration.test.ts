@@ -30,8 +30,7 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
         BETTER_AUTH_URL: "http://localhost:3000",
         CONSOLE_ORIGIN: "http://localhost:5173",
         PASSKEY_RP_ID: "localhost",
-        AUTH_E2E_PASSWORD: "0",
-      },
+            },
       prisma,
     );
     gateway = new BetterAuthGateway(auth, prisma);
@@ -104,5 +103,23 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
     await expect(
       prisma.auditLog.count({ where: { organizationId: orgId, action: "agent.revoked" } }),
     ).resolves.toBe(1);
+  });
+
+  it("registers an email without keeping a password credential", async () => {
+    const email = `passkey-${randomUUID()}@example.test`;
+    const response = await gateway.registerPasswordless("http://localhost:3000", "http://localhost:5173", {
+      email,
+      name: "Passkey User",
+    });
+    expect(response.status).toBe(200);
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    await expect(
+      prisma.account.count({ where: { userId: user.id, providerId: "credential" } }),
+    ).resolves.toBe(0);
+    const again = await gateway.registerPasswordless("http://localhost:3000", "http://localhost:5173", {
+      email,
+      name: "Passkey User",
+    });
+    expect(again.ok).toBe(false);
   });
 });

@@ -4,10 +4,8 @@ Objectif : rejouer le parcours console sur **NEAR testnet + Base Sepolia**, sans
 clé privée côté serveur. Cocher dans l'ordre ; chaque étape indique le résultat
 attendu.
 
-> Création de compte : `emailAndPassword` est désactivé par défaut. Pour l’UAT
-> locale, démarrer l’API avec `NODE_ENV=test AUTH_E2E_PASSWORD=1`, créer le compte
-> puis la passkey, et retirer le flag ensuite. Hors test, le démarrage refuse ce
-> flag.
+> Création de compte : e-mail + passkey uniquement. Aucun mot de passe n’est créé ;
+> les routes `/sign-up/email` et `/sign-in/email` renvoient 404.
 
 ## 0. Pré-requis
 

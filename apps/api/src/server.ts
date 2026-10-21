@@ -66,7 +66,6 @@ const app = createApp({
   payments,
   consoleData,
   consoleOrigin: env.CONSOLE_ORIGIN,
-  passwordAuthEnabled: env.AUTH_E2E_PASSWORD === "1",
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
