@@ -182,3 +182,29 @@ export async function waitForEvmTransaction(hash: Hex): Promise<void> {
   const receipt = await client.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success") throw new Error(`transaction ${hash} reverted`);
 }
+
+
+export async function signDaoProposal(
+  signerId: string,
+  proposal: { receiverId: string; args: Record<string, unknown>; deposit: string },
+): Promise<string> {
+  const selector = await nearSelector();
+  const wallet = await selector.wallet();
+  const outcome = await wallet.signAndSendTransaction({
+    signerId,
+    receiverId: proposal.receiverId,
+    actions: [
+      {
+        type: "FunctionCall",
+        params: {
+          methodName: "add_proposal",
+          args: proposal.args,
+          gas: "150000000000000",
+          deposit: proposal.deposit,
+        },
+      },
+    ],
+  });
+  if (!outcome) throw new Error("wallet returned no transaction outcome");
+  return outcome.transaction_outcome.id;
+}

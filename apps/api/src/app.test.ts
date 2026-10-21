@@ -103,6 +103,22 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve([]);
   }
 
+  getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
+    if (organizationId !== "org-1" || agentId !== "11111111-1111-4111-8111-111111111111") return Promise.resolve(null);
+    return Promise.resolve({
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "Agent A",
+      role: "researcher",
+      nearAccountId: "agent-a.near",
+      nearPublicKey: "ed25519:11111111111111111111111111111111",
+      vaultAccountId: "vault-1.near",
+      evmAddress: null,
+      mpcPath: "agents/researcher/base",
+      active: true,
+      createdAt: new Date(0),
+    });
+  }
+
   createAgent(input: CreateAgentInput): Promise<CreatedAgent> {
     this.created.push(input);
     return Promise.resolve({
@@ -145,6 +161,8 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
   const near = {
     getOperation: async () => options?.operation ?? operation,
     cancelNonce: async () => "near-cancel-hash",
+    viewFunction: async (_accountId: string, method: string) =>
+      method === "get_agent" ? { role: "researcher", active: true, evm_address: [1, 2] } : 3,
   } as unknown as NearClient;
   const guard = {
     approve: async () => {
@@ -156,6 +174,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     wallets: [] as Array<{ organizationId: string; userId: string; nearAccountId: string; evmAddress: string }>,
     plans: [] as Array<{ organizationId: string; daoName: string }>,
     registers: [] as Array<{ organizationId: string; actorId: string }>,
+    refreshes: [] as Array<{ organizationId: string; actorId: string }>,
   };
   const treasury = {
     linkWallets: async (organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }) => {
@@ -168,6 +187,10 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     register: async (organizationId: string, actorId: string) => {
       treasuryCalls.registers.push({ organizationId, actorId });
       return {} as TreasuryView;
+    },
+    refresh: async (organizationId: string, actorId: string) => {
+      treasuryCalls.refreshes.push({ organizationId, actorId });
+      return { status: "active" } as TreasuryView;
     },
     getTreasury: async () => ({ status: options?.treasuryStatus ?? "active" }) as TreasuryView,
   } as TreasuryGateway;
@@ -283,6 +306,51 @@ describe("rate limiting", () => {
     expect(limiter.allow("agent:a")).toBe(true);
     expect(limiter.allow("agent:a")).toBe(false);
     expect(limiter.allow("agent:b")).toBe(true);
+  });
+});
+
+describe("agent detail", () => {
+  it("returns the stored agent and its on-chain state", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents/11111111-1111-4111-8111-111111111111", {
+      headers: consoleHeaders({ cookie: "session-member" }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { agent: { id: string }; onChain: { agent: unknown; nextEvmNonce: number } };
+    expect(body.agent.id).toBe("11111111-1111-4111-8111-111111111111");
+    expect(body.onChain.nextEvmNonce).toBe(3);
+  });
+
+  it("does not expose another organization's agent", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents/22222222-2222-4222-8222-222222222222", {
+      headers: consoleHeaders({ cookie: "session-member" }),
+    });
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("treasury refresh", () => {
+  it("lets an admin re-run verification", async () => {
+    const { app, treasuryCalls } = testApp();
+    const response = await app.request("/v1/console/treasury/refresh", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ environment: "uat" }),
+    });
+    expect(response.status).toBe(200);
+    expect(treasuryCalls.refreshes).toEqual([{ organizationId: "org-1", actorId: "user-admin" }]);
+  });
+
+  it("forbids a member from refreshing", async () => {
+    const { app, treasuryCalls } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/treasury/refresh", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({ environment: "uat" }),
+    });
+    expect(response.status).toBe(403);
+    expect(treasuryCalls.refreshes).toEqual([]);
   });
 });
 

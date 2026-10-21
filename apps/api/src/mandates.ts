@@ -50,7 +50,7 @@ export interface MandatePreview {
   proposals: {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
-    funding: Record<string, unknown> | null;
+    funding: MandateProposal | null;
     zodiacRelay: MandateProposal[];
   };
   warnings: string[];
@@ -236,18 +236,35 @@ export class MandateService implements MandateGateway {
       : null;
 
     const zodiacRelay: MandateProposal[] = zodiacCalls.map((call) => ({
-      receiverId: treasury.relayAccountId,
-      methodName: "propose",
-      description: `Governance relay: ${call.description}`,
+      receiverId: treasury.daoAccountId,
+      methodName: "add_proposal",
+      description: `DAO proposal: relay ${call.description}`,
       args: {
-        target: b64(call.to),
-        value: "0",
-        data: b64(call.data),
-        gas_limit: input.gas.gasLimit,
-        max_fee_per_gas: input.gas.maxFeePerGas,
-        max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
+        proposal: {
+          description: call.description,
+          kind: {
+            FunctionCall: {
+              receiver_id: treasury.relayAccountId,
+              actions: [
+                {
+                  method_name: "propose",
+                  args: functionCallArgs({
+                    target: b64(call.to),
+                    value: "0",
+                    data: b64(call.data),
+                    gas_limit: input.gas.gasLimit,
+                    max_fee_per_gas: input.gas.maxFeePerGas,
+                    max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
+                  }),
+                  gas: "300000000000000",
+                  deposit: "0",
+                },
+              ],
+            },
+          },
+        },
       },
-      deposit: "0",
+      deposit: "100000000000000000000000",
     }));
 
     const agentStatus = !input.agent
@@ -284,10 +301,22 @@ export class MandateService implements MandateGateway {
           input.agent === undefined
             ? null
             : {
-                kind: "Transfer",
-                receiverId: treasury.vaultAccountId,
-                amount: input.budget,
-                msg: { role: input.role, config },
+                receiverId: treasury.daoAccountId,
+                methodName: "add_proposal",
+                description: `DAO proposal: fund ${input.role} budget`,
+                args: {
+                  proposal: {
+                    description: `Fund ${input.role} budget`,
+                    kind: {
+                      Transfer: {
+                        receiver_id: treasury.vaultAccountId,
+                        amount: input.budget,
+                        msg: JSON.stringify({ role: input.role, config }),
+                      },
+                    },
+                  },
+                },
+                deposit: "100000000000000000000000",
               },
         zodiacRelay,
       },

@@ -68,6 +68,14 @@ export function explorerBase(address: string): string {
 }
 
 
+export type MandateProposal = {
+  receiverId: string;
+  methodName: string;
+  description: string;
+  args: Record<string, unknown>;
+  deposit: string;
+};
+
 export type MandatePreview = {
   roleKey: string;
   allowanceKey: string;
@@ -77,10 +85,10 @@ export type MandatePreview = {
   diff: Array<{ field: string; current: unknown; next: unknown }>;
   agentStatus: "ready" | "needs_agent_address" | "no_agent";
   proposals: {
-    vaultSetRole: { description: string; args: unknown };
-    vaultRegisterAgent: { description: string; args: unknown } | null;
-    funding: unknown;
-    zodiacRelay: Array<{ description: string; args: unknown }>;
+    vaultSetRole: MandateProposal;
+    vaultRegisterAgent: MandateProposal | null;
+    funding: MandateProposal | null;
+    zodiacRelay: MandateProposal[];
   };
   warnings: string[];
 };

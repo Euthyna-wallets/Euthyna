@@ -140,6 +140,17 @@ The response contains:
   calls to sign. The Safe is deployed before the modules because their initializers
   reference its address; enabling them is a separate 2/3 Safe batch.
 
+### `POST /v1/console/treasury/refresh`
+
+Admin only. Re-runs every register check against the stored treasury and updates
+its status: `pending_dao_hardening → active` once `get_factory_info().auto_update`
+is `false`. The console exposes a "Re-run verification" button on that state.
+
+### `GET /v1/console/agents/:id`
+
+Returns the stored agent plus its on-chain Vault state (`get_agent`,
+`next_evm_nonce`). The console lists agents and shows this state per agent.
+
 ### `POST /v1/console/mandates/preview`
 
 Compiles one role into the three locks and returns a diff plus unsigned proposals:
@@ -148,7 +159,8 @@ Compiles one role into the three locks and returns a diff plus unsigned proposal
 - Zodiac permission (`scopeTarget`, `scopeFunction` with recipient conditions and allowance,
   `assignRoles` once the agent EVM address exists);
 - Guard policy snapshot;
-- DAO and governance-relay proposal payloads. The server never signs.
+- DAO `add_proposal` payloads for the Vault, funding and relay calls. The console
+  signs each proposal with the member's NEAR wallet; the server never signs.
 
 `swap`/`bridge` are rejected until Phase 2. `maxPerTx` must not exceed the budget.
 
@@ -158,7 +170,9 @@ Admin only. Verifies on-chain state before inserting `treasury`:
 
 - DAO code hash equals `sputnikv2.testnet.get_default_code_hash()`;
 - DAO `get_policy()` has the council Group equal to the member NEAR accounts, an
-  absolute threshold `ceil(2n/3)`, and no `Everyone` role granting `AddProposal`;
+  absolute `RoleWeight` threshold `ceil(2n/3)` with quorum `0`, and no other role
+  carrying `Vote*` or `AddProposal` (Sputnik ORs roles); a council `vote_policy`
+  is rejected unless each per-kind threshold is at least the expected threshold;
 - DAO `get_factory_info().auto_update === false`; otherwise the treasury is stored
   as `pending_dao_hardening` and agent creation is blocked;
 - Vault and relay code hashes equal the local wasm SHA-256, and both have zero
