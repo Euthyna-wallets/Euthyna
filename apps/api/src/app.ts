@@ -1,4 +1,5 @@
 import { Hono, type Context, type Next } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
@@ -6,6 +7,7 @@ import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway
 import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
+import { TreasuryError, type TreasuryGateway } from "./treasury.js";
 import type { BaseRelayer } from "./relayer.js";
 
 const requestSchema = z.object({
@@ -30,6 +32,29 @@ const createAgentSchema = z.object({
 
 const agentIdSchema = z.object({ id: z.string().uuid() });
 
+const walletsSchema = z.object({
+  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  evmAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+const treasuryPlanSchema = z.object({
+  environment: z.string().min(1).default("uat"),
+  daoName: z.string().min(2).max(40),
+  founderNearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+});
+
+const treasuryRegisterSchema = z.object({
+  environment: z.string().min(1).default("uat"),
+  daoAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  vaultAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  relayAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  safeAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  rolesAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  delayAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  govAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+
 interface AppVariables {
   agent: AgentIdentity;
   console: ConsoleIdentity;
@@ -42,6 +67,8 @@ export interface AppDependencies {
   guard: Guard;
   relayer: BaseRelayer;
   auth: AuthGateway;
+  treasury: TreasuryGateway;
+  consoleOrigin: string;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -84,6 +111,25 @@ function requireConsoleAdmin(auth: AuthGateway, limiter: RateLimiter) {
   };
 }
 
+function requireConsoleRequest(consoleOrigin: string) {
+  return async (context: AppContext, next: Next) => {
+    if (context.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    if (context.req.header("origin") !== consoleOrigin) {
+      throw new HTTPException(403, { message: "origin not allowed" });
+    }
+    if (context.req.method !== "GET" && context.req.method !== "HEAD") {
+      const contentType = (context.req.header("content-type") ?? "").toLowerCase();
+      if (!contentType.startsWith("application/json")) {
+        throw new HTTPException(415, { message: "application/json required" });
+      }
+    }
+    await next();
+  };
+}
+
 async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<T> {
   let body: unknown;
   try {
@@ -98,10 +144,28 @@ async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<
   return parsed.data;
 }
 
-export function createApp({ near, guard, relayer, auth }: AppDependencies): Hono<{ Variables: AppVariables }> {
+export function createApp({
+  near,
+  guard,
+  relayer,
+  auth,
+  treasury,
+  consoleOrigin,
+}: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
+  app.use(
+    "*",
+    cors({
+      origin: consoleOrigin,
+      credentials: true,
+      allowHeaders: ["content-type", "x-api-key"],
+      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+    }),
+  );
+  app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
+  app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", (context) => auth.handler(context.req.raw));
 
@@ -202,6 +266,44 @@ export function createApp({ near, guard, relayer, auth }: AppDependencies): Hono
     return context.json({ nearTransactionHash, opId: input.opId });
   });
 
+  app.patch("/v1/console/members/me/wallets", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, walletsSchema);
+    await treasury.linkWallets(consoleIdentity.organizationId, consoleIdentity.userId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "member.wallets_linked",
+      metadata: { nearAccountId: input.nearAccountId, evmAddress: input.evmAddress },
+    });
+    return context.json({ nearAccountId: input.nearAccountId, evmAddress: input.evmAddress });
+  });
+
+  app.get("/v1/console/treasury", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const environment = context.req.query("environment") ?? "uat";
+    return context.json({ treasury: await treasury.getTreasury(consoleIdentity.organizationId, environment) });
+  });
+
+  app.post("/v1/console/treasury/plan", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, treasuryPlanSchema);
+    return context.json(await treasury.plan(consoleIdentity.organizationId, input));
+  });
+
+  app.post("/v1/console/treasury/register", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, treasuryRegisterSchema);
+    const registered = await treasury.register(consoleIdentity.organizationId, consoleIdentity.userId, input);
+    return context.json(registered, 201);
+  });
+
+  app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json({ members: await auth.listMembers(consoleIdentity.organizationId) });
+  });
+
   app.get("/v1/console/agents", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json({ agents: await auth.listAgents(consoleIdentity.organizationId) });
@@ -248,6 +350,9 @@ export function createApp({ near, guard, relayer, auth }: AppDependencies): Hono
 
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof TreasuryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
     console.error(error);
     return context.json({ error: "request_failed", message: error.message }, 500);
   });

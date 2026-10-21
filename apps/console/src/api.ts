@@ -1,0 +1,68 @@
+export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+
+export type TreasuryView = {
+  organizationId: string;
+  environment: string;
+  daoAccountId: string;
+  vaultAccountId: string;
+  relayAccountId: string;
+  safeAddress: string;
+  rolesAddress: string;
+  delayAddress: string;
+  govAddress: string;
+  status: string;
+};
+
+export type NearAction =
+  | { type: "CreateAccount"; description: string }
+  | { type: "Transfer"; depositYocto: string; description: string }
+  | { type: "DeployContract"; codeBase64: string; description: string }
+  | { type: "FunctionCall"; methodName: string; args: Record<string, unknown>; gasTgas: number; description: string };
+
+export type TreasuryPlan = {
+  daoAccountId: string;
+  threshold: number;
+  govAddress: string;
+  council: Array<{ nearAccountId: string; evmAddress: string }>;
+  daoCreate: { factoryId: string; method: string; args: { name: string; args: string }; depositYocto: string };
+  vault: {
+    accountId: string;
+    wasmSha256: string;
+    actions: NearAction[];
+  };
+  relay: {
+    accountId: string;
+    wasmSha256: string;
+    actions: NearAction[];
+  };
+  base: {
+    safeAddress: string;
+    rolesAddress: string;
+    delayAddress: string;
+    safeDeployment: { to: string; value: string; data: string };
+    rolesDeployment: { to: string; value: string; data: string };
+    delayDeployment: { to: string; value: string; data: string };
+    safeModuleCalls: Array<{ to: string; value: string; data: string; description: string }>;
+  };
+};
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    ...init,
+  });
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(String(body.message ?? body.error ?? response.statusText));
+  }
+  return body as T;
+}
+
+export function explorerNear(accountId: string): string {
+  return `https://testnet.nearblocks.io/address/${accountId}`;
+}
+
+export function explorerBase(address: string): string {
+  return `https://sepolia.basescan.org/address/${address}`;
+}

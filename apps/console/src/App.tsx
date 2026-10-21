@@ -1,0 +1,735 @@
+import { useEffect, useState } from "react";
+
+import { api, explorerBase, explorerNear, type TreasuryPlan, type TreasuryView } from "./api.js";
+import {
+  buildSafeBatch,
+  executeSafeBatch,
+  signSafeBatch,
+  type SafeBatch,
+  type SafeBatchSignature,
+} from "./safe.js";
+import { authClient } from "./auth.js";
+import {
+  createDao,
+  disableFactoryAutoUpdate,
+  evmAccounts,
+  evmWalletClient,
+  nearAccounts,
+  sendEvmTransaction,
+  signNearTransactions,
+  waitForEvmTransaction,
+} from "./wallets.js";
+
+type Organization = { id: string; name: string; slug: string };
+type Member = {
+  id: string;
+  userId: string;
+  role: string;
+  nearAccountId: string | null;
+  evmAddress: string | null;
+  email: string | null;
+  name: string | null;
+};
+
+function short(value: string): string {
+  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
+}
+
+export function App() {
+  const session = authClient.useSession();
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [treasury, setTreasury] = useState<TreasuryView | null>(null);
+  const [plan, setPlan] = useState<TreasuryPlan | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [founderNear, setFounderNear] = useState("");
+
+  const signedIn = Boolean(session.data?.user);
+
+  async function refreshOrganizations() {
+    const result = await authClient.organization.list();
+    const list = (result.data ?? []) as Organization[];
+    setOrganizations(list);
+    const stored = localStorage.getItem("mandateos.organization");
+    const selected = list.find((organization) => organization.id === stored) ?? list[0] ?? null;
+    setActiveOrganization(selected);
+    if (selected) localStorage.setItem("mandateos.organization", selected.id);
+  }
+
+  async function refreshMembers(organizationId: string) {
+    const result = await api<{ members: Member[] }>(`/v1/console/members?organizationId=${organizationId}`);
+    setMembers(result.members);
+  }
+
+  async function refreshTreasury() {
+    const result = await api<{ treasury: TreasuryView | null }>("/v1/console/treasury");
+    setTreasury(result.treasury);
+  }
+
+  useEffect(() => {
+    if (!signedIn) return;
+    refreshOrganizations().catch((cause: unknown) => setError(String(cause)));
+  }, [signedIn]);
+
+  useEffect(() => {
+    if (!activeOrganization) return;
+    void (async () => {
+      await authClient.organization.setActive({ organizationId: activeOrganization.id }).catch(() => undefined);
+      await refreshMembers(activeOrganization.id).catch((cause: unknown) => setError(String(cause)));
+      await refreshTreasury().catch((cause: unknown) => setError(String(cause)));
+    })();
+  }, [activeOrganization?.id]);
+
+  async function run(label: string, action: () => Promise<void>) {
+    setBusy(label);
+    setError(null);
+    setNotice(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!signedIn) {
+    return <SignIn />;
+  }
+
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">MandateOS</div>
+        <div className="muted small">Company console</div>
+        <nav>
+          <a className="active" href="#onboarding">Onboarding</a>
+          <a href="#treasury">Treasury</a>
+          <a href="#agents">Agents</a>
+        </nav>
+        <div className="spacer" />
+        <div className="small muted">{session.data?.user.email}</div>
+        <button className="ghost" onClick={() => authClient.signOut()}>Sign out</button>
+      </aside>
+
+      <main>
+        <header>
+          <div>
+            <h1>{activeOrganization?.name ?? "Create your company"}</h1>
+            <p className="muted">Passkey identity, human council, no server key.</p>
+          </div>
+          <div className="pill">Base Sepolia · NEAR testnet</div>
+        </header>
+
+        {error ? <div className="alert error">{error}</div> : null}
+        {notice ? <div className="alert success">{notice}</div> : null}
+
+        <section id="onboarding" className="card">
+          <h2>1. Company and members</h2>
+          <OrganizationPanel
+            organizations={organizations}
+            active={activeOrganization}
+            onChanged={async () => {
+              await refreshOrganizations();
+            }}
+            onSelect={(organization) => {
+              setActiveOrganization(organization);
+              localStorage.setItem("mandateos.organization", organization.id);
+            }}
+            onError={setError}
+          />
+        </section>
+
+        {activeOrganization ? (
+          <section className="card">
+            <h2>2. Member wallets</h2>
+            <p className="muted">
+              Each member links the NEAR account that signs DAO proposals and the EVM address that
+              becomes a Safe owner. The server only stores public addresses.
+            </p>
+            <MemberWallets
+              members={members}
+              onSaved={async () => refreshMembers(activeOrganization.id)}
+              onError={setError}
+            />
+          </section>
+        ) : null}
+
+        {activeOrganization && !treasury ? (
+          <section className="card">
+            <h2>3. Treasury plan</h2>
+            <p className="muted">
+              The server builds unsigned transactions only. DAO, Vault, relay and Base transactions
+              are signed in your wallets.
+            </p>
+            <div className="row">
+              <input
+                placeholder="founder.testnet"
+                value={founderNear}
+                onChange={(event) => setFounderNear(event.target.value)}
+              />
+              <button
+                className="ghost"
+                onClick={() => void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch((cause) => setError(String(cause)))}
+              >
+                Use connected NEAR account
+              </button>
+            </div>
+            <button
+              className="primary"
+              disabled={Boolean(busy) || founderNear.length < 2}
+              onClick={() =>
+                run("plan", async () => {
+                  const result = await api<TreasuryPlan>("/v1/console/treasury/plan", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      environment: "uat",
+                      daoName: activeOrganization.name,
+                      founderNearAccountId: founderNear,
+                    }),
+                  });
+                  setPlan(result);
+                  setNotice("Plan ready. Sign the three steps below.");
+                })
+              }
+            >
+              {busy === "plan" ? "Building plan…" : "Build plan"}
+            </button>
+          </section>
+        ) : null}
+
+        {plan ? (
+          <TreasuryWizard
+            plan={plan}
+            busy={busy}
+            run={run}
+            onError={setError}
+            onRegistered={async (registered) => {
+              setTreasury(registered);
+              setPlan(null);
+              setNotice("Treasury verified on-chain and registered.");
+              setActiveOrganization((current) => current);
+            }}
+          />
+        ) : null}
+
+        {treasury ? <Summary treasury={treasury} /> : null}
+
+        {treasury ? (
+          <section id="agents" className="card">
+            <h2>4. Register an agent</h2>
+            <AgentForm
+              treasury={treasury}
+              onCreated={(createdKey) => {
+                setApiKey(createdKey);
+                setNotice("Agent created. The API key is shown once.");
+              }}
+              onError={setError}
+            />
+            {apiKey ? <pre className="secret">{apiKey}</pre> : null}
+          </section>
+        ) : null}
+      </main>
+    </div>
+  );
+}
+
+function SignIn() {
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"passkey" | "signup" | "password">("passkey");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function attempt(
+    action: () => Promise<{ error?: { message?: string | undefined } | null }>,
+  ) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await action();
+      if (result.error) setError(result.error.message ?? "authentication failed");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth">
+      <div className="auth-card">
+        <div className="brand">MandateOS</div>
+        <h1>Company console</h1>
+        <p className="muted">Sign in with a passkey. No password leaves the browser after setup.</p>
+        {error ? <div className="alert error">{error}</div> : null}
+        <div className="tabs">
+          <button className={mode === "passkey" ? "tab active" : "tab"} onClick={() => setMode("passkey")}>Passkey</button>
+          <button className={mode === "signup" ? "tab active" : "tab"} onClick={() => setMode("signup")}>Create account</button>
+          <button className={mode === "password" ? "tab active" : "tab"} onClick={() => setMode("password")}>Password</button>
+        </div>
+        {mode === "passkey" ? (
+          <button className="primary" disabled={busy} onClick={() => attempt(() => authClient.signIn.passkey())}>
+            {busy ? "Waiting for authenticator…" : "Continue with passkey"}
+          </button>
+        ) : null}
+        {mode === "signup" ? (
+          <>
+            <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                attempt(async () => {
+                  const result = await authClient.signUp.email({ email, name, password });
+                  if (!result.error) {
+                    const passkey = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+                    if (passkey?.error) return passkey;
+                  }
+                  return result;
+                })
+              }
+            >
+              Create account and passkey
+            </button>
+          </>
+        ) : null}
+        {mode === "password" ? (
+          <>
+            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <button className="primary" disabled={busy} onClick={() => attempt(() => authClient.signIn.email({ email, password }))}>
+              Sign in
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function OrganizationPanel(props: {
+  organizations: Organization[];
+  active: Organization | null;
+  onChanged: () => Promise<void>;
+  onSelect: (organization: Organization) => void;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [invitation, setInvitation] = useState<string | null>(null);
+
+  return (
+    <div className="stack">
+      {props.organizations.length ? (
+        <div className="row wrap">
+          {props.organizations.map((organization) => (
+            <button
+              key={organization.id}
+              className={props.active?.id === organization.id ? "chip active" : "chip"}
+              onClick={() => props.onSelect(organization)}
+            >
+              {organization.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="row">
+        <input placeholder="Company name" value={name} onChange={(event) => setName(event.target.value)} />
+        <button
+          className="primary"
+          disabled={name.trim().length < 2}
+          onClick={() =>
+            void (async () => {
+              try {
+                const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+                const created = await authClient.organization.create({ name, slug });
+                if (created.error) throw new Error(created.error.message);
+                await props.onChanged();
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              }
+            })()
+          }
+        >
+          Create company
+        </button>
+      </div>
+      {props.active ? (
+        <div className="row">
+          <input placeholder="member@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <button
+            className="ghost"
+            onClick={() =>
+              void (async () => {
+                try {
+                  const result = await authClient.organization.inviteMember({
+                    email,
+                    role: "member",
+                    organizationId: props.active!.id,
+                  });
+                  if (result.error) throw new Error(result.error.message);
+                  const invitationId = result.data?.id;
+                  setInvitation(invitationId ? `${window.location.origin}/?invitation=${invitationId}` : null);
+                } catch (cause) {
+                  props.onError(cause instanceof Error ? cause.message : String(cause));
+                }
+              })()
+            }
+          >
+            Invite member
+          </button>
+        </div>
+      ) : null}
+      {invitation ? (
+        <div className="alert success">
+          Invitation link: <code>{invitation}</code>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MemberWallets(props: {
+  members: Member[];
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [nearAccountId, setNearAccountId] = useState("");
+  const [evmAddress, setEvmAddress] = useState("");
+  const self = props.members[0];
+
+  return (
+    <div className="stack">
+      <table>
+        <thead><tr><th>Member</th><th>Role</th><th>NEAR</th><th>EVM</th></tr></thead>
+        <tbody>
+          {props.members.map((member) => (
+            <tr key={member.id}>
+              <td>{member.email ?? short(member.userId)}</td>
+              <td>{member.role}</td>
+              <td>{member.nearAccountId ?? "—"}</td>
+              <td>{member.evmAddress ? short(member.evmAddress) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row">
+        <button
+          className="ghost"
+          onClick={() =>
+            void (async () => {
+              try {
+                const accounts = await nearAccounts();
+                if (accounts[0]) setNearAccountId(accounts[0]);
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              }
+            })()
+          }
+        >
+          Use connected NEAR account
+        </button>
+        <button
+          className="ghost"
+          onClick={() =>
+            void (async () => {
+              try {
+                const accounts = await evmAccounts();
+                if (accounts[0]) setEvmAddress(accounts[0]);
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              }
+            })()
+          }
+        >
+          Use connected EVM account
+        </button>
+      </div>
+      <div className="row">
+        <input placeholder="alice.testnet" value={nearAccountId} onChange={(event) => setNearAccountId(event.target.value)} />
+        <input placeholder="0x…" value={evmAddress} onChange={(event) => setEvmAddress(event.target.value)} />
+        <button
+          className="primary"
+          onClick={() =>
+            void (async () => {
+              try {
+                await api("/v1/console/members/me/wallets", {
+                  method: "PATCH",
+                  body: JSON.stringify({ nearAccountId, evmAddress }),
+                });
+                await props.onSaved();
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              }
+            })()
+          }
+        >
+          Link my wallets
+        </button>
+      </div>
+      {self?.nearAccountId && self?.evmAddress ? null : (
+        <div className="muted small">Every member must link both wallets before a plan is built.</div>
+      )}
+    </div>
+  );
+}
+
+function TreasuryWizard(props: {
+  plan: TreasuryPlan;
+  busy: string | null;
+  run: (label: string, action: () => Promise<void>) => Promise<void>;
+  onError: (message: string) => void;
+  onRegistered: (treasury: TreasuryView) => Promise<void>;
+}) {
+  const [signerId, setSignerId] = useState("");
+  const [safeBatch, setSafeBatch] = useState<SafeBatch | null>(null);
+  const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
+  const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
+
+  async function deployBase() {
+    for (const transaction of [
+      props.plan.base.safeDeployment,
+      props.plan.base.rolesDeployment,
+      props.plan.base.delayDeployment,
+    ]) {
+      const hash = await sendEvmTransaction(transaction);
+      await waitForEvmTransaction(hash);
+      setTransactionHashes((current) => [...current, hash]);
+    }
+  }
+
+  async function collectSafeSignature() {
+    const batch = safeBatch ?? (await buildSafeBatch(props.plan));
+    setSafeBatch(batch);
+    const signature = await signSafeBatch(batch);
+    setSignatures((current) => {
+      if (current.some((item) => item.owner.toLowerCase() === signature.owner.toLowerCase())) {
+        throw new Error(`${signature.owner} already signed`);
+      }
+      return [...current, signature];
+    });
+  }
+
+  async function executeBatch() {
+    if (!safeBatch) throw new Error("Prepare the Safe batch first");
+    const hash = await executeSafeBatch(safeBatch, signatures);
+    await waitForEvmTransaction(hash);
+    setTransactionHashes((current) => [...current, hash]);
+  }
+
+  const baseDeployed = transactionHashes.length >= 3;
+
+  return (
+    <section className="card">
+      <h2>3. Treasury transactions</h2>
+      <div className="steps">
+        <div className="step">
+          <h3>a. DAO</h3>
+          <p className="muted">{props.plan.daoAccountId} · threshold {props.plan.threshold}</p>
+          <div className="row">
+            <button
+              className="ghost"
+              onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}
+            >
+              Use connected NEAR account
+            </button>
+            <input placeholder="founder.testnet" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
+            <button
+              className="primary"
+              disabled={Boolean(props.busy) || !signerId}
+              onClick={() => props.run("dao", async () => {
+                const hashes = await createDao(props.plan, signerId);
+                setTransactionHashes((current) => [...current, ...hashes]);
+              })}
+            >
+              Sign DAO creation
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy) || !signerId}
+              onClick={() => props.run("auto-update", async () => {
+                const hashes = await disableFactoryAutoUpdate(props.plan, signerId);
+                setTransactionHashes((current) => [...current, ...hashes]);
+              })}
+            >
+              Propose auto_update=false
+            </button>
+          </div>
+        </div>
+
+        <div className="step">
+          <h3>b. Vault and relay</h3>
+          <p className="muted">
+            Two accounts, each deployed with CreateAccount + Transfer + DeployContract + new().
+            No AddKey action is emitted.
+          </p>
+          <div className="row">
+            <button
+              className="primary"
+              disabled={Boolean(props.busy) || !signerId}
+              onClick={() => props.run("near-deploy", async () => {
+                const hashes = await signNearTransactions(signerId, [
+                  { receiverId: props.plan.vault.accountId, actions: props.plan.vault.actions },
+                  { receiverId: props.plan.relay.accountId, actions: props.plan.relay.actions },
+                ]);
+                setTransactionHashes((current) => [...current, ...hashes]);
+              })}
+            >
+              Sign Vault + relay deployment
+            </button>
+          </div>
+          <div className="muted small">
+            Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}
+          </div>
+        </div>
+
+        <div className="step">
+          <h3>c. Base Safe, Roles and Delay</h3>
+          <p className="muted">
+            Safe {short(props.plan.base.safeAddress)} · Roles {short(props.plan.base.rolesAddress)} · Delay{" "}
+            {short(props.plan.base.delayAddress)} · 0xGOV {short(props.plan.govAddress)}
+          </p>
+          <div className="row wrap">
+            <button
+              className="primary"
+              disabled={Boolean(props.busy) || baseDeployed}
+              onClick={() => props.run("base-deploy", deployBase)}
+            >
+              Deploy Safe + modules
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy) || !baseDeployed}
+              onClick={() => props.run("safe-prepare", async () => { setSafeBatch(await buildSafeBatch(props.plan)); })}
+            >
+              Prepare Safe batch
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy) || !baseDeployed}
+              onClick={() => props.run("safe-sign", collectSafeSignature)}
+            >
+              Sign as owner ({signatures.length}/{props.plan.threshold})
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy) || signatures.length < props.plan.threshold}
+              onClick={() => props.run("safe-execute", executeBatch)}
+            >
+              Execute Safe batch
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="row">
+        <button
+          className="primary"
+          disabled={Boolean(props.busy) || !baseDeployed || signatures.length < props.plan.threshold}
+          onClick={() => props.run("register", async () => {
+            const registered = await api<TreasuryView>("/v1/console/treasury/register", {
+              method: "POST",
+              body: JSON.stringify({
+                environment: "uat",
+                daoAccountId: props.plan.daoAccountId,
+                vaultAccountId: props.plan.vault.accountId,
+                relayAccountId: props.plan.relay.accountId,
+                safeAddress: props.plan.base.safeAddress,
+                rolesAddress: props.plan.base.rolesAddress,
+                delayAddress: props.plan.base.delayAddress,
+                govAddress: props.plan.govAddress,
+              }),
+            });
+            await props.onRegistered(registered);
+          })}
+        >
+          Verify and register treasury
+        </button>
+      </div>
+      {transactionHashes.length ? (
+        <details>
+          <summary>{transactionHashes.length} transaction(s) signed</summary>
+          <pre>{transactionHashes.join("\n")}</pre>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function Summary({ treasury }: { treasury: TreasuryView }) {
+  return (
+    <section className="card">
+      <h2>Treasury</h2>
+      <p className="muted">Verified on-chain. No access key exists on the NEAR accounts.</p>
+      <table>
+        <tbody>
+          <tr><td>DAO</td><td><a href={explorerNear(treasury.daoAccountId)} target="_blank" rel="noreferrer">{treasury.daoAccountId}</a></td></tr>
+          <tr><td>Vault</td><td><a href={explorerNear(treasury.vaultAccountId)} target="_blank" rel="noreferrer">{treasury.vaultAccountId}</a></td></tr>
+          <tr><td>Relay</td><td><a href={explorerNear(treasury.relayAccountId)} target="_blank" rel="noreferrer">{treasury.relayAccountId}</a></td></tr>
+          <tr><td>Safe</td><td><a href={explorerBase(treasury.safeAddress)} target="_blank" rel="noreferrer">{treasury.safeAddress}</a></td></tr>
+          <tr><td>Roles</td><td><a href={explorerBase(treasury.rolesAddress)} target="_blank" rel="noreferrer">{treasury.rolesAddress}</a></td></tr>
+          <tr><td>Delay</td><td><a href={explorerBase(treasury.delayAddress)} target="_blank" rel="noreferrer">{treasury.delayAddress}</a></td></tr>
+          <tr><td>0xGOV</td><td><a href={explorerBase(treasury.govAddress)} target="_blank" rel="noreferrer">{treasury.govAddress}</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function AgentForm(props: {
+  treasury: TreasuryView;
+  onCreated: (apiKey: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [nearAccountId, setNearAccountId] = useState("");
+  const [nearPublicKey, setNearPublicKey] = useState("");
+  const [role, setRole] = useState("researcher");
+
+  return (
+    <div className="stack">
+      <div className="row wrap">
+        <input placeholder="Agent name" value={name} onChange={(event) => setName(event.target.value)} />
+        <input placeholder="agent.testnet" value={nearAccountId} onChange={(event) => setNearAccountId(event.target.value)} />
+        <input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} />
+        <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
+        <button
+          className="primary"
+          onClick={() =>
+            void (async () => {
+              try {
+                const result = await api<{ apiKey: string }>("/v1/console/agents", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    name,
+                    role,
+                    nearAccountId,
+                    nearPublicKey,
+                    vaultAccountId: props.treasury.vaultAccountId,
+                    mpcPath: `agents/${role}/base`,
+                  }),
+                });
+                props.onCreated(result.apiKey);
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              }
+            })()
+          }
+        >
+          Create agent
+        </button>
+      </div>
+      <div className="muted small">
+        The agent's NEAR function-call private key stays in the SDK/MCP client. Only the public key is sent.
+      </div>
+    </div>
+  );
+}

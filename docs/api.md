@@ -99,6 +99,73 @@ curl -sS -X POST http://localhost:3000/v1/emergency/cancel \
 Console admin only. Broadcasts the stored signed transaction and submits the
 Guard-signed confirmation report.
 
+## Treasury onboarding
+
+All `/v1/console/*` and `/v1/emergency/*` requests require
+`Origin: CONSOLE_ORIGIN`. State-changing methods must also send
+`Content-Type: application/json`; otherwise the API returns `403` or `415`.
+
+### `PATCH /v1/console/members/me/wallets`
+
+Links the session member's NEAR account and EVM address. Both are required before a
+treasury plan can be built.
+
+```json
+{ "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
+```
+
+### `GET /v1/console/members`
+
+Returns members of the session organization with their linked `nearAccountId` and
+`evmAddress`. Better Auth's own member listing does not expose application-specific
+columns.
+
+### `POST /v1/console/treasury/plan`
+
+Admin only. Builds the unsigned DAO, Vault, relay and Base plan for the session
+organization. It never signs and never receives a private key.
+
+```json
+{ "environment": "uat", "daoName": "acme", "founderNearAccountId": "alice.testnet" }
+```
+
+The response contains:
+
+- `daoCreate`: Sputnik factory `create` arguments and attached deposit;
+- `vault` / `relay`: wasm base64, SHA-256, init arguments and the exact
+  `CreateAccount → Transfer → DeployContract → FunctionCall new` actions;
+- `govAddress`: `0xGOV` derived off-chain from the MPC view for the relay account
+  and `governance/base-sepolia` path;
+- `base`: Safe deployment, Roles and Delay deployment, and the three Safe module
+  calls to sign. The Safe is deployed before the modules because their initializers
+  reference its address; enabling them is a separate 2/3 Safe batch.
+
+### `POST /v1/console/treasury/register`
+
+Admin only. Verifies on-chain state before inserting `treasury`:
+
+- Vault and relay code hashes equal the local wasm SHA-256, and both have zero
+  access keys;
+- Vault and relay `owner_id` equal the DAO;
+- relay `evm_address` equals the registered `0xGOV`;
+- Safe owners equal the council EVM addresses, threshold is `ceil(2n/3)`;
+- Roles and Delay are enabled modules, `0xGOV` is enabled on Delay;
+- Delay cooldown/expiration are `300`/`604 800`, Roles owner/avatar/target are the
+  Safe.
+
+```json
+{
+  "environment": "uat",
+  "daoAccountId": "acme.sputnikv2.testnet",
+  "vaultAccountId": "acme-vault.alice.testnet",
+  "relayAccountId": "acme-relay.alice.testnet",
+  "safeAddress": "0x...",
+  "rolesAddress": "0x...",
+  "delayAddress": "0x...",
+  "govAddress": "0x..."
+}
+```
+
 ## Auth routes
 
 `/api/auth/*` is handled by Better Auth:
@@ -107,8 +174,9 @@ Guard-signed confirmation report.
 - organizations and active organization (`/api/auth/organization/*`);
 - sessions (`/api/auth/get-session`).
 
-Email/password is disabled. The passkey relying party is `PASSKEY_RP_ID` and the
-expected origin is `BETTER_AUTH_URL`.
+Email/password is enabled only to bootstrap a human account; the console then adds
+a passkey and uses it as the primary credential. The passkey relying party is
+`PASSKEY_RP_ID` and the expected origin is `BETTER_AUTH_URL`.
 
 ## Errors
 

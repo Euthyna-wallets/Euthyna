@@ -115,6 +115,7 @@ model Organization {
   policies     PolicySnapshot[]
   operations   Operation[]
   auditLogs    AuditLog[]
+  treasuries   Treasury[]
 
   @@unique([slug])
   @@map("organization")
@@ -127,6 +128,8 @@ model Member {
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   role           String       @default("member")
+  nearAccountId  String?
+  evmAddress     String?
   createdAt      DateTime
 
   @@index([organizationId])
@@ -284,6 +287,31 @@ model Operation {
   @@unique([organizationId, visaNonce])
   @@unique([organizationId, reportNonce])
   @@map("operation")
+}
+
+model Treasury {
+  id                String       @id @default(uuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment       String       @default("uat")
+  nearNetwork       String
+  baseChainId       Int
+  daoAccountId      String
+  vaultAccountId    String
+  relayAccountId    String
+  safeAddress       String
+  rolesAddress      String
+  delayAddress      String
+  govAddress        String
+  vaultWasmSha256   String
+  relayWasmSha256   String
+  status            String       @default("active")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([organizationId, environment])
+  @@index([organizationId])
+  @@map("treasury")
 }
 
 model AuditLog {

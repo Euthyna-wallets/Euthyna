@@ -12,11 +12,22 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
-  PASSKEY_RP_ID: z.string().min(1).default("localhost"),
+  CONSOLE_ORIGIN: z.string().url().default("http://localhost:5173"),
+  PASSKEY_RP_ID: z.string().min(1).optional(),
+  DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
+  MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
+  BUDGET_TOKEN_ACCOUNT_ID: z.string().min(1),
+  CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 
-export type Env = z.infer<typeof schema>;
+type ParsedEnv = z.infer<typeof schema>;
+
+export type Env = Omit<ParsedEnv, "PASSKEY_RP_ID"> & { PASSKEY_RP_ID: string };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
-  return schema.parse(input);
+  const parsed = schema.parse(input);
+  return {
+    ...parsed,
+    PASSKEY_RP_ID: parsed.PASSKEY_RP_ID ?? new URL(parsed.CONSOLE_ORIGIN).hostname,
+  };
 }
