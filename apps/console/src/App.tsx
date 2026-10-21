@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import { authClient } from "./auth.js";
 import { Layout } from "./components/Layout.js";
@@ -17,8 +18,16 @@ import { SuppliersPage } from "./routes/SuppliersPage.js";
 
 function Gate() {
   const session = authClient.useSession();
+  const organizations = useQuery({
+    queryKey: ["organizations"],
+    queryFn: async () => (await authClient.organization.list()).data as Array<{ id: string }> | null,
+    enabled: Boolean(session.data),
+  });
   if (session.isPending) return <div className="state">Loading session…</div>;
   if (!session.data) return <SignIn />;
+  if (organizations.isLoading) return <div className="state">Loading organization…</div>;
+  if (organizations.error) return <div className="state error">Error: {organizations.error.message}</div>;
+  if (!organizations.data?.length) return <Navigate to="/onboarding" replace />;
   return <Outlet />;
 }
 

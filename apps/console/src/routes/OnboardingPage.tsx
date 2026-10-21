@@ -125,7 +125,10 @@ export function OnboardingPage() {
             <h1>{activeOrganization?.name ?? "Create your company"}</h1>
             <p className="muted">Passkey identity, human council, no server key.</p>
           </div>
-          <div className="pill">Base Sepolia · NEAR testnet</div>
+          <div className="row wrap">
+            <div className="pill">Base Sepolia · NEAR testnet</div>
+            {activeOrganization ? <a className="pill" href="/">Open console →</a> : null}
+          </div>
         </header>
 
         {error ? <div className="alert error">{error}</div> : null}
