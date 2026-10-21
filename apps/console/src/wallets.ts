@@ -5,10 +5,27 @@ import { baseSepolia } from "viem/chains";
 
 import type { NearAction, TreasuryPlan } from "./api.js";
 
+interface E2eNearWallet {
+  getAccounts(): Promise<Array<{ accountId: string }>>;
+  signAndSendTransaction(input: {
+    signerId: string;
+    receiverId: string;
+    actions: Array<{ type: string; params?: Record<string, unknown> }>;
+  }): Promise<{ transaction_outcome: { id: string } }>;
+  signAndSendTransactions(input: {
+    transactions: Array<{ signerId: string; receiverId: string; actions: Array<{ type: string; params?: Record<string, unknown> }> }>;
+  }): Promise<Array<{ transaction_outcome: { id: string } }>>;
+}
+
 declare global {
   interface Window {
     ethereum?: EIP1193Provider;
+    __MANDATEOS_E2E_NEAR__?: E2eNearWallet;
   }
+}
+
+function e2eNear(): E2eNearWallet | undefined {
+  return import.meta.env.VITE_E2E === "1" ? window.__MANDATEOS_E2E_NEAR__ : undefined;
 }
 
 let selectorPromise: Promise<WalletSelector> | undefined;
@@ -22,6 +39,8 @@ export function nearSelector(): Promise<WalletSelector> {
 }
 
 export async function nearAccounts(): Promise<string[]> {
+  const injected = e2eNear();
+  if (injected) return (await injected.getAccounts()).map((account) => account.accountId);
   const selector = await nearSelector();
   const wallet = await selector.wallet();
   const accounts = await wallet.getAccounts();
@@ -61,6 +80,17 @@ export async function signNearTransactions(
   signerId: string,
   transactions: Array<{ receiverId: string; actions: NearAction[] }>,
 ): Promise<string[]> {
+  const injected = e2eNear();
+  if (injected) {
+    const outcomes = await injected.signAndSendTransactions({
+      transactions: transactions.map((transaction) => ({
+        signerId,
+        receiverId: transaction.receiverId,
+        actions: selectorActions(transaction.actions),
+      })),
+    });
+    return outcomes.map((outcome) => outcome.transaction_outcome.id);
+  }
   const selector = await nearSelector();
   const wallet = await selector.wallet();
   const outcomes = await wallet.signAndSendTransactions({
@@ -75,6 +105,25 @@ export async function signNearTransactions(
 }
 
 export async function createDao(plan: TreasuryPlan, signerId: string): Promise<string[]> {
+  const injected = e2eNear();
+  if (injected) {
+    const outcome = await injected.signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoCreate.factoryId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: {
+            methodName: "create",
+            args: plan.daoCreate.args,
+            gas: "150000000000000",
+            deposit: plan.daoCreate.depositYocto,
+          },
+        },
+      ],
+    });
+    return [outcome.transaction_outcome.id];
+  }
   const selector = await nearSelector();
   const wallet = await selector.wallet();
   const outcome = await wallet.signAndSendTransaction({
@@ -100,6 +149,30 @@ export async function disableFactoryAutoUpdate(
   plan: TreasuryPlan,
   signerId: string,
 ): Promise<string[]> {
+  const injected = e2eNear();
+  if (injected) {
+    const args = {
+      proposal: {
+        description: "Disable Sputnik factory auto-update",
+        kind: {
+          FactoryInfoUpdate: {
+            factory_info: { factory_id: plan.daoCreate.factoryId, auto_update: false },
+          },
+        },
+      },
+    };
+    const outcome = await injected.signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoAccountId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: { methodName: "add_proposal", args, gas: "100000000000000", deposit: "100000000000000000000000" },
+        },
+      ],
+    });
+    return [outcome.transaction_outcome.id];
+  }
   const selector = await nearSelector();
   const wallet = await selector.wallet();
   const outcome = await wallet.signAndSendTransaction({
@@ -188,6 +261,25 @@ export async function signDaoProposal(
   signerId: string,
   proposal: { receiverId: string; args: Record<string, unknown>; deposit: string },
 ): Promise<string> {
+  const injected = e2eNear();
+  if (injected) {
+    const outcome = await injected.signAndSendTransaction({
+      signerId,
+      receiverId: proposal.receiverId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: {
+            methodName: "add_proposal",
+            args: proposal.args,
+            gas: "150000000000000",
+            deposit: proposal.deposit,
+          },
+        },
+      ],
+    });
+    return outcome.transaction_outcome.id;
+  }
   const selector = await nearSelector();
   const wallet = await selector.wallet();
   const outcome = await wallet.signAndSendTransaction({

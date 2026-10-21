@@ -61,6 +61,33 @@ The plan was built against real testnet/Base RPC and returned:
 Safe/Roles/Delay addresses are CREATE2 predictions from their salts; they are
 only valid once the deployment transactions are mined.
 
+## Funding update
+
+A fresh testnet account was sponsored by the official helper (one request, no
+faucet loop): `mandateos-uat-mvi3degx.testnet` received 10 NEAR, then 9 NEAR were
+moved from `mandateos-root-20261021.testnet`, for 19 NEAR total. Plan deposits
+were reduced from 10/10/10 to the measured UAT storage needs: DAO 7,5 NEAR,
+Vault 5 NEAR, relay 5 NEAR (17,5 NEAR total), leaving a small gas buffer.
+
+`0x1D693a4425bf7eD10FE7775E2b65b072019FFceb` was funded with 0.002 ETH on Base
+Sepolia. Its private key is not in the harness; it can be a Safe owner signed
+manually in MetaMask. The automated 2/3 batch uses the deployer key and council
+key 1.
+
+## Automated harness result (real testnet)
+
+The injected-signer Playwright test passed (`E2E=1`, 32 s):
+
+- DAO `e2e-mvi3tup7.sputnikv2.testnet` created from the console;
+- balance `7.50 NEAR`, code hash `AA4nA45vauiac3jdVwJTzSdUP3oj2r1fDaPAb2mHdgcH`
+  (the `sputnikv2.testnet` default);
+- the transaction was signed by the injected NEAR signer
+  (`mandateos-uat-mvi3degx.testnet`), not by the server.
+
+The exact creation hash is not exposed by the testnet indexers used here; the
+account and code hash are the on-chain evidence. Future runs attach the hash
+printed by the console.
+
 ## Blockers
 
 ### B1 — no NEAR wallet in the test browser
