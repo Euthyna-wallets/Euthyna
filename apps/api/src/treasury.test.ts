@@ -57,7 +57,7 @@ const members: TestMember[] = [
   { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333" },
 ];
 
-function fakePrisma(options?: { members?: TestMember[] }) {
+function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Record<string, unknown> }) {
   const created: unknown[] = [];
   const audits: unknown[] = [];
   const prisma = {
@@ -67,7 +67,12 @@ function fakePrisma(options?: { members?: TestMember[] }) {
       update: async () => ({ id: "m1" }),
     },
     treasury: {
-      findUnique: async () => null,
+      findUnique: async () => options?.existingTreasury ?? null,
+      update: async ({ data }: { data: unknown }) => ({
+        ...(options?.existingTreasury ?? {}),
+        ...(data as Record<string, unknown>),
+        id: "treasury-1",
+      }),
       create: async ({ data }: { data: unknown }) => {
         created.push(data);
         return {
@@ -251,11 +256,54 @@ describe("TreasuryService.register", () => {
 });
 
 
-describe("TreasuryService.register hardening", () => {
-  async function validNear(overrides?: NearOverrides) {
-    return fakeNear({ codeHashes: await artifactHashes(), ...overrides });
-  }
+async function validNear(overrides?: NearOverrides) {
+  return fakeNear({ codeHashes: await artifactHashes(), ...overrides });
+}
 
+describe("TreasuryService.refresh", () => {
+  const existing = {
+    id: "treasury-1",
+    organizationId: "org-1",
+    environment: "uat",
+    nearNetwork: "testnet",
+    baseChainId: 84532,
+    daoAccountId,
+    vaultAccountId,
+    relayAccountId,
+    safeAddress: basePlan.safeAddress,
+    rolesAddress: basePlan.rolesAddress,
+    delayAddress: basePlan.delayAddress,
+    govAddress,
+    vaultWasmSha256: "old",
+    relayWasmSha256: "old",
+    status: "pending_dao_hardening",
+  };
+
+  it("re-runs verification and flips pending_dao_hardening to active", async () => {
+    const { prisma, audits } = fakePrisma({ existingTreasury: existing });
+    const treasury = await service(prisma, await validNear()).refresh("org-1", "user-1", "uat");
+    expect(treasury.status).toBe("active");
+    expect(audits).toContainEqual(
+      expect.objectContaining({ action: "treasury.refreshed", metadata: expect.objectContaining({ from: "pending_dao_hardening", to: "active" }) }),
+    );
+  });
+
+  it("keeps the treasury pending while auto-update is still enabled", async () => {
+    const { prisma } = fakePrisma({ existingTreasury: existing });
+    const treasury = await service(prisma, await validNear({ autoUpdate: true })).refresh("org-1", "user-1", "uat");
+    expect(treasury.status).toBe("pending_dao_hardening");
+  });
+
+  it("returns 404 when no treasury exists", async () => {
+    const { prisma } = fakePrisma();
+    await expect(service(prisma).refresh("org-1", "user-1", "uat")).rejects.toMatchObject({
+      status: 404,
+      code: "treasury_missing",
+    });
+  });
+});
+
+describe("TreasuryService.register hardening", () => {
   it("keeps the treasury pending while the DAO auto-update is still enabled", async () => {
     const { prisma, created } = fakePrisma();
     const treasury = await service(prisma, await validNear({ autoUpdate: true })).register(
@@ -295,6 +343,85 @@ describe("TreasuryService.register hardening", () => {
     await expect(
       service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
     ).rejects.toMatchObject({ code: "dao_threshold_mismatch" });
+  });
+
+  it("rejects an extra mono-member role that carries a voting permission", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      roles: [
+        ...councilPolicy().roles,
+        {
+          name: "solo",
+          kind: { Group: ["alice.testnet"] },
+          permissions: ["*:AddProposal", "*:VoteApprove"],
+          vote_policy: {},
+        },
+      ],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_extra_voting_role" });
+  });
+
+  it("rejects a council VotePolicy that lowers the Transfer threshold", async () => {
+    const { prisma } = fakePrisma();
+    const base = councilPolicy();
+    const policy = {
+      ...base,
+      roles: [
+        {
+          ...base.roles[0],
+          vote_policy: {
+            Transfer: { weight_kind: "RoleWeight", quorum: "0", threshold: "1" },
+          },
+        },
+      ],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_vote_policy_threshold" });
+  });
+
+  it("accepts a council VotePolicy that keeps the expected threshold", async () => {
+    const { prisma } = fakePrisma();
+    const base = councilPolicy();
+    const policy = {
+      ...base,
+      roles: [
+        {
+          ...base.roles[0],
+          vote_policy: {
+            Transfer: { weight_kind: "RoleWeight", quorum: "0", threshold: "2" },
+          },
+        },
+      ],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).resolves.toMatchObject({ status: "active" });
+  });
+
+  it("rejects a non-RoleWeight default vote policy", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      default_vote_policy: { weight_kind: "Ratio", quorum: "0", threshold: "2" },
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_weight_kind" });
+  });
+
+  it("rejects a non-zero quorum", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      default_vote_policy: { weight_kind: "RoleWeight", quorum: "1", threshold: "2" },
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_weight_kind" });
   });
 
   it("rejects a policy that grants AddProposal to Everyone", async () => {

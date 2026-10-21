@@ -83,6 +83,17 @@ export interface RegisterTreasuryInput {
   govAddress: string;
 }
 
+interface VerifiedTreasury {
+  environment: TreasuryEnvironmentConfig;
+  status: string;
+  safe: Address;
+  roles: Address;
+  delay: Address;
+  gov: Address;
+  vaultWasmSha256: string;
+  relayWasmSha256: string;
+}
+
 export interface TreasuryView {
   organizationId: string;
   environment: string;
@@ -136,12 +147,54 @@ export interface TreasuryGateway {
   linkWallets(organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }): Promise<void>;
   plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan>;
   register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView>;
+  refresh(organizationId: string, actorId: string, environment: string): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
 }
 
+type WeightOrRatio = string | number | [number, number];
+
+interface VotePolicy {
+  weight_kind?: string;
+  quorum?: WeightOrRatio;
+  threshold?: WeightOrRatio;
+}
+
 interface SputnikPolicy {
-  roles?: Array<{ name?: string; kind?: unknown; permissions?: string[] }>;
-  default_vote_policy?: { threshold?: string | number };
+  roles?: Array<{
+    name?: string;
+    kind?: unknown;
+    permissions?: string[];
+    vote_policy?: Record<string, VotePolicy>;
+  }>;
+  default_vote_policy?: VotePolicy;
+}
+
+function requiredVotes(value: WeightOrRatio | undefined, councilSize: number): bigint | null {
+  if (value === undefined) return null;
+  if (Array.isArray(value)) {
+    const [numerator, denominator] = value;
+    if (!Number.isInteger(numerator) || !Number.isInteger(denominator) || denominator <= 0) return null;
+    return BigInt(Math.floor((numerator * councilSize) / denominator) + 1);
+  }
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function assertRoleWeight(policy: VotePolicy | undefined, code: string, label: string): void {
+  if (policy?.weight_kind !== "RoleWeight") {
+    throw new TreasuryError(422, code, `${label} weight_kind must be RoleWeight`);
+  }
+  if (policy.quorum === undefined || String(policy.quorum) !== "0") {
+    throw new TreasuryError(422, code, `${label} quorum must be 0`);
+  }
+}
+
+function permissionAction(permission: string): string {
+  const separator = permission.indexOf(":");
+  return separator === -1 ? permission : permission.slice(separator + 1);
 }
 
 interface FactoryInfo {
@@ -470,6 +523,86 @@ export class TreasuryService {
   }
 
   async register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView> {
+    const verified = await this.verify(organizationId, input);
+    const treasury = await this.prisma.treasury.create({
+      data: {
+        organizationId,
+        environment: input.environment,
+        nearNetwork: this.config.nearNetwork,
+        baseChainId: verified.environment.baseChainId,
+        daoAccountId: input.daoAccountId,
+        vaultAccountId: input.vaultAccountId,
+        relayAccountId: input.relayAccountId,
+        safeAddress: verified.safe,
+        rolesAddress: verified.roles,
+        delayAddress: verified.delay,
+        govAddress: verified.gov,
+        vaultWasmSha256: verified.vaultWasmSha256,
+        relayWasmSha256: verified.relayWasmSha256,
+        status: verified.status,
+      },
+    }).catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+        throw new TreasuryError(409, "treasury_exists", "a treasury is already registered for this environment");
+      }
+      throw error;
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId,
+        actorType: "console",
+        actorId,
+        action: "treasury.registered",
+        targetType: "treasury",
+        targetId: treasury.id,
+        metadata: { daoAccountId: input.daoAccountId, safeAddress: verified.safe, status: verified.status },
+      },
+    });
+    return this.toView(treasury);
+  }
+
+  async refresh(organizationId: string, actorId: string, environmentName: string): Promise<TreasuryView> {
+    const existing = await this.prisma.treasury.findUnique({
+      where: { organizationId_environment: { organizationId, environment: environmentName } },
+    });
+    if (!existing) throw new TreasuryError(404, "treasury_missing", "no treasury registered for this environment");
+    const verified = await this.verify(organizationId, {
+      environment: environmentName,
+      daoAccountId: existing.daoAccountId,
+      vaultAccountId: existing.vaultAccountId,
+      relayAccountId: existing.relayAccountId,
+      safeAddress: existing.safeAddress,
+      rolesAddress: existing.rolesAddress,
+      delayAddress: existing.delayAddress,
+      govAddress: existing.govAddress,
+    });
+    const updated = await this.prisma.treasury.update({
+      where: { id: existing.id },
+      data: {
+        status: verified.status,
+        vaultWasmSha256: verified.vaultWasmSha256,
+        relayWasmSha256: verified.relayWasmSha256,
+        safeAddress: verified.safe,
+        rolesAddress: verified.roles,
+        delayAddress: verified.delay,
+        govAddress: verified.gov,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId,
+        actorType: "console",
+        actorId,
+        action: "treasury.refreshed",
+        targetType: "treasury",
+        targetId: existing.id,
+        metadata: { from: existing.status, to: verified.status, environment: environmentName },
+      },
+    });
+    return this.toView(updated);
+  }
+
+  private async verify(organizationId: string, input: RegisterTreasuryInput): Promise<VerifiedTreasury> {
     const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({ where: { organizationId } })) as TreasuryMember[];
     if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
@@ -540,62 +673,66 @@ export class TreasuryService {
       delayExpirationSeconds: environment.delayExpirationSeconds,
     });
 
-    const treasury = await this.prisma.treasury.create({
-      data: {
-        organizationId,
-        environment: input.environment,
-        nearNetwork: this.config.nearNetwork,
-        baseChainId: environment.baseChainId,
-        daoAccountId: input.daoAccountId,
-        vaultAccountId: input.vaultAccountId,
-        relayAccountId: input.relayAccountId,
-        safeAddress: safe,
-        rolesAddress: roles,
-        delayAddress: delay,
-        govAddress: getAddress(input.govAddress),
-        vaultWasmSha256: vaultArtifact.sha256,
-        relayWasmSha256: relayArtifact.sha256,
-        status: daoHardened ? "active" : "pending_dao_hardening",
-      },
-    }).catch((error: unknown) => {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
-        throw new TreasuryError(409, "treasury_exists", "a treasury is already registered for this environment");
-      }
-      throw error;
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId,
-        actorType: "console",
-        actorId,
-        action: "treasury.registered",
-        targetType: "treasury",
-        targetId: treasury.id,
-        metadata: { daoAccountId: input.daoAccountId, safeAddress: safe, status: daoHardened ? "active" : "pending_dao_hardening" },
-      },
-    });
-    return this.toView(treasury);
+    return {
+      environment,
+      status: daoHardened ? "active" : "pending_dao_hardening",
+      safe,
+      roles,
+      delay,
+      gov: expectedGov,
+      vaultWasmSha256: vaultArtifact.sha256,
+      relayWasmSha256: relayArtifact.sha256,
+    };
   }
 
   private validateDaoPolicy(policy: SputnikPolicy, council: string[], threshold: bigint): void {
     const roles = Array.isArray(policy.roles) ? policy.roles : [];
     const councilRole = roles.find((role) => role.name === "council");
-    const group = isGroupKind(councilRole?.kind) ? councilRole.kind.Group : null;
+    if (!councilRole) throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council role");
+    const group = isGroupKind(councilRole.kind) ? councilRole.kind.Group : null;
     if (!group) throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council Group role");
     const actual = [...group].sort();
     const expected = [...council].sort();
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       throw new TreasuryError(422, "dao_council_mismatch", "DAO council members do not match the organization");
     }
-    const policyThreshold = policy.default_vote_policy?.threshold;
-    if (policyThreshold === undefined || String(policyThreshold) !== threshold.toString()) {
+    assertRoleWeight(policy.default_vote_policy, "dao_weight_kind", "default_vote_policy");
+    const policyThreshold = requiredVotes(policy.default_vote_policy?.threshold, council.length);
+    if (policyThreshold === null || policyThreshold !== threshold) {
       throw new TreasuryError(422, "dao_threshold_mismatch", "DAO vote threshold is incorrect");
     }
+
     for (const role of roles) {
       const permissions = Array.isArray(role.permissions) ? role.permissions : [];
       const everyone = role.kind === "Everyone" || role.name === "Everyone";
       if (everyone && permissions.some((permission) => permission.includes("AddProposal"))) {
         throw new TreasuryError(422, "dao_everyone_add_proposal", "DAO grants AddProposal to Everyone");
+      }
+      if (role.name !== "council") {
+        const voting = permissions.some((permission) => {
+          const action = permissionAction(permission);
+          return action === "*" || action === "AddProposal" || action.startsWith("Vote");
+        });
+        if (voting) {
+          throw new TreasuryError(
+            422,
+            "dao_extra_voting_role",
+            `role ${role.name ?? "<unnamed>"} carries a voting or AddProposal permission`,
+          );
+        }
+      }
+    }
+
+    const councilVotePolicy = councilRole.vote_policy ?? {};
+    for (const [kind, votePolicy] of Object.entries(councilVotePolicy)) {
+      assertRoleWeight(votePolicy, "dao_vote_policy_weight", `council.vote_policy.${kind}`);
+      const required = requiredVotes(votePolicy.threshold, council.length);
+      if (required === null || required < threshold) {
+        throw new TreasuryError(
+          422,
+          "dao_vote_policy_threshold",
+          `council.vote_policy.${kind} threshold is below the expected threshold`,
+        );
       }
     }
   }

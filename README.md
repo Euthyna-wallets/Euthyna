@@ -77,7 +77,8 @@ The current repository contains:
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
 - `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
 - `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; `/v1/console/treasury/register` re-verifies DAO code hash/policy/auto-update, Vault init parameters, relay delay/chain, zero access keys, Safe owners/threshold, module wiring and the environment-specific Delay cooldown before persisting a `Treasury`;
-- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned Trezu proposals;
+- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies a pending DAO and promotes it to active;
+- `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
 - `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard, treasury status gate and mandate preview/diff/proposals, plus agent registration;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
 - `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;

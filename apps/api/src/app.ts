@@ -338,6 +338,28 @@ export function createApp({
     return context.json(await treasury.plan(consoleIdentity.organizationId, input));
   });
 
+  app.post("/v1/console/treasury/refresh", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(
+      context,
+      z.object({ environment: z.string().min(1).default("uat") }),
+    );
+    const refreshed = await treasury.refresh(
+      consoleIdentity.organizationId,
+      consoleIdentity.userId,
+      input.environment,
+    );
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "treasury.refresh.requested",
+      targetType: "treasury",
+      metadata: { environment: input.environment, status: refreshed.status },
+    });
+    return context.json(refreshed);
+  });
+
   app.post("/v1/console/treasury/register", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, treasuryRegisterSchema);
@@ -348,6 +370,32 @@ export function createApp({
   app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json({ members: await auth.listMembers(consoleIdentity.organizationId) });
+  });
+
+  app.get("/v1/console/agents/:id", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const parsedId = agentIdSchema.safeParse(context.req.param());
+    if (!parsedId.success) throw new HTTPException(400, { message: parsedId.error.message });
+    const agent = await auth.getAgent(consoleIdentity.organizationId, parsedId.data.id);
+    if (!agent) return context.json({ error: "agent_not_found" }, 404);
+    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
+    let onChain: unknown = { status: "no_treasury" };
+    if (currentTreasury) {
+      try {
+        onChain = {
+          status: "ok",
+          agent: await near.viewFunction<unknown>(currentTreasury.vaultAccountId, "get_agent", {
+            agent: agent.nearAccountId,
+          }),
+          nextEvmNonce: await near.viewFunction<number>(currentTreasury.vaultAccountId, "next_evm_nonce", {
+            agent: agent.nearAccountId,
+          }),
+        };
+      } catch (cause) {
+        onChain = { status: "unavailable", message: cause instanceof Error ? cause.message : String(cause) };
+      }
+    }
+    return context.json({ agent, onChain, treasury: currentTreasury });
   });
 
   app.get("/v1/console/agents", requireConsole(auth, consoleLimiter), async (context) => {

@@ -16,6 +16,7 @@ import {
   evmWalletClient,
   nearAccounts,
   sendEvmTransaction,
+  signDaoProposal,
   signNearTransactions,
   waitForEvmTransaction,
 } from "./wallets.js";
@@ -235,12 +236,35 @@ export function App() {
                   onError={setError}
                 />
                 {apiKey ? <pre className="secret">{apiKey}</pre> : null}
+                <AgentList treasury={treasury} onError={setError} />
               </>
             ) : (
+              <>
               <div className="alert error">
-                Agent registration is blocked: the DAO factory auto-update is still enabled.
-                Pass and execute the FactoryInfoUpdate proposal, then register the treasury again.
+                Treasury status: {treasury.status}. Agent registration is blocked until every
+                register check passes (DAO hardening, init parameters, Safe modules and Delay).
               </div>
+              <button
+                className="primary"
+                disabled={Boolean(busy)}
+                onClick={() =>
+                  run("refresh", async () => {
+                    const refreshed = await api<TreasuryView>("/v1/console/treasury/refresh", {
+                      method: "POST",
+                      body: JSON.stringify({ environment: treasury.environment }),
+                    });
+                    setTreasury(refreshed);
+                    setNotice(
+                      refreshed.status === "active"
+                        ? "DAO hardening verified. Agent registration is enabled."
+                        : "DAO auto-update is still enabled; treasury remains pending.",
+                    );
+                  })
+                }
+              >
+                {busy === "refresh" ? "Re-verifying…" : "Re-run verification"}
+              </button>
+              </>
             )}
           </section>
         ) : null}
@@ -686,7 +710,11 @@ function Summary({ treasury }: { treasury: TreasuryView }) {
   return (
     <section className="card">
       <h2>Treasury</h2>
-      <p className="muted">Verified on-chain. No access key exists on the NEAR accounts.</p>
+      <p className="muted">
+        {treasury.status === "active"
+          ? "Verified on-chain. No access key exists on the NEAR accounts."
+          : `Status ${treasury.status}: re-run verification after the DAO hardening proposal executes.`}
+      </p>
       <table>
         <tbody>
           <tr><td>DAO</td><td><a href={explorerNear(treasury.daoAccountId)} target="_blank" rel="noreferrer">{treasury.daoAccountId}</a></td></tr>
@@ -767,6 +795,8 @@ function MandatePanel(props: {
   const [token, setToken] = useState("0x418A2b47911dE05e21688F7490195F5324B49474");
   const [agentAccount, setAgentAccount] = useState("");
   const [agentEvm, setAgentEvm] = useState("");
+  const [signerId, setSignerId] = useState("");
+  const [proposalHashes, setProposalHashes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   return (
@@ -871,9 +901,124 @@ function MandatePanel(props: {
             </div>
           </div>
           <h3>Unsigned proposals</h3>
+          <div className="row">
+            <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
+            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
+              Use connected NEAR account
+            </button>
+          </div>
+          <div className="stack">
+            {[
+              props.preview.proposals.vaultSetRole,
+              props.preview.proposals.vaultRegisterAgent,
+              props.preview.proposals.funding,
+              ...props.preview.proposals.zodiacRelay,
+            ]
+              .filter((proposal): proposal is NonNullable<typeof proposal> => Boolean(proposal))
+              .map((proposal, index) => (
+                <div key={`${proposal.description}-${index}`} className="row">
+                  <span>{proposal.description}</span>
+                  <button
+                    className="primary"
+                    disabled={!signerId || busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          const hash = await signDaoProposal(signerId, proposal);
+                          setProposalHashes((current) => [...current, hash]);
+                        } catch (cause) {
+                          props.onError(cause instanceof Error ? cause.message : String(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Sign with NEAR wallet
+                  </button>
+                </div>
+              ))}
+          </div>
+          {proposalHashes.length ? (
+            <details>
+              <summary>{proposalHashes.length} proposal transaction(s)</summary>
+              <pre>{proposalHashes.join("\n")}</pre>
+            </details>
+          ) : null}
           <pre>{JSON.stringify(props.preview.proposals, null, 2)}</pre>
         </>
       ) : null}
+    </div>
+  );
+}
+
+
+type AgentRow = {
+  id: string;
+  name: string;
+  role: string;
+  nearAccountId: string;
+  evmAddress: string | null;
+  active: boolean;
+};
+
+function AgentList(props: { treasury: TreasuryView; onError: (message: string) => void }) {
+  const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const result = await api<{ agents: AgentRow[] }>("/v1/console/agents");
+    setAgents(result.agents);
+  }
+
+  useEffect(() => {
+    load().catch((cause: unknown) => props.onError(String(cause)));
+  }, []);
+
+  return (
+    <div className="stack">
+      <div className="row">
+        <h3 style={{ margin: 0 }}>Agents</h3>
+        <button className="ghost" onClick={() => void load().catch((cause) => props.onError(String(cause)))}>Refresh</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>EVM</th><th>Status</th><th /></tr></thead>
+        <tbody>
+          {agents.map((agent) => (
+            <tr key={agent.id}>
+              <td>{agent.name}</td>
+              <td>{agent.role}</td>
+              <td>{agent.nearAccountId}</td>
+              <td>{agent.evmAddress ? short(agent.evmAddress) : "—"}</td>
+              <td>{agent.active ? "active" : "revoked"}</td>
+              <td>
+                <button
+                  className="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      setBusy(true);
+                      try {
+                        const result = await api<Record<string, unknown>>(`/v1/console/agents/${agent.id}`);
+                        setDetail(result);
+                      } catch (cause) {
+                        props.onError(cause instanceof Error ? cause.message : String(cause));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  On-chain state
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {detail ? <pre>{JSON.stringify(detail, null, 2)}</pre> : null}
     </div>
   );
 }

@@ -75,6 +75,7 @@ export interface AuthGateway {
   identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null>;
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
+  getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
   listMembers(organizationId: string): Promise<MemberView[]>;
   createAgent(input: CreateAgentInput): Promise<CreatedAgent>;
   revokeAgent(organizationId: string, agentId: string): Promise<boolean>;
@@ -162,6 +163,11 @@ export class BetterAuthGateway implements AuthGateway {
       organizationId: member.organizationId,
       role: member.role,
     };
+  }
+
+  async getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
+    const agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId } });
+    return agent ? toAgentView(agent) : null;
   }
 
   async listMembers(organizationId: string): Promise<MemberView[]> {
