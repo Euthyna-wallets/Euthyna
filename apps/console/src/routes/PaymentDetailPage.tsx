@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api.js";
 import { PaymentTrace, type TraceStep } from "../components/PaymentTrace.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
+import { formatToken } from "../lib/format.js";
 
 interface Detail {
   operation: { opId: string; reference: string; amount: string; state: string; txHash: string | null; lastError: string | null };
@@ -23,7 +24,7 @@ export function PaymentDetailPage() {
           <>
             <div className="metrics">
               <div className="metric"><span>Reference</span><strong>{query.data.operation.reference}</strong></div>
-              <div className="metric"><span>Amount</span><strong className="mono">{query.data.operation.amount}</strong></div>
+              <div className="metric"><span>Amount</span><strong className="mono">{formatToken(query.data.operation.amount)}</strong></div>
               <div className="metric"><span>State</span><strong><Status value={query.data.operation.state} /></strong></div>
               <div className="metric"><span>Op</span><strong className="mono small">{short(query.data.operation.opId)}</strong></div>
             </div>

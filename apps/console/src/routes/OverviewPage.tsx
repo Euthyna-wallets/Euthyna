@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api, explorerBase, explorerNear, type OperationRow, type TreasuryView } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
+import { formatToken } from "../lib/format.js";
 
 interface Overview {
   treasury: TreasuryView | null;
@@ -9,6 +10,7 @@ interface Overview {
   agents: { total: number; active: number };
   pendingEscalations: number;
   safeBalance: string | null;
+  roleBudgets: Array<{ role: string; funded?: string; reserved?: string; spent?: string; available?: string }>;
   operations: OperationRow[];
 }
 
@@ -39,6 +41,24 @@ export function OverviewPage() {
                 </table>
               ) : <div className="state">No treasury yet. Run onboarding.</div>}
             </Card>
+            <Card title="Role budgets">
+              {query.data.roleBudgets.length === 0 ? <div className="state">No role deployed yet.</div> : (
+                <table>
+                  <thead><tr><th>Role</th><th>Funded</th><th>Reserved</th><th>Spent</th><th>Available</th></tr></thead>
+                  <tbody>
+                    {query.data.roleBudgets.map((budget) => (
+                      <tr key={budget.role}>
+                        <td>{budget.role}</td>
+                        <td className="mono">{formatToken(budget.funded)}</td>
+                        <td className="mono">{formatToken(budget.reserved)}</td>
+                        <td className="mono">{formatToken(budget.spent)}</td>
+                        <td className="mono">{formatToken(budget.available)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Card>
             <Card title="Recent operations">
               {query.data.operations.length === 0 ? <div className="state">No operations yet.</div> : (
                 <table>
@@ -47,7 +67,7 @@ export function OverviewPage() {
                     {query.data.operations.map((operation) => (
                       <tr key={operation.opId}>
                         <td>{operation.reference}</td>
-                        <td className="mono">{operation.amount}</td>
+                        <td className="mono">{formatToken(operation.amount)}</td>
                         <td><Status value={operation.state} /></td>
                         <td className="mono small">{short(operation.opId)}</td>
                       </tr>

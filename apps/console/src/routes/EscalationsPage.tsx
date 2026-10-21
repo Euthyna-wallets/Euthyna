@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "../api.js";
+import { SecondaryButton } from "../components/SecondaryButton.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
+import { formatToken } from "../lib/format.js";
 
 interface Escalation {
   id: string;
@@ -46,7 +48,7 @@ export function EscalationsPage() {
                   <td><Status value={row.status} /></td>
                   <td>{Array.isArray(row.reasons) ? row.reasons.join(", ") : String(row.reasons)}</td>
                   <td>{new Date(row.createdAt).toLocaleString()}</td>
-                  <td><button className="ghost" onClick={() => setSelected(row.id)}>Compare</button></td>
+                  <td><SecondaryButton onClick={() => setSelected(row.id)}>Compare</SecondaryButton></td>
                 </tr>
               ))}
             </tbody>
@@ -70,14 +72,14 @@ function EscalationDetail({ escalation, onDecide, pending }: { escalation: Escal
         <thead><tr><th>Field</th><th>Invoice</th><th>Registry</th><th>Result</th></tr></thead>
         <tbody>
           <tr><td>Recipient</td><td className="mono small">{recipient}</td><td className="mono small">{recipients.join(", ") || "—"}</td><td>{recipientMatches ? "match" : "different"}</td></tr>
-          <tr><td>Amount</td><td className="mono">{escalation.invoice?.amount ?? "—"}</td><td className="mono">{role?.maximumPayment ?? "—"}</td><td>{amountMatches ? "within cap" : "different"}</td></tr>
+          <tr><td>Amount</td><td className="mono">{formatToken(escalation.invoice?.amount)}</td><td className="mono">{formatToken(role?.maximumPayment)}</td><td>{amountMatches ? "within cap" : "different"}</td></tr>
           <tr><td>Reference</td><td>{escalation.invoice?.reference ?? "—"}</td><td>—</td><td>review</td></tr>
         </tbody>
       </table>
       <p className="notice">Call the supplier back at the number in the registry before changing anything.</p>
       <div className="row wrap">
         <button className="primary" disabled={pending} onClick={() => onDecide({ id: escalation.id, decision: "approve" })}>Re-check</button>
-        <button className="ghost" disabled={pending} onClick={() => onDecide({ id: escalation.id, decision: "reject" })}>Reject</button>
+        <SecondaryButton disabled={pending} onClick={() => onDecide({ id: escalation.id, decision: "reject" })}>Reject</SecondaryButton>
         <span className="muted small">Registry corrections use a separate four-eyes change.</span>
       </div>
     </Card>

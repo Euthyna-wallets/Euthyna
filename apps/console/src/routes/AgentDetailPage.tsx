@@ -2,13 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
+import { SecondaryButton } from "../components/SecondaryButton.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
+import { formatBytesAddress, formatEth, formatNonce, formatToken } from "../lib/format.js";
 
 interface Detail {
   agent: AgentRow;
   treasury: { vaultAccountId: string; daoAccountId: string } | null;
   onChain: Record<string, unknown> | null;
   mandate: Record<string, unknown> | null;
+  budget: { config?: Record<string, unknown>; funded?: string; reserved?: string; spent?: string; available?: string } | null;
+  nonce: number | null;
   ethBalance: string | null;
   audit: Array<{ id: string; action: string; actorId: string; createdAt: string }>;
 }
@@ -35,19 +39,30 @@ export function AgentDetailPage() {
             <div className="metrics">
               <div className="metric"><span>Status</span><strong>{query.data.agent.active ? "Active" : "Revoked"}</strong></div>
               <div className="metric"><span>0xAAA</span><strong className="mono small">{short(query.data.agent.evmAddress)}</strong></div>
-              <div className="metric"><span>Gas ETH</span><strong>{query.data.ethBalance ? `${(Number(query.data.ethBalance) / 1e18).toFixed(5)} ETH` : "—"}</strong></div>
-              <div className="metric"><span>Nonce</span><strong>{String((query.data.onChain as { evm_nonce?: unknown })?.evm_nonce ?? "—")}</strong></div>
+              <div className="metric"><span>Gas ETH</span><strong>{formatEth(query.data.ethBalance)}</strong></div>
+              <div className="metric"><span>Nonce</span><strong>{formatNonce(query.data.nonce)}</strong></div>
             </div>
             <Card title="On-chain state">
-              <pre>{JSON.stringify(query.data.onChain ?? { status: "unavailable" }, null, 2)}</pre>
+              <table>
+                <tbody>
+                  <tr><td>Active</td><td>{String((query.data.onChain as { active?: unknown })?.active ?? "—")}</td></tr>
+                  <tr><td>Role</td><td>{String((query.data.onChain as { role?: unknown })?.role ?? "—")}</td></tr>
+                  <tr><td>0xAAA</td><td className="mono">{formatBytesAddress((query.data.onChain as { evm_address?: unknown })?.evm_address ?? query.data.agent.evmAddress)}</td></tr>
+                  <tr><td>MPC path</td><td className="mono">{String((query.data.onChain as { mpc_path?: unknown })?.mpc_path ?? query.data.agent.mpcPath)}</td></tr>
+                  <tr><td>Nonce</td><td>{formatNonce(query.data.nonce)}</td></tr>
+                  <tr><td>Budget funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>
+                  <tr><td>Budget reserved</td><td className="mono">{formatToken(query.data.budget?.reserved)}</td></tr>
+                  <tr><td>Budget spent</td><td className="mono">{formatToken(query.data.budget?.spent)}</td></tr>
+                </tbody>
+              </table>
             </Card>
             <Card title="Current mandate">
               {query.data.mandate ? <pre>{JSON.stringify(query.data.mandate, null, 2)}</pre> : <div className="state">No mandate.</div>}
             </Card>
             <Card title="Actions" action={<Status value={query.data.agent.active ? "active" : "revoked"} />}>
               <div className="row wrap">
-                <button className="ghost" onClick={() => revoke.mutate()} disabled={!query.data.agent.active || revoke.isPending}>Revoke agent</button>
-                <button className="ghost" onClick={() => pause.mutate()} disabled={pause.isPending}>Prepare pause proposal</button>
+                <SecondaryButton onClick={() => revoke.mutate()} disabled={!query.data.agent.active || revoke.isPending}>Revoke agent</SecondaryButton>
+                <SecondaryButton onClick={() => pause.mutate()} disabled={pause.isPending}>Prepare pause proposal</SecondaryButton>
               </div>
               {pause.data ? <pre>{JSON.stringify(pause.data, null, 2)}</pre> : null}
             </Card>

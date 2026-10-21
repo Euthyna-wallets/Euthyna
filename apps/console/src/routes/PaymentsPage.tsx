@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import { api, type OperationRow } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
+import { formatToken } from "../lib/format.js";
 
 const states = ["all", "Prepared", "PossiblySigned", "Broadcast", "Confirmed", "Escalated", "Rejected", "Cancelled", "Reverted"];
 
@@ -22,7 +23,7 @@ export function PaymentsPage() {
               {rows.map((row) => (
                 <tr key={row.opId}>
                   <td>{row.reference}</td>
-                  <td className="mono">{row.amount}</td>
+                  <td className="mono">{formatToken(row.amount)}</td>
                   <td><Status value={row.status ?? row.state} /></td>
                   <td className="mono small">{short(row.txHash)}</td>
                   <td>{new Date(row.createdAt).toLocaleString()}</td>
