@@ -40,6 +40,8 @@ export function Layout() {
           <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/payments">Payments</NavLink>
           <NavLink to="/escalations">Escalations</NavLink>
+          <NavLink to="/suppliers">Suppliers</NavLink>
+          <NavLink to="/governance">Governance</NavLink>
           <NavLink to="/onboarding">Onboarding</NavLink>
         </nav>
         <div className="spacer" />

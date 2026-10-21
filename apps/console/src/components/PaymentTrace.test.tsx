@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { PaymentTrace, sequenceTrace } from "./PaymentTrace.js";
 
@@ -13,6 +13,8 @@ const steps = [
   { step: "Zodiac", at: "2026-10-21T10:05:00Z", txHash: "0xabc" },
   { step: "Confirmed", at: "2026-10-21T10:06:00Z", txHash: "0xabc" },
 ];
+
+afterEach(cleanup);
 
 describe("PaymentTrace", () => {
   it("renders the strict three-lock order and only completed steps", () => {

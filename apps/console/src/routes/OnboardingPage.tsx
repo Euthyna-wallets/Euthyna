@@ -781,7 +781,7 @@ function AgentForm(props: {
 }
 
 
-function MandatePanel(props: {
+export function MandatePanel(props: {
   treasury: TreasuryView;
   preview: MandatePreview | null;
   onPreview: (preview: MandatePreview) => void;

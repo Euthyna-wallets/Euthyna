@@ -300,3 +300,35 @@ export async function signDaoProposal(
   if (!outcome) throw new Error("wallet returned no transaction outcome");
   return outcome.transaction_outcome.id;
 }
+
+
+export async function signDaoVote(signerId: string, daoAccountId: string, proposalId: number): Promise<string> {
+  const injected = e2eNear();
+  if (injected) {
+    const outcome = await injected.signAndSendTransaction({
+      signerId,
+      receiverId: daoAccountId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" },
+        },
+      ],
+    });
+    return outcome.transaction_outcome.id;
+  }
+  const selector = await nearSelector();
+  const wallet = await selector.wallet();
+  const outcome = await wallet.signAndSendTransaction({
+    signerId,
+    receiverId: daoAccountId,
+    actions: [
+      {
+        type: "FunctionCall",
+        params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" },
+      },
+    ],
+  });
+  if (!outcome) throw new Error("wallet returned no transaction outcome");
+  return outcome.transaction_outcome.id;
+}

@@ -59,6 +59,9 @@ export function AgentDetailPage() {
             <Card title="Current mandate">
               {query.data.mandate ? <pre>{JSON.stringify(query.data.mandate, null, 2)}</pre> : <div className="state">No mandate.</div>}
             </Card>
+            <Card title="Mandate" action={<Link to="/mandate">Open mandate</Link>}>
+              <p className="muted small">Preview the role diff and prepare the proposals.</p>
+            </Card>
             <Card title="Actions" action={<Status value={query.data.agent.active ? "active" : "revoked"} />}>
               <div className="row wrap">
                 <SecondaryButton onClick={() => revoke.mutate()} disabled={!query.data.agent.active || revoke.isPending}>Revoke agent</SecondaryButton>

@@ -156,15 +156,15 @@ export class ConsoleDataService {
 
   async governance(organizationId: string) {
     const treasury = await this.prisma.treasury.findFirst({ where: { organizationId } });
-    if (!treasury) return { proposals: [], delay: null };
+    if (!treasury) return { proposals: [], delay: null, daoAccountId: null };
     try {
       const proposals = await this.near.viewFunction<unknown[]>(treasury.daoAccountId, "get_proposals", {
         from_index: 0,
         limit: 20,
       });
-      return plain({ proposals: proposals.reverse(), delay: { address: treasury.delayAddress, cooldownSeconds: 300 } });
+      return plain({ daoAccountId: treasury.daoAccountId, proposals: proposals.reverse(), delay: { address: treasury.delayAddress, cooldownSeconds: 300 } });
     } catch (error) {
-      return { proposals: [], delay: null, error: error instanceof Error ? error.message : String(error) };
+      return { daoAccountId: treasury.daoAccountId, proposals: [], delay: null, error: error instanceof Error ? error.message : String(error) };
     }
   }
 }

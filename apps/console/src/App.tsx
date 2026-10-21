@@ -7,10 +7,13 @@ import { queryClient } from "./lib/query.js";
 import { AgentDetailPage } from "./routes/AgentDetailPage.js";
 import { AgentsPage } from "./routes/AgentsPage.js";
 import { EscalationsPage } from "./routes/EscalationsPage.js";
+import { GovernancePage } from "./routes/GovernancePage.js";
+import { MandatePage } from "./routes/MandatePage.js";
 import { OnboardingPage, SignIn } from "./routes/OnboardingPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
 import { PaymentDetailPage } from "./routes/PaymentDetailPage.js";
 import { PaymentsPage } from "./routes/PaymentsPage.js";
+import { SuppliersPage } from "./routes/SuppliersPage.js";
 
 function Gate() {
   const session = authClient.useSession();
@@ -33,6 +36,9 @@ export function App() {
               <Route path="/payments" element={<PaymentsPage />} />
               <Route path="/payments/:opId" element={<PaymentDetailPage />} />
               <Route path="/escalations" element={<EscalationsPage />} />
+              <Route path="/suppliers" element={<SuppliersPage />} />
+              <Route path="/governance" element={<GovernancePage />} />
+              <Route path="/mandate" element={<MandatePage />} />
             </Route>
           </Route>
         </Routes>
