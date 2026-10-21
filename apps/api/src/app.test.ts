@@ -106,6 +106,18 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve([]);
   }
 
+  addMember(_organizationId: string, input: { name: string; nearAccountId: string; evmAddress: string }) {
+    return Promise.resolve({
+      id: "member-new",
+      userId: "user-new",
+      role: "member",
+      nearAccountId: input.nearAccountId,
+      evmAddress: input.evmAddress,
+      email: null,
+      name: input.name,
+    });
+  }
+
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
     if (organizationId !== "org-1" || agentId !== "11111111-1111-4111-8111-111111111111") return Promise.resolve(null);
     return Promise.resolve({
@@ -335,6 +347,37 @@ describe("agent detail", () => {
       headers: consoleHeaders({ cookie: "session-member" }),
     });
     expect(response.status).toBe(404);
+  });
+});
+
+describe("members", () => {
+  it("adds a wallet-only member for an admin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Alice",
+        nearAccountId: "alice.testnet",
+        evmAddress: "0x1111111111111111111111111111111111111111",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ nearAccountId: "alice.testnet", name: "Alice" });
+  });
+
+  it("forbids a non-admin member from adding a member", async () => {
+    const { app } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({
+        name: "Bob",
+        nearAccountId: "bob.testnet",
+        evmAddress: "0x2222222222222222222222222222222222222222",
+      }),
+    });
+    expect(response.status).toBe(403);
   });
 });
 

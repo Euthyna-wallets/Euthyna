@@ -165,6 +165,19 @@ Returns members of the session organization with their linked `nearAccountId` an
 `evmAddress`. Better Auth's own member listing does not expose application-specific
 columns.
 
+### `POST /v1/console/members`
+
+Admin only. Adds a wallet-only council member for the MVP: no email invitation and
+no login. The server creates a local `User` row (synthetic
+`member-<uuid>@members.mandateos.invalid` email) and a `Member` row bound to the
+organization, so the addresses immediately feed the DAO/Safe plan.
+
+```json
+{ "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
+```
+
+The EVM address is checksum-normalized. Nothing is signed.
+
 ### `POST /v1/console/treasury/plan`
 
 Admin only. Builds the unsigned DAO, Vault, relay and Base plan for the session
@@ -184,6 +197,23 @@ The response contains:
 - `base`: Safe deployment, Roles and Delay deployment, and the three Safe module
   calls to sign. The Safe is deployed before the modules because their initializers
   reference its address; enabling them is a separate 2/3 Safe batch.
+
+### `POST /v1/console/treasury/create-dao`
+
+Admin only. Signs the Sputnik `create` call with the MandateOS relayer and pays the
+attached deposit. The caller only supplies the same identifiers as the plan; no
+member key is required.
+
+```json
+{ "environment": "uat", "daoName": "acme", "founderNearAccountId": "w-....mandateos.testnet" }
+```
+
+### `POST /v1/console/treasury/deploy-contracts`
+
+Admin only. Creates and deploys the Vault and governance relay accounts with the
+relayer (`CreateAccount → Transfer → DeployContract → new`), paying from
+`NEAR_RELAYER_ACCOUNT_ID`. Both contracts are initialized with the DAO as owner and
+hold no access key of their own.
 
 ### `POST /v1/console/treasury/refresh`
 

@@ -149,6 +149,9 @@ export function OnboardingPage() {
               localStorage.setItem("mandateos.organization", organization.id);
             }}
             onError={setError}
+            onMembersChanged={async () => {
+              if (activeOrganization) await refreshMembers(activeOrganization.id);
+            }}
           />
         </section>
 
@@ -384,10 +387,12 @@ function OrganizationPanel(props: {
   onChanged: () => Promise<void>;
   onSelect: (organization: Organization) => void;
   onError: (message: string) => void;
+  onMembersChanged: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [invitation, setInvitation] = useState<string | null>(null);
+  const [memberName, setMemberName] = useState("");
+  const [memberNear, setMemberNear] = useState("");
+  const [memberEvm, setMemberEvm] = useState("");
 
   return (
     <div className="stack">
@@ -426,34 +431,35 @@ function OrganizationPanel(props: {
         </button>
       </div>
       {props.active ? (
-        <div className="row">
-          <input placeholder="member@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <button
-            className="ghost"
-            onClick={() =>
-              void (async () => {
-                try {
-                  const result = await authClient.organization.inviteMember({
-                    email,
-                    role: "member",
-                    organizationId: props.active!.id,
-                  });
-                  if (result.error) throw new Error(result.error.message);
-                  const invitationId = result.data?.id;
-                  setInvitation(invitationId ? `${window.location.origin}/?invitation=${invitationId}` : null);
-                } catch (cause) {
-                  props.onError(cause instanceof Error ? cause.message : String(cause));
-                }
-              })()
-            }
-          >
-            Invite member
-          </button>
-        </div>
-      ) : null}
-      {invitation ? (
-        <div className="alert success">
-          Invitation link: <code>{invitation}</code>
+        <div className="stack">
+          <div className="muted small">Add a council member with their NEAR and EVM wallets. No email invitation in the MVP.</div>
+          <div className="row wrap">
+            <input placeholder="Member name" value={memberName} onChange={(event) => setMemberName(event.target.value)} />
+            <input placeholder="near.testnet" value={memberNear} onChange={(event) => setMemberNear(event.target.value)} />
+            <input placeholder="0x EVM address" value={memberEvm} onChange={(event) => setMemberEvm(event.target.value)} />
+            <button
+              className="ghost"
+              disabled={!memberName || !memberNear || !memberEvm}
+              onClick={() =>
+                void (async () => {
+                  try {
+                    await api("/v1/console/members", {
+                      method: "POST",
+                      body: JSON.stringify({ name: memberName, nearAccountId: memberNear, evmAddress: memberEvm }),
+                    });
+                    setMemberName("");
+                    setMemberNear("");
+                    setMemberEvm("");
+                    await props.onMembersChanged();
+                  } catch (cause) {
+                    props.onError(cause instanceof Error ? cause.message : String(cause));
+                  }
+                })()
+              }
+            >
+              Add member
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -481,7 +487,7 @@ function MemberWallets(props: {
         <tbody>
           {props.members.map((member) => (
             <tr key={member.id}>
-              <td>{member.email ?? short(member.userId)}</td>
+              <td>{member.name ?? member.email ?? short(member.userId)}</td>
               <td>{member.role}</td>
               <td>{member.nearAccountId ?? "—"}</td>
               <td>{member.evmAddress ? short(member.evmAddress) : "—"}</td>

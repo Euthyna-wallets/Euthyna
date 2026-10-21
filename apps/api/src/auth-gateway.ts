@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@mandateos/db";
+import { getAddress } from "viem";
 
 import { AGENT_API_KEY_CONFIG_ID, type MandateAuth } from "./auth.js";
 
@@ -77,6 +78,10 @@ export interface AuthGateway {
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
   listMembers(organizationId: string): Promise<MemberView[]>;
+  addMember(
+    organizationId: string,
+    input: { name: string; nearAccountId: string; evmAddress: string },
+  ): Promise<MemberView>;
   registerPasswordless(
     baseUrl: string,
     consoleOrigin: string,
@@ -196,6 +201,48 @@ export class BetterAuthGateway implements AuthGateway {
   async getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
     const agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId } });
     return agent ? toAgentView(agent) : null;
+  }
+
+  async addMember(
+    organizationId: string,
+    input: { name: string; nearAccountId: string; evmAddress: string },
+  ): Promise<MemberView> {
+    const userId = randomUUID();
+    const memberId = randomUUID();
+    await this.prisma.$transaction([
+      this.prisma.user.create({
+        data: {
+          id: userId,
+          name: input.name,
+          email: `member-${userId}@members.mandateos.invalid`,
+          emailVerified: true,
+        },
+      }),
+      this.prisma.member.create({
+        data: {
+          id: memberId,
+          organizationId,
+          userId,
+          role: "member",
+          nearAccountId: input.nearAccountId,
+          evmAddress: getAddress(input.evmAddress),
+          createdAt: new Date(),
+        },
+      }),
+    ]);
+    const member = await this.prisma.member.findUniqueOrThrow({
+      where: { id: memberId },
+      include: { user: true },
+    });
+    return {
+      id: member.id,
+      userId: member.userId,
+      role: member.role,
+      nearAccountId: member.nearAccountId,
+      evmAddress: member.evmAddress,
+      email: member.user.email,
+      name: member.user.name,
+    };
   }
 
   async listMembers(organizationId: string): Promise<MemberView[]> {

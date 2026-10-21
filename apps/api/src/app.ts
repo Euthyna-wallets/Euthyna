@@ -94,6 +94,12 @@ const mandateSchema = z.object({
     .optional(),
 });
 
+const addMemberSchema = z.object({
+  name: z.string().min(1).max(120),
+  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  evmAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
 const walletsSchema = z.object({
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
   evmAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
@@ -583,6 +589,22 @@ export function createApp({
     const input = await parseJson(context, treasuryRegisterSchema);
     const registered = await treasury.register(consoleIdentity.organizationId, consoleIdentity.userId, input);
     return context.json(registered, 201);
+  });
+
+  app.post("/v1/console/members", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, addMemberSchema);
+    const member = await auth.addMember(consoleIdentity.organizationId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "member.added",
+      targetType: "member",
+      targetId: member.id,
+      metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
+    });
+    return context.json(member, 201);
   });
 
   app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
