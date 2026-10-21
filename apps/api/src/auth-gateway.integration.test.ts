@@ -30,6 +30,7 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
         BETTER_AUTH_URL: "http://localhost:3000",
         CONSOLE_ORIGIN: "http://localhost:5173",
         PASSKEY_RP_ID: "localhost",
+        AUTH_E2E_PASSWORD: "0",
       },
       prisma,
     );
