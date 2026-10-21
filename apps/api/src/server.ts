@@ -51,7 +51,16 @@ const treasury = new TreasuryService(prisma, near, signer, {
   daoCreateDepositYocto: "7500000000000000000000000",
 });
 const mandates = new MandateService(prisma, near);
-const app = createApp({ near, guard, relayer, auth, treasury, mandates, consoleOrigin: env.CONSOLE_ORIGIN });
+const app = createApp({
+  near,
+  guard,
+  relayer,
+  auth,
+  treasury,
+  mandates,
+  consoleOrigin: env.CONSOLE_ORIGIN,
+  passwordAuthEnabled: env.AUTH_E2E_PASSWORD === "1",
+});
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`MandateOS API listening on http://127.0.0.1:${info.port}`);

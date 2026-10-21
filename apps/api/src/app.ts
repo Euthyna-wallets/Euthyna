@@ -99,6 +99,7 @@ export interface AppDependencies {
   treasury: TreasuryGateway;
   mandates: MandateGateway;
   consoleOrigin: string;
+  passwordAuthEnabled: boolean;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -182,6 +183,7 @@ export function createApp({
   treasury,
   mandates,
   consoleOrigin,
+  passwordAuthEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -198,7 +200,13 @@ export function createApp({
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
-  app.on(["GET", "POST"], "/api/auth/*", (context) => auth.handler(context.req.raw));
+  app.on(["GET", "POST"], "/api/auth/*", (context) => {
+    const path = context.req.path;
+    if (!passwordAuthEnabled && (path.endsWith("/sign-up/email") || path.endsWith("/sign-in/email"))) {
+      return context.json({ error: "not_found" }, 404);
+    }
+    return auth.handler(context.req.raw);
+  });
 
   app.post("/v1/guard/visas", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");

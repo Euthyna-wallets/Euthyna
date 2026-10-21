@@ -201,7 +201,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       return {} as MandatePreview;
     },
   };
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, consoleOrigin });
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, consoleOrigin, passwordAuthEnabled: false });
   return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 
@@ -351,6 +351,18 @@ describe("treasury refresh", () => {
     });
     expect(response.status).toBe(403);
     expect(treasuryCalls.refreshes).toEqual([]);
+  });
+});
+
+describe("email/password gating", () => {
+  it("returns 404 for sign-up/email when password auth is disabled", async () => {
+    const { app } = testApp();
+    const response = await app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: headers({}),
+      body: JSON.stringify({ email: "user@example.test", password: "password-123", name: "User" }),
+    });
+    expect(response.status).toBe(404);
   });
 });
 
