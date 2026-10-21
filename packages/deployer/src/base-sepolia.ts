@@ -38,8 +38,7 @@ const SAFE_THRESHOLD = 2n;
 const ROLES_MASTERCOPY = getAddress("0xf2964ce6161ce0e75964fe7927ce114cb0b283d5");
 const DELAY_MASTERCOPY = getAddress("0x824175b945838d127c1ca83cbce11d8e44f6df01");
 const MODULE_PROXY_FACTORY = getAddress("0x000000000000aDdB49795b0f9bA5BC298cDda236");
-const RESEARCHER = getAddress("0xcd0733dd35a000189d2a6de096390b68393aa525");
-const COOLDOWN = 86_400n;
+const COOLDOWN = 300n;
 const EXPIRATION = 604_800n;
 const UAT_ALLOWANCE = 5_000_000n;
 const MINIMUM_AGENT_GAS = 5_000_000_000_000_000n;
@@ -57,6 +56,7 @@ const envSchema = z.object({
   COUNCIL_PRIVATE_KEY_3: privateKey,
   BASE_ALLOWED_RECIPIENT: address,
   GOV_ADDRESS: address,
+  RESEARCHER_ADDRESS: address,
   RESUME_TEST_USDC_ADDRESS: address.optional(),
   RESUME_SAFE_ADDRESS: address.optional(),
   RESUME_ROLES_ADDRESS: address.optional(),
@@ -361,7 +361,7 @@ const moduleCalls: Array<{ name: string; to: Address; data: Hex }> = [
   {
     name: "assignResearcherRole",
     to: roles,
-    data: encodeFunctionData({ abi: rolesAbi, functionName: "assignRoles", args: [RESEARCHER, [roleKey], [true]] }),
+    data: encodeFunctionData({ abi: rolesAbi, functionName: "assignRoles", args: [env.RESEARCHER_ADDRESS, [roleKey], [true]] }),
   },
   {
     name: "scopeUsdcTarget",
@@ -475,10 +475,10 @@ if (safeUsdcBalance < UAT_ALLOWANCE) {
   await publicClient.waitForTransactionReceipt({ hash: fundSafeUsdcHash });
 }
 
-const agentBalance = await publicClient.getBalance({ address: RESEARCHER });
+const agentBalance = await publicClient.getBalance({ address: env.RESEARCHER_ADDRESS });
 let fundAgentGasHash: Hex | undefined;
 if (agentBalance < MINIMUM_AGENT_GAS) {
-  fundAgentGasHash = await walletClient.sendTransaction({ to: RESEARCHER, value: MINIMUM_AGENT_GAS - agentBalance });
+  fundAgentGasHash = await walletClient.sendTransaction({ to: env.RESEARCHER_ADDRESS, value: MINIMUM_AGENT_GAS - agentBalance });
   await publicClient.waitForTransactionReceipt({ hash: fundAgentGasHash });
 }
 
@@ -510,7 +510,7 @@ const manifest: Manifest = {
     councilOwner1: councilAccounts[0]!.address,
     councilOwner2: councilAccounts[1]!.address,
     councilOwner3: councilAccounts[2]!.address,
-    researcher: RESEARCHER,
+    researcher: env.RESEARCHER_ADDRESS,
     allowedRecipient: env.BASE_ALLOWED_RECIPIENT,
     usdcAllowanceBaseUnits: UAT_ALLOWANCE.toString(),
     cooldownSeconds: Number(COOLDOWN),

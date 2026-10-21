@@ -333,7 +333,56 @@ impl GovernanceRelay {
         attempt.signed_transaction = Some(signed_transaction);
     }
 
-    pub fn confirm_original(&mut self, op_id: OperationId, tx_hash: [u8; 32]) {
+    /// Permissionless recovery path for MPC signatures published on-chain after a
+    /// failed, timed-out or late callback. Verified against the relay's derived
+    /// `0xGOV` address and the exact original or cancellation digest.
+    pub fn submit_signature(&mut self, op_id: OperationId, signature: MpcSignature) {
+        let mut operation = self
+            .operations
+            .get(&op_id)
+            .cloned()
+            .expect("ERR_OPERATION_NOT_FOUND");
+        require!(
+            operation.state == OperationState::PossiblySigned,
+            "ERR_NOT_POSSIBLY_SIGNED"
+        );
+        let expected_address = self.evm_address.expect("ERR_KEY_NOT_DERIVED");
+
+        if signature_matches(operation.tx_digest, &signature, expected_address) {
+            require!(
+                operation.signature.is_none(),
+                "ERR_SIGNATURE_ALREADY_SUBMITTED"
+            );
+            operation.signed_transaction =
+                Some(evm::signed_transaction(&operation.transaction, &signature));
+            operation.signature = Some(signature);
+            self.operations.insert(op_id, operation);
+            return;
+        }
+
+        if let Some(attempt) = operation.cancellation.as_mut() {
+            if signature_matches(attempt.tx_digest, &signature, expected_address) {
+                require!(
+                    attempt.signature.is_none(),
+                    "ERR_SIGNATURE_ALREADY_SUBMITTED"
+                );
+                attempt.signed_transaction =
+                    Some(evm::signed_transaction(&attempt.transaction, &signature));
+                attempt.signature = Some(signature);
+                self.operations.insert(op_id, operation);
+                return;
+            }
+        }
+
+        env::panic_str("ERR_SIGNATURE_MISMATCH");
+    }
+
+    pub fn confirm_original(
+        &mut self,
+        op_id: OperationId,
+        tx_hash: [u8; 32],
+        mpc_signature: Option<MpcSignature>,
+    ) {
         self.assert_owner();
         let operation = self
             .operations
@@ -344,12 +393,18 @@ impl GovernanceRelay {
             operation.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
-        let signed_transaction = operation
-            .signed_transaction
-            .as_ref()
+        if let Some(signature) = mpc_signature {
+            if operation.signed_transaction.is_none() {
+                self.submit_signature(op_id, signature);
+            }
+        }
+        let signed_transaction = self
+            .operations
+            .get(&op_id)
+            .and_then(|operation| operation.signed_transaction.clone())
             .expect("ERR_ORIGINAL_SIGNATURE_UNAVAILABLE");
         require!(
-            tx_hash == env::keccak256_array(signed_transaction),
+            tx_hash == env::keccak256_array(&signed_transaction),
             "ERR_ORIGINAL_TX_HASH"
         );
         self.operations
@@ -461,4 +516,19 @@ fn derive_evm_address(public_key: &str) -> EvmAddress {
 
 fn bytes20(value: Base64VecU8, error: &str) -> EvmAddress {
     value.0.try_into().unwrap_or_else(|_| env::panic_str(error))
+}
+
+fn signature_matches(
+    digest: [u8; 32],
+    signature: &MpcSignature,
+    expected_address: EvmAddress,
+) -> bool {
+    if signature.big_r.len() != 33 || signature.recovery_id > 1 {
+        return false;
+    }
+    let mut compact = [0u8; 64];
+    compact[..32].copy_from_slice(&signature.big_r[1..]);
+    compact[32..].copy_from_slice(&signature.s);
+    env::ecrecover(&digest, &compact, signature.recovery_id, true)
+        .is_some_and(|public_key| env::keccak256_array(public_key)[12..] == expected_address[..])
 }

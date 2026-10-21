@@ -12,6 +12,7 @@ const registrySchema = z.object({
   chainId: z.literal(84532),
   token: z.object({ symbol: z.literal("USDC"), address: address.nullable(), decimals: z.literal(6) }),
   roles: z.record(
+    z.string(),
     z.object({
       maximumPayment: z.string().regex(/^\d+$/),
       vendors: z.array(

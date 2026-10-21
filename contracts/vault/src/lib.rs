@@ -545,6 +545,56 @@ impl Vault {
         attempt.signed_transaction = Some(signed_transaction);
     }
 
+    /// Stores an MPC signature that was published on-chain even when the callback
+    /// failed, timed out or arrived after the operation was paused.
+    ///
+    /// Permissionless by design: the only accepted signatures are those recovering
+    /// the agent's derived address for the exact original or cancellation digest.
+    pub fn submit_signature(&mut self, op_id: OperationId, signature: MpcSignature) {
+        let mut operation = self
+            .operations
+            .get(&op_id)
+            .cloned()
+            .expect("ERR_OPERATION_NOT_FOUND");
+        require!(
+            operation.state == OperationState::PossiblySigned,
+            "ERR_NOT_POSSIBLY_SIGNED"
+        );
+        let expected_address = self
+            .agents
+            .get(&operation.agent)
+            .and_then(|agent| agent.evm_address)
+            .expect("ERR_EVM_ADDRESS_NOT_DERIVED");
+
+        if signature_matches(operation.tx_digest, &signature, expected_address) {
+            require!(
+                operation.signature.is_none(),
+                "ERR_SIGNATURE_ALREADY_SUBMITTED"
+            );
+            operation.signed_transaction =
+                Some(evm::signed_transaction(&operation.transaction, &signature));
+            operation.signature = Some(signature);
+            self.operations.insert(op_id, operation);
+            return;
+        }
+
+        if let Some(attempt) = operation.cancellation.as_mut() {
+            if signature_matches(attempt.tx_digest, &signature, expected_address) {
+                require!(
+                    attempt.signature.is_none(),
+                    "ERR_SIGNATURE_ALREADY_SUBMITTED"
+                );
+                attempt.signed_transaction =
+                    Some(evm::signed_transaction(&attempt.transaction, &signature));
+                attempt.signature = Some(signature);
+                self.operations.insert(op_id, operation);
+                return;
+            }
+        }
+
+        env::panic_str("ERR_SIGNATURE_MISMATCH");
+    }
+
     pub fn expire(&mut self, op_id: OperationId) {
         let operation = self
             .operations
@@ -561,7 +611,11 @@ impl Vault {
         self.cancel_operation(op_id, OperationState::Expired);
     }
 
-    pub fn report_status(&mut self, signed_report: SignedStatusReport) {
+    pub fn report_status(
+        &mut self,
+        signed_report: SignedStatusReport,
+        mpc_signature: Option<MpcSignature>,
+    ) {
         let report = &signed_report.report;
         require!(report.client_id == self.client_id, "ERR_REPORT_CLIENT");
         require!(
@@ -594,11 +648,21 @@ impl Vault {
         );
 
         require!(report.kind == StatusKind::Confirmed, "ERR_REPORT_KIND");
-        let signed_transaction = operation
-            .signed_transaction
-            .as_ref()
+        if let Some(signature) = mpc_signature {
+            let already_stored = self
+                .operations
+                .get(&report.op_id)
+                .is_some_and(|operation| operation.signed_transaction.is_some());
+            if !already_stored {
+                self.submit_signature(report.op_id, signature);
+            }
+        }
+        let signed_transaction = self
+            .operations
+            .get(&report.op_id)
+            .and_then(|operation| operation.signed_transaction.clone())
             .expect("ERR_ORIGINAL_SIGNATURE_UNAVAILABLE");
-        let expected_hash = env::keccak256_array(signed_transaction);
+        let expected_hash = env::keccak256_array(&signed_transaction);
         require!(report.tx_hash == expected_hash, "ERR_REPORT_TX_HASH");
         self.used_report_nonces.insert(report.report_nonce);
 
@@ -827,4 +891,19 @@ fn derive_evm_address(public_key: &str) -> [u8; 20] {
     hash[12..]
         .try_into()
         .unwrap_or_else(|_| env::panic_str("ERR_ADDRESS_LENGTH"))
+}
+
+fn signature_matches(
+    digest: [u8; 32],
+    signature: &MpcSignature,
+    expected_address: [u8; 20],
+) -> bool {
+    if signature.big_r.len() != 33 || signature.recovery_id > 1 {
+        return false;
+    }
+    let mut compact = [0u8; 64];
+    compact[..32].copy_from_slice(&signature.big_r[1..]);
+    compact[32..].copy_from_slice(&signature.s);
+    env::ecrecover(&digest, &compact, signature.recovery_id, true)
+        .is_some_and(|public_key| env::keccak256_array(public_key)[12..] == expected_address[..])
 }

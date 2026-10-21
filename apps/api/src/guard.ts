@@ -1,5 +1,6 @@
 import { bytesToHex, keccak256, type Hex } from "viem";
 import { serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
+import type { KmsSigner } from "./kms.js";
 import { bytes32ToHex, digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { evaluateExactRules, type RegistryDecision } from "./registry.js";
 import type { GuardVisa, Registry, SignedPayload, StatusReport, VaultOperation } from "./types.js";
@@ -16,7 +17,7 @@ export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: 
 export class Guard {
   constructor(
     private readonly registry: Registry,
-    private readonly privateKey: Uint8Array,
+    private readonly signer: KmsSigner,
   ) {}
 
   async approve(operation: VaultOperation): Promise<GuardResult> {
@@ -41,7 +42,7 @@ export class Guard {
       visa_nonce: randomSafeNonce(),
       expires_at_block: operation.expires_at_block,
     };
-    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.privateKey);
+    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.signer);
     return {
       decision: "approve",
       vendorId: decision.vendorId,
@@ -70,7 +71,7 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:status:v1",
       serializeStatusReport(report),
-      this.privateKey,
+      this.signer,
     );
     return { report, signature };
   }

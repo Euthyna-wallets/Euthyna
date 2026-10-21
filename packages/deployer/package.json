@@ -8,6 +8,7 @@
     "update:researcher": "tsx src/update-researcher.ts",
     "configure:governance": "tsx src/configure-governance.ts",
     "veto:delay": "tsx src/veto-delay.ts",
+    "verify:step3": "tsx src/verify-step3.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"

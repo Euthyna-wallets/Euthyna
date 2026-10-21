@@ -8,8 +8,9 @@ use serial_test::serial;
 
 use vault_common::{
     FUNDED_BUDGET, MPC_PUBLIC_KEY, ROLE, ROLES_MODIFIER, TTL_BLOCKS, approval,
-    assert_failure_contains, authorize, expected_evm_address, get_operation, op_id, prepare,
-    set_mpc_mode, setup, signed_transaction_hash, status_report,
+    assert_failure_contains, authorize, cancellation_digest, expected_evm_address, get_operation,
+    mpc_signature, op_id, operation_digest, prepare, set_mpc_mode, setup, signed_transaction_hash,
+    status_report, status_report_with_hash,
 };
 
 fn expiry(operation: &Value) -> u64 {
@@ -407,5 +408,134 @@ async fn mpc_failure_and_late_response_never_release_or_reuse_nonce() -> Result<
         .transact()
         .await?;
     assert_failure_contains(&reuse_after_response, "ERR_ACTIVE_OPERATION");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn submit_signature_recovers_failed_mpc_callback_and_unblocks_agent() -> Result<()> {
+    let fixture = setup().await?;
+    set_mpc_mode(&fixture, "Fail").await?;
+    let operation = prepare(&fixture, "MPC-RECOVER", 100).await?;
+    let visa = approval(&fixture, &operation, 30, expiry(&operation), None);
+    authorize(&fixture, &operation, visa).await?.into_result()?;
+
+    let failed = get_operation(&fixture, &operation).await?;
+    assert_eq!(failed["state"], "PossiblySigned");
+    assert!(failed["signed_transaction"].is_null());
+
+    let wrong = fixture
+        .outsider
+        .call(fixture.vault.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": failed["op_id"],
+            "signature": mpc_signature([0x99; 32])
+        }))
+        .transact()
+        .await?;
+    assert_failure_contains(&wrong, "ERR_SIGNATURE_MISMATCH");
+
+    let direct = fixture
+        .outsider
+        .call(fixture.vault.id(), "report_status")
+        .args_json(json!({
+            "signed_report": status_report_with_hash(&fixture, &failed, [0u8; 32], 41),
+            "mpc_signature": mpc_signature([0x98; 32])
+        }))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&direct, "ERR_SIGNATURE_MISMATCH");
+
+    fixture
+        .outsider
+        .call(fixture.vault.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": failed["op_id"],
+            "signature": mpc_signature(operation_digest(&failed))
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let recovered = get_operation(&fixture, &operation).await?;
+    assert_eq!(recovered["state"], "PossiblySigned");
+    assert!(!recovered["signed_transaction"].is_null());
+    assert!(!recovered["signature"].is_null());
+
+    let report = status_report(&fixture, &recovered, 40);
+    fixture
+        .outsider
+        .call(fixture.vault.id(), "report_status")
+        .args_json(json!({"signed_report": report}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    assert_eq!(
+        get_operation(&fixture, &operation).await?["state"],
+        "Confirmed"
+    );
+
+    let next = prepare(&fixture, "AFTER-RECOVER", 100).await?;
+    assert_eq!(next["evm_nonce"], 1);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn submit_signature_recovers_failed_cancellation_callback() -> Result<()> {
+    let fixture = setup().await?;
+    set_mpc_mode(&fixture, "Fail").await?;
+    let operation = prepare(&fixture, "MPC-CANCEL-RECOVER", 100).await?;
+    let visa = approval(&fixture, &operation, 31, expiry(&operation), None);
+    authorize(&fixture, &operation, visa).await?.into_result()?;
+
+    fixture
+        .agent
+        .call(fixture.vault.id(), "cancel_nonce")
+        .args_json(json!({
+            "op_id": operation["op_id"],
+            "gas_limit": "21000",
+            "max_fee_per_gas": "30000000000",
+            "max_priority_fee_per_gas": "2000000000"
+        }))
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?
+        .into_result()?;
+    let cancelling = get_operation(&fixture, &operation).await?;
+    assert!(cancelling["cancellation"]["signed_transaction"].is_null());
+
+    fixture
+        .outsider
+        .call(fixture.vault.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": cancelling["op_id"],
+            "signature": mpc_signature(cancellation_digest(&cancelling))
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let recovered = get_operation(&fixture, &operation).await?;
+    assert!(!recovered["cancellation"]["signed_transaction"].is_null());
+    fixture
+        .owner
+        .call(fixture.vault.id(), "confirm_cancellation")
+        .args_json(json!({
+            "op_id": recovered["op_id"],
+            "tx_hash": signed_transaction_hash(&recovered, true)
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    assert_eq!(
+        get_operation(&fixture, &operation).await?["state"],
+        "Cancelled"
+    );
+
+    let next = prepare(&fixture, "AFTER-CANCEL-RECOVER", 100).await?;
+    assert_eq!(next["evm_nonce"], 1);
     Ok(())
 }

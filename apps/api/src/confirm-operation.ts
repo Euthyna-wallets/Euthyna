@@ -1,6 +1,7 @@
 import { hexToBytes, type Hex } from "viem";
 import { z } from "zod";
 import { Guard } from "./guard.js";
+import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { loadRegistry } from "./registry.js";
 
@@ -21,7 +22,7 @@ const near = new NearClient(env);
 const registry = await loadRegistry(env.VENDOR_REGISTRY_PATH);
 const guard = new Guard(
   registry,
-  Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64")),
+  new EnvKmsSigner(Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"))),
 );
 const operation = await near.getOperation(
   env.VAULT_ACCOUNT_ID,

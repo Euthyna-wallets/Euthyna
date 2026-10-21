@@ -96,12 +96,12 @@ Aucune adresse MandateOS n'est inventée dans cette spécification. Les adresses
 | MPC Chain Signatures | `v1.signer` mainnet ; `v1.signer-prod.testnet` testnet | Méthode `sign`, domaine ECDSA et path de dérivation | [MPC README][near-mpc], [interface MPC][mpc-interface] |
 | `omni-transaction` | `0.3` | Construction EIP-1559, `build_for_signing`, assemblage avec signature | [dépôt][omni-transaction] |
 | Zodiac Roles | v2, Base et Base Sepolia | `execTransactionWithRole`, cibles, fonctions et conditions de paramètres | [README et déploiements Roles][zodiac-roles] |
-| Zodiac Delay | 1.1.1 | File FIFO des changements administratifs, cooldown UAT de 24 h et veto par `setTxNonce` | [référence Delay 1.1.1][zodiac-delay-reference], [source Solidity épinglée][zodiac-delay-1.1.1-source] |
+| Zodiac Delay | 1.1.1 | FIFO, cooldown UAT `300 s`, production `86 400 s`, expiration `604 800 s`, veto par `setTxNonce` | [référence Delay 1.1.1][zodiac-delay-reference], [source Solidity épinglée][zodiac-delay-1.1.1-source] |
 | ModuleProxyFactory | 1.2.0 | Déploiement des modules Zodiac | [dépôt Zodiac][zodiac] |
 | SafeL2 / SafeProxyFactory | 1.4.1 | Safe Base et factory de proxy | [registre SafeL2][safe-l2-deployment], [registre SafeProxyFactory][safe-proxy-factory] |
-| USDC UAT Base Sepolia | `TestUSDC`, adresse écrite après déploiement | ERC-20 de test à 6 décimales, 20 unités frappées au deployer ; aucune valeur réelle | [`packages/deployer/contracts/TestUSDC.sol`](./packages/deployer/contracts/TestUSDC.sol) |
+| USDC UAT Base Sepolia | `TestUSDC (token de test)`, `0x418A…9474` | ERC-20 de test à 6 décimales, 20 unités frappées au deployer ; aucune valeur réelle | [`packages/deployer/contracts/TestUSDC.sol`](./packages/deployer/contracts/TestUSDC.sol) |
 
-Le déploiement UAT observé est : Safe `0x19C…199cD`, Roles `0x7178…ed40`, Delay `0xDd86…9533`, TestUSDC `0x418A…9474`. Les adresses complètes, hashes de bytecode et transactions sont dans [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
+Le déploiement UAT observé est : Safe `0x19C…199cD`, Roles `0x7178…ed40`, Delay `0xDd86…9533`, TestUSDC (token de test) `0x418A…9474`, `0xAAA` `0x10Ed…37Af` et `0xGOV` `0xC963…FDBb`. Les adresses complètes, owners, modules, hashes de bytecode et transactions sont dans [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
 
 Les allowances Roles sont indexées par une clé globale `bytes32` dans le stockage du contrat ; partager cette clé entre plusieurs rôles permet un plafond commun. L'opérateur `EqualTo` fixe une valeur de paramètre dynamique, par exemple le destinataire de `USDC.transfer` ([contrats Roles][zodiac-roles-contracts]).
 
@@ -141,8 +141,8 @@ Le seed et le script de déploiement mono-client exécutent et vérifient les é
 6. supprimer toutes les access keys du compte Vault ;
 7. dériver les adresses `0xAAA`, puis les préfinancer avec un petit montant d'ETH par action gouvernée ;
 8. déployer le Safe Base Sepolia avec trois owners de test distincts et un seuil 2/3 ;
-9. déployer Roles v2 et Delay 1.1.1 avec `owner = avatar = target = Safe`, `cooldown = 86 400` secondes et `expiration = 604 800` secondes ;
-10. activer Roles et Delay comme modules du Safe, assigner `0xAAA` aux rôles opérationnels et autoriser `0xGOV` dans le Delay — de préférence via le Roles administratif intermédiaire ;
+9. déployer Roles v2 et Delay 1.1.1 avec `owner = avatar = target = Safe`, `cooldown = 300` secondes sur Base Sepolia (`86 400` en production) et `expiration = 604 800` secondes ;
+10. activer Roles et Delay comme modules du Safe, assigner `0xAAA` au rôle opérationnel et autoriser le vrai `0xGOV` dérivé par le relais dans Delay ;
 11. créer les comptes agents et ajouter leurs function-call keys générées localement ;
 12. enregistrer adresses, versions, hashes de bytecode et transactions dans la table `deployments`, puis publier les liens explorateurs dans le README.
 
@@ -235,10 +235,12 @@ Le modèle minimal comprend :
 
 | Table | Clé principale | Contenu |
 |---|---|---|
-| `clients` | `id` | Identité stable, nom d'affichage, statut |
-| `client_environments` | `(client_id, environment)` | Réseaux et composants déployés |
-| `agents` | `(client_id, id)` | Client Better Auth, compte NEAR, rôle, path MPC |
-| `vendors` | `(client_id, id)` | Fournisseur et statut |
+| `organization` | `id` | Organisation Better Auth, nom, slug, métadonnées |
+| `member` | `id` | Appartenance `(organizationId, userId)` et rôle `owner`, `admin` ou `member` |
+| `agent` | `id` | `authUserId` Better Auth, organisation, compte NEAR, clé publique, Vault, rôle, path MPC, statut |
+| `apikey` | `id` | Credential agent haché, `referenceId = authUserId`, activation et rate limit |
+| `organization_environments` | `(organizationId, environment)` | Réseaux et composants déployés |
+| `vendor` | `(organizationId, id)` | Fournisseur et statut |
 | `vendor_addresses` | `(client_id, vendor_id, chain)` | Destinations autorisées |
 | `contracts` | `(client_id, reference_id)` | Abonnements, commandes et règles d'idempotence |
 | `roles` | `(client_id, id)` | Opérations, plafonds, budget et limites de gas |
@@ -248,7 +250,7 @@ Le modèle minimal comprend :
 | `compiled_artifacts` | `(client_id, environment, policy_version, target)` | Artefacts Guard, Vault et Zodiac |
 | `deployments` | `(client_id, environment, component)` | Adresse, version, code hash, tx hash |
 
-Toutes les contraintes et requêtes métier sont préfixées par `client_id`. L'API dérive ce `client_id` du token Better Auth de l'agent ou de la session humaine ; elle ne fait jamais confiance à un `client_id` libre fourni dans le body.
+Toutes les contraintes et requêtes métier sont préfixées par `organizationId`. L'API le dérive de la session Better Auth (`activeOrganizationId`, avec relecture de `member`) ou de la clé API de l'agent ; elle ne fait jamais confiance à un `organizationId` fourni dans le body. Une session console et une clé agent ne sont jamais interchangeables : la route agent n'accepte que `x-api-key`, les routes console que le cookie de session. La route d'urgence est réservée aux membres et écrit deux lignes d'audit (`requested`, puis `submitted` ou `rejected`) dans `audit_log`.
 
 Les secrets ne sont pas enregistrés dans les snapshots. PostgreSQL conserve uniquement une référence KMS. Chaque client et environnement possède sa propre clé Guard afin qu'une compromission ne permette pas de signer pour un autre Vault.
 
@@ -293,7 +295,7 @@ Draft → Validated → Proposed → VaultApplied → ZodiacQueued → Cooldown 
 3. le compilateur crée un snapshot et les trois artefacts ;
 4. Trezu applique l'artefact Vault ;
 5. `0xGOV` met l'artefact Zodiac en file dans Delay ;
-6. le security council dispose de 24 heures pour vérifier ou opposer son veto ;
+6. le security council dispose de 300 secondes en UAT, 24 heures en production, pour vérifier ou opposer son veto ;
 7. après le cooldown, n'importe qui exécute la tête de file ;
 8. l'API vérifie que le Vault et Zodiac exposent la version et le hash attendus ;
 9. Guard active le snapshot en dernier.
@@ -412,9 +414,10 @@ Guard le signe en ed25519. Le Vault vérifie la signature avec `env::ed25519_ver
 6. refuser tout `visa_nonce` déjà consommé, puis le consommer avant l'appel externe ;
 7. passer immédiatement l'opération à `PossiblySigned` et avancer `next_evm_nonce` ;
 8. appeler `sign` sur le contrat MPC avec le path agent et le digest EIP-1559 ;
-9. dans le callback privé, stocker la signature si elle est disponible, sans modifier les réservations en cas d'échec ou de timeout.
+9. dans le callback privé, stocker la signature si elle est disponible, sans modifier les réservations en cas d'échec ou de timeout ;
+10. si le callback échoue, arrive en retard ou est ignoré, n'importe qui peut appeler `submit_signature(op_id, signature)` : le contrat accepte la signature uniquement si `env::ecrecover` retrouve l'adresse `0xAAA` dérivée pour le digest exact de la transaction originale ou de l'annulation en cours, puis stocke `signature` et `signed_transaction`. `submit_signature` ne libère ni budget, ni référence, ni nonce.
 
-L'invariant de sécurité est conservateur : **une signature MPC est considérée publique dès l'appel à `sign`**. Les réponses MPC sont publiées dans les arguments de `respond` sur NEAR ; ignorer une réponse dans le callback du Vault ne rend donc pas la signature secrète ([source du contrat MPC][mpc-contract-source]). Le Vault verrouille budget, référence et nonce avant l'appel MPC. Un échec du callback, une réponse tardive, un timeout, `pause` ou `revoke_agent` ne libère aucun de ces éléments ([`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs)).
+L'invariant de sécurité est conservateur : **une signature MPC est considérée publique dès l'appel à `sign`**. Les réponses MPC sont publiées dans les arguments de `respond` sur NEAR ; ignorer une réponse dans le callback du Vault ne rend donc pas la signature secrète ([source du contrat MPC][mpc-contract-source]). `submit_signature` est sans permission parce que son seul effet est de stocker une signature cryptographiquement valide pour un digest déjà engagé. `report_status` et `confirm_original` acceptent aussi `(big_r, s, recovery_id)` en argument et passent par le même contrôle `ecrecover` avant de comparer le hash. Le Vault verrouille budget, référence et nonce avant l'appel MPC. Un échec du callback, une réponse tardive, un timeout, `pause` ou `revoke_agent` ne libère aucun de ces éléments ([`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs)).
 
 L'appel cible `v1.signer-prod.testnet` en UAT et `v1.signer` en production. Le wire format est `sign({ request: { path, payload_v2: { Ecdsa }, domain_id } })`. Le signer testnet exige au moins 1 yoctoNEAR et 10 Tgas ; le Vault réserve environ 50 Tgas pour l'appel et son callback jusqu'à mesure finale sur la version déployée ([MPC README][near-mpc], [interface MPC][mpc-interface]).
 
@@ -438,8 +441,9 @@ stateDiagram-v2
   Reservee --> Preparee: budget + référence + nonce réservés
   Preparee --> Expiree: TTL avant authorize
   Preparee --> PossiblySigned: visa consommé puis sign appelé
-  PossiblySigned --> PossiblySigned: signature reçue / soumise / bloquée / callback en échec
+  PossiblySigned --> PossiblySigned: signature reçue / submit_signature / bloquée / callback en échec
   PossiblySigned --> PossiblySigned: cancel_nonce signé au même nonce
+  PossiblySigned --> PossiblySigned: submit_signature sur le digest d'annulation
   PossiblySigned --> Confirmee: rapport Guard signé sur la tx originale
   PossiblySigned --> Cancelled: annulation minée puis confirmée par la DAO
   Confirmee --> [*]
@@ -460,7 +464,7 @@ stateDiagram-v2
 
 ### Transaction bloquée et `cancel_nonce`
 
-`cancel_nonce(op_id, gas_limit, max_fee_per_gas, max_priority_fee_per_gas)` construit une transaction EIP-1559 sur Base avec le même nonce, `to = 0xAAA`, `value = 0` et un calldata vide. Les frais doivent être strictement supérieurs à la tentative précédente tout en restant sous les plafonds du rôle. Avant un coupe-circuit, l'appelant doit être l'agent ou l'owner ; après `pause` ou `revoke_agent`, le worker d'urgence peut déclencher l'annulation. Le Vault la fait signer par le même path MPC. Le callback ne libère rien ; après inclusion Base, la DAO confirme le hash de la transaction d'annulation, puis seulement le Vault passe à `Cancelled` ([`contracts/vault/src/evm.rs`](./contracts/vault/src/evm.rs), [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs), [transactions Ethereum][ethereum-transactions]).
+`cancel_nonce(op_id, gas_limit, max_fee_per_gas, max_priority_fee_per_gas)` construit une transaction EIP-1559 sur Base avec le même nonce, `to = 0xAAA`, `value = 0` et un calldata vide. Les frais doivent être strictement supérieurs à la tentative précédente tout en restant sous les plafonds du rôle. Avant un coupe-circuit, l'appelant doit être l'agent ou l'owner ; après `pause` ou `revoke_agent`, le worker d'urgence peut déclencher l'annulation. Le Vault la fait signer par le même path MPC. Le callback ne libère rien ; si le callback d'annulation échoue, `submit_signature` stocke la signature publiée pour le digest d'annulation. Après inclusion Base, la DAO confirme le hash de la transaction d'annulation, puis seulement le Vault passe à `Cancelled` ([`contracts/vault/src/evm.rs`](./contracts/vault/src/evm.rs), [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs), [transactions Ethereum][ethereum-transactions]).
 
 Une annulation et la transaction originale partagent le même nonce : une seule peut être incluse. Une réponse MPC originale tardive après l'annulation reste sans effet sur la comptabilité ; le nonce déjà consommé ne redevient jamais disponible.
 
@@ -496,7 +500,7 @@ UTF8("mandateos:status:v1") || BORSH({
 })
 ```
 
-Le Vault vérifie la signature ed25519, l'unicité de `report_nonce` et l'égalité de `tx_hash` avec le hash de la transaction brute originale qu'il a stockée. Ce rapport permet uniquement `PossiblySigned → Confirmée` ; il ne peut ni annuler, ni recréditer, ni rouvrir une opération. La confirmation d'une annulation est réservée à l'owner DAO via `confirm_cancellation` ([`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs), [RPC Ethereum][ethereum-json-rpc]).
+Le Vault vérifie la signature ed25519, l'unicité de `report_nonce` et l'égalité de `tx_hash` avec le hash de la transaction brute originale qu'il a stockée. Si le callback MPC a échoué, la transaction brute est d'abord reconstruite par `submit_signature` à partir de la signature publique ; `report_status` refuse alors toujours de confirmer sans cette transaction stockée. Ce rapport permet uniquement `PossiblySigned → Confirmée` ; il ne peut ni annuler, ni recréditer, ni rouvrir une opération. La confirmation d'une annulation est réservée à l'owner DAO via `confirm_cancellation` ([`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs), [RPC Ethereum][ethereum-json-rpc]).
 
 ## Gouvernance
 
@@ -507,7 +511,7 @@ L'UAT utilise NEAR testnet comme plan de contrôle et Base Sepolia comme plan d'
 Le Safe active deux chemins séparés, inspirés du [Zodiac Key Challenge][zodiac-key-challenge] :
 
 1. **Opérations agents sans délai** : `0xAAA → Roles opérationnel → Safe`. Roles impose cible, fonction, paramètres et allowance.
-2. **Administration avec délai** : `Trezu → relais NEAR → MPC → 0xGOV → Delay 24 h → Safe → Roles`.
+2. **Administration avec délai** : `Trezu → relais NEAR → MPC → 0xGOV → Delay 300 s → Safe → Roles`. La production remplace `300 s` par `86 400 s`.
 
 Dans le Key Challenge, des clés opérateur compromises ont mis 27 transactions en file ; le security council les a toutes invalidées, tandis que les sorties directes sont restées bornées par les permissions et budgets Roles ([debrief et wiring][zodiac-key-challenge], [constellation de référence][key-challenge-constellation]).
 
@@ -518,7 +522,7 @@ sequenceDiagram
   participant G as Relais gouvernance
   participant M as MPC
   participant X as 0xGOV
-  participant D as Delay 24 h
+  participant D as Delay 300 s
   participant S as Safe · Base Sepolia
   participant R as Roles
   participant C as Security council 2/3
@@ -533,9 +537,31 @@ sequenceDiagram
   C-->>S: veto si changement anormal
   S->>D: setTxNonce après signature 2/3
   D-->>D: invalide les entrées sautées
-  D->>S: executeNextTx après 24 h
+  D->>S: executeNextTx après 300 s
   S->>R: changement administratif
 ```
+
+### Relais réel et machine à états
+
+Le relais UAT est `gov-relay-v1.mandateos-root-20261021.testnet`, sans access key, owner immuable `mandateos-uat-92543787.sputnikv2.testnet`. Le path MPC `governance/base-sepolia` dérive `0xGOV = 0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`.
+
+`propose(target, value, data, gas...)` vérifie `predecessor_account_id == owner_id`, refuse une seconde opération active, construit une transaction EIP-1559 vers le Delay immuable et encode exactement `Delay.execTransactionFromModule(target, value, data, Call)`. Le nonce EVM est avancé avant `sign`; la transaction passe immédiatement en `PossiblySigned`. Un échec, timeout ou callback tardif du MPC ne libère ni l'opération ni le nonce ; `submit_signature` reconstruit la transaction à partir de la signature publique si `env::ecrecover` retrouve `0xGOV` pour le digest original ou d'annulation ([`contracts/governance-relay/src/lib.rs`](./contracts/governance-relay/src/lib.rs), [`contracts/governance-relay/src/evm.rs`](./contracts/governance-relay/src/evm.rs)).
+
+```mermaid
+stateDiagram-v2
+  [*] --> PossiblySigned: proposition DAO approuvée + sign appelé
+  PossiblySigned --> PossiblySigned: callback MPC / submit_signature / diffusion / timeout
+  PossiblySigned --> PossiblySigned: cancel_nonce au même nonce
+  PossiblySigned --> PossiblySigned: submit_signature sur le digest d'annulation
+  PossiblySigned --> Confirmed: DAO confirme le hash original
+  PossiblySigned --> Cancelled: DAO confirme l'annulation minée
+  Confirmed --> [*]
+  Cancelled --> [*]
+```
+
+`cancel_nonce` est owner-only, conserve le nonce de l'opération, signe un transfert nul vers `0xGOV` avec des frais strictement supérieurs et laisse l'état `PossiblySigned` jusqu'à `confirm_cancellation`. Les tests Sandbox couvrent owner-only, séquence des nonces, callback tardif, transaction d'annulation au même nonce, `Confirmed` et `Cancelled` ([`contracts/tests/tests/governance_relay.rs`](./contracts/tests/tests/governance_relay.rs)).
+
+Les contrôles d'intégrité inter-chaînes sont : caller DAO fixe, chain ID `84532` fixe, Delay fixe, un seul message actif, nonce EVM séquentiel, calldata et gas couverts par le digest MPC, et confirmation DAO liée au hash brut stocké. Un payload de gouvernance peut être arbitraire par décision du DAO, mais il ne peut pas viser un autre point d'entrée EVM que le Delay.
 
 ### Wiring et ownership
 
@@ -544,7 +570,7 @@ sequenceDiagram
 - **Owner du Delay** : le Safe.
 - **Avatar et target du Delay** : le Safe.
 - **Modules du Safe** : Roles opérationnel et Delay.
-- **Module autorisé du Delay** : `0xGOV`, ou le Roles administratif intermédiaire.
+- **Module autorisé du Delay** : `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`, dérivé par le relais NEAR.
 - **Membres des rôles opérationnels** : adresses `0xAAA`.
 
 Delay 1.1.1 stocke un cooldown et une expiration lors de `setUp`; son owner, avatar et target sont configurés séparément ([`Delay.sol:L34-L85`][zodiac-delay-setup-source]). Seuls les modules activés peuvent appeler `execTransactionFromModule`, qui ajoute le hash et l'horodatage à la file puis incrémente `queueNonce` ([`Delay.sol:L121-L168`][zodiac-delay-queue-source]). Après le cooldown, n'importe qui peut exécuter la tête de file ; Delay vérifie le hash, l'expiration et l'ordre FIFO avant de transmettre au Safe ([`Delay.sol:L170-L201`][zodiac-delay-execute-source]).
@@ -557,7 +583,7 @@ Le council peut aussi désactiver un module, révoquer un rôle ou déplacer les
 
 ### Option renforcée : Roles administratif
 
-Sans filtre intermédiaire, un `0xGOV` compromis peut mettre n'importe quel appel Safe en file ; la sécurité dépend alors du veto dans les 24 heures. L'option renforcée place un second Roles entre `0xGOV` et Delay :
+Sans filtre intermédiaire, un `0xGOV` compromis peut mettre n'importe quel appel Safe en file ; la sécurité dépend alors du veto pendant le cooldown. L'UAT utilise ce montage direct pour tester toute la chaîne. L'option de production renforcée place un second Roles entre `0xGOV` et Delay :
 
 ```text
 0xGOV → Roles administratif → Delay 24 h → Safe → Roles opérationnel
@@ -579,9 +605,9 @@ La proposition `FactoryInfoUpdate` contrôle les informations de factory et l'au
 
 ### Spike automatisé
 
-Le workspace `contracts/` déploie Sputnik DAO et le Vault réel sans access key dans NEAR Sandbox. Neuf tests DAO et sept tests Vault passent. La suite DAO prouve le seuil explicite de deux membres, les appels directs refusés, le financement par `ft_transfer_call`, la création et le financement atomiques, la proposition non-membre refusée, la désactivation de l'auto-update et l'expiration. Le vote qui atteint le seuil et appelle le Vault a consommé 8,788 Tgas lors de la mesure locale.
+Le workspace `contracts/` déploie Sputnik DAO, le Vault et le relais sans access key dans NEAR Sandbox. Neuf tests DAO, dix tests Vault et six tests relais passent. La suite DAO prouve le seuil explicite de deux membres, les appels directs refusés, le financement par `ft_transfer_call`, la création et le financement atomiques, la proposition non-membre refusée, la désactivation de l'auto-update et l'expiration. Le vote qui atteint le seuil et appelle le Vault a consommé 8,788 Tgas lors de la mesure locale.
 
-La suite Vault couvre visas, budgets, références, concurrence, expiration avant `authorize`, `PossiblySigned`, réponse MPC tardive, pause, révocation, annulation au même nonce, rapports de confirmation et dérivation `0xAAA`. Le Vault corrigé est déployé sur NEAR testnet sans access key à `vault-v4.mandateos-root-20261021.testnet`; son owner est la DAO `mandateos-uat-92543787.sputnikv2.testnet`. Une opération de 1 TestUSDC a été signée par `v1.signer-prod.testnet`, exécutée via Roles/Safe sur Base Sepolia, puis confirmée dans le Vault par rapport Guard. Les preuves sont consignées dans [`docs/vault-testnet.md`](./docs/vault-testnet.md), [`deployments/near-testnet.json`](./deployments/near-testnet.json) et [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
+La suite Vault couvre visas, budgets, références, concurrence, expiration avant `authorize`, `PossiblySigned`, réponse MPC tardive, récupération de signature après callback en échec pour l'original et l'annulation, pause, révocation, annulation au même nonce, rapports de confirmation et dérivation `0xAAA`. La suite relais couvre owner DAO, nonce séquentiel, callback tardif, récupération de signature, `Confirmed` et `Cancelled`. En UAT, 1 TestUSDC (token de test) a été payé par le Vault ; la gouvernance a porté l'allowance à 10 TestUSDC (token de test) après Delay ; une proposition à 1 000 TestUSDC (token de test) a ensuite été veto par `setTxNonce(3)`, et `executeNextTx` a revert. Les preuves sont dans les deux manifests de déploiement.
 
 ### Security council et seuils
 
@@ -660,10 +686,10 @@ Après le dépôt, les fonds crédités à `0xINT` ne sont plus détenus par le 
 
 - NEAR, Base, Chain Signatures, Safe, Zodiac Roles, Delay 1.1.1 et NEAR Intents suivent leurs règles publiées.
 - Moins de deux clés du security council Safe sont compromises.
-- Le council surveille la file Delay et peut intervenir pendant les 24 heures de cooldown.
+- Le council surveille la file Delay et peut intervenir pendant les `300 s` UAT ; la production rétablit `86 400 s`.
 - Les wallets humains requis pour le seuil Trezu ne sont pas tous compromis.
 - Les adresses, versions, ownerships, modules et bytecodes externes sont vérifiés au déploiement.
-- Les contrats MandateOS n'ont pas encore été audités ; l'UAT Base Sepolia n'utilise que des actifs de test et une allowance de 5 USDC.
+- Les contrats MandateOS n'ont pas encore été audités ; l'UAT Base Sepolia n'utilise que TestUSDC (token de test).
 
 ### Scénarios
 
@@ -686,12 +712,12 @@ Après le dépôt, les fonds crédités à `0xINT` ne sont plus détenus par le 
 | Vault compromis en Phase 1 | — | Contourné | Cibles et allowances | Somme des allowances financées jusqu'à intervention |
 | Vault compromis en Phase 2 | — | Contourné | Pas de Zodiac sur `0xINT` | Solde de période de `0xINT` |
 | NEAR testnet ou relais compromis | — | Potentiellement contourné | Peut mettre des changements en file via `0xGOV`; cooldown et veto restent actifs | 0 si veto à temps ; sinon impact du changement |
-| `0xGOV` compromis sans Roles administratif | — | — | Peut mettre tout appel Safe en file | Tous les fonds si council absent pendant 24 h |
+| `0xGOV` compromis sans Roles administratif | — | — | Peut mettre tout appel Safe en file | Tous les fonds si council absent pendant le cooldown |
 | `0xGOV` compromis avec Roles administratif | — | — | Ne peut mettre en file que les fonctions d'administration autorisées | Paramètres/allowances modifiables après délai |
 | Spam de la file Delay | — | — | Bloque la FIFO ; le council avance `txNonce` | Déni de service jusqu'au veto |
 | Delay mal configuré ou compromis | — | — | Délai trop court, file bloquée ou contournée | Changements administratifs non contrôlés |
 | Deux clés du security council compromises | — | — | Contrôle direct du Safe, des modules et des fonds | Totalité du Safe |
-| Security council indisponible | — | — | Pas de veto ni d'urgence | Changement malveillant exécutable après 24 h |
+| Security council indisponible | — | — | Pas de veto ni d'urgence | Changement malveillant exécutable après le cooldown |
 | Rapport Guard mensonger | Compromis | Ne peut que confirmer l'original exact | Fonds déjà soumis sur Base | Erreur de comptabilité, pas de réouverture |
 | Policy erronée | Applique l'erreur | Applique l'erreur | Applique l'erreur | Budget erroné approuvé |
 
@@ -703,7 +729,7 @@ Les trois verrous ont des implémentations séparées mais partagent une spécif
 - tests d'invariants sur les artefacts générés ;
 - comparaison des versions actives ;
 - vote Trezu ;
-- Delay de 24 heures pour toute administration Base issue de `0xGOV` ;
+- Delay de `300 s` en UAT et `86 400 s` en production pour toute administration Base issue de `0xGOV` ;
 - veto `setTxNonce` et actions d'urgence par le security council Safe 2/3 ;
 - ownership Safe de Roles et Delay ;
 - Roles administratif intermédiaire recommandé pour limiter `0xGOV` ;
@@ -720,28 +746,25 @@ Les trois verrous ont des implémentations séparées mais partagent une spécif
 
 La Phase 1 est implémentée uniquement si les preuves suivantes existent :
 
-1. paiement USDC confirmé de bout en bout avec liens explorateurs NEAR et Base ;
-2. deuxième paiement avec une référence distincte ;
-3. destinataire divergent escaladé sans paiement ;
-4. référence déjà consommée refusée ;
-5. `authorize` sans visa refusé ;
-6. visa consommé rejoué et refusé ;
-7. visa modifié ou périmé refusé ;
-8. appel MPC direct par l'agent produisant une adresse rejetée par Zodiac ;
-9. callback MPC en échec conservant budget, référence et nonce ;
-10. réponse MPC tardive ne permettant aucune réutilisation du nonce ;
-11. `pause` après `sign` conservant la réservation et exigeant `cancel_nonce` ;
-12. annulation signée au même nonce, confirmée par la DAO, puis nonce suivant utilisé ;
-13. transaction revertée impossible à rouvrir sans vote Trezu ;
-14. déploiements et versions externes vérifiés sans adresse fictive.
+1. paiement TestUSDC (token de test) confirmé de bout en bout avec liens explorateurs NEAR et Base ;
+2. Guard escalade un destinataire inconnu sans émettre de visa ;
+3. Vault refuse un `prepare` dont le destinataire n'est pas dans son allowlist ;
+4. Zodiac revert une transaction EVM signée envoyée directement ;
+5. `authorize` sans visa, visa rejoué, modifié ou périmé refusés ;
+6. callback MPC en échec ou tardif conservant budget, référence et nonce ;
+7. `cancel_nonce` signe le même nonce et atteint `Cancelled` uniquement après confirmation ;
+8. relais appelable uniquement par la DAO, nonce `0xGOV` séquentiel et état `PossiblySigned` ;
+9. proposition Trezu 2/3 portée par `0xGOV`, Delay 300 secondes, puis allowance à 10 TestUSDC (token de test) ;
+10. proposition malveillante mise en file, veto `setTxNonce`, puis `executeNextTx` refusé ;
+11. owners, seuil, modules, versions et hashes externes vérifiés sans adresse fictive.
 
 ## Points ouverts
 
 - [ ] **Memo de retrait POA vers Base** : confirmer le format exact attendu par la version de bridge utilisée.
 - [ ] **Source de prix de référence** : choisir et documenter la source indépendante utilisée par Guard pour le minimum reçu d'un swap.
 - [x] **Trezu en un vote** : le spike prouve la création et le financement atomiques via `Transfer.msg → ft_transfer_call → ft_on_transfer`.
-- [ ] **Ordre des nonces de `0xGOV`** : définir la réservation et la sérialisation lorsque plusieurs propositions sont approuvées.
-- [x] **Gas MPC exact** : le signer testnet annonce 15 Tgas ; le smoke `authorize` complet a brûlé 14,437 Tgas.
+- [x] **Ordre des nonces de `0xGOV`** : le relais sérialise une seule opération active et avance le nonce avant tout appel MPC ; le smoke a utilisé les nonces `0`, `1` et `2`.
+- [x] **Gas MPC exact** : le Vault a brûlé `14,288425743215 Tgas` sur le smoke réel ; le relais réserve 15 Tgas pour `sign` et 20 Tgas pour son callback.
 
 ## Sources
 
