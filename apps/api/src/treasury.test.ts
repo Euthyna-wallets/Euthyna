@@ -323,6 +323,18 @@ describe("TreasuryService.register hardening", () => {
     });
   });
 
+  it("rejects more than one council role", async () => {
+    const { prisma } = fakePrisma();
+    const base = councilPolicy();
+    const policy = {
+      ...base,
+      roles: [...base.roles, { ...base.roles[0], name: "council" }],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_council_role_count" });
+  });
+
   it("rejects a council that does not match the organization members", async () => {
     const { prisma } = fakePrisma();
     const policy = {
