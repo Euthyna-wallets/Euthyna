@@ -617,13 +617,23 @@ function TreasuryWizard(props: {
             <input placeholder="founder.testnet" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
             <button
               className="primary"
-              disabled={Boolean(props.busy) || !signerId}
+              disabled={Boolean(props.busy)}
               onClick={() => props.run("dao", async () => {
-                const hashes = await createDao(props.plan, signerId);
-                setTransactionHashes((current) => [...current, ...hashes]);
+                const created = await api<{ daoAccountId: string; txHash: string }>(
+                  "/v1/console/treasury/create-dao",
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      environment: props.plan.environment,
+                      daoName: props.plan.daoName,
+                      founderNearAccountId: props.plan.founderNearAccountId,
+                    }),
+                  },
+                );
+                setTransactionHashes((current) => [...current, created.txHash]);
               })}
             >
-              Sign DAO creation
+              Create DAO (MandateOS pays)
             </button>
             <button
               className="ghost"

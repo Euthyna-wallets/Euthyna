@@ -81,7 +81,7 @@ export class NearClient {
         action.methodName ?? "",
         action.args ?? {},
         BigInt(action.gasTgas ?? 100) * 1_000_000_000_000n,
-        0n,
+        BigInt(action.depositYocto ?? "0"),
       );
     });
     const outcome = await account.signAndSendTransaction({ receiverId, actions: mapped });

@@ -268,6 +268,7 @@ export function createApp({
     const url = new URL(context.req.url);
     const response = await auth.registerPasswordless(`${url.protocol}//${url.host}`, consoleOrigin, input);
     if (!response.ok || !input.nearPublicKey) return response;
+    const payload = (await response.clone().json()) as Record<string, unknown>;
     const relayer = nearParentAccount;
     if (/^[0-9a-f]{64}$/.test(relayer)) {
       return context.json({ error: "relayer_must_be_named", message: "set a named NEAR relayer account to create wallets" }, 500);
@@ -277,8 +278,7 @@ export function createApp({
     if (nearAccountId.length > 64) {
       return context.json({ error: "near_account_too_long" }, 500);
     }
-    await near.createSubaccount(nearAccountId, input.nearPublicKey, "9000000000000000000000000");
-    const payload = await response.json();
+    await near.createSubaccount(nearAccountId, input.nearPublicKey, "1000000000000000000000000");
     return new Response(JSON.stringify({ ...payload, nearAccountId }), {
       status: response.status,
       headers: response.headers,
@@ -548,6 +548,20 @@ export function createApp({
       metadata: { environment: input.environment, status: refreshed.status },
     });
     return context.json(refreshed);
+  });
+
+  app.post("/v1/console/treasury/create-dao", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, treasuryPlanSchema);
+    const created = await treasury.createDao(consoleIdentity.organizationId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "treasury.dao_created",
+      metadata: created,
+    });
+    return context.json(created);
   });
 
   app.post("/v1/console/treasury/deploy-contracts", requireConsoleAdmin(auth, consoleLimiter), async (context) => {

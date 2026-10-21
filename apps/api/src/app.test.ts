@@ -196,6 +196,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       return {} as TreasuryView;
     },
     deployContracts: async () => ({ vaultTxHash: "v", relayTxHash: "r" }),
+    createDao: async () => ({ daoAccountId: "dao.testnet", txHash: "t" }),
     refresh: async (organizationId: string, actorId: string) => {
       treasuryCalls.refreshes.push({ organizationId, actorId });
       return { status: "active" } as TreasuryView;

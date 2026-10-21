@@ -154,6 +154,10 @@ export interface TreasuryGateway {
     organizationId: string,
     input: { environment: string; daoName: string; founderNearAccountId: string },
   ): Promise<{ vaultTxHash: string; relayTxHash: string }>;
+  createDao(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ daoAccountId: string; txHash: string }>;
   refresh(organizationId: string, actorId: string, environment: string): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
 }
@@ -530,6 +534,23 @@ export class TreasuryService {
       govAddress,
       base,
     };
+  }
+
+  async createDao(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ daoAccountId: string; txHash: string }> {
+    const plan = await this.plan(organizationId, input);
+    const txHash = await this.near.executeActions(plan.daoCreate.factoryId, [
+      {
+        type: "FunctionCall",
+        methodName: "create",
+        args: plan.daoCreate.args,
+        gasTgas: 150,
+        depositYocto: plan.daoCreate.depositYocto,
+      },
+    ]);
+    return { daoAccountId: plan.daoAccountId, txHash };
   }
 
   async deployContracts(
