@@ -609,6 +609,7 @@ function TreasuryWizard(props: {
   const [safeBatch, setSafeBatch] = useState<SafeBatch | null>(null);
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
+  const [daoCreated, setDaoCreated] = useState<string | null>(null);
 
   async function deployBase() {
     for (const transaction of [
@@ -674,13 +675,23 @@ function TreasuryWizard(props: {
                   },
                 );
                 setTransactionHashes((current) => [...current, created.txHash]);
+                setDaoCreated(created.daoAccountId);
               })}
             >
               Create DAO (MandateOS pays)
             </button>
             <button
               className="ghost"
-              disabled={Boolean(props.busy) || !signerId}
+              disabled={
+                Boolean(props.busy) ||
+                !signerId ||
+                !props.plan.council.some((member) => member.nearAccountId === signerId)
+              }
+              title={
+                signerId && !props.plan.council.some((member) => member.nearAccountId === signerId)
+                  ? "Connect a council NEAR account to propose"
+                  : undefined
+              }
               onClick={() => props.run("auto-update", async () => {
                 const hashes = await disableFactoryAutoUpdate(props.plan, signerId);
                 setTransactionHashes((current) => [...current, ...hashes]);
@@ -689,6 +700,20 @@ function TreasuryWizard(props: {
               Propose auto_update=false
             </button>
           </div>
+          {daoCreated ? (
+            <div className="alert success">
+              DAO deployed on-chain: <code>{daoCreated}</code>{" "}
+              <a href={`https://testnet.nearblocks.io/address/${daoCreated}`} target="_blank" rel="noreferrer">
+                explorer
+              </a>
+            </div>
+          ) : null}
+          {signerId && !props.plan.council.some((member) => member.nearAccountId === signerId) ? (
+            <div className="muted small">
+              <code>{signerId}</code> is not in the DAO council ({props.plan.council.map((member) => member.nearAccountId).join(", ")}).
+              The auto-update proposal must be signed by a council member.
+            </div>
+          ) : null}
         </div>
 
         <div className="step">
