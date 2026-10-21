@@ -19,6 +19,7 @@ import type { TreasuryGateway, TreasuryPlan, TreasuryView } from "./treasury.js"
 import type { MandateGateway, MandatePreview } from "./mandates.js";
 import type { RegistryService } from "./registry-db.js";
 import type { PaymentService } from "./payments.js";
+import type { ConsoleDataService } from "./console-data.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -219,7 +220,14 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     listEscalations: async () => [],
     decideEscalation: async () => ({}),
   } as unknown as PaymentService;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleOrigin, passwordAuthEnabled: false });
+  const consoleData = {
+    overview: async () => ({}),
+    operations: async () => [],
+    operation: async () => null,
+    agentDetail: async () => null,
+    governance: async () => ({ proposals: [], delay: null }),
+  } as unknown as ConsoleDataService;
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin, passwordAuthEnabled: false });
   return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 

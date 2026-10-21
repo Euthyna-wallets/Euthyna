@@ -10,6 +10,7 @@ import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { TreasuryError, type TreasuryGateway } from "./treasury.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
+import type { ConsoleDataService } from "./console-data.js";
 import type { MandateGateway } from "./mandates.js";
 import type { BaseRelayer } from "./relayer.js";
 
@@ -132,6 +133,7 @@ export interface AppDependencies {
   mandates: MandateGateway;
   registry: RegistryService;
   payments: PaymentService;
+  consoleData: ConsoleDataService;
   consoleOrigin: string;
   passwordAuthEnabled: boolean;
 }
@@ -218,6 +220,7 @@ export function createApp({
   mandates,
   registry: registryService,
   payments,
+  consoleData,
   consoleOrigin,
   passwordAuthEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
@@ -322,6 +325,38 @@ export function createApp({
     if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
     const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
     return context.json(await payments.getOperation(agent.organizationId, agent.agentId, opId));
+  });
+
+  app.get("/v1/console/overview", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json(await consoleData.overview(consoleIdentity.organizationId));
+  });
+
+  app.get("/v1/console/operations", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json({ operations: await consoleData.operations(consoleIdentity.organizationId) });
+  });
+
+  app.get("/v1/console/operations/:opId", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const raw = context.req.param("opId") ?? "";
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
+    const result = await consoleData.operation(consoleIdentity.organizationId, raw);
+    if (!result) return context.json({ error: "operation_not_found" }, 404);
+    return context.json(result);
+  });
+
+  app.get("/v1/console/agents/:id/detail", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const result = await consoleData.agentDetail(consoleIdentity.organizationId, id);
+    if (!result) return context.json({ error: "agent_not_found" }, 404);
+    return context.json(result);
+  });
+
+  app.get("/v1/console/governance", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json(await consoleData.governance(consoleIdentity.organizationId));
   });
 
   app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
@@ -564,6 +599,31 @@ export function createApp({
       targetId: parsedId.data.id,
     });
     return context.json({ agentId: parsedId.data.id, active: false });
+  });
+
+  app.post("/v1/console/agents/:id/pause-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const agent = await auth.getAgent(consoleIdentity.organizationId, id);
+    if (!agent) return context.json({ error: "agent_not_found" }, 404);
+    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
+    if (!currentTreasury) return context.json({ error: "treasury_missing" }, 409);
+    return context.json({
+      receiverId: currentTreasury.daoAccountId,
+      methodName: "add_proposal",
+      deposit: "100000000000000000000000",
+      args: {
+        proposal: {
+          description: `Pause Vault after agent ${agent.name} incident`,
+          kind: {
+            FunctionCall: {
+              receiver_id: currentTreasury.vaultAccountId,
+              actions: [{ method_name: "pause", args: "", gas: "50000000000000", deposit: "0" }],
+            },
+          },
+        },
+      },
+    });
   });
 
   app.onError((error, context) => {

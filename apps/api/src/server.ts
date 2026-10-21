@@ -12,6 +12,7 @@ import { TreasuryService } from "./treasury.js";
 import { MandateService } from "./mandates.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
+import { ConsoleDataService } from "./console-data.js";
 
 const env = loadEnv();
 const guardKey = Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"));
@@ -53,6 +54,7 @@ const treasury = new TreasuryService(prisma, near, signer, {
 const mandates = new MandateService(prisma, near);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
+const consoleData = new ConsoleDataService(prisma, near, env.BASE_SEPOLIA_RPC_URL);
 const app = createApp({
   near,
   guard,
@@ -62,6 +64,7 @@ const app = createApp({
   mandates,
   registry: registryService,
   payments,
+  consoleData,
   consoleOrigin: env.CONSOLE_ORIGIN,
   passwordAuthEnabled: env.AUTH_E2E_PASSWORD === "1",
 });
