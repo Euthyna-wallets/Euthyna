@@ -18,7 +18,7 @@ afterEach(cleanup);
 
 describe("PaymentTrace", () => {
   it("renders the strict three-lock order and only completed steps", () => {
-    render(<PaymentTrace steps={steps} />);
+    render(<PaymentTrace steps={steps} state="Confirmed" />);
     expect(screen.getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent)).toEqual([
       "Agent request", "Guard visa", "Vault", "MPC signature", "Base broadcast", "Zodiac", "Confirmed",
     ]);
@@ -26,18 +26,18 @@ describe("PaymentTrace", () => {
     expect(screen.getAllByRole("link", { name: "0xabc" })[0]?.getAttribute("href")).toBe("https://sepolia.basescan.org/tx/0xabc");
   });
 
-  it("never marks a step done before its predecessor", () => {
-    const rows = sequenceTrace([
-      steps[0]!,
-      { ...steps[1]!, at: null },
-      steps[2]!,
-      steps[6]!,
-    ]);
-    expect(rows.map((row) => row.done)).toEqual([true, false, false, false]);
+  it("derives progress from the operation state, not timestamps", () => {
+    const rows = sequenceTrace(steps.map((step) => ({ ...step, at: null })), "Broadcast");
+    expect(rows.map((row) => row.done)).toEqual([true, true, true, true, true, false, false]);
+  });
+
+  it("marks all steps done for a confirmed operation", () => {
+    const rows = sequenceTrace(steps.map((step) => ({ ...step, at: null })), "Confirmed");
+    expect(rows.every((row) => row.done)).toBe(true);
   });
 
   it("does not show Reverted or Cancelled unless present", () => {
-    render(<PaymentTrace steps={steps} />);
+    render(<PaymentTrace steps={steps} state="Confirmed" />);
     expect(screen.queryByText("Reverted")).toBeNull();
     expect(screen.queryByText("Cancelled")).toBeNull();
   });

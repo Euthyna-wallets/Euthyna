@@ -45,7 +45,7 @@ export function AgentDetailPage() {
             <Card title="On-chain state">
               <table>
                 <tbody>
-                  <tr><td>Active</td><td>{String((query.data.onChain as { active?: unknown })?.active ?? "—")}</td></tr>
+                  <tr><td>Active</td><td><Status value={(query.data.onChain as { active?: unknown })?.active === true ? "active" : "revoked"} /></td></tr>
                   <tr><td>Role</td><td>{String((query.data.onChain as { role?: unknown })?.role ?? "—")}</td></tr>
                   <tr><td>0xAAA</td><td className="mono">{formatBytesAddress((query.data.onChain as { evm_address?: unknown })?.evm_address ?? query.data.agent.evmAddress)}</td></tr>
                   <tr><td>MPC path</td><td className="mono">{String((query.data.onChain as { mpc_path?: unknown })?.mpc_path ?? query.data.agent.mpcPath)}</td></tr>
@@ -57,7 +57,17 @@ export function AgentDetailPage() {
               </table>
             </Card>
             <Card title="Current mandate">
-              {query.data.mandate ? <pre>{JSON.stringify(query.data.mandate, null, 2)}</pre> : <div className="state">No mandate.</div>}
+              {query.data.mandate ? (
+                <table>
+                  <tbody>
+                    <tr><td>Role</td><td>{String((query.data.mandate as { config?: { enabled?: boolean } }).config?.enabled === false ? "disabled" : query.data.agent.role)}</td></tr>
+                    <tr><td>Max per tx</td><td className="mono">{formatToken(String((query.data.mandate as { config?: { max_per_tx?: string } }).config?.max_per_tx ?? "0"))}</td></tr>
+                    <tr><td>Funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>
+                    <tr><td>Reserved</td><td className="mono">{formatToken(query.data.budget?.reserved)}</td></tr>
+                    <tr><td>Spent</td><td className="mono">{formatToken(query.data.budget?.spent)}</td></tr>
+                  </tbody>
+                </table>
+              ) : <div className="state">No mandate.</div>}
             </Card>
             <Card title="Mandate" action={<Link to="/mandate">Open mandate</Link>}>
               <p className="muted small">Preview the role diff and prepare the proposals.</p>

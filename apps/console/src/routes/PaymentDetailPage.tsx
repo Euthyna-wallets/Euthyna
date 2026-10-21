@@ -28,7 +28,7 @@ export function PaymentDetailPage() {
               <div className="metric"><span>State</span><strong><Status value={query.data.operation.state} /></strong></div>
               <div className="metric"><span>Op</span><strong className="mono small">{short(query.data.operation.opId)}</strong></div>
             </div>
-            <Card title="Three locks"><PaymentTrace steps={query.data.timeline} /></Card>
+            <Card title="Three locks"><PaymentTrace steps={query.data.timeline} state={query.data.operation.state} /></Card>
             {query.data.escalation ? <Card title="Escalation"><pre>{JSON.stringify(query.data.escalation, null, 2)}</pre></Card> : null}
             {query.data.visa ? <Card title="Guard visa"><pre>{JSON.stringify(query.data.visa, null, 2)}</pre></Card> : null}
             {query.data.operation.lastError ? <div className="state error">{query.data.operation.lastError}</div> : null}
