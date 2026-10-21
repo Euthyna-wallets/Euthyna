@@ -17,6 +17,8 @@ import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
 import type { TreasuryGateway, TreasuryPlan, TreasuryView } from "./treasury.js";
 import type { MandateGateway, MandatePreview } from "./mandates.js";
+import type { RegistryService } from "./registry-db.js";
+import type { PaymentService } from "./payments.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -201,7 +203,23 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       return {} as MandatePreview;
     },
   };
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, consoleOrigin, passwordAuthEnabled: false });
+  const registry = {
+    loadRegistry: async () => ({
+      clientId: "acme",
+      registryVersion: 1,
+      network: "base-sepolia",
+      chainId: 84532,
+      token: { symbol: "USDC", address: "0x2222222222222222222222222222222222222222", decimals: 6 },
+      roles: {},
+    }),
+  } as unknown as RegistryService;
+  const payments = {
+    pay: async () => ({ status: 200, body: {} }),
+    getOperation: async () => ({}),
+    listEscalations: async () => [],
+    decideEscalation: async () => ({}),
+  } as unknown as PaymentService;
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleOrigin, passwordAuthEnabled: false });
   return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 

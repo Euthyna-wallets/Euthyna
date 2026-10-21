@@ -99,6 +99,47 @@ curl -sS -X POST http://localhost:3000/v1/emergency/cancel \
 Console admin only. Broadcasts the stored signed transaction and submits the
 Guard-signed confirmation report.
 
+## Agent payments and escalations
+
+### `POST /v1/operations/pay`
+
+Agent credential (`x-api-key`), body `{ "opId": [..32 bytes..] }`. The agent has
+already called `prepare` on the Vault with its client-held function-call key.
+
+- `200 {visa, signature}`: Guard approved and the visa is stored (also returned by
+  `GET /v1/operations/:opId`).
+- `202 {escalationId, reasons}`: uncovered case, queued for a human.
+- `422 {error, message}`: hard refusal (recipient, amount cap, token, consumed
+  reference, state).
+- Repeating the same `opId` returns the stored visa/escalation, never a second one.
+
+### `GET /v1/operations/:opId`
+
+Agent only, own operations. Merges the DB (`Prepared`, `Escalated`, `Rejected`,
+`Broadcast`, `Confirmed`, `Cancelled`, `Reverted`) with the Vault state and the
+stored visa/escalation.
+
+### Console registry (suppliers)
+
+- `GET /v1/console/registry`
+- `POST /v1/console/suppliers`
+- `POST /v1/console/suppliers/:id/address-changes` (creates a pending change)
+- `POST /v1/console/supplier-address-changes/:id/decision` (`approve|reject`)
+- `POST /v1/console/contracts`
+
+Any registry write increments `registry_version`. A payment-address change is
+applied only after approval by **another** member; the author cannot approve their
+own change. Guard now reads suppliers, contracts and version from PostgreSQL.
+
+### Console escalations
+
+- `GET /v1/console/escalations`
+- `POST /v1/console/escalations/:id/decision` (`approve|reject`)
+
+Approval re-reads the Vault operation, re-runs Guard and only then stores the visa;
+rejection marks the operation `Rejected` (the Vault reservation expires on its
+own). An escalation never modifies the registry.
+
 ## Treasury onboarding
 
 All `/v1/console/*` and `/v1/emergency/*` requests require

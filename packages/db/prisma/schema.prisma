@@ -111,7 +111,13 @@ model Organization {
   invitations  Invitation[]
   environments OrganizationEnvironment[]
   agents       Agent[]
-  vendors      Vendor[]
+  suppliers    Supplier[]
+  contracts    Contract[]
+  consumedReferences ConsumedReference[]
+  supplierChanges SupplierAddressChange[]
+  escalations  Escalation[]
+  visas        PaymentVisa[]
+  registry     RegistryVersion?
   policies     PolicySnapshot[]
   operations   Operation[]
   auditLogs    AuditLog[]
@@ -225,29 +231,134 @@ model Agent {
   @@map("agent")
 }
 
-model Vendor {
+model Supplier {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  id             String
+  id             String       @id @default(uuid())
   name           String
+  contact        String?
   active         Boolean      @default(true)
-  addresses      VendorAddress[]
+  wallets        SupplierWallet[]
+  contracts      Contract[]
+  changes        SupplierAddressChange[]
+  createdAt      DateTime     @default(now())
 
-  @@id([organizationId, id])
-  @@map("vendor")
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("supplier")
 }
 
-model VendorAddress {
+model SupplierWallet {
+  id             String   @id @default(uuid())
   organizationId String
-  vendorId       String
+  supplierId     String
   chainId        Int
   address        String
-  maximumPayment Decimal? @db.Decimal(78, 0)
-  vendor         Vendor   @relation(fields: [organizationId, vendorId], references: [organizationId, id], onDelete: Cascade)
+  active         Boolean  @default(true)
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
 
-  @@id([organizationId, vendorId, chainId, address])
-  @@unique([organizationId, chainId, address])
-  @@map("vendor_address")
+  @@unique([organizationId, supplierId, chainId, address])
+  @@index([organizationId, chainId, address])
+  @@map("supplier_wallet")
+}
+
+model SupplierAddressChange {
+  id             String   @id @default(uuid())
+  organizationId String
+  supplierId     String
+  chainId        Int
+  address        String
+  status         String   @default("pending")
+  authorId       String
+  reviewerId     String?
+  createdAt      DateTime @default(now())
+  decidedAt      DateTime?
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@map("supplier_address_change")
+}
+
+model Contract {
+  id             String   @id @default(uuid())
+  organizationId String
+  reference      String
+  role           String
+  supplierId     String
+  maxAmount      Decimal  @db.Decimal(78, 0)
+  periodicity    String
+  token          String
+  active         Boolean  @default(true)
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, role])
+  @@map("contract")
+}
+
+model ConsumedReference {
+  organizationId String
+  reference      String
+  opId           String
+  consumedAt     DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, reference])
+  @@index([organizationId, opId])
+  @@map("consumed_reference")
+}
+
+model RegistryVersion {
+  organizationId String       @id
+  version        Int          @default(1)
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("registry_version")
+}
+
+model Escalation {
+  id              String   @id @default(uuid())
+  organizationId  String
+  opId            String
+  agentId         String
+  reasons         Json
+  invoice         Json?
+  registrySnapshot Json?
+  status          String   @default("pending")
+  decidedBy       String?
+  createdAt       DateTime @default(now())
+  decidedAt       DateTime?
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, opId])
+  @@index([organizationId, status])
+  @@map("escalation")
+}
+
+model PaymentVisa {
+  organizationId String
+  opId           String
+  visa           Json
+  signature      String
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, opId])
+  @@map("payment_visa")
+}
+
+model WorkerLease {
+  name      String   @id
+  holder    String
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@map("worker_lease")
 }
 
 model PolicySnapshot {
@@ -277,6 +388,10 @@ model Operation {
   visaNonce      BigInt?
   reportNonce    BigInt?
   txHash         String?
+  broadcastAt    DateTime?
+  revertedAt     DateTime?
+  attempts       Int      @default(0)
+  lastError      String?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Restrict)
   createdAt      DateTime     @default(now())

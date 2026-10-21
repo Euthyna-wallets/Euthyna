@@ -15,12 +15,9 @@ export interface GuardApproval {
 export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: "escalate" }>;
 
 export class Guard {
-  constructor(
-    private readonly registry: Registry,
-    private readonly signer: KmsSigner,
-  ) {}
+  constructor(private readonly signer: KmsSigner) {}
 
-  async approve(operation: VaultOperation): Promise<GuardResult> {
+  async approve(operation: VaultOperation, registry: Registry): Promise<GuardResult> {
     if (operation.state !== "Prepared") {
       return { decision: "escalate", reasons: [`operation state is ${operation.state}, expected Prepared`] };
     }
@@ -28,7 +25,7 @@ export class Guard {
     if (recomputed !== bytes32ToHex(operation.tx_digest)) {
       return { decision: "escalate", reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"] };
     }
-    const decision = evaluateExactRules(this.registry, operation);
+    const decision = evaluateExactRules(registry, operation);
     if (decision.decision === "escalate") return decision;
     const visa: GuardVisa = {
       client_id: operation.client_id,
