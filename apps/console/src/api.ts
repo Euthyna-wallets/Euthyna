@@ -66,3 +66,21 @@ export function explorerNear(accountId: string): string {
 export function explorerBase(address: string): string {
   return `https://sepolia.basescan.org/address/${address}`;
 }
+
+
+export type MandatePreview = {
+  roleKey: string;
+  allowanceKey: string;
+  vault: { config: Record<string, unknown>; current: unknown };
+  zodiac: { target: string; selector: string; conditions: unknown[]; calls: Array<{ description: string }> };
+  guard: Record<string, unknown>;
+  diff: Array<{ field: string; current: unknown; next: unknown }>;
+  agentStatus: "ready" | "needs_agent_address" | "no_agent";
+  proposals: {
+    vaultSetRole: { description: string; args: unknown };
+    vaultRegisterAgent: { description: string; args: unknown } | null;
+    funding: unknown;
+    zodiacRelay: Array<{ description: string; args: unknown }>;
+  };
+  warnings: string[];
+};

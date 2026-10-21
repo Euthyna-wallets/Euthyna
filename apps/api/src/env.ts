@@ -5,6 +5,7 @@ const schema = z.object({
   NEAR_NETWORK_ID: z.string().default("testnet"),
   NEAR_RPC_URL: z.string().url().default("https://rpc.testnet.near.org"),
   BASE_SEPOLIA_RPC_URL: z.string().url().default("https://sepolia.base.org"),
+  BASE_MAINNET_RPC_URL: z.string().url().optional(),
   VENDOR_REGISTRY_PATH: z.string().default("config/clients/acme/vendors.json"),
   GUARD_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
   NEAR_RELAYER_ACCOUNT_ID: z.string().min(1),

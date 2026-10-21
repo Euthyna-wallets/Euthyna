@@ -16,6 +16,7 @@ import type { NearClient } from "./near.js";
 import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
 import type { TreasuryGateway, TreasuryPlan, TreasuryView } from "./treasury.js";
+import type { MandateGateway, MandatePreview } from "./mandates.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -132,7 +133,7 @@ class FakeAuth implements AuthGateway {
   }
 }
 
-function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" | "member" }) {
+function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" | "member"; treasuryStatus?: string }) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
   auth.agents.set("key-b", agentB);
@@ -168,10 +169,17 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       treasuryCalls.registers.push({ organizationId, actorId });
       return {} as TreasuryView;
     },
-    getTreasury: async () => null,
+    getTreasury: async () => ({ status: options?.treasuryStatus ?? "active" }) as TreasuryView,
   } as TreasuryGateway;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, consoleOrigin });
-  return { app, auth, treasuryCalls, guardCalls: () => guardCalls };
+  const mandateCalls: Array<{ organizationId: string; role: string }> = [];
+  const mandates: MandateGateway = {
+    preview: async (organizationId: string, input: { role: string }) => {
+      mandateCalls.push({ organizationId, role: input.role });
+      return {} as MandatePreview;
+    },
+  };
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, consoleOrigin });
+  return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
@@ -275,6 +283,33 @@ describe("rate limiting", () => {
     expect(limiter.allow("agent:a")).toBe(true);
     expect(limiter.allow("agent:a")).toBe(false);
     expect(limiter.allow("agent:b")).toBe(true);
+  });
+});
+
+describe("mandate preview", () => {
+  it("previews a mandate for the session organization", async () => {
+    const { app, mandateCalls } = testApp();
+    const response = await app.request("/v1/console/mandates/preview", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({
+        role: "researcher",
+        operations: ["pay"],
+        maxPerTx: "5000000",
+        budget: "6000000",
+        periodDays: 30,
+        recipients: ["0x1111111111111111111111111111111111111111"],
+        token: "0x2222222222222222222222222222222222222222",
+        gas: {
+          gasLimit: "200000",
+          maxFeePerGas: "20000000000",
+          maxPriorityFeePerGas: "1000000000",
+          maxTotalFee: "30000000000000000",
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(mandateCalls).toEqual([{ organizationId: "org-1", role: "researcher" }]);
   });
 });
 
@@ -398,6 +433,25 @@ describe("console isolation and emergency", () => {
       "emergency.cancel.requested",
       "emergency.cancel.submitted",
     ]);
+  });
+
+  it("blocks agent creation while the treasury is pending DAO hardening", async () => {
+    const { app, auth } = testApp({ treasuryStatus: "pending_dao_hardening" });
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Research agent",
+        role: "researcher",
+        nearAccountId: "agent-c.near",
+        nearPublicKey: "ed25519:11111111111111111111111111111111",
+        vaultAccountId: "vault-1.near",
+        mpcPath: "agents/researcher/base",
+      }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "treasury_not_active", status: "pending_dao_hardening" });
+    expect(auth.created).not.toContainEqual(expect.objectContaining({ nearAccountId: "agent-c.near" }));
   });
 
   it("forbids a member from creating agent credentials", async () => {

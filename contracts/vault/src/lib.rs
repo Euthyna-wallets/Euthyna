@@ -130,6 +130,22 @@ impl Vault {
         self.evm_chain_id
     }
 
+    pub fn guard_public_key(&self) -> Base64VecU8 {
+        Base64VecU8(self.guard_public_key.to_vec())
+    }
+
+    pub fn token_id(&self) -> AccountId {
+        self.token_id.clone()
+    }
+
+    pub fn mpc_contract_id(&self) -> AccountId {
+        self.mpc_contract_id.clone()
+    }
+
+    pub fn reservation_ttl_blocks(&self) -> u64 {
+        self.reservation_ttl_blocks
+    }
+
     pub fn is_paused(&self) -> bool {
         self.paused
     }

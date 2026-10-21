@@ -254,6 +254,12 @@ Toutes les contraintes et requêtes métier sont préfixées par `organizationId
 
 Les secrets ne sont pas enregistrés dans les snapshots. PostgreSQL conserve uniquement une référence KMS. Chaque client et environnement possède sa propre clé Guard afin qu'une compromission ne permette pas de signer pour un autre Vault.
 
+### Onboarding et mandats (implémenté)
+
+`apps/api/src/treasury.ts` construit un plan non signé (DAO, Vault, relay, Safe/Roles/Delay) puis vérifie l'état on-chain avant d'enregistrer une `Treasury` : code hash du DAO égal à `get_default_code_hash()` de la factory, council et seuil absolu lus via `get_policy()`, absence de `Everyone:AddProposal`, `get_factory_info().auto_update`, paramètres d'init du Vault (`mpc_contract_id`, `evm_chain_id`, `guard_public_key`, `token_id`, TTL), `delay_address`/`evm_chain_id` du relay, owners/seuil/modules du Safe et cooldown du Delay par environnement (`uat` 300 s, `production` 86 400 s). Tant que `auto_update` est vrai, le statut est `pending_dao_hardening` et l'API refuse la création d'agent.
+
+`apps/api/src/mandates.ts` compile un rôle en trois artefacts : config `set_role` du Vault, permission Zodiac (`scopeTarget`, `scopeFunction` avec conditions de destinataires et allowance, `assignRoles`) et policy Guard. Il renvoie un diff déterministe et des propositions Trezu non signées ; le serveur ne signe jamais ([`apps/api/src/treasury.ts`](./apps/api/src/treasury.ts), [`apps/api/src/mandates.ts`](./apps/api/src/mandates.ts), [`packages/deployer/src/roles-policy.ts`](./packages/deployer/src/roles-policy.ts)).
+
 ### Compilation
 
 `packages/policy` reçoit un draft typé, pas un fichier. Son pipeline est déterministe :

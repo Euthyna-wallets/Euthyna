@@ -2,7 +2,7 @@
 
 ## Status
 
-The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The deployed WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21`; the latest reproducible local build with `submit_signature` is `ffe7b4af70f4a92242f60d1c4ce55504e7da750973fc41e1f1654d75b38fcb19`.
+The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The deployed WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21`; the latest reproducible local build with `submit_signature` is `c2f758f7be4f0ab13becdda21740068cb4b3be9f2c7d775ee56787fccd200c34`.
 
 Local verification:
 

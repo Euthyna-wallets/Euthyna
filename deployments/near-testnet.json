@@ -18,7 +18,7 @@
     "account_id": "vault-v4.mandateos-root-20261021.testnet",
     "code_hash_sha256_hex": "11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21",
     "code_hash_sha256_bs58": "2CTrDibuU42kqQBxNpQRkABgjYk5AuGLcv3mdefpyv9n",
-    "latest_local_code_hash_sha256_hex": "ffe7b4af70f4a92242f60d1c4ce55504e7da750973fc41e1f1654d75b38fcb19",
+    "latest_local_code_hash_sha256_hex": "c2f758f7be4f0ab13becdda21740068cb4b3be9f2c7d775ee56787fccd200c34",
     "access_key_count": 0,
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "client_id": "acme",
