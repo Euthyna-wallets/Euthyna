@@ -92,3 +92,27 @@ export type MandatePreview = {
   };
   warnings: string[];
 };
+
+export type OperationRow = {
+  opId: string;
+  reference: string;
+  amount: string;
+  state: string;
+  status?: string;
+  txHash: string | null;
+  createdAt: string;
+  agentId: string;
+};
+
+export type AgentRow = {
+  id: string;
+  name: string;
+  role: string;
+  nearAccountId: string;
+  nearPublicKey: string;
+  vaultAccountId: string;
+  evmAddress: string | null;
+  mpcPath: string;
+  active: boolean;
+  createdAt: string;
+};
