@@ -46,9 +46,9 @@ const treasury = new TreasuryService(prisma, near, signer, {
       : {}),
   },
   vaultTtlBlocks: 50,
-  vaultDepositYocto: "10000000000000000000000000",
-  relayDepositYocto: "10000000000000000000000000",
-  daoCreateDepositYocto: "10000000000000000000000000",
+  vaultDepositYocto: "5000000000000000000000000",
+  relayDepositYocto: "5000000000000000000000000",
+  daoCreateDepositYocto: "7500000000000000000000000",
 });
 const mandates = new MandateService(prisma, near);
 const app = createApp({ near, guard, relayer, auth, treasury, mandates, consoleOrigin: env.CONSOLE_ORIGIN });

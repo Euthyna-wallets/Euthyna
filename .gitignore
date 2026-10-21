@@ -7,3 +7,6 @@ packages/deployer/out/
 packages/deployer/cache/
 *.log
 *.tsbuildinfo
+dist-check/
+apps/console/test-results/
+apps/console/playwright-report/
