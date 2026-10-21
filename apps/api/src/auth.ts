@@ -1,7 +1,7 @@
 import { apiKey } from "@better-auth/api-key";
 import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
-import { betterAuth } from "better-auth";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { organization } from "better-auth/plugins/organization";
 import type { PrismaClient } from "@mandateos/db";
 
@@ -32,27 +32,38 @@ export interface MandateAuth {
   };
 }
 
+export type AuthEnvironment = Pick<
+  Env,
+  "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID" | "CONSOLE_ORIGIN"
+>;
+
+export function passkeyRelyingParty(env: AuthEnvironment) {
+  return {
+    rpID: env.PASSKEY_RP_ID,
+    rpName: "MandateOS",
+    origin: env.CONSOLE_ORIGIN,
+  };
+}
+
 /**
- * Better Auth owns console identities (passkey), organizations, memberships and
- * per-agent API credentials. MandateOS never stores the agent's NEAR
- * function-call key: the console only registers the public key.
+ * The console is served from its own origin. WebAuthn ceremonies and console
+ * API calls are scoped to it; the API origin only hosts `/api/auth`.
  */
-export function createAuth(
-  env: Pick<Env, "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID">,
-  client: PrismaClient,
-): MandateAuth {
-  return betterAuth({
-    database: prismaAdapter(client, { provider: "postgresql" }),
+export function buildAuthOptions(
+  env: AuthEnvironment,
+  database: BetterAuthOptions["database"],
+): BetterAuthOptions {
+  return {
+    database,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     basePath: "/api/auth",
-    emailAndPassword: { enabled: false },
+    trustedOrigins: [env.CONSOLE_ORIGIN],
+    // Password bootstrap is required once per human account before adding a passkey;
+    // passkeys remain the primary sign-in method.
+    emailAndPassword: { enabled: true, requireEmailVerification: false },
     plugins: [
-      passkey({
-        rpID: env.PASSKEY_RP_ID,
-        rpName: "MandateOS",
-        origin: env.BETTER_AUTH_URL,
-      }),
+      passkey(passkeyRelyingParty(env)),
       organization(),
       apiKey({
         configId: AGENT_API_KEY_CONFIG_ID,
@@ -61,5 +72,12 @@ export function createAuth(
         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 60 },
       }),
     ],
-  });
+  } satisfies BetterAuthOptions;
+}
+
+export function createAuth(env: AuthEnvironment, client: PrismaClient): MandateAuth {
+  const auth = betterAuth(buildAuthOptions(env, prismaAdapter(client, { provider: "postgresql" })));
+  // BetterAuthOptions erases plugin-generated API methods. MandateAuth names the
+  // exact subset this app uses; the auth and gateway tests exercise it.
+  return auth as unknown as MandateAuth;
 }

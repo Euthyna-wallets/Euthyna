@@ -15,6 +15,7 @@ import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
+import type { TreasuryGateway, TreasuryPlan, TreasuryView } from "./treasury.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -69,6 +70,7 @@ const admin: ConsoleIdentity = { userId: "user-admin", organizationId: "org-1", 
 const member: ConsoleIdentity = { userId: "user-member", organizationId: "org-1", role: "member" };
 
 const requestBody = { vaultAccountId: "vault-1.near", opId: Array(32).fill(1) };
+const consoleOrigin = "http://console.test";
 
 class FakeAuth implements AuthGateway {
   readonly agents = new Map<string, AgentIdentity>();
@@ -93,6 +95,10 @@ class FakeAuth implements AuthGateway {
 
   listAgents(organizationId: string): Promise<AgentView[]> {
     this.listedOrganizations.push(organizationId);
+    return Promise.resolve([]);
+  }
+
+  listMembers(): Promise<import("./auth-gateway.js").MemberView[]> {
     return Promise.resolve([]);
   }
 
@@ -145,11 +151,32 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
       return { decision: "escalate", reasons: ["recipient not registered"] };
     },
   } as unknown as Guard;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth });
-  return { app, auth, guardCalls: () => guardCalls };
+  const treasuryCalls = {
+    wallets: [] as Array<{ organizationId: string; userId: string; nearAccountId: string; evmAddress: string }>,
+    plans: [] as Array<{ organizationId: string; daoName: string }>,
+    registers: [] as Array<{ organizationId: string; actorId: string }>,
+  };
+  const treasury = {
+    linkWallets: async (organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }) => {
+      treasuryCalls.wallets.push({ organizationId, userId, ...input });
+    },
+    plan: async (organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }) => {
+      treasuryCalls.plans.push({ organizationId, daoName: input.daoName });
+      return {} as TreasuryPlan;
+    },
+    register: async (organizationId: string, actorId: string) => {
+      treasuryCalls.registers.push({ organizationId, actorId });
+      return {} as TreasuryView;
+    },
+    getTreasury: async () => null,
+  } as TreasuryGateway;
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, consoleOrigin });
+  return { app, auth, treasuryCalls, guardCalls: () => guardCalls };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
+const consoleHeaders = (extra: Record<string, string> = {}) =>
+  headers({ origin: consoleOrigin, ...extra });
 
 describe("agent and console boundaries", () => {
   it("rejects an unauthenticated Guard request", async () => {
@@ -166,7 +193,7 @@ describe("agent and console boundaries", () => {
     const { app } = testApp();
     const response = await app.request("/v1/guard/visas", {
       method: "POST",
-      headers: headers({ cookie: "session-admin" }),
+      headers: consoleHeaders({ cookie: "session-admin" }),
       body: JSON.stringify(requestBody),
     });
     expect(response.status).toBe(401);
@@ -176,12 +203,12 @@ describe("agent and console boundaries", () => {
     const { app } = testApp();
     const emergency = await app.request("/v1/emergency/cancel", {
       method: "POST",
-      headers: headers({ "x-api-key": "key-a" }),
+      headers: consoleHeaders({ "x-api-key": "key-a" }),
       body: JSON.stringify({ ...requestBody, gasLimit: "21000", maxFeePerGas: "1", maxPriorityFeePerGas: "1" }),
     });
     expect(emergency.status).toBe(401);
     const list = await app.request("/v1/console/agents", {
-      headers: { "x-api-key": "key-a" },
+      headers: { "x-api-key": "key-a", origin: consoleOrigin },
     });
     expect(list.status).toBe(401);
   });
@@ -251,11 +278,100 @@ describe("rate limiting", () => {
   });
 });
 
+describe("console CSRF protection", () => {
+  it("rejects a console request without an Origin header", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin" },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a console request from another origin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin", origin: "http://evil.test" },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a state-changing console request without JSON", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/emergency/cancel", {
+      method: "POST",
+      headers: { cookie: "session-member", origin: consoleOrigin, "content-type": "text/plain" },
+      body: JSON.stringify({ ...requestBody, gasLimit: "1", maxFeePerGas: "1", maxPriorityFeePerGas: "1" }),
+    });
+    expect(response.status).toBe(415);
+  });
+
+  it("answers CORS preflight for the console origin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      method: "OPTIONS",
+      headers: { origin: consoleOrigin, "access-control-request-method": "GET" },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(consoleOrigin);
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+  });
+});
+
+describe("treasury onboarding", () => {
+  it("links member wallets inside the session organization", async () => {
+    const { app, treasuryCalls } = testApp();
+    const response = await app.request("/v1/console/members/me/wallets", {
+      method: "PATCH",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({ nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111" }),
+    });
+    expect(response.status).toBe(200);
+    expect(treasuryCalls.wallets).toEqual([
+      {
+        organizationId: "org-1",
+        userId: "user-member",
+        nearAccountId: "alice.testnet",
+        evmAddress: "0x1111111111111111111111111111111111111111",
+      },
+    ]);
+  });
+
+  it("builds a treasury plan for the session organization", async () => {
+    const { app, treasuryCalls } = testApp();
+    const response = await app.request("/v1/console/treasury/plan", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ daoName: "acme", founderNearAccountId: "alice.testnet" }),
+    });
+    expect(response.status).toBe(200);
+    expect(treasuryCalls.plans).toEqual([{ organizationId: "org-1", daoName: "acme" }]);
+  });
+
+  it("forbids a non-admin from registering a treasury", async () => {
+    const { app, treasuryCalls } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/treasury/register", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({
+        daoAccountId: "acme.sputnikv2.testnet",
+        vaultAccountId: "acme-vault.alice.testnet",
+        relayAccountId: "acme-relay.alice.testnet",
+        safeAddress: "0x1111111111111111111111111111111111111111",
+        rolesAddress: "0x2222222222222222222222222222222222222222",
+        delayAddress: "0x3333333333333333333333333333333333333333",
+        govAddress: "0x4444444444444444444444444444444444444444",
+      }),
+    });
+    expect(response.status).toBe(403);
+    expect(treasuryCalls.registers).toEqual([]);
+  });
+});
+
 describe("console isolation and emergency", () => {
   it("lists agents for the session organization only", async () => {
     const { app, auth } = testApp();
     const response = await app.request("/v1/console/agents", {
-      headers: { cookie: "session-admin" },
+      headers: { cookie: "session-admin", origin: consoleOrigin },
     });
     expect(response.status).toBe(200);
     expect(auth.listedOrganizations).toEqual(["org-1"]);
@@ -270,7 +386,7 @@ describe("console isolation and emergency", () => {
     const { app, auth } = testApp({ operation: signedOperation });
     const response = await app.request("/v1/emergency/cancel", {
       method: "POST",
-      headers: headers({ cookie: "session-member" }),
+      headers: consoleHeaders({ cookie: "session-member" }),
       body: JSON.stringify({ ...requestBody, gasLimit: "21000", maxFeePerGas: "1", maxPriorityFeePerGas: "1" }),
     });
     expect(response.status).toBe(200);
@@ -288,7 +404,7 @@ describe("console isolation and emergency", () => {
     const { app, auth } = testApp({ consoleRole: "member" });
     const response = await app.request("/v1/console/agents", {
       method: "POST",
-      headers: headers({ cookie: "session-member" }),
+      headers: consoleHeaders({ cookie: "session-member" }),
       body: JSON.stringify({
         name: "Research agent",
         role: "researcher",
@@ -306,7 +422,7 @@ describe("console isolation and emergency", () => {
     const { app, auth } = testApp();
     const response = await app.request("/v1/console/agents", {
       method: "POST",
-      headers: headers({ cookie: "session-admin" }),
+      headers: consoleHeaders({ cookie: "session-admin" }),
       body: JSON.stringify({
         name: "Research agent",
         role: "researcher",
@@ -333,7 +449,7 @@ describe("console isolation and emergency", () => {
     const { app, auth } = testApp();
     const response = await app.request("/v1/console/agents/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/revoke", {
       method: "POST",
-      headers: { cookie: "session-admin" },
+      headers: consoleHeaders({ cookie: "session-admin" }),
     });
     expect(response.status).toBe(404);
     expect(auth.revoked).toEqual([

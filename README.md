@@ -76,14 +76,16 @@ The current repository contains:
 - `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
 - `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
-- `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto;
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; `/v1/console/treasury/register` re-verifies code hashes, zero access keys, DAO ownership, Safe owners/threshold and module wiring before persisting a `Treasury`;
+- `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard and agent registration; it calls the API through a same-origin Vite proxy;
+- `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
 - `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
 - [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
 - [`docs/vault-testnet.md`](./docs/vault-testnet.md): Vault protocol, test coverage and testnet deployment evidence;
 - [`docs/api.md`](./docs/api.md): console and agent authentication, routes, errors, audit rows and local setup;
 - [`deployments/near-testnet.json`](./deployments/near-testnet.json) and [`deployments/base-sepolia.json`](./deployments/base-sepolia.json): observed addresses, policies and transaction hashes.
 
-Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. NEP-366 sponsorship, console, SDK, Phase 2 Intents and production hardening remain unimplemented.
+Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. NEP-366 sponsorship, the SDK/MCP agent, Phase 2 Intents and production hardening remain unimplemented.
 
 ## Architecture target
 
@@ -175,7 +177,8 @@ Current monorepo layout:
 ```text
 MandateOS/
 ├── apps/
-│   └── api/                   # Hono Guard, Base relayer and emergency cancellation endpoint
+│   ├── api/                   # Hono Guard, Base relayer and emergency cancellation endpoint
+│   └── console/               # React/Vite onboarding, treasury and agent console
 ├── config/
 │   └── clients/acme/          # Exact hackathon vendor registry
 ├── contracts/
@@ -228,7 +231,17 @@ set +a
 pnpm --filter @mandateos/api dev
 ```
 
-The passkey relying party is `PASSKEY_RP_ID=localhost` and `BETTER_AUTH_URL=http://localhost:3000`. Email/password is disabled; console users authenticate with a passkey. Agent credentials are per-agent API keys in `x-api-key`, documented in [`docs/api.md`](./docs/api.md).
+The passkey relying party is `PASSKEY_RP_ID=localhost` and `BETTER_AUTH_URL=http://localhost:3000`. Email/password is enabled once to bootstrap the human account; the console immediately adds a passkey and uses it afterwards. Agent credentials are per-agent API keys in `x-api-key`, documented in [`docs/api.md`](./docs/api.md).
+
+Run the console in another terminal:
+
+```bash
+pnpm --filter @mandateos/console dev
+```
+
+It listens on `http://localhost:5173` (`CONSOLE_ORIGIN`) and calls the API at
+`VITE_API_URL` (default `http://localhost:3000`) with credentials. The API's CORS
+and CSRF checks accept exactly `CONSOLE_ORIGIN`.
 
 The Base Sepolia script performs no transaction unless every required variable is present and `BASE_DEPLOY_CONFIRM=DEPLOY_ACME_BASE_SEPOLIA`. On success it writes observed addresses, code hashes and transaction hashes to `deployments/base-sepolia.json`:
 
@@ -297,6 +310,8 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 - The common mandate is a common-mode risk: a policy error can be compiled into all three locks.
 - Phase 2 assets held by `0xINT` are outside Zodiac protection; exposure is limited operationally to the period budget.
 - The Base withdrawal memo and independent reference-price source remain open design points.
+- Treasury onboarding deploys the Safe first, then deploys Roles/Delay and enables them in a 2/3 Safe batch. Deploying the modules inside Safe `setup` would require predicting module addresses that themselves depend on the Safe address (circular dependency).
+- Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the console displays the addresses but does not create the funding proposal yet.
 
 ## License
 

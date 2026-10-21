@@ -31,6 +31,16 @@ export interface AgentView {
   createdAt: Date;
 }
 
+export interface MemberView {
+  id: string;
+  userId: string;
+  role: string;
+  nearAccountId: string | null;
+  evmAddress: string | null;
+  email: string | null;
+  name: string | null;
+}
+
 export interface CreateAgentInput {
   organizationId: string;
   name: string;
@@ -65,6 +75,7 @@ export interface AuthGateway {
   identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null>;
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
+  listMembers(organizationId: string): Promise<MemberView[]>;
   createAgent(input: CreateAgentInput): Promise<CreatedAgent>;
   revokeAgent(organizationId: string, agentId: string): Promise<boolean>;
   recordAudit(event: AuditEvent): Promise<void>;
@@ -151,6 +162,23 @@ export class BetterAuthGateway implements AuthGateway {
       organizationId: member.organizationId,
       role: member.role,
     };
+  }
+
+  async listMembers(organizationId: string): Promise<MemberView[]> {
+    const members = await this.prisma.member.findMany({
+      where: { organizationId },
+      include: { user: true },
+      orderBy: { createdAt: "asc" },
+    });
+    return members.map((member) => ({
+      id: member.id,
+      userId: member.userId,
+      role: member.role,
+      nearAccountId: member.nearAccountId,
+      evmAddress: member.evmAddress,
+      email: member.user.email,
+      name: member.user.name,
+    }));
   }
 
   async listAgents(organizationId: string): Promise<AgentView[]> {

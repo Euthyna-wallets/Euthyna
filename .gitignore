@@ -6,3 +6,4 @@ contracts/target/
 packages/deployer/out/
 packages/deployer/cache/
 *.log
+*.tsbuildinfo

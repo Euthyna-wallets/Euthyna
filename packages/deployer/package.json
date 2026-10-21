@@ -11,7 +11,8 @@
     "verify:step3": "tsx src/verify-step3.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prepare": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@gnosis-guild/zodiac-core": "4.3.0",
@@ -19,5 +20,13 @@
     "viem": "^2.30.6",
     "zod": "^3.25.57",
     "zodiac-roles-sdk": "4.1.3"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   }
 }

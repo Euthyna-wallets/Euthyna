@@ -1,0 +1,35 @@
+{
+  "name": "@mandateos/console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "^1.7.12",
+    "@mandateos/deployer": "workspace:^",
+    "@near-wallet-selector/core": "^9.1.0",
+    "@near-wallet-selector/modal-ui": "^9.1.0",
+    "@near-wallet-selector/my-near-wallet": "^9.1.0",
+    "@safe-global/safe-deployments": "1.37.64",
+    "@simplewebauthn/browser": "^13.1.0",
+    "better-auth": "^1.7.12",
+    "buffer": "^6.0.3",
+    "near-api-js": "^5.1.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "viem": "^2.30.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "vite": "^6.3.0",
+    "vite-plugin-node-polyfills": "^0.28.0"
+  }
+}

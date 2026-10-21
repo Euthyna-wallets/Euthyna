@@ -42,17 +42,54 @@ export class NearClient {
     return payload.result;
   }
 
-  async getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation> {
+  private async callView<T>(accountId: string, methodName: string, args: Record<string, unknown>): Promise<T> {
     const result = await this.rpc<{ result: number[] }>("query", {
       request_type: "call_function",
       finality: "final",
-      account_id: vaultAccountId,
-      method_name: "get_operation",
-      args_base64: Buffer.from(JSON.stringify({ op_id: opId })).toString("base64"),
+      account_id: accountId,
+      method_name: methodName,
+      args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
     });
-    const operation = JSON.parse(Buffer.from(result.result).toString("utf8")) as VaultOperation | null;
+    return JSON.parse(Buffer.from(result.result).toString("utf8")) as T;
+  }
+
+  async getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation> {
+    const operation = await this.callView<VaultOperation | null>(vaultAccountId, "get_operation", { op_id: opId });
     if (!operation) throw new Error("operation not found");
     return operation;
+  }
+
+  async getAccount(accountId: string): Promise<{ code_hash: string; amount: string }> {
+    return this.rpc<{ code_hash: string; amount: string }>("query", {
+      request_type: "view_account",
+      finality: "final",
+      account_id: accountId,
+    });
+  }
+
+  async getAccessKeys(accountId: string): Promise<{ keys: unknown[] }> {
+    return this.rpc<{ keys: unknown[] }>("query", {
+      request_type: "view_access_key_list",
+      finality: "final",
+      account_id: accountId,
+    });
+  }
+
+  async viewFunction<T>(accountId: string, methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+    return this.callView<T>(accountId, methodName, args);
+  }
+
+  async derivedPublicKey(
+    mpcContractId: string,
+    predecessor: string,
+    path: string,
+    domainId: number,
+  ): Promise<string> {
+    return this.callView<string>(mpcContractId, "derived_public_key", {
+      path,
+      predecessor,
+      domain_id: domainId,
+    });
   }
 
   async reportStatus(vaultAccountId: string, signedReport: unknown): Promise<string> {
