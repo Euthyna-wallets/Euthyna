@@ -102,19 +102,22 @@ export class PaymentService {
       throw new PaymentError(422, "reference_consumed", "this reference is already consumed");
     }
 
+    const treasury = await this.prisma.treasury.findFirst({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this organization");
     const result = await this.guard.approve(operation, registry);
     await this.upsertOperation(organizationId, agent.agentId, operation);
     if (result.decision === "approve") {
-      await this.prisma.paymentVisa.create({
-        data: {
-          organizationId,
-          opId: opHex(opId),
-          visa: result.approval.visa as unknown as object,
-          signature: result.approval.signature,
-        },
-      });
-      await this.registry.consumeReference(organizationId, operation.intent.reference, opHex(opId));
-      return { status: 200, body: { visa: result.approval.visa, signature: result.approval.signature } };
+      const stored = await this.storeVisa(
+        organizationId,
+        opHex(opId),
+        operation.intent.reference,
+        result.approval.visa as unknown as object,
+        result.approval.signature,
+      );
+      return { status: 200, body: { visa: stored.visa, signature: stored.signature } };
     }
 
     const escalation = await this.prisma.escalation.create({
@@ -122,6 +125,7 @@ export class PaymentService {
         organizationId,
         opId: opHex(opId),
         agentId: agent.agentId,
+        environment: treasury.environment,
         reasons: result.reasons,
         invoice: operation.intent as unknown as object,
         registrySnapshot: registry as unknown as object,
@@ -204,9 +208,9 @@ export class PaymentService {
     }
 
     const treasury = await this.prisma.treasury.findUnique({
-      where: { organizationId_environment: { organizationId, environment: "uat" } },
+      where: { organizationId_environment: { organizationId, environment: escalation.environment } },
     });
-    if (!treasury) throw new PaymentError(409, "treasury_missing", "no active treasury");
+    if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this escalation environment");
     const opBytes = Array.from(Buffer.from(escalation.opId.slice(2), "hex"));
     const operation = await this.near.getOperation(treasury.vaultAccountId, opBytes);
     if (operation.state !== "Prepared") {
@@ -217,28 +221,57 @@ export class PaymentService {
     if (result.decision !== "approve") {
       throw new PaymentError(422, "still_escalated", "the operation still does not match a rule");
     }
-    await this.prisma.$transaction([
-      this.prisma.paymentVisa.create({
+    const stored = await this.prisma.$transaction(async (tx) => {
+      const visa = await tx.paymentVisa.create({
         data: {
           organizationId,
           opId: escalation.opId,
           visa: result.approval.visa as unknown as object,
           signature: result.approval.signature,
         },
-      }),
-      this.prisma.consumedReference.create({
+      });
+      await tx.consumedReference.create({
         data: { organizationId, reference: operation.intent.reference, opId: escalation.opId },
-      }),
-      this.prisma.escalation.update({
+      });
+      await tx.escalation.update({
         where: { id: escalation.id },
         data: { status: "approved", decidedBy: reviewerId, decidedAt: new Date() },
-      }),
-      this.prisma.operation.updateMany({
+      });
+      await tx.operation.updateMany({
         where: { organizationId, opId: escalation.opId },
         data: { state: "Prepared" },
-      }),
-    ]);
-    return { escalation: { ...escalation, status: "approved" }, visa: result.approval.visa, signature: result.approval.signature };
+      });
+      return visa;
+    });
+    return { escalation: { ...escalation, status: "approved" }, visa: stored.visa, signature: stored.signature };
+  }
+
+  private async storeVisa(
+    organizationId: string,
+    opId: string,
+    reference: string,
+    visa: object,
+    signature: string,
+  ) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.paymentVisa.findUnique({
+          where: { organizationId_opId: { organizationId, opId } },
+        });
+        if (existing) return existing;
+        await tx.consumedReference.create({ data: { organizationId, reference, opId } });
+        return tx.paymentVisa.create({ data: { organizationId, opId, visa, signature } });
+      });
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+        const existing = await this.prisma.paymentVisa.findUnique({
+          where: { organizationId_opId: { organizationId, opId } },
+        });
+        if (existing) return existing;
+        throw new PaymentError(422, "reference_consumed", "this reference is already consumed");
+      }
+      throw error;
+    }
   }
 
   private mergeStatus(stored: string | null | undefined, escalationStatus: string | null, hasVisa: boolean): OperationStatus {

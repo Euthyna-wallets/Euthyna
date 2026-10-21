@@ -122,23 +122,27 @@ stored visa/escalation.
 ### Console registry (suppliers)
 
 - `GET /v1/console/registry`
-- `POST /v1/console/suppliers`
-- `POST /v1/console/suppliers/:id/address-changes` (creates a pending change)
-- `POST /v1/console/supplier-address-changes/:id/decision` (`approve|reject`)
-- `POST /v1/console/contracts`
+- `POST /v1/console/suppliers` → pending `supplier_create`
+- `POST /v1/console/suppliers/:id/wallets` → pending `wallet_add`
+- `POST /v1/console/contracts` → pending `contract_create`
+- `PATCH /v1/console/contracts/:id` → pending `contract_update`
+- `POST /v1/console/registry-changes/:id/decision` (`approve|reject`)
 
-Any registry write increments `registry_version`. A payment-address change is
-applied only after approval by **another** member; the author cannot approve their
-own change. Guard now reads suppliers, contracts and version from PostgreSQL.
+Every write is staged. Nothing is created or modified, and `registry_version` does
+not move, until **another** member approves; the author cannot approve their own
+change. Guard reads suppliers, contracts and version from PostgreSQL.
 
 ### Console escalations
 
 - `GET /v1/console/escalations`
 - `POST /v1/console/escalations/:id/decision` (`approve|reject`)
 
-Approval re-reads the Vault operation, re-runs Guard and only then stores the visa;
-rejection marks the operation `Rejected` (the Vault reservation expires on its
-own). An escalation never modifies the registry.
+The console labels `approve` as **Re-check**. It re-reads the Vault operation,
+re-runs Guard against the current registry and only then stores the visa; if the
+gap is still present it returns `422 still_escalated`. There is no out-of-rules
+override: the correction is a separate four-eyes registry change. Rejection marks
+the operation `Rejected` (the Vault reservation expires on its own). An escalation
+never modifies the registry.
 
 ## Treasury onboarding
 

@@ -114,7 +114,7 @@ model Organization {
   suppliers    Supplier[]
   contracts    Contract[]
   consumedReferences ConsumedReference[]
-  supplierChanges SupplierAddressChange[]
+  registryChanges RegistryChange[]
   escalations  Escalation[]
   visas        PaymentVisa[]
   registry     RegistryVersion?
@@ -240,7 +240,6 @@ model Supplier {
   active         Boolean      @default(true)
   wallets        SupplierWallet[]
   contracts      Contract[]
-  changes        SupplierAddressChange[]
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, name])
@@ -263,22 +262,20 @@ model SupplierWallet {
   @@map("supplier_wallet")
 }
 
-model SupplierAddressChange {
+model RegistryChange {
   id             String   @id @default(uuid())
   organizationId String
-  supplierId     String
-  chainId        Int
-  address        String
+  kind           String
+  payload        Json
   status         String   @default("pending")
   authorId       String
   reviewerId     String?
   createdAt      DateTime @default(now())
   decidedAt      DateTime?
-  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, status])
-  @@map("supplier_address_change")
+  @@map("registry_change")
 }
 
 model Contract {
@@ -326,6 +323,7 @@ model Escalation {
   organizationId  String
   opId            String
   agentId         String
+  environment     String
   reasons         Json
   invoice         Json?
   registrySnapshot Json?

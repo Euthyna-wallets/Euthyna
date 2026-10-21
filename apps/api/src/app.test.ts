@@ -228,22 +228,22 @@ const consoleHeaders = (extra: Record<string, string> = {}) =>
   headers({ origin: consoleOrigin, ...extra });
 
 describe("agent and console boundaries", () => {
-  it("rejects an unauthenticated Guard request", async () => {
+  it("rejects an unauthenticated pay request", async () => {
     const { app } = testApp();
-    const response = await app.request("/v1/guard/visas", {
+    const response = await app.request("/v1/operations/pay", {
       method: "POST",
       headers: headers({}),
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({ opId: Array(32).fill(1) }),
     });
     expect(response.status).toBe(401);
   });
 
   it("rejects a console session on an agent route", async () => {
     const { app } = testApp();
-    const response = await app.request("/v1/guard/visas", {
+    const response = await app.request("/v1/operations/pay", {
       method: "POST",
       headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({ opId: Array(32).fill(1) }),
     });
     expect(response.status).toBe(401);
   });
@@ -262,58 +262,34 @@ describe("agent and console boundaries", () => {
     expect(list.status).toBe(401);
   });
 
-  it("refuses a visa when the authenticated agent is not the operation agent", async () => {
-    const { app, auth, guardCalls } = testApp();
-    const response = await app.request("/v1/guard/visas", {
-      method: "POST",
-      headers: headers({ "x-api-key": "key-b" }),
-      body: JSON.stringify(requestBody),
-    });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "agent_mismatch" });
-    expect(guardCalls()).toBe(0);
-    expect(auth.audits).toContainEqual(
-      expect.objectContaining({ action: "guard.visa.denied", actorId: "agent-b" }),
-    );
-  });
-
-  it("refuses a vault the agent does not belong to", async () => {
-    const { app, guardCalls } = testApp();
-    const response = await app.request("/v1/guard/visas", {
+  it("accepts a pay request from a valid agent credential", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/operations/pay", {
       method: "POST",
       headers: headers({ "x-api-key": "key-a" }),
-      body: JSON.stringify({ ...requestBody, vaultAccountId: "vault-2.near" }),
+      body: JSON.stringify({ opId: Array(32).fill(1) }),
     });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "vault_not_owned_by_agent" });
-    expect(guardCalls()).toBe(0);
-  });
-
-  it("lets the owning agent through to the exact Guard decision", async () => {
-    const { app, auth } = testApp();
-    const response = await app.request("/v1/guard/visas", {
-      method: "POST",
-      headers: headers({ "x-api-key": "key-a" }),
-      body: JSON.stringify(requestBody),
-    });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      decision: "escalate",
-      reasons: ["recipient not registered"],
-    });
-    expect(auth.audits).toContainEqual(
-      expect.objectContaining({ action: "guard.escalation", actorId: "agent-a" }),
-    );
+    expect(response.status).toBe(200);
   });
 
   it("refuses a revoked agent because no API key resolves", async () => {
     const { app } = testApp();
-    const response = await app.request("/v1/guard/visas", {
+    const response = await app.request("/v1/operations/pay", {
       method: "POST",
       headers: headers({ "x-api-key": "revoked-key" }),
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({ opId: Array(32).fill(1) }),
     });
     expect(response.status).toBe(401);
+  });
+
+  it("no longer exposes the legacy guard route", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/guard/visas", {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
+      body: JSON.stringify(requestBody),
+    });
+    expect(response.status).toBe(404);
   });
 });
 

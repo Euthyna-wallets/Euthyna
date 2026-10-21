@@ -31,46 +31,60 @@ describe.skipIf(!databaseUrl)("RegistryService against PostgreSQL", () => {
     await prisma.$disconnect();
   });
 
-  it("versionne, applique le quatre-yeux et isole les organisations", async () => {
-    const supplier = await service.createSupplier(organizationId, {
+  it("stage chaque écriture, refuse l'auto-approbation et ne versionne qu'à l'accord", async () => {
+    const supplierChange = await service.requestSupplier(organizationId, "author", {
       name: "Data Provider",
       chainId: 84532,
       address: "0x1111111111111111111111111111111111111111",
     });
-    expect(supplier.version).toBe(1);
+    await expect(
+      service.decideChange(organizationId, "author", supplierChange.id, "approve"),
+    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
+    expect(await service.version(organizationId)).toBe(0);
+    await service.decideChange(organizationId, "reviewer", supplierChange.id, "approve");
+    expect(await service.version(organizationId)).toBe(1);
+    const supplier = await prisma.supplier.findFirstOrThrow({ where: { organizationId } });
 
-    const contract = await service.createContract(organizationId, {
+    const walletChange = await service.requestWallet(organizationId, "author", {
+      supplierId: supplier.id,
+      chainId: 84532,
+      address: "0x2222222222222222222222222222222222222222",
+    });
+    await expect(
+      service.decideChange(organizationId, "author", walletChange.id, "approve"),
+    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
+    await service.decideChange(organizationId, "reviewer", walletChange.id, "approve");
+    expect(await service.version(organizationId)).toBe(2);
+
+    const contractChange = await service.requestContract(organizationId, "author", {
       reference: "SUB-001",
       role: "researcher",
-      supplierId: supplier.supplier.id,
+      supplierId: supplier.id,
       maxAmount: "5000000",
       periodicity: "monthly",
       token: "0x418A2b47911dE05e21688F7490195F5324B49474",
     });
-    expect(contract.version).toBe(2);
+    await expect(
+      service.decideChange(organizationId, "author", contractChange.id, "approve"),
+    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
+    await service.decideChange(organizationId, "reviewer", contractChange.id, "approve");
+    expect(await service.version(organizationId)).toBe(3);
+    const contract = await prisma.contract.findFirstOrThrow({ where: { organizationId } });
+
+    const updateChange = await service.requestContractUpdate(organizationId, "author", {
+      contractId: contract.id,
+      maxAmount: "6000000",
+    });
+    await expect(
+      service.decideChange(organizationId, "author", updateChange.id, "approve"),
+    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
+    await service.decideChange(organizationId, "reviewer", updateChange.id, "approve");
+    expect(await service.version(organizationId)).toBe(4);
 
     const registry = await service.loadRegistry(organizationId, "researcher", "acme");
-    expect(registry.registryVersion).toBe(2);
-    expect(registry.roles.researcher?.vendors[0]?.addresses[0]?.address).toBe(
-      "0x1111111111111111111111111111111111111111",
-    );
-
-    const change = await service.requestAddressChange(
-      organizationId,
-      "author-user",
-      supplier.supplier.id,
-      { chainId: 84532, address: "0x2222222222222222222222222222222222222222" },
-    );
-    await expect(
-      service.decideAddressChange(organizationId, "author-user", change.id, "approve"),
-    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
-    expect(await service.version(organizationId)).toBe(2);
-
-    const approved = await service.decideAddressChange(organizationId, "reviewer-user", change.id, "approve");
-    expect(approved.version).toBe(3);
-    const wallets = await prisma.supplierWallet.findMany({ where: { supplierId: supplier.supplier.id } });
-    expect(wallets.filter((wallet) => wallet.active)).toHaveLength(1);
-    expect(wallets.find((wallet) => wallet.active)?.address).toBe("0x2222222222222222222222222222222222222222");
+    expect(registry.registryVersion).toBe(4);
+    expect(registry.roles.researcher?.maximumPayment).toBe("6000000");
+    expect(registry.roles.researcher?.vendors[0]?.addresses).toHaveLength(2);
 
     const other = await service.list(otherOrganizationId);
     expect(other.suppliers).toEqual([]);

@@ -49,9 +49,16 @@ const supplierSchema = z.object({
   address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
-const addressChangeSchema = z.object({
+const walletSchema = z.object({
   chainId: z.number().int().positive().default(84532),
   address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+const contractUpdateSchema = z.object({
+  maxAmount: z.string().regex(/^\d+$/).optional(),
+  periodicity: z.enum(["monthly", "quarterly", "annual", "one_off"]).optional(),
+  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  role: z.string().min(1).max(80).optional(),
 });
 
 const contractSchema = z.object({
@@ -237,53 +244,6 @@ export function createApp({
     return auth.handler(context.req.raw);
   });
 
-  app.post("/v1/guard/visas", requireAgent(auth, agentLimiter), async (context) => {
-    const agent = context.get("agent");
-    const input = await parseJson(context, requestSchema);
-    if (input.vaultAccountId !== agent.vaultAccountId) {
-      await auth.recordAudit({
-        organizationId: agent.organizationId,
-        actorType: "agent",
-        actorId: agent.agentId,
-        action: "guard.visa.denied",
-        targetType: "operation",
-        targetId: Buffer.from(input.opId).toString("hex"),
-        metadata: { reason: "vault_not_owned_by_agent" },
-      });
-      return context.json({ error: "vault_not_owned_by_agent" }, 403);
-    }
-
-    const operation = await near.getOperation(input.vaultAccountId, input.opId);
-    if (operation.agent !== agent.nearAccountId) {
-      await auth.recordAudit({
-        organizationId: agent.organizationId,
-        actorType: "agent",
-        actorId: agent.agentId,
-        action: "guard.visa.denied",
-        targetType: "operation",
-        targetId: Buffer.from(input.opId).toString("hex"),
-        metadata: { reason: "agent_mismatch", operationAgent: operation.agent },
-      });
-      return context.json({ error: "agent_mismatch" }, 403);
-    }
-
-    const registry = await registryService.loadRegistry(agent.organizationId, agent.role, operation.client_id);
-    const result = await guard.approve(operation, registry);
-    await auth.recordAudit({
-      organizationId: agent.organizationId,
-      actorType: "agent",
-      actorId: agent.agentId,
-      action: result.decision === "approve" ? "guard.visa.issued" : "guard.escalation",
-      targetType: "operation",
-      targetId: Buffer.from(input.opId).toString("hex"),
-      metadata:
-        result.decision === "approve"
-          ? { vendorId: result.vendorId, reference: operation.intent.reference }
-          : { reasons: result.reasons },
-    });
-    return context.json(result, result.decision === "approve" ? 200 : 409);
-  });
-
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const input = await parseJson(context, requestSchema);
     const operation = await near.getOperation(input.vaultAccountId, input.opId);
@@ -372,31 +332,34 @@ export function createApp({
   app.post("/v1/console/suppliers", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, supplierSchema);
-    const created = await registryService.createSupplier(consoleIdentity.organizationId, input);
+    const change = await registryService.requestSupplier(consoleIdentity.organizationId, consoleIdentity.userId, input);
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
       actorType: "console",
       actorId: consoleIdentity.userId,
-      action: "supplier.created",
-      targetType: "supplier",
-      targetId: created.supplier.id,
+      action: "registry.supplier.requested",
+      targetType: "registry_change",
+      targetId: change.id,
     });
-    return context.json(created, 201);
+    return context.json(change, 202);
   });
 
-  app.post("/v1/console/suppliers/:id/address-changes", requireConsole(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/suppliers/:id/wallets", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const id = z.string().uuid().parse(context.req.param("id"));
-    const input = await parseJson(context, addressChangeSchema);
-    const change = await registryService.requestAddressChange(consoleIdentity.organizationId, consoleIdentity.userId, id, input);
-    return context.json(change, 201);
+    const input = await parseJson(context, walletSchema);
+    const change = await registryService.requestWallet(consoleIdentity.organizationId, consoleIdentity.userId, {
+      supplierId: id,
+      ...input,
+    });
+    return context.json(change, 202);
   });
 
-  app.post("/v1/console/supplier-address-changes/:id/decision", requireConsole(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/registry-changes/:id/decision", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const id = z.string().uuid().parse(context.req.param("id"));
     const input = await parseJson(context, z.object({ decision: z.enum(["approve", "reject"]) }));
-    const result = await registryService.decideAddressChange(
+    const result = await registryService.decideChange(
       consoleIdentity.organizationId,
       consoleIdentity.userId,
       id,
@@ -406,8 +369,8 @@ export function createApp({
       organizationId: consoleIdentity.organizationId,
       actorType: "console",
       actorId: consoleIdentity.userId,
-      action: input.decision === "approve" ? "supplier.address.approved" : "supplier.address.rejected",
-      targetType: "supplier_address_change",
+      action: `registry.${input.decision}`,
+      targetType: "registry_change",
       targetId: id,
     });
     return context.json(result);
@@ -416,16 +379,27 @@ export function createApp({
   app.post("/v1/console/contracts", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, contractSchema);
-    const created = await registryService.createContract(consoleIdentity.organizationId, input);
+    const change = await registryService.requestContract(consoleIdentity.organizationId, consoleIdentity.userId, input);
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
       actorType: "console",
       actorId: consoleIdentity.userId,
-      action: "contract.created",
-      targetType: "contract",
-      targetId: created.contract.id,
+      action: "registry.contract.requested",
+      targetType: "registry_change",
+      targetId: change.id,
     });
-    return context.json(created, 201);
+    return context.json(change, 202);
+  });
+
+  app.patch("/v1/console/contracts/:id", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const input = await parseJson(context, contractUpdateSchema);
+    const change = await registryService.requestContractUpdate(consoleIdentity.organizationId, consoleIdentity.userId, {
+      contractId: id,
+      ...input,
+    });
+    return context.json(change, 202);
   });
 
   app.get("/v1/console/escalations", requireConsole(auth, consoleLimiter), async (context) => {
