@@ -687,8 +687,14 @@ export class TreasuryService {
 
   private validateDaoPolicy(policy: SputnikPolicy, council: string[], threshold: bigint): void {
     const roles = Array.isArray(policy.roles) ? policy.roles : [];
-    const councilRole = roles.find((role) => role.name === "council");
-    if (!councilRole) throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council role");
+    const councilRoles = roles.filter((role) => role.name === "council");
+    if (councilRoles.length === 0) {
+      throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council role");
+    }
+    if (councilRoles.length !== 1) {
+      throw new TreasuryError(422, "dao_council_role_count", "DAO must have exactly one council role");
+    }
+    const councilRole = councilRoles[0]!;
     const group = isGroupKind(councilRole.kind) ? councilRole.kind.Group : null;
     if (!group) throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council Group role");
     const actual = [...group].sort();
