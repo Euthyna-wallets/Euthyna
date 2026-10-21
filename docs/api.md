@@ -99,6 +99,51 @@ curl -sS -X POST http://localhost:3000/v1/emergency/cancel \
 Console admin only. Broadcasts the stored signed transaction and submits the
 Guard-signed confirmation report.
 
+## Agent payments and escalations
+
+### `POST /v1/operations/pay`
+
+Agent credential (`x-api-key`), body `{ "opId": [..32 bytes..] }`. The agent has
+already called `prepare` on the Vault with its client-held function-call key.
+
+- `200 {visa, signature}`: Guard approved and the visa is stored (also returned by
+  `GET /v1/operations/:opId`).
+- `202 {escalationId, reasons}`: uncovered case, queued for a human.
+- `422 {error, message}`: hard refusal (recipient, amount cap, token, consumed
+  reference, state).
+- Repeating the same `opId` returns the stored visa/escalation, never a second one.
+
+### `GET /v1/operations/:opId`
+
+Agent only, own operations. Merges the DB (`Prepared`, `Escalated`, `Rejected`,
+`Broadcast`, `Confirmed`, `Cancelled`, `Reverted`) with the Vault state and the
+stored visa/escalation.
+
+### Console registry (suppliers)
+
+- `GET /v1/console/registry`
+- `POST /v1/console/suppliers` → pending `supplier_create`
+- `POST /v1/console/suppliers/:id/wallets` → pending `wallet_add`
+- `POST /v1/console/contracts` → pending `contract_create`
+- `PATCH /v1/console/contracts/:id` → pending `contract_update`
+- `POST /v1/console/registry-changes/:id/decision` (`approve|reject`)
+
+Every write is staged. Nothing is created or modified, and `registry_version` does
+not move, until **another** member approves; the author cannot approve their own
+change. Guard reads suppliers, contracts and version from PostgreSQL.
+
+### Console escalations
+
+- `GET /v1/console/escalations`
+- `POST /v1/console/escalations/:id/decision` (`approve|reject`)
+
+The console labels `approve` as **Re-check**. It re-reads the Vault operation,
+re-runs Guard against the current registry and only then stores the visa; if the
+gap is still present it returns `422 still_escalated`. There is no out-of-rules
+override: the correction is a separate four-eyes registry change. Rejection marks
+the operation `Rejected` (the Vault reservation expires on its own). An escalation
+never modifies the registry.
+
 ## Treasury onboarding
 
 All `/v1/console/*` and `/v1/emergency/*` requests require

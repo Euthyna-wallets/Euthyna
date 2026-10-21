@@ -21,7 +21,6 @@ const env = z.object({
 const near = new NearClient(env);
 const registry = await loadRegistry(env.VENDOR_REGISTRY_PATH);
 const guard = new Guard(
-  registry,
   new EnvKmsSigner(Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"))),
 );
 const operation = await near.getOperation(

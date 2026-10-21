@@ -8,6 +8,8 @@ import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { TreasuryError, type TreasuryGateway } from "./treasury.js";
+import { RegistryError, type RegistryService } from "./registry-db.js";
+import { PaymentError, type PaymentService } from "./payments.js";
 import type { MandateGateway } from "./mandates.js";
 import type { BaseRelayer } from "./relayer.js";
 
@@ -37,6 +39,36 @@ const addressSchema = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/)
   .transform((value) => value as `0x${string}`);
+
+const opIdSchema = z.object({ opId: z.array(z.number().int().min(0).max(255)).length(32) });
+
+const supplierSchema = z.object({
+  name: z.string().min(1).max(120),
+  contact: z.string().max(200).optional(),
+  chainId: z.number().int().positive().default(84532),
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+const walletSchema = z.object({
+  chainId: z.number().int().positive().default(84532),
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+const contractUpdateSchema = z.object({
+  maxAmount: z.string().regex(/^\d+$/).optional(),
+  periodicity: z.enum(["monthly", "quarterly", "annual", "one_off"]).optional(),
+  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  role: z.string().min(1).max(80).optional(),
+});
+
+const contractSchema = z.object({
+  reference: z.string().min(1).max(120),
+  role: z.string().min(1).max(80),
+  supplierId: z.string().uuid(),
+  maxAmount: z.string().regex(/^\d+$/),
+  periodicity: z.enum(["monthly", "quarterly", "annual", "one_off"]),
+  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
 
 const mandateSchema = z.object({
   role: z.string().regex(/^[a-z][a-z0-9-]{1,31}$/),
@@ -98,6 +130,8 @@ export interface AppDependencies {
   auth: AuthGateway;
   treasury: TreasuryGateway;
   mandates: MandateGateway;
+  registry: RegistryService;
+  payments: PaymentService;
   consoleOrigin: string;
   passwordAuthEnabled: boolean;
 }
@@ -182,6 +216,8 @@ export function createApp({
   auth,
   treasury,
   mandates,
+  registry: registryService,
+  payments,
   consoleOrigin,
   passwordAuthEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
@@ -206,52 +242,6 @@ export function createApp({
       return context.json({ error: "not_found" }, 404);
     }
     return auth.handler(context.req.raw);
-  });
-
-  app.post("/v1/guard/visas", requireAgent(auth, agentLimiter), async (context) => {
-    const agent = context.get("agent");
-    const input = await parseJson(context, requestSchema);
-    if (input.vaultAccountId !== agent.vaultAccountId) {
-      await auth.recordAudit({
-        organizationId: agent.organizationId,
-        actorType: "agent",
-        actorId: agent.agentId,
-        action: "guard.visa.denied",
-        targetType: "operation",
-        targetId: Buffer.from(input.opId).toString("hex"),
-        metadata: { reason: "vault_not_owned_by_agent" },
-      });
-      return context.json({ error: "vault_not_owned_by_agent" }, 403);
-    }
-
-    const operation = await near.getOperation(input.vaultAccountId, input.opId);
-    if (operation.agent !== agent.nearAccountId) {
-      await auth.recordAudit({
-        organizationId: agent.organizationId,
-        actorType: "agent",
-        actorId: agent.agentId,
-        action: "guard.visa.denied",
-        targetType: "operation",
-        targetId: Buffer.from(input.opId).toString("hex"),
-        metadata: { reason: "agent_mismatch", operationAgent: operation.agent },
-      });
-      return context.json({ error: "agent_mismatch" }, 403);
-    }
-
-    const result = await guard.approve(operation);
-    await auth.recordAudit({
-      organizationId: agent.organizationId,
-      actorType: "agent",
-      actorId: agent.agentId,
-      action: result.decision === "approve" ? "guard.visa.issued" : "guard.escalation",
-      targetType: "operation",
-      targetId: Buffer.from(input.opId).toString("hex"),
-      metadata:
-        result.decision === "approve"
-          ? { vendorId: result.vendorId, reference: operation.intent.reference }
-          : { reasons: result.reasons },
-    });
-    return context.json(result, result.decision === "approve" ? 200 : 409);
   });
 
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -317,6 +307,125 @@ export function createApp({
       metadata: { nearAccountId: input.nearAccountId, evmAddress: input.evmAddress },
     });
     return context.json({ nearAccountId: input.nearAccountId, evmAddress: input.evmAddress });
+  });
+
+  app.post("/v1/operations/pay", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const input = await parseJson(context, opIdSchema);
+    const result = await payments.pay(agent.organizationId, agent, input.opId);
+    return context.json(result.body, result.status);
+  });
+
+  app.get("/v1/operations/:opId", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const raw = context.req.param("opId") ?? "";
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
+    const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
+    return context.json(await payments.getOperation(agent.organizationId, agent.agentId, opId));
+  });
+
+  app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json(await registryService.list(consoleIdentity.organizationId));
+  });
+
+  app.post("/v1/console/suppliers", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, supplierSchema);
+    const change = await registryService.requestSupplier(consoleIdentity.organizationId, consoleIdentity.userId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "registry.supplier.requested",
+      targetType: "registry_change",
+      targetId: change.id,
+    });
+    return context.json(change, 202);
+  });
+
+  app.post("/v1/console/suppliers/:id/wallets", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const input = await parseJson(context, walletSchema);
+    const change = await registryService.requestWallet(consoleIdentity.organizationId, consoleIdentity.userId, {
+      supplierId: id,
+      ...input,
+    });
+    return context.json(change, 202);
+  });
+
+  app.post("/v1/console/registry-changes/:id/decision", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const input = await parseJson(context, z.object({ decision: z.enum(["approve", "reject"]) }));
+    const result = await registryService.decideChange(
+      consoleIdentity.organizationId,
+      consoleIdentity.userId,
+      id,
+      input.decision,
+    );
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: `registry.${input.decision}`,
+      targetType: "registry_change",
+      targetId: id,
+    });
+    return context.json(result);
+  });
+
+  app.post("/v1/console/contracts", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, contractSchema);
+    const change = await registryService.requestContract(consoleIdentity.organizationId, consoleIdentity.userId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "registry.contract.requested",
+      targetType: "registry_change",
+      targetId: change.id,
+    });
+    return context.json(change, 202);
+  });
+
+  app.patch("/v1/console/contracts/:id", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const input = await parseJson(context, contractUpdateSchema);
+    const change = await registryService.requestContractUpdate(consoleIdentity.organizationId, consoleIdentity.userId, {
+      contractId: id,
+      ...input,
+    });
+    return context.json(change, 202);
+  });
+
+  app.get("/v1/console/escalations", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json({ escalations: await payments.listEscalations(consoleIdentity.organizationId) });
+  });
+
+  app.post("/v1/console/escalations/:id/decision", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().parse(context.req.param("id"));
+    const input = await parseJson(context, z.object({ decision: z.enum(["approve", "reject"]) }));
+    const result = await payments.decideEscalation(
+      consoleIdentity.organizationId,
+      consoleIdentity.userId,
+      id,
+      input.decision,
+    );
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: input.decision === "approve" ? "escalation.approved" : "escalation.rejected",
+      targetType: "escalation",
+      targetId: id,
+    });
+    return context.json(result);
   });
 
   app.post("/v1/console/mandates/preview", requireConsole(auth, consoleLimiter), async (context) => {
@@ -460,6 +569,12 @@ export function createApp({
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof TreasuryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof RegistryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof PaymentError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     console.error(error);

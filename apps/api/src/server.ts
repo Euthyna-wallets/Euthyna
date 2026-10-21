@@ -7,16 +7,16 @@ import { BetterAuthGateway } from "./auth-gateway.js";
 import { loadEnv } from "./env.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
-import { loadRegistry } from "./registry.js";
 import { createBaseRelayer } from "./relayer.js";
 import { TreasuryService } from "./treasury.js";
 import { MandateService } from "./mandates.js";
+import { RegistryService } from "./registry-db.js";
+import { PaymentService } from "./payments.js";
 
 const env = loadEnv();
-const registry = await loadRegistry(env.VENDOR_REGISTRY_PATH);
 const guardKey = Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"));
 const signer = new EnvKmsSigner(guardKey);
-const guard = new Guard(registry, signer);
+const guard = new Guard(signer);
 const near = new NearClient(env);
 const relayer = createBaseRelayer(env, near, guard);
 const auth = new BetterAuthGateway(createAuth(env, prisma), prisma);
@@ -51,6 +51,8 @@ const treasury = new TreasuryService(prisma, near, signer, {
   daoCreateDepositYocto: "7500000000000000000000000",
 });
 const mandates = new MandateService(prisma, near);
+const registryService = new RegistryService(prisma);
+const payments = new PaymentService(prisma, near, guard, registryService);
 const app = createApp({
   near,
   guard,
@@ -58,6 +60,8 @@ const app = createApp({
   auth,
   treasury,
   mandates,
+  registry: registryService,
+  payments,
   consoleOrigin: env.CONSOLE_ORIGIN,
   passwordAuthEnabled: env.AUTH_E2E_PASSWORD === "1",
 });
