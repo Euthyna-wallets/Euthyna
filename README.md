@@ -76,8 +76,9 @@ The current repository contains:
 - `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
 - `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; `/v1/console/treasury/register` re-verifies code hashes, zero access keys, DAO ownership, Safe owners/threshold and module wiring before persisting a `Treasury`;
-- `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard and agent registration; it calls the API through a same-origin Vite proxy;
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; `/v1/console/treasury/register` re-verifies DAO code hash/policy/auto-update, Vault init parameters, relay delay/chain, zero access keys, Safe owners/threshold, module wiring and the environment-specific Delay cooldown before persisting a `Treasury`;
+- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned Trezu proposals;
+- `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard, treasury status gate and mandate preview/diff/proposals, plus agent registration;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
 - `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
 - [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
@@ -311,7 +312,8 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 - Phase 2 assets held by `0xINT` are outside Zodiac protection; exposure is limited operationally to the period budget.
 - The Base withdrawal memo and independent reference-price source remain open design points.
 - Treasury onboarding deploys the Safe first, then deploys Roles/Delay and enables them in a 2/3 Safe batch. Deploying the modules inside Safe `setup` would require predicting module addresses that themselves depend on the Safe address (circular dependency).
-- Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the console displays the addresses but does not create the funding proposal yet.
+- Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the mandate preview returns a funding payload but does not sign it.
+- A DAO registered before `FactoryInfoUpdate` is stored as `pending_dao_hardening`; the console and API block agent registration until the treasury is re-registered after the proposal executes.
 
 ## License
 

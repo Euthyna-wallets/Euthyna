@@ -8,6 +8,7 @@ import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { TreasuryError, type TreasuryGateway } from "./treasury.js";
+import type { MandateGateway } from "./mandates.js";
 import type { BaseRelayer } from "./relayer.js";
 
 const requestSchema = z.object({
@@ -31,6 +32,34 @@ const createAgentSchema = z.object({
 });
 
 const agentIdSchema = z.object({ id: z.string().uuid() });
+
+const addressSchema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]{40}$/)
+  .transform((value) => value as `0x${string}`);
+
+const mandateSchema = z.object({
+  role: z.string().regex(/^[a-z][a-z0-9-]{1,31}$/),
+  operations: z.array(z.enum(["pay", "swap", "bridge"])).min(1),
+  maxPerTx: z.string().regex(/^\d+$/),
+  budget: z.string().regex(/^\d+$/),
+  periodDays: z.number().int().min(1).max(365),
+  recipients: z.array(addressSchema).min(1),
+  token: addressSchema,
+  gas: z.object({
+    gasLimit: z.string().regex(/^\d+$/),
+    maxFeePerGas: z.string().regex(/^\d+$/),
+    maxPriorityFeePerGas: z.string().regex(/^\d+$/),
+    maxTotalFee: z.string().regex(/^\d+$/),
+  }),
+  agent: z
+    .object({
+      nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+      mpcPath: z.string().min(1).max(200),
+      evmAddress: addressSchema.optional(),
+    })
+    .optional(),
+});
 
 const walletsSchema = z.object({
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
@@ -68,6 +97,7 @@ export interface AppDependencies {
   relayer: BaseRelayer;
   auth: AuthGateway;
   treasury: TreasuryGateway;
+  mandates: MandateGateway;
   consoleOrigin: string;
 }
 
@@ -150,6 +180,7 @@ export function createApp({
   relayer,
   auth,
   treasury,
+  mandates,
   consoleOrigin,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -280,6 +311,21 @@ export function createApp({
     return context.json({ nearAccountId: input.nearAccountId, evmAddress: input.evmAddress });
   });
 
+  app.post("/v1/console/mandates/preview", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, mandateSchema);
+    const preview = await mandates.preview(consoleIdentity.organizationId, input);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "mandate.previewed",
+      targetType: "role",
+      targetId: input.role,
+    });
+    return context.json(preview);
+  });
+
   app.get("/v1/console/treasury", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const environment = context.req.query("environment") ?? "uat";
@@ -311,6 +357,13 @@ export function createApp({
 
   app.post("/v1/console/agents", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
+    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
+    if (!currentTreasury || currentTreasury.status !== "active") {
+      return context.json(
+        { error: "treasury_not_active", status: currentTreasury?.status ?? "missing" },
+        409,
+      );
+    }
     const input = await parseJson(context, createAgentSchema);
     const created = await auth.createAgent({
       organizationId: consoleIdentity.organizationId,

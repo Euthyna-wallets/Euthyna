@@ -15,7 +15,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { baseSepolia } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const SAFE_VERSION = "1.4.1";
@@ -105,6 +105,7 @@ export interface BaseTreasuryPlanInput {
   threshold: number;
   govAddress: Address;
   rpcUrl: string;
+  chainId?: number;
   /** Test seam: skip the RPC read of SafeProxyFactory.proxyCreationCode(). */
   proxyCreationCode?: Hex;
 }
@@ -115,9 +116,10 @@ function deploymentAddress(
     | ReturnType<typeof getProxyFactoryDeployment>
     | ReturnType<typeof getMultiSendDeployment>,
   name: string,
+  chainId: number,
 ): Address {
-  if (!deployment) throw new Error(`${name} ${SAFE_VERSION} is not registered on Base`);
-  const address = deployment.networkAddresses[String(BASE_SEPOLIA_CHAIN_ID)] ?? deployment.defaultAddress;
+  if (!deployment) throw new Error(`${name} ${SAFE_VERSION} is not registered on chain ${chainId}`);
+  const address = deployment.networkAddresses[String(chainId)] ?? deployment.defaultAddress;
   return getAddress(address);
 }
 
@@ -153,23 +155,25 @@ function predictSafeAddress(
 export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promise<BaseTreasuryPlan> {
   if (input.owners.length === 0) throw new Error("at least one Safe owner is required");
   if (input.threshold < 1 || input.threshold > input.owners.length) throw new Error("invalid Safe threshold");
+  const chainId = input.chainId ?? BASE_SEPOLIA_CHAIN_ID;
+  const chain = chainId === 8453 ? base : baseSepolia;
 
   const compartment = `mandateos:${input.organizationId}:${input.slug}`;
   const safeSalt = BigInt(keccak256(stringToHex(`${compartment}:safe:${SAFE_VERSION}`)));
   const rolesSalt = BigInt(keccak256(stringToHex(`${compartment}:roles:${ROLES_VERSION}`)));
   const delaySalt = BigInt(keccak256(stringToHex(`${compartment}:delay:${DELAY_VERSION}`)));
 
-  const singletonDeployment = getSafeL2SingletonDeployment({ network: String(BASE_SEPOLIA_CHAIN_ID), version: SAFE_VERSION });
-  const factoryDeployment = getProxyFactoryDeployment({ network: String(BASE_SEPOLIA_CHAIN_ID), version: SAFE_VERSION });
-  const multiSendDeployment = getMultiSendDeployment({ network: String(BASE_SEPOLIA_CHAIN_ID), version: SAFE_VERSION });
-  const singleton = deploymentAddress(singletonDeployment, "SafeL2");
-  const factory = deploymentAddress(factoryDeployment, "SafeProxyFactory");
-  const multiSend = deploymentAddress(multiSendDeployment, "MultiSend");
+  const singletonDeployment = getSafeL2SingletonDeployment({ network: String(chainId), version: SAFE_VERSION });
+  const factoryDeployment = getProxyFactoryDeployment({ network: String(chainId), version: SAFE_VERSION });
+  const multiSendDeployment = getMultiSendDeployment({ network: String(chainId), version: SAFE_VERSION });
+  const singleton = deploymentAddress(singletonDeployment, "SafeL2", chainId);
+  const factory = deploymentAddress(factoryDeployment, "SafeProxyFactory", chainId);
+  const multiSend = deploymentAddress(multiSendDeployment, "MultiSend", chainId);
   if (!singletonDeployment || !factoryDeployment || !multiSendDeployment) throw new Error("Safe deployments missing");
 
   const proxyCreationCode =
     input.proxyCreationCode ??
-    ((await createPublicClient({ chain: baseSepolia, transport: http(input.rpcUrl) }).readContract({
+    ((await createPublicClient({ chain, transport: http(input.rpcUrl) }).readContract({
       address: factory,
       abi: proxyFactoryAbi,
       functionName: "proxyCreationCode",
@@ -225,7 +229,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
   ];
 
   return {
-    chainId: BASE_SEPOLIA_CHAIN_ID,
+    chainId,
     safeAddress,
     safeDeployment: {
       to: factory,
@@ -235,7 +239,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
         functionName: "createProxyWithNonce",
         args: [singleton, initializer, safeSalt],
       }),
-      chainId: BASE_SEPOLIA_CHAIN_ID,
+      chainId,
       description: `Deploy Safe ${SAFE_VERSION}`,
     },
     rolesAddress,
@@ -243,7 +247,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
       to: getAddress(String(rolesTransaction.to)),
       value: "0",
       data: rolesTransaction.data as Hex,
-      chainId: BASE_SEPOLIA_CHAIN_ID,
+      chainId,
       description: `Deploy Zodiac Roles ${ROLES_VERSION}`,
     },
     delayAddress,
@@ -251,7 +255,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
       to: getAddress(String(delayTransaction.to)),
       value: "0",
       data: delayTransaction.data as Hex,
-      chainId: BASE_SEPOLIA_CHAIN_ID,
+      chainId,
       description: `Deploy Zodiac Delay ${DELAY_VERSION}`,
     },
     safeModuleCalls,

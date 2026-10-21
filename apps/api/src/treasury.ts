@@ -6,20 +6,26 @@ import { buildBaseTreasuryPlan, type BaseTreasuryPlan } from "@mandateos/deploye
 import type { PrismaClient } from "@mandateos/db";
 import bs58 from "bs58";
 import { createPublicClient, getAddress, http, keccak256, type Address, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
+
+export interface TreasuryEnvironmentConfig {
+  baseChainId: number;
+  baseRpcUrl: string;
+  delayCooldownSeconds: bigint;
+  delayExpirationSeconds: bigint;
+}
 
 export interface TreasuryConfig {
   nearNetwork: string;
   daoFactoryId: string;
   mpcContractId: string;
   mpcPath: string;
-  baseRpcUrl: string;
   budgetTokenAccountId: string;
   artifactsDir: string;
-  baseChainId: number;
+  environments: Record<string, TreasuryEnvironmentConfig>;
   vaultTtlBlocks: number;
   vaultDepositYocto: string;
   relayDepositYocto: string;
@@ -99,7 +105,19 @@ export type BaseTreasuryPlanner = (input: {
   threshold: number;
   govAddress: Address;
   rpcUrl: string;
+  chainId: number;
 }) => Promise<BaseTreasuryPlan>;
+
+export function assertDelayPolicy(
+  cooldown: bigint,
+  expiration: bigint,
+  expectedCooldown: bigint,
+  expectedExpiration: bigint,
+): void {
+  if (cooldown !== expectedCooldown || expiration !== expectedExpiration) {
+    throw new TreasuryError(422, "delay_policy_mismatch", "Delay cooldown or expiration is incorrect");
+  }
+}
 
 export interface BaseTreasuryVerifier {
   verify(input: {
@@ -109,6 +127,8 @@ export interface BaseTreasuryVerifier {
     rolesAddress: Address;
     delayAddress: Address;
     govAddress: Address;
+    delayCooldownSeconds: bigint;
+    delayExpirationSeconds: bigint;
   }): Promise<void>;
 }
 
@@ -117,6 +137,26 @@ export interface TreasuryGateway {
   plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan>;
   register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
+}
+
+interface SputnikPolicy {
+  roles?: Array<{ name?: string; kind?: unknown; permissions?: string[] }>;
+  default_vote_policy?: { threshold?: string | number };
+}
+
+interface FactoryInfo {
+  factory_id?: string;
+  auto_update?: boolean;
+}
+
+function isGroupKind(kind: unknown): kind is { Group: string[] } {
+  return (
+    typeof kind === "object" &&
+    kind !== null &&
+    "Group" in kind &&
+    Array.isArray(kind.Group) &&
+    kind.Group.every((member) => typeof member === "string")
+  );
 }
 
 export class TreasuryError extends Error {
@@ -205,8 +245,14 @@ async function loadArtifact(directory: string, name: string): Promise<Artifact> 
 export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
   private readonly client;
 
-  constructor(rpcUrl: string) {
-    this.client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
+  constructor(
+    rpcUrl: string,
+    private readonly chainId: number,
+  ) {
+    this.client = createPublicClient({
+      chain: chainId === 8453 ? base : baseSepolia,
+      transport: http(rpcUrl),
+    });
   }
 
   async verify(input: {
@@ -216,6 +262,8 @@ export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
     rolesAddress: Address;
     delayAddress: Address;
     govAddress: Address;
+    delayCooldownSeconds: bigint;
+    delayExpirationSeconds: bigint;
   }): Promise<void> {
     const { safe, roles, delay, gov, owners, threshold } = {
       safe: input.safeAddress,
@@ -244,7 +292,7 @@ export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
     if (!govEnabled) throw new TreasuryError(422, "gov_not_enabled", "0xGOV is not enabled on Delay");
     const cooldown = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "txCooldown" });
     const expiration = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "txExpiration" });
-    if (cooldown !== 300n || expiration !== 604_800n) throw new TreasuryError(422, "delay_policy_mismatch", "Delay cooldown or expiration is incorrect");
+    assertDelayPolicy(cooldown, expiration, input.delayCooldownSeconds, input.delayExpirationSeconds);
     const rolesOwner = getAddress(await this.client.readContract({ address: roles, abi: rolesAbi, functionName: "owner" }));
     const rolesAvatar = getAddress(await this.client.readContract({ address: roles, abi: rolesAbi, functionName: "avatar" }));
     const rolesTarget = getAddress(await this.client.readContract({ address: roles, abi: rolesAbi, functionName: "target" }));
@@ -261,8 +309,16 @@ export class TreasuryService {
     private readonly signer: KmsSigner,
     private readonly config: TreasuryConfig,
     private readonly basePlanner: BaseTreasuryPlanner = buildBaseTreasuryPlan,
-    private readonly baseVerifier: BaseTreasuryVerifier = new RpcBaseTreasuryVerifier(config.baseRpcUrl),
+    private readonly baseVerifierFactory: (environment: TreasuryEnvironmentConfig) => BaseTreasuryVerifier = (
+      environment,
+    ) => new RpcBaseTreasuryVerifier(environment.baseRpcUrl, environment.baseChainId),
   ) {}
+
+  private environment(name: string): TreasuryEnvironmentConfig {
+    const environment = this.config.environments[name];
+    if (!environment) throw new TreasuryError(400, "unknown_environment", `unknown environment ${name}`);
+    return environment;
+  }
 
   async linkWallets(
     organizationId: string,
@@ -286,6 +342,7 @@ export class TreasuryService {
   }
 
   async plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan> {
+    const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({
       where: { organizationId },
       orderBy: { createdAt: "asc" },
@@ -348,7 +405,7 @@ export class TreasuryService {
       owner_id: daoAccountId,
       token_id: this.config.budgetTokenAccountId,
       mpc_contract_id: this.config.mpcContractId,
-      evm_chain_id: this.config.baseChainId,
+      evm_chain_id: environment.baseChainId,
       guard_public_key: guardPublicKey,
       policy_version: 1,
       registry_version: 1,
@@ -358,7 +415,7 @@ export class TreasuryService {
       owner_id: daoAccountId,
       mpc_contract_id: this.config.mpcContractId,
       mpc_path: this.config.mpcPath,
-      evm_chain_id: this.config.baseChainId,
+      evm_chain_id: environment.baseChainId,
       delay_address: Buffer.from(govAddress.slice(2), "hex").toString("base64"),
       max_gas_limit: "300000",
       max_fee_per_gas: "100000000000",
@@ -372,7 +429,8 @@ export class TreasuryService {
       owners: council.map((member) => member.evmAddress),
       threshold,
       govAddress,
-      rpcUrl: this.config.baseRpcUrl,
+      rpcUrl: environment.baseRpcUrl,
+      chainId: environment.baseChainId,
     });
 
     const nearDeployment = (accountId: string, artifact: Artifact, initArgs: Record<string, unknown>, depositYocto: string): NearContractPlan => ({
@@ -392,7 +450,7 @@ export class TreasuryService {
       organizationId,
       environment: input.environment,
       nearNetwork: this.config.nearNetwork,
-      baseChainId: this.config.baseChainId,
+      baseChainId: environment.baseChainId,
       daoAccountId,
       council,
       threshold,
@@ -412,6 +470,7 @@ export class TreasuryService {
   }
 
   async register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView> {
+    const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({ where: { organizationId } })) as TreasuryMember[];
     if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
       throw new TreasuryError(409, "member_wallets_missing", "every member must link a NEAR and an EVM wallet");
@@ -421,29 +480,64 @@ export class TreasuryService {
     const vaultArtifact = await loadArtifact(this.config.artifactsDir, "vault.wasm");
     const relayArtifact = await loadArtifact(this.config.artifactsDir, "governance_relay.wasm");
 
-    await this.verifyNearAccount(input.daoAccountId, null);
+    const factoryCodeHash = await this.near.viewFunction<string>(this.config.daoFactoryId, "get_default_code_hash");
+    const daoAccount = await this.near.getAccount(input.daoAccountId);
+    if (daoAccount.code_hash !== factoryCodeHash) {
+      throw new TreasuryError(422, "dao_code_hash_mismatch", "DAO code hash does not match the factory default");
+    }
+    const policy = await this.near.viewFunction<SputnikPolicy>(input.daoAccountId, "get_policy");
+    this.validateDaoPolicy(policy, members.map((member) => member.nearAccountId as string), expectedThreshold);
+    const factoryInfo = await this.near.viewFunction<FactoryInfo>(input.daoAccountId, "get_factory_info");
+    const daoHardened = factoryInfo.auto_update === false;
+
     await this.verifyNearAccount(input.vaultAccountId, vaultArtifact.sha256);
     await this.verifyNearAccount(input.relayAccountId, relayArtifact.sha256);
     const vaultOwner = await this.near.viewFunction<string>(input.vaultAccountId, "owner_id");
     const relayOwner = await this.near.viewFunction<string>(input.relayAccountId, "owner_id");
     if (vaultOwner !== input.daoAccountId) throw new TreasuryError(422, "vault_owner_mismatch", "Vault owner is not the DAO");
     if (relayOwner !== input.daoAccountId) throw new TreasuryError(422, "relay_owner_mismatch", "relay owner is not the DAO");
+
+    const expectedGuardKey = Buffer.from(await this.signer.publicKey()).toString("base64");
+    const vaultParameters: Array<[string, unknown, unknown, string]> = [
+      ["mpc_contract_id", await this.near.viewFunction<string>(input.vaultAccountId, "mpc_contract_id"), this.config.mpcContractId, "vault_mpc_mismatch"],
+      ["evm_chain_id", await this.near.viewFunction<number>(input.vaultAccountId, "evm_chain_id"), environment.baseChainId, "vault_chain_mismatch"],
+      ["guard_public_key", await this.near.viewFunction<string>(input.vaultAccountId, "guard_public_key"), expectedGuardKey, "vault_guard_key_mismatch"],
+      ["token_id", await this.near.viewFunction<string>(input.vaultAccountId, "token_id"), this.config.budgetTokenAccountId, "vault_token_mismatch"],
+      ["reservation_ttl_blocks", await this.near.viewFunction<number>(input.vaultAccountId, "reservation_ttl_blocks"), this.config.vaultTtlBlocks, "vault_ttl_mismatch"],
+    ];
+    for (const [name, actual, expected, code] of vaultParameters) {
+      if (actual !== expected) {
+        throw new TreasuryError(422, code, `Vault ${name} is ${String(actual)}, expected ${String(expected)}`);
+      }
+    }
+
+    const expectedGov = getAddress(input.govAddress);
     const relayGov = await this.near.viewFunction<string>(input.relayAccountId, "evm_address");
     const relayGovHex = `0x${Buffer.from(relayGov, "base64").toString("hex")}`;
-    if (getAddress(relayGovHex) !== getAddress(input.govAddress)) {
+    if (getAddress(relayGovHex) !== expectedGov) {
       throw new TreasuryError(422, "gov_mismatch", "relay does not derive the registered 0xGOV");
+    }
+    const relayDelay = await this.near.viewFunction<string>(input.relayAccountId, "delay_address");
+    if (Buffer.from(relayDelay, "base64").toString("hex") !== expectedGov.slice(2).toLowerCase()) {
+      throw new TreasuryError(422, "relay_delay_mismatch", "relay delay_address is not the registered 0xGOV");
+    }
+    const relayChain = await this.near.viewFunction<number>(input.relayAccountId, "evm_chain_id");
+    if (relayChain !== environment.baseChainId) {
+      throw new TreasuryError(422, "relay_chain_mismatch", "relay evm_chain_id is incorrect");
     }
 
     const safe = getAddress(input.safeAddress);
     const roles = getAddress(input.rolesAddress);
     const delay = getAddress(input.delayAddress);
-    await this.baseVerifier.verify({
+    await this.baseVerifierFactory(environment).verify({
       owners: members.map((member) => getAddress(member.evmAddress as string)),
       threshold: expectedThreshold,
       safeAddress: safe,
       rolesAddress: roles,
       delayAddress: delay,
-      govAddress: getAddress(input.govAddress),
+      govAddress: expectedGov,
+      delayCooldownSeconds: environment.delayCooldownSeconds,
+      delayExpirationSeconds: environment.delayExpirationSeconds,
     });
 
     const treasury = await this.prisma.treasury.create({
@@ -451,7 +545,7 @@ export class TreasuryService {
         organizationId,
         environment: input.environment,
         nearNetwork: this.config.nearNetwork,
-        baseChainId: this.config.baseChainId,
+        baseChainId: environment.baseChainId,
         daoAccountId: input.daoAccountId,
         vaultAccountId: input.vaultAccountId,
         relayAccountId: input.relayAccountId,
@@ -461,7 +555,7 @@ export class TreasuryService {
         govAddress: getAddress(input.govAddress),
         vaultWasmSha256: vaultArtifact.sha256,
         relayWasmSha256: relayArtifact.sha256,
-        status: "active",
+        status: daoHardened ? "active" : "pending_dao_hardening",
       },
     }).catch((error: unknown) => {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
@@ -477,10 +571,33 @@ export class TreasuryService {
         action: "treasury.registered",
         targetType: "treasury",
         targetId: treasury.id,
-        metadata: { daoAccountId: input.daoAccountId, safeAddress: safe },
+        metadata: { daoAccountId: input.daoAccountId, safeAddress: safe, status: daoHardened ? "active" : "pending_dao_hardening" },
       },
     });
     return this.toView(treasury);
+  }
+
+  private validateDaoPolicy(policy: SputnikPolicy, council: string[], threshold: bigint): void {
+    const roles = Array.isArray(policy.roles) ? policy.roles : [];
+    const councilRole = roles.find((role) => role.name === "council");
+    const group = isGroupKind(councilRole?.kind) ? councilRole.kind.Group : null;
+    if (!group) throw new TreasuryError(422, "dao_council_role_missing", "DAO has no council Group role");
+    const actual = [...group].sort();
+    const expected = [...council].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new TreasuryError(422, "dao_council_mismatch", "DAO council members do not match the organization");
+    }
+    const policyThreshold = policy.default_vote_policy?.threshold;
+    if (policyThreshold === undefined || String(policyThreshold) !== threshold.toString()) {
+      throw new TreasuryError(422, "dao_threshold_mismatch", "DAO vote threshold is incorrect");
+    }
+    for (const role of roles) {
+      const permissions = Array.isArray(role.permissions) ? role.permissions : [];
+      const everyone = role.kind === "Everyone" || role.name === "Everyone";
+      if (everyone && permissions.some((permission) => permission.includes("AddProposal"))) {
+        throw new TreasuryError(422, "dao_everyone_add_proposal", "DAO grants AddProposal to Everyone");
+      }
+    }
   }
 
   private async verifyNearAccount(accountId: string, expectedSha256: string | null): Promise<void> {

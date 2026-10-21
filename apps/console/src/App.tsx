@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api, explorerBase, explorerNear, type TreasuryPlan, type TreasuryView } from "./api.js";
+import { api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "./api.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -46,6 +46,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [mandate, setMandate] = useState<MandatePreview | null>(null);
   const [founderNear, setFounderNear] = useState("");
 
   const signedIn = Boolean(session.data?.user);
@@ -110,6 +111,7 @@ export function App() {
           <a className="active" href="#onboarding">Onboarding</a>
           <a href="#treasury">Treasury</a>
           <a href="#agents">Agents</a>
+          <a href="#mandates">Mandates</a>
         </nav>
         <div className="spacer" />
         <div className="small muted">{session.data?.user.email}</div>
@@ -222,15 +224,31 @@ export function App() {
         {treasury ? (
           <section id="agents" className="card">
             <h2>4. Register an agent</h2>
-            <AgentForm
-              treasury={treasury}
-              onCreated={(createdKey) => {
-                setApiKey(createdKey);
-                setNotice("Agent created. The API key is shown once.");
-              }}
-              onError={setError}
-            />
-            {apiKey ? <pre className="secret">{apiKey}</pre> : null}
+            {treasury.status === "active" ? (
+              <>
+                <AgentForm
+                  treasury={treasury}
+                  onCreated={(createdKey) => {
+                    setApiKey(createdKey);
+                    setNotice("Agent created. The API key is shown once.");
+                  }}
+                  onError={setError}
+                />
+                {apiKey ? <pre className="secret">{apiKey}</pre> : null}
+              </>
+            ) : (
+              <div className="alert error">
+                Agent registration is blocked: the DAO factory auto-update is still enabled.
+                Pass and execute the FactoryInfoUpdate proposal, then register the treasury again.
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {treasury?.status === "active" ? (
+          <section id="mandates" className="card">
+            <h2>5. Agent mandate</h2>
+            <MandatePanel treasury={treasury} preview={mandate} onPreview={setMandate} onError={setError} />
           </section>
         ) : null}
       </main>
@@ -730,6 +748,132 @@ function AgentForm(props: {
       <div className="muted small">
         The agent's NEAR function-call private key stays in the SDK/MCP client. Only the public key is sent.
       </div>
+    </div>
+  );
+}
+
+
+function MandatePanel(props: {
+  treasury: TreasuryView;
+  preview: MandatePreview | null;
+  onPreview: (preview: MandatePreview) => void;
+  onError: (message: string) => void;
+}) {
+  const [role, setRole] = useState("researcher");
+  const [maxPerTx, setMaxPerTx] = useState("5000000");
+  const [budget, setBudget] = useState("6000000");
+  const [periodDays, setPeriodDays] = useState("30");
+  const [recipients, setRecipients] = useState("");
+  const [token, setToken] = useState("0x418A2b47911dE05e21688F7490195F5324B49474");
+  const [agentAccount, setAgentAccount] = useState("");
+  const [agentEvm, setAgentEvm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="stack">
+      <p className="muted">
+        One YAML-like mandate compiles into three locks. The preview is deterministic; the server
+        prepares unsigned Trezu proposals and never signs.
+      </p>
+      <div className="row wrap">
+        <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
+        <input placeholder="max per tx" value={maxPerTx} onChange={(event) => setMaxPerTx(event.target.value)} />
+        <input placeholder="budget" value={budget} onChange={(event) => setBudget(event.target.value)} />
+        <input placeholder="period days" value={periodDays} onChange={(event) => setPeriodDays(event.target.value)} />
+      </div>
+      <input placeholder="recipient 0x…, comma separated" value={recipients} onChange={(event) => setRecipients(event.target.value)} />
+      <input placeholder="token 0x…" value={token} onChange={(event) => setToken(event.target.value)} />
+      <div className="row wrap">
+        <input placeholder="agent near account (optional)" value={agentAccount} onChange={(event) => setAgentAccount(event.target.value)} />
+        <input placeholder="agent EVM address (optional)" value={agentEvm} onChange={(event) => setAgentEvm(event.target.value)} />
+      </div>
+      <button
+        className="primary"
+        disabled={busy}
+        onClick={() => {
+          void (async () => {
+            setBusy(true);
+            try {
+              const preview = await api<MandatePreview>("/v1/console/mandates/preview", {
+                method: "POST",
+                body: JSON.stringify({
+                  role,
+                  operations: ["pay"],
+                  maxPerTx,
+                  budget,
+                  periodDays: Number(periodDays),
+                  recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
+                  token,
+                  gas: {
+                    gasLimit: "200000",
+                    maxFeePerGas: "20000000000",
+                    maxPriorityFeePerGas: "1000000000",
+                    maxTotalFee: "30000000000000000",
+                  },
+                  ...(agentAccount
+                    ? {
+                        agent: {
+                          nearAccountId: agentAccount,
+                          mpcPath: `agents/${role}/base`,
+                          ...(agentEvm ? { evmAddress: agentEvm } : {}),
+                        },
+                      }
+                    : {}),
+                }),
+              });
+              props.onPreview(preview);
+            } catch (cause) {
+              props.onError(cause instanceof Error ? cause.message : String(cause));
+            } finally {
+              setBusy(false);
+            }
+          })();
+        }}
+      >
+        {busy ? "Compiling…" : "Preview mandate"}
+      </button>
+
+      {props.preview ? (
+        <>
+          <div className="row wrap">
+            <span className="pill">roleKey {short(props.preview.roleKey)}</span>
+            <span className="pill">allowance {short(props.preview.allowanceKey)}</span>
+            <span className="pill">agent: {props.preview.agentStatus}</span>
+          </div>
+          {props.preview.warnings.map((warning) => (
+            <div key={warning} className="alert success">{warning}</div>
+          ))}
+          <h3>Diff</h3>
+          <table>
+            <thead><tr><th>Field</th><th>Current</th><th>Next</th></tr></thead>
+            <tbody>
+              {props.preview.diff.map((change) => (
+                <tr key={change.field}>
+                  <td>{change.field}</td>
+                  <td><code>{JSON.stringify(change.current)}</code></td>
+                  <td><code>{JSON.stringify(change.next)}</code></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="row wrap">
+            <div className="step">
+              <h3>Vault</h3>
+              <pre>{JSON.stringify(props.preview.vault.config, null, 2)}</pre>
+            </div>
+            <div className="step">
+              <h3>Zodiac</h3>
+              <pre>{JSON.stringify({ target: props.preview.zodiac.target, selector: props.preview.zodiac.selector, calls: props.preview.zodiac.calls.map((call) => call.description) }, null, 2)}</pre>
+            </div>
+            <div className="step">
+              <h3>Guard</h3>
+              <pre>{JSON.stringify(props.preview.guard, null, 2)}</pre>
+            </div>
+          </div>
+          <h3>Unsigned proposals</h3>
+          <pre>{JSON.stringify(props.preview.proposals, null, 2)}</pre>
+        </>
+      ) : null}
     </div>
   );
 }

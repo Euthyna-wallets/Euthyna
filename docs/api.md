@@ -140,18 +140,38 @@ The response contains:
   calls to sign. The Safe is deployed before the modules because their initializers
   reference its address; enabling them is a separate 2/3 Safe batch.
 
+### `POST /v1/console/mandates/preview`
+
+Compiles one role into the three locks and returns a diff plus unsigned proposals:
+
+- Vault `set_role` config (`role_key`, token, Recipient allowlist, caps, gas);
+- Zodiac permission (`scopeTarget`, `scopeFunction` with recipient conditions and allowance,
+  `assignRoles` once the agent EVM address exists);
+- Guard policy snapshot;
+- DAO and governance-relay proposal payloads. The server never signs.
+
+`swap`/`bridge` are rejected until Phase 2. `maxPerTx` must not exceed the budget.
+
 ### `POST /v1/console/treasury/register`
 
 Admin only. Verifies on-chain state before inserting `treasury`:
 
+- DAO code hash equals `sputnikv2.testnet.get_default_code_hash()`;
+- DAO `get_policy()` has the council Group equal to the member NEAR accounts, an
+  absolute threshold `ceil(2n/3)`, and no `Everyone` role granting `AddProposal`;
+- DAO `get_factory_info().auto_update === false`; otherwise the treasury is stored
+  as `pending_dao_hardening` and agent creation is blocked;
 - Vault and relay code hashes equal the local wasm SHA-256, and both have zero
   access keys;
+- Vault `mpc_contract_id`, `evm_chain_id`, `guard_public_key` (KMS key),
+  `token_id` and `reservation_ttl_blocks` equal the expected values;
 - Vault and relay `owner_id` equal the DAO;
 - relay `evm_address` equals the registered `0xGOV`;
 - Safe owners equal the council EVM addresses, threshold is `ceil(2n/3)`;
 - Roles and Delay are enabled modules, `0xGOV` is enabled on Delay;
-- Delay cooldown/expiration are `300`/`604 800`, Roles owner/avatar/target are the
-  Safe.
+- Relay `delay_address` and `evm_chain_id` are correct;
+- Delay cooldown/expiration match the environment (`uat` 300 s, `production`
+  86 400 s), Roles owner/avatar/target are the Safe.
 
 ```json
 {

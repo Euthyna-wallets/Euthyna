@@ -11,6 +11,7 @@ import { getAddress } from "viem";
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
 import {
+  assertDelayPolicy,
   TreasuryError,
   TreasuryService,
   type BaseTreasuryVerifier,
@@ -26,10 +27,22 @@ const config: TreasuryConfig = {
   daoFactoryId: "sputnikv2.testnet",
   mpcContractId: "v1.signer-prod.testnet",
   mpcPath: "governance/base-sepolia",
-  baseRpcUrl: "http://127.0.0.1:8545",
   budgetTokenAccountId: "test-ft.testnet",
   artifactsDir,
-  baseChainId: 84532,
+  environments: {
+    uat: {
+      baseChainId: 84532,
+      baseRpcUrl: "http://127.0.0.1:8545",
+      delayCooldownSeconds: 300n,
+      delayExpirationSeconds: 604_800n,
+    },
+    production: {
+      baseChainId: 8453,
+      baseRpcUrl: "http://127.0.0.1:8546",
+      delayCooldownSeconds: 86_400n,
+      delayExpirationSeconds: 604_800n,
+    },
+  },
   vaultTtlBlocks: 50,
   vaultDepositYocto: "10000000000000000000000000",
   relayDepositYocto: "10000000000000000000000000",
@@ -60,7 +73,6 @@ function fakePrisma(options?: { members?: TestMember[] }) {
         return {
           ...(data as Record<string, unknown>),
           id: "treasury-1",
-          status: "active",
         };
       },
     },
@@ -73,14 +85,54 @@ function fakePrisma(options?: { members?: TestMember[] }) {
   return { prisma, created, audits };
 }
 
-function fakeNear(overrides?: { vaultOwner?: string; codeHashes?: Record<string, string> }): NearClient {
+type NearOverrides = {
+  vaultOwner?: string;
+  codeHashes?: Record<string, string>;
+  policy?: unknown;
+  autoUpdate?: boolean;
+  vault?: { mpc?: string; chain?: number; guard?: string; token?: string; ttl?: number };
+  relay?: { chain?: number; delay?: string };
+};
+
+const daoAccountId = "acme.sputnikv2.testnet";
+const vaultAccountId = "acme-vault.alice.testnet";
+const relayAccountId = "acme-relay.alice.testnet";
+const guardKeyBase64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+
+function councilPolicy() {
+  return {
+    roles: [
+      {
+        name: "council",
+        kind: { Group: members.map((member) => member.nearAccountId) },
+        permissions: ["*:AddProposal", "*:VoteApprove"],
+      },
+    ],
+    default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: "2" },
+  };
+}
+
+function fakeNear(overrides?: NearOverrides): NearClient {
   return {
     derivedPublicKey: async () => govPublicKey,
-    getAccount: async (accountId: string) => ({ code_hash: overrides?.codeHashes?.[accountId] ?? "unused", amount: "0" }),
+    getAccount: async (accountId: string) => ({
+      code_hash: overrides?.codeHashes?.[accountId] ?? "factory-hash",
+      amount: "0",
+    }),
     getAccessKeys: async () => ({ keys: [] }),
     viewFunction: async (accountId: string, method: string) => {
-      if (method === "owner_id") return overrides?.vaultOwner ?? "acme.sputnikv2.testnet";
+      const isVault = accountId === vaultAccountId;
+      if (method === "get_default_code_hash") return "factory-hash";
+      if (method === "get_policy") return overrides?.policy ?? councilPolicy();
+      if (method === "get_factory_info") return { factory_id: "sputnikv2.testnet", auto_update: overrides?.autoUpdate ?? false };
+      if (method === "owner_id") return overrides?.vaultOwner ?? daoAccountId;
       if (method === "evm_address") return Buffer.from(govAddress.slice(2), "hex").toString("base64");
+      if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(govAddress.slice(2), "hex").toString("base64");
+      if (method === "mpc_contract_id") return overrides?.vault?.mpc ?? config.mpcContractId;
+      if (method === "evm_chain_id") return isVault ? (overrides?.vault?.chain ?? 84532) : (overrides?.relay?.chain ?? 84532);
+      if (method === "guard_public_key") return overrides?.vault?.guard ?? guardKeyBase64;
+      if (method === "token_id") return overrides?.vault?.token ?? config.budgetTokenAccountId;
+      if (method === "reservation_ttl_blocks") return overrides?.vault?.ttl ?? config.vaultTtlBlocks;
       throw new Error(`unexpected view ${accountId}.${method}`);
     },
   } as unknown as NearClient;
@@ -105,8 +157,8 @@ const basePlan = {
 
 const verifier: BaseTreasuryVerifier = { verify: async () => undefined };
 
-function service(prisma: PrismaClient, near: NearClient = fakeNear()) {
-  return new TreasuryService(prisma, near, signer, config, async () => basePlan, verifier);
+function service(prisma: PrismaClient, near: NearClient = fakeNear(), baseVerifier = verifier) {
+  return new TreasuryService(prisma, near, signer, config, async () => basePlan, () => baseVerifier);
 }
 
 describe("TreasuryService.plan", () => {
@@ -153,16 +205,16 @@ async function artifactHashes() {
   const hash = async (name: string) =>
     bs58.encode(createHash("sha256").update(await readFile(resolve(artifactsDir, name))).digest());
   return {
-    "acme-vault.alice.testnet": await hash("vault.wasm"),
-    "acme-relay.alice.testnet": await hash("governance_relay.wasm"),
+    [vaultAccountId]: await hash("vault.wasm"),
+    [relayAccountId]: await hash("governance_relay.wasm"),
   };
 }
 
 const registerInput = {
   environment: "uat",
-  daoAccountId: "acme.sputnikv2.testnet",
-  vaultAccountId: "acme-vault.alice.testnet",
-  relayAccountId: "acme-relay.alice.testnet",
+  daoAccountId,
+  vaultAccountId,
+  relayAccountId,
   safeAddress: basePlan.safeAddress,
   rolesAddress: basePlan.rolesAddress,
   delayAddress: basePlan.delayAddress,
@@ -191,9 +243,124 @@ describe("TreasuryService.register", () => {
 
   it("refuses a Vault code hash that does not match the artifact", async () => {
     const { prisma } = fakePrisma();
-    const near = fakeNear({ codeHashes: { "acme-vault.alice.testnet": "wrong", "acme-relay.alice.testnet": "wrong" } });
+    const near = fakeNear({ codeHashes: { [vaultAccountId]: "wrong", [relayAccountId]: "wrong" } });
     await expect(service(prisma, near).register("org-1", "user-1", registerInput)).rejects.toMatchObject({
       code: "wasm_hash_mismatch",
     });
+  });
+});
+
+
+describe("TreasuryService.register hardening", () => {
+  async function validNear(overrides?: NearOverrides) {
+    return fakeNear({ codeHashes: await artifactHashes(), ...overrides });
+  }
+
+  it("keeps the treasury pending while the DAO auto-update is still enabled", async () => {
+    const { prisma, created } = fakePrisma();
+    const treasury = await service(prisma, await validNear({ autoUpdate: true })).register(
+      "org-1",
+      "user-1",
+      registerInput,
+    );
+    expect(treasury.status).toBe("pending_dao_hardening");
+    expect(created).toEqual([expect.objectContaining({ status: "pending_dao_hardening" })]);
+  });
+
+  it("rejects a DAO whose code hash is not the factory default", async () => {
+    const { prisma } = fakePrisma();
+    const near = await validNear({ codeHashes: { ...(await artifactHashes()), [daoAccountId]: "other-hash" } });
+    await expect(service(prisma, near).register("org-1", "user-1", registerInput)).rejects.toMatchObject({
+      code: "dao_code_hash_mismatch",
+    });
+  });
+
+  it("rejects a council that does not match the organization members", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      roles: [{ ...councilPolicy().roles[0], kind: { Group: ["alice.testnet", "bob.testnet"] } }],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_council_mismatch" });
+  });
+
+  it("rejects a non-absolute or wrong threshold", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: "3" },
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_threshold_mismatch" });
+  });
+
+  it("rejects a policy that grants AddProposal to Everyone", async () => {
+    const { prisma } = fakePrisma();
+    const policy = {
+      ...councilPolicy(),
+      roles: [
+        ...councilPolicy().roles,
+        { name: "open", kind: "Everyone", permissions: ["*:AddProposal"] },
+      ],
+    };
+    await expect(
+      service(prisma, await validNear({ policy })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "dao_everyone_add_proposal" });
+  });
+
+  it.each([
+    ["mpc_contract_id", { mpc: "wrong.testnet" }, "vault_mpc_mismatch"],
+    ["evm_chain_id", { chain: 8453 }, "vault_chain_mismatch"],
+    ["guard_public_key", { guard: "AAAA" }, "vault_guard_key_mismatch"],
+    ["token_id", { token: "wrong-ft.testnet" }, "vault_token_mismatch"],
+    ["reservation_ttl_blocks", { ttl: 99 }, "vault_ttl_mismatch"],
+  ])("rejects a Vault with the wrong %s", async (_name, vaultOverride, code) => {
+    const { prisma } = fakePrisma();
+    await expect(
+      service(prisma, await validNear({ vault: vaultOverride })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code });
+  });
+
+  it("rejects a relay whose delay_address is not 0xGOV", async () => {
+    const { prisma } = fakePrisma();
+    await expect(
+      service(prisma, await validNear({ relay: { delay: Buffer.alloc(20).toString("base64") } })).register(
+        "org-1",
+        "user-1",
+        registerInput,
+      ),
+    ).rejects.toMatchObject({ code: "relay_delay_mismatch" });
+  });
+
+  it("rejects a relay with the wrong chain id", async () => {
+    const { prisma } = fakePrisma();
+    await expect(
+      service(prisma, await validNear({ relay: { chain: 8453 } })).register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "relay_chain_mismatch" });
+  });
+
+  it("passes the environment cooldown to the Delay verifier", async () => {
+    const { prisma } = fakePrisma();
+    const calls: Array<{ cooldown: bigint; expiration: bigint }> = [];
+    const spy: BaseTreasuryVerifier = {
+      verify: async (input) => {
+        calls.push({ cooldown: input.delayCooldownSeconds, expiration: input.delayExpirationSeconds });
+      },
+    };
+    await service(prisma, await validNear({ vault: { chain: 8453 }, relay: { chain: 8453 } }), spy).register(
+      "org-1",
+      "user-1",
+      { ...registerInput, environment: "production" },
+    );
+    expect(calls).toEqual([{ cooldown: 86_400n, expiration: 604_800n }]);
+  });
+
+  it("rejects a 300 s Delay in production", () => {
+    expect(() => assertDelayPolicy(300n, 604_800n, 86_400n, 604_800n)).toThrow(
+      expect.objectContaining({ code: "delay_policy_mismatch" }),
+    );
   });
 });
