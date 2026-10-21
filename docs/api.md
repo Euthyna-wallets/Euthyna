@@ -176,7 +176,15 @@ organization, so the addresses immediately feed the DAO/Safe plan.
 { "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
 ```
 
-The EVM address is checksum-normalized. Nothing is signed.
+Both fields accept a pasted wallet label: only the first token is kept and a trailing
+`(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is stored as
+`busyvideo615.testnet`. The EVM address is checksum-normalized. Nothing is signed.
+
+### `PATCH /v1/console/members/:id/wallets`
+
+Admin only. Attaches or replaces the wallets of an existing organization member
+(for example the owner created at signup). Uses the same normalization as
+`POST /v1/console/members` and returns the updated member.
 
 ### `POST /v1/console/treasury/plan`
 

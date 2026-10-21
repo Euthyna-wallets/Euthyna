@@ -82,6 +82,11 @@ export interface AuthGateway {
     organizationId: string,
     input: { name: string; nearAccountId: string; evmAddress: string },
   ): Promise<MemberView>;
+  setMemberWallets(
+    organizationId: string,
+    memberId: string,
+    input: { nearAccountId: string; evmAddress: string },
+  ): Promise<MemberView | null>;
   registerPasswordless(
     baseUrl: string,
     consoleOrigin: string,
@@ -230,6 +235,34 @@ export class BetterAuthGateway implements AuthGateway {
         },
       }),
     ]);
+    const member = await this.prisma.member.findUniqueOrThrow({
+      where: { id: memberId },
+      include: { user: true },
+    });
+    return {
+      id: member.id,
+      userId: member.userId,
+      role: member.role,
+      nearAccountId: member.nearAccountId,
+      evmAddress: member.evmAddress,
+      email: member.user.email,
+      name: member.user.name,
+    };
+  }
+
+  async setMemberWallets(
+    organizationId: string,
+    memberId: string,
+    input: { nearAccountId: string; evmAddress: string },
+  ): Promise<MemberView | null> {
+    const updated = await this.prisma.member.updateMany({
+      where: { id: memberId, organizationId },
+      data: {
+        nearAccountId: input.nearAccountId,
+        evmAddress: getAddress(input.evmAddress),
+      },
+    });
+    if (updated.count === 0) return null;
     const member = await this.prisma.member.findUniqueOrThrow({
       where: { id: memberId },
       include: { user: true },

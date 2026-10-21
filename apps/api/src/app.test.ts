@@ -106,6 +106,18 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve([]);
   }
 
+  setMemberWallets(_organizationId: string, memberId: string, input: { nearAccountId: string; evmAddress: string }) {
+    return Promise.resolve({
+      id: memberId,
+      userId: "user-owner",
+      role: "owner",
+      nearAccountId: input.nearAccountId,
+      evmAddress: input.evmAddress,
+      email: "owner@acme.test",
+      name: "Owner",
+    });
+  }
+
   addMember(_organizationId: string, input: { name: string; nearAccountId: string; evmAddress: string }) {
     return Promise.resolve({
       id: "member-new",
@@ -364,6 +376,35 @@ describe("members", () => {
     });
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ nearAccountId: "alice.testnet", name: "Alice" });
+  });
+
+  it("normalizes annotated wallet values", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Alice",
+        nearAccountId: "busyvideo615.testnet (*testnet)",
+        evmAddress: "0x1111111111111111111111111111111111111111 (Base Sepolia)",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ nearAccountId: "busyvideo615.testnet" });
+  });
+
+  it("lets an admin set wallets on an existing member", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members/member-1/wallets", {
+      method: "PATCH",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        nearAccountId: "owner.testnet",
+        evmAddress: "0x3333333333333333333333333333333333333333",
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ nearAccountId: "owner.testnet" });
   });
 
   it("forbids a non-admin member from adding a member", async () => {

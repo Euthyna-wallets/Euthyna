@@ -148,6 +148,7 @@ export function OnboardingPage() {
               setActiveOrganization(organization);
               localStorage.setItem("mandateos.organization", organization.id);
             }}
+            members={members}
             onError={setError}
             onMembersChanged={async () => {
               if (activeOrganization) await refreshMembers(activeOrganization.id);
@@ -387,9 +388,11 @@ function OrganizationPanel(props: {
   onChanged: () => Promise<void>;
   onSelect: (organization: Organization) => void;
   onError: (message: string) => void;
+  members: Member[];
   onMembersChanged: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [memberName, setMemberName] = useState("");
   const [memberNear, setMemberNear] = useState("");
   const [memberEvm, setMemberEvm] = useState("");
@@ -432,21 +435,55 @@ function OrganizationPanel(props: {
       </div>
       {props.active ? (
         <div className="stack">
-          <div className="muted small">Add a council member with their NEAR and EVM wallets. No email invitation in the MVP.</div>
+          <div className="muted small">
+            Pick an existing member to attach wallets, or add a wallet-only member. Paste
+            accounts as copied from the wallet: <code>busyvideo615.testnet (*testnet)</code>.
+          </div>
           <div className="row wrap">
-            <input placeholder="Member name" value={memberName} onChange={(event) => setMemberName(event.target.value)} />
+            <select
+              value={selectedMemberId}
+              onChange={(event) => {
+                const id = event.target.value;
+                setSelectedMemberId(id);
+                const member = props.members.find((item) => item.id === id);
+                setMemberName(member ? member.name ?? member.email ?? "" : "");
+                setMemberNear(member?.nearAccountId ?? "");
+                setMemberEvm(member?.evmAddress ?? "");
+              }}
+            >
+              <option value="">New member</option>
+              {props.members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name ?? member.email ?? member.userId} ({member.role})
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Member name"
+              value={memberName}
+              disabled={Boolean(selectedMemberId)}
+              onChange={(event) => setMemberName(event.target.value)}
+            />
             <input placeholder="near.testnet" value={memberNear} onChange={(event) => setMemberNear(event.target.value)} />
             <input placeholder="0x EVM address" value={memberEvm} onChange={(event) => setMemberEvm(event.target.value)} />
             <button
               className="ghost"
-              disabled={!memberName || !memberNear || !memberEvm}
+              disabled={!memberNear || !memberEvm || (!selectedMemberId && !memberName)}
               onClick={() =>
                 void (async () => {
                   try {
-                    await api("/v1/console/members", {
-                      method: "POST",
-                      body: JSON.stringify({ name: memberName, nearAccountId: memberNear, evmAddress: memberEvm }),
-                    });
+                    if (selectedMemberId) {
+                      await api(`/v1/console/members/${selectedMemberId}/wallets`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ nearAccountId: memberNear, evmAddress: memberEvm }),
+                      });
+                    } else {
+                      await api("/v1/console/members", {
+                        method: "POST",
+                        body: JSON.stringify({ name: memberName, nearAccountId: memberNear, evmAddress: memberEvm }),
+                      });
+                    }
+                    setSelectedMemberId("");
                     setMemberName("");
                     setMemberNear("");
                     setMemberEvm("");
@@ -457,7 +494,7 @@ function OrganizationPanel(props: {
                 })()
               }
             >
-              Add member
+              {selectedMemberId ? "Save member wallets" : "Add member"}
             </button>
           </div>
         </div>

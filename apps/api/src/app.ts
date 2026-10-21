@@ -94,15 +94,25 @@ const mandateSchema = z.object({
     .optional(),
 });
 
+const nearAccountSchema = z
+  .string()
+  .transform((value) => value.trim().split(/\s+/)[0]!.replace(/\(.*\)$/, ""))
+  .pipe(z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/));
+
+const evmAddressSchema = z
+  .string()
+  .transform((value) => value.trim().split(/\s+/)[0]!)
+  .pipe(z.string().regex(/^0x[0-9a-fA-F]{40}$/));
+
 const addMemberSchema = z.object({
   name: z.string().min(1).max(120),
-  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  evmAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  nearAccountId: nearAccountSchema,
+  evmAddress: evmAddressSchema,
 });
 
 const walletsSchema = z.object({
-  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  evmAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  nearAccountId: nearAccountSchema,
+  evmAddress: evmAddressSchema,
 });
 
 const treasuryPlanSchema = z.object({
@@ -605,6 +615,25 @@ export function createApp({
       metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
     });
     return context.json(member, 201);
+  });
+
+  app.patch("/v1/console/members/:id/wallets", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const memberId = context.req.param("id");
+    if (!memberId) return context.json({ error: "member_not_found" }, 404);
+    const input = await parseJson(context, walletsSchema);
+    const member = await auth.setMemberWallets(consoleIdentity.organizationId, memberId, input);
+    if (!member) return context.json({ error: "member_not_found" }, 404);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "member.wallets_updated",
+      targetType: "member",
+      targetId: member.id,
+      metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
+    });
+    return context.json(member);
   });
 
   app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
