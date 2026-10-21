@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.*
+contracts/target/
+packages/deployer/out/
+packages/deployer/cache/
+*.log

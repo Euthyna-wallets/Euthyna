@@ -1,0 +1,18 @@
+[package]
+name = "governance-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+borsh.workspace = true
+bs58.workspace = true
+hex.workspace = true
+near-sdk.workspace = true
+omni-transaction.workspace = true
+schemars.workspace = true
+serde.workspace = true

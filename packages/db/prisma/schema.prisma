@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id           String              @id
+  displayName  String
+  environments ClientEnvironment[]
+  agents       Agent[]
+  vendors      Vendor[]
+  policies     PolicySnapshot[]
+  operations   Operation[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model ClientEnvironment {
+  clientId       String
+  environment    String
+  nearNetwork    String
+  baseChainId    Int
+  vaultAccountId String?
+  safeAddress    String?
+  rolesAddress   String?
+  delayAddress   String?
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, environment])
+}
+
+model Agent {
+  clientId      String
+  id            String
+  nearAccountId String
+  role          String
+  mpcPath       String
+  evmAddress    String?
+  active        Boolean  @default(true)
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  operations    Operation[]
+
+  @@id([clientId, id])
+  @@unique([clientId, nearAccountId])
+}
+
+model Vendor {
+  clientId    String
+  id          String
+  name        String
+  active      Boolean         @default(true)
+  client      Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  addresses   VendorAddress[]
+
+  @@id([clientId, id])
+}
+
+model VendorAddress {
+  clientId       String
+  vendorId       String
+  chainId        Int
+  address        String
+  maximumPayment Decimal? @db.Decimal(78, 0)
+  vendor         Vendor   @relation(fields: [clientId, vendorId], references: [clientId, id], onDelete: Cascade)
+
+  @@id([clientId, vendorId, chainId, address])
+  @@unique([clientId, chainId, address])
+}
+
+model PolicySnapshot {
+  clientId       String
+  version        BigInt
+  registryVersion BigInt
+  status         String
+  document       Json
+  contentHash    String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@id([clientId, version])
+  @@unique([clientId, contentHash])
+}
+
+model Operation {
+  clientId    String
+  opId        String
+  agentId     String
+  reference   String
+  state       String
+  txDigest    String
+  evmNonce    BigInt
+  amount      Decimal  @db.Decimal(78, 0)
+  visaNonce   BigInt?
+  reportNonce BigInt?
+  txHash      String?
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  agent       Agent    @relation(fields: [clientId, agentId], references: [clientId, id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@id([clientId, opId])
+  @@unique([clientId, reference])
+  @@unique([clientId, visaNonce])
+  @@unique([clientId, reportNonce])
+}

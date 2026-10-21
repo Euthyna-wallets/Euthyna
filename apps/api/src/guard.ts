@@ -1,0 +1,77 @@
+import { bytesToHex, keccak256, type Hex } from "viem";
+import { serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
+import { bytes32ToHex, digestVaultTransaction, hexToByteArray } from "./evm.js";
+import { evaluateExactRules, type RegistryDecision } from "./registry.js";
+import type { GuardVisa, Registry, SignedPayload, StatusReport, VaultOperation } from "./types.js";
+
+export interface GuardApproval {
+  decision: "approve";
+  vendorId: string;
+  vendorName: string;
+  approval: { visa: GuardVisa; signature: string };
+}
+
+export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: "escalate" }>;
+
+export class Guard {
+  constructor(
+    private readonly registry: Registry,
+    private readonly privateKey: Uint8Array,
+  ) {}
+
+  async approve(operation: VaultOperation): Promise<GuardResult> {
+    if (operation.state !== "Prepared") {
+      return { decision: "escalate", reasons: [`operation state is ${operation.state}, expected Prepared`] };
+    }
+    const recomputed = digestVaultTransaction(operation);
+    if (recomputed !== bytes32ToHex(operation.tx_digest)) {
+      return { decision: "escalate", reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"] };
+    }
+    const decision = evaluateExactRules(this.registry, operation);
+    if (decision.decision === "escalate") return decision;
+    const visa: GuardVisa = {
+      client_id: operation.client_id,
+      op_id: operation.op_id,
+      tx_digest: operation.tx_digest,
+      agent: operation.agent,
+      role: operation.role,
+      reference: operation.intent.reference,
+      policy_version: operation.policy_version,
+      registry_version: operation.registry_version,
+      visa_nonce: randomSafeNonce(),
+      expires_at_block: operation.expires_at_block,
+    };
+    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.privateKey);
+    return {
+      decision: "approve",
+      vendorId: decision.vendorId,
+      vendorName: decision.vendorName,
+      approval: { visa, signature },
+    };
+  }
+
+  async confirmationReport(
+    operation: VaultOperation,
+    txHash: Hex,
+    blockNumber: bigint,
+  ): Promise<SignedPayload<StatusReport>> {
+    if (!operation.signed_transaction) throw new Error("operation has no signed transaction");
+    const storedHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
+    if (storedHash !== txHash) throw new Error("receipt hash does not match the stored signed transaction");
+    if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Base block number exceeds safe integer range");
+    const report: StatusReport = {
+      client_id: operation.client_id,
+      op_id: operation.op_id,
+      kind: "Confirmed",
+      tx_hash: hexToByteArray(txHash),
+      report_nonce: randomSafeNonce(),
+      block_number: Number(blockNumber),
+    };
+    const signature = await signDomainPayload(
+      "mandateos:status:v1",
+      serializeStatusReport(report),
+      this.privateKey,
+    );
+    return { report, signature };
+  }
+}

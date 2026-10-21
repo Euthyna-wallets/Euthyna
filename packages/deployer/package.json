@@ -1,0 +1,22 @@
+{
+  "name": "@mandateos/deployer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:base-sepolia": "forge build --root . && tsx src/base-sepolia.ts",
+    "update:researcher": "tsx src/update-researcher.ts",
+    "configure:governance": "tsx src/configure-governance.ts",
+    "veto:delay": "tsx src/veto-delay.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@gnosis-guild/zodiac-core": "4.3.0",
+    "@safe-global/safe-deployments": "1.37.64",
+    "viem": "^2.30.6",
+    "zod": "^3.25.57",
+    "zodiac-roles-sdk": "4.1.3"
+  }
+}

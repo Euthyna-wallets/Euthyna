@@ -1,0 +1,92 @@
+{
+  "observedAt": "2026-10-21T00:20:07.842Z",
+  "chainId": 84532,
+  "network": "base-sepolia",
+  "versions": {
+    "safe": "1.4.1",
+    "roles": "2.1.1",
+    "delay": "1.1.1",
+    "moduleProxyFactory": "1.2.0"
+  },
+  "contracts": {
+    "safe": "0x19C06E5bfCd7C31c71508f14df2f1C70d9D199cD",
+    "safeSingleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+    "safeFactory": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+    "multiSend": "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526",
+    "roles": "0x7178555779097cAE1BA20C5D7ED7205708a5ed40",
+    "rolesMastercopy": "0xF2964CE6161ce0e75964Fe7927cE114cb0B283D5",
+    "delay": "0xDd860F2a45b62b84A94ABF61F7f6c2f262549533",
+    "delayMastercopy": "0x824175b945838d127C1ca83CbcE11D8e44F6dF01",
+    "moduleProxyFactory": "0x000000000000aDdB49795b0f9bA5BC298cDda236",
+    "usdc": "0x418A2b47911dE05e21688F7490195F5324B49474",
+    "governanceRelayEvm": "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb"
+  },
+  "policy": {
+    "safeThreshold": 2,
+    "councilOwner1": "0x7CBa74F6Fb05d35590FEd22c88606Ef83130c0a6",
+    "councilOwner2": "0x845362eDC9bCCe38dac9aABAabEE49De8Eb1062D",
+    "councilOwner3": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
+    "researcher": "0x10EdE0F3C618321919934Fd63df173DD37F037Af",
+    "allowedRecipient": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
+    "usdcAllowanceBaseUnits": "5000000",
+    "cooldownSeconds": 300,
+    "expirationSeconds": 604800,
+    "govAddress": "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb",
+    "minimumAgentGasWei": "5000000000000000"
+  },
+  "transactions": {
+    "bridgeSepoliaEth": "0x78529ae52ffa0a40f5a63b67914c822e9d003a0cbb3e599275be563cf1e2df39",
+    "deploySafe": "0xbaa428f76577c91581274ad5653ee6231e7f872909115fbbbb790a9431ed63d7",
+    "deployRoles": "0xc995b1196d38b30cd505dc60afe8837e0846fdfcb59d87e2c36eb68970713c58",
+    "deployDelay": "0x1fa6f1fbe22c95aa3acd13c3433c22e3817019f5bda2ba5abc1490f521e3b039",
+    "deployTestUsdc": "0xafe880236a195b9c175555169029e2a2b1e5985e419eb19630d39d10bcec9023",
+    "enableRolesModule": "0x835838beac5eb06ba29aeac6b5ac693f1bfb3b96c6577b0fa3244071fe8876ad",
+    "enableDelayModule": "0x43f363f273e3510b2d304ab5999fc97cb9455bdb2fbe14c41735ea6eb9630f43",
+    "assignResearcherRole": "0xf9755746f582daf19b72032d3f5e8b3557e9a03089eea0b22e04fd0469a119cd",
+    "scopeUsdcTarget": "0x27b48cb864deaf6996cf7b19fd4239b44aaecf2ba662b8e6bc5381592edd14db",
+    "scopeUsdcTransfer": "0x80cd00c7363c9d8889cc3df6150637a9073ddc2ec1c541b24dbe8b64e56094e9",
+    "setUsdcAllowance": "0x389acc8b5c9d4ab8a30bb3a2c4066fa404d85a01b54442db96020469bd652fb4",
+    "enableGovOnDelay": "0xcc264b47edf31b6a4194977c2d624f93c70e0632bfb680308dd2cbbc507e87e9",
+    "fundSafeUsdc": "0xf7e29aee3a801f4828b659bf41e2ce86410ea3b73c1ba57a854566f96a4015b2",
+    "fundAgentGas": "0xc7e3333fb4b7fbb0d28d3a408bdc730a7297735219ac85b80b0627f6728d7d75",
+    "grantDerivedResearcher": "0x5a2b60609671b424b19a3b134eb68eb94bdb0c0c14ae1fc3476b0e6702c4493c",
+    "revokeSupersededResearcher": "0x8f17f1fb601d6b6bb10ee822ccbed80d25c6563b1b90212498ecafeea47114af",
+    "fundDerivedResearcherGas": "0x8329dfc7277177460145e4c3be492fe29cda6c52be13a0ddfa0b1e1581e5d22f",
+    "topUpDerivedResearcherGas": "0xe81d4873248e3888ec257f3c707e899050db5764dcf85ed2ed6cc48c6a9bdb9f",
+    "basePayment": "0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4",
+    "enableRealGovOnDelay": "0x54812647f04a2b5c1de8d25d278c29e2dcd114cd87f1114584c6aa727e8c2776",
+    "disableTemporaryGovOnDelay": "0x6149b2996aedf21000da5c16d7229ffc62bc8a31b28ac8c20a367e11c0c09343",
+    "setSepoliaCooldown300": "0xa57fa355832c255e4ab4cb85b936371ebde6a5bb5d9073743dda4e20e5a1ef22",
+    "fundGovernanceRelayGas": "0x4168309124e6d803794ec4405208930c5c5ce48cba30ab185e091a9b4a8e505a",
+    "zodiacDirectAttackRejected": "0xaddc852fa9967d6171127c424ba5c2c1e819e6ea98b98634e640faa9b1688ebb"
+  },
+  "codeHashes": {
+    "safeSingleton": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff",
+    "safeFactory": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317",
+    "multiSend": "0x0e4f7fc66550a322d1e7688e181b75e217e662a4f3f4d6a29b22bc61217c4b77",
+    "rolesMastercopy": "0x471d8b3b419f1eb955230c0326c8812176df49bf3c7b414a563fda5a3c6c10b6",
+    "delayMastercopy": "0xdd928eddfff7b68bd8fff28178c29e3388c1d098051d9262f151c4b534c577b8",
+    "moduleProxyFactory": "0x01623cbcf010a1c326230f1b2d5f48a66b440232ee49096102bc84967dc5f21e",
+    "safe": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
+    "roles": "0x248f9591f94c24c199ade3e73feb477cf02d387b2bea91f2f931a0deb094f163",
+    "delay": "0x7c921d11060320194065e9bd189224e331ce39b1c7a15f47cdee6688572abb7d",
+    "testUsdc": "0x082d4440729e6d02cee3349697b08bff6b26c2cac3400ed24192590f233639d8"
+  },
+  "observed": {
+    "safeOwners": [
+      "0x7CBa74F6Fb05d35590FEd22c88606Ef83130c0a6",
+      "0x845362eDC9bCCe38dac9aABAabEE49De8Eb1062D",
+      "0xa7BE833AD5422421204198E47C04516B0026F9B6"
+    ],
+    "safeThreshold": 2,
+    "safeModules": [
+      "0xDd860F2a45b62b84A94ABF61F7f6c2f262549533",
+      "0x7178555779097cAE1BA20C5D7ED7205708a5ed40"
+    ],
+    "delayModules": [
+      "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb"
+    ],
+    "delayCooldownSeconds": 300,
+    "delayExpirationSeconds": 604800
+  }
+}

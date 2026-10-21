@@ -1,0 +1,71 @@
+{
+  "observed_at": "2026-10-21T03:05:11+02:00",
+  "network": "testnet",
+  "factory": {
+    "account_id": "sputnikv2.testnet",
+    "default_code_hash": "AA4nA45vauiac3jdVwJTzSdUP3oj2r1fDaPAb2mHdgcH",
+    "default_version": [3, 31]
+  },
+  "dao": {
+    "account_id": "mandateos-uat-92543787.sputnikv2.testnet",
+    "code_hash_sha256_hex": "880bae9a58c99ec1efe8b10cf834b3f0c0ebc7a05d71206f3c1202c4280952da",
+    "access_key_count": 0,
+    "auto_update": false,
+    "threshold": "2",
+    "member_count": 3
+  },
+  "vault": {
+    "account_id": "vault-v4.mandateos-root-20261021.testnet",
+    "code_hash_sha256_hex": "11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21",
+    "code_hash_sha256_bs58": "2CTrDibuU42kqQBxNpQRkABgjYk5AuGLcv3mdefpyv9n",
+    "access_key_count": 0,
+    "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
+    "client_id": "acme",
+    "evm_chain_id": 84532
+  },
+  "test_ft": {
+    "account_id": "test-ft-v4.mandateos-root-20261021.testnet",
+    "code_hash_sha256_hex": "3362ee79c2255d8ed5a230dad241641759174b7b51187b171516967e8df1e04e"
+  },
+  "agent": {
+    "account_id": "agent-v4.mandateos-root-20261021.testnet",
+    "mpc_path": "agents/researcher/base",
+    "derived_public_key": "secp256k1:5W7hzvx4ML2KuGYByYBbz8PYTbFNztZiShDWVeVgcJFwryFzMH7SoRssVuciUUwj9hCvKAB6eBuoXkouH2GnAkUc",
+    "evm_address": "0x10EdE0F3C618321919934Fd63df173DD37F037Af"
+  },
+  "governance_relay": {
+    "account_id": "gov-relay-v1.mandateos-root-20261021.testnet",
+    "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",
+    "code_hash_sha256_bs58": "6KZnkemmuysJwuRfZkaqEifTmTdaGUpTKr128GhDJsMA",
+    "access_key_count": 0,
+    "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
+    "mpc_path": "governance/base-sepolia",
+    "derived_public_key": "secp256k1:3cuFpPFwraKRy7vUjRRetafeZnyp4WBNEwuUtjRNWkhbLam21jcmribNomTFEzQzczqcKvbjEdRhUYf7qgf6b4cs",
+    "evm_address": "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb",
+    "derivation_proposal_id": 18
+  },
+  "operation": {
+    "op_id": "0xe505ff589ddcc3b4383750077bc8f86dea338cf2f507c02583a0a0cd5424bd74",
+    "reference": "UAT-MPC-001",
+    "amount": "1000000",
+    "final_state": "Confirmed",
+    "funded_budget": "5000000",
+    "spent_budget": "1000000",
+    "reserved_budget": "0"
+  },
+  "mpc": {
+    "account_id": "v1.signer-prod.testnet",
+    "authorize_total_gas_units": 14288425743215,
+    "authorize_total_tgas": 14.288425743215
+  },
+  "transactions": {
+    "base_payment": "0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4",
+    "near_confirmation_report": "8u2G2cZrxwviWYnKqnGm4W59XMeCK9K2QrFVCM9qGTmK"
+  },
+  "base_transaction_broadcast": true,
+  "superseded_deployment": {
+    "dao": "mandateos-uat-92530026.sputnikv2.testnet",
+    "vault": "dev-20261020210039-23270069158069.testnet",
+    "reason": "predates PossiblySigned and Base Sepolia chain configuration"
+  }
+}
