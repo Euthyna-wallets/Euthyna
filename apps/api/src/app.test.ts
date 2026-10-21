@@ -1,55 +1,223 @@
 import { describe, expect, it } from "vitest";
+
 import { createApp } from "./app.js";
-import type { Env } from "./env.js";
+import { MemoryRateLimiter } from "./rate-limit.js";
+import type {
+  AgentIdentity,
+  AgentView,
+  AuditEvent,
+  AuthGateway,
+  ConsoleIdentity,
+  CreateAgentInput,
+  CreatedAgent,
+} from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import type { BaseRelayer } from "./relayer.js";
+import type { VaultOperation } from "./types.js";
 
-const env: Env = {
-  PORT: 3000,
-  NEAR_NETWORK_ID: "testnet",
-  NEAR_RPC_URL: "https://rpc.testnet.near.org",
-  BASE_SEPOLIA_RPC_URL: "https://sepolia.base.org",
-  VENDOR_REGISTRY_PATH: "config/clients/acme/vendors.json",
-  GUARD_ED25519_PRIVATE_KEY_BASE64: "unused",
-  NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
-  NEAR_RELAYER_PRIVATE_KEY: "ed25519:unused",
-  AGENT_API_TOKEN: "test-token-at-least-24-characters",
+const operation: VaultOperation = {
+  op_id: Array(32).fill(1) as number[],
+  client_id: "acme",
+  agent: "agent-a.near",
+  role: "researcher",
+  intent: {
+    token: Array(20).fill(0x83),
+    recipient: Array(20).fill(0x66),
+    amount: "1000000",
+    reference: "INV-1",
+    gas_limit: "200000",
+    max_fee_per_gas: "20000000000",
+    max_priority_fee_per_gas: "1000000000",
+  },
+  policy_version: 1,
+  registry_version: 1,
+  evm_nonce: 0,
+  transaction: {
+    chain_id: 84532,
+    nonce: 0,
+    to: Array(20).fill(0x44),
+    value: "0",
+    input: [],
+    gas_limit: "200000",
+    max_fee_per_gas: "20000000000",
+    max_priority_fee_per_gas: "1000000000",
+  },
+  tx_digest: Array(32).fill(2),
+  expires_at_block: 100,
+  state: "Prepared",
+  signed_transaction: null,
 };
 
-const requestBody = {
-  vaultAccountId: "acme-vault.testnet",
-  opId: Array(32).fill(1),
+const agentA: AgentIdentity = {
+  agentId: "agent-a",
+  organizationId: "org-1",
+  nearAccountId: "agent-a.near",
+  vaultAccountId: "vault-1.near",
+  role: "researcher",
 };
 
-function testApp() {
-  const near = {
-    getOperation: async () => ({ state: "Prepared" }),
-  } as unknown as NearClient;
-  const guard = {
-    approve: async () => ({ decision: "escalate", reasons: ["recipient not registered"] }),
-  } as unknown as Guard;
-  const relayer = {} as BaseRelayer;
-  return createApp(env, near, guard, relayer);
+const agentB: AgentIdentity = {
+  agentId: "agent-b",
+  organizationId: "org-1",
+  nearAccountId: "agent-b.near",
+  vaultAccountId: "vault-1.near",
+  role: "researcher",
+};
+
+const admin: ConsoleIdentity = { userId: "user-admin", organizationId: "org-1", role: "admin" };
+const member: ConsoleIdentity = { userId: "user-member", organizationId: "org-1", role: "member" };
+
+const requestBody = { vaultAccountId: "vault-1.near", opId: Array(32).fill(1) };
+
+class FakeAuth implements AuthGateway {
+  readonly agents = new Map<string, AgentIdentity>();
+  readonly consoles = new Map<string, ConsoleIdentity>();
+  readonly audits: AuditEvent[] = [];
+  readonly listedOrganizations: string[] = [];
+  readonly created: CreateAgentInput[] = [];
+  readonly revoked: Array<{ organizationId: string; agentId: string }> = [];
+
+  handler(): Promise<Response> {
+    return Promise.resolve(new Response(null, { status: 404 }));
+  }
+
+  identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null> {
+    return Promise.resolve(apiKey ? (this.agents.get(apiKey) ?? null) : null);
+  }
+
+  identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
+    const cookie = headers.get("cookie");
+    return Promise.resolve(cookie ? (this.consoles.get(cookie) ?? null) : null);
+  }
+
+  listAgents(organizationId: string): Promise<AgentView[]> {
+    this.listedOrganizations.push(organizationId);
+    return Promise.resolve([]);
+  }
+
+  createAgent(input: CreateAgentInput): Promise<CreatedAgent> {
+    this.created.push(input);
+    return Promise.resolve({
+      agent: {
+        id: "created-agent",
+        name: input.name,
+        role: input.role,
+        nearAccountId: input.nearAccountId,
+        nearPublicKey: input.nearPublicKey,
+        vaultAccountId: input.vaultAccountId,
+        evmAddress: null,
+        mpcPath: input.mpcPath,
+        active: true,
+        createdAt: new Date(0),
+      },
+      apiKey: "mdo_secret",
+    });
+  }
+
+  revokeAgent(organizationId: string, agentId: string): Promise<boolean> {
+    this.revoked.push({ organizationId, agentId });
+    return Promise.resolve(agentId === "agent-a" && organizationId === "org-1");
+  }
+
+  recordAudit(event: AuditEvent): Promise<void> {
+    this.audits.push(event);
+    return Promise.resolve();
+  }
 }
 
-describe("Hono API", () => {
+function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" | "member" }) {
+  const auth = new FakeAuth();
+  auth.agents.set("key-a", agentA);
+  auth.agents.set("key-b", agentB);
+  auth.consoles.set("session-admin", admin);
+  auth.consoles.set("session-member", member);
+  if (options?.consoleRole === "member") auth.consoles.delete("session-admin");
+
+  let guardCalls = 0;
+  const near = {
+    getOperation: async () => options?.operation ?? operation,
+    cancelNonce: async () => "near-cancel-hash",
+  } as unknown as NearClient;
+  const guard = {
+    approve: async () => {
+      guardCalls += 1;
+      return { decision: "escalate", reasons: ["recipient not registered"] };
+    },
+  } as unknown as Guard;
+  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth });
+  return { app, auth, guardCalls: () => guardCalls };
+}
+
+const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
+
+describe("agent and console boundaries", () => {
   it("rejects an unauthenticated Guard request", async () => {
-    const response = await testApp().request("/v1/guard/visas", {
+    const { app } = testApp();
+    const response = await app.request("/v1/guard/visas", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: headers({}),
       body: JSON.stringify(requestBody),
     });
     expect(response.status).toBe(401);
   });
 
-  it("returns an explicit escalation instead of a visa for an uncovered case", async () => {
-    const response = await testApp().request("/v1/guard/visas", {
+  it("rejects a console session on an agent route", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/guard/visas", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${env.AGENT_API_TOKEN}`,
-        "content-type": "application/json",
-      },
+      headers: headers({ cookie: "session-admin" }),
+      body: JSON.stringify(requestBody),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an agent credential on a console route", async () => {
+    const { app } = testApp();
+    const emergency = await app.request("/v1/emergency/cancel", {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
+      body: JSON.stringify({ ...requestBody, gasLimit: "21000", maxFeePerGas: "1", maxPriorityFeePerGas: "1" }),
+    });
+    expect(emergency.status).toBe(401);
+    const list = await app.request("/v1/console/agents", {
+      headers: { "x-api-key": "key-a" },
+    });
+    expect(list.status).toBe(401);
+  });
+
+  it("refuses a visa when the authenticated agent is not the operation agent", async () => {
+    const { app, auth, guardCalls } = testApp();
+    const response = await app.request("/v1/guard/visas", {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-b" }),
+      body: JSON.stringify(requestBody),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "agent_mismatch" });
+    expect(guardCalls()).toBe(0);
+    expect(auth.audits).toContainEqual(
+      expect.objectContaining({ action: "guard.visa.denied", actorId: "agent-b" }),
+    );
+  });
+
+  it("refuses a vault the agent does not belong to", async () => {
+    const { app, guardCalls } = testApp();
+    const response = await app.request("/v1/guard/visas", {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
+      body: JSON.stringify({ ...requestBody, vaultAccountId: "vault-2.near" }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "vault_not_owned_by_agent" });
+    expect(guardCalls()).toBe(0);
+  });
+
+  it("lets the owning agent through to the exact Guard decision", async () => {
+    const { app, auth } = testApp();
+    const response = await app.request("/v1/guard/visas", {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
       body: JSON.stringify(requestBody),
     });
     expect(response.status).toBe(409);
@@ -57,5 +225,119 @@ describe("Hono API", () => {
       decision: "escalate",
       reasons: ["recipient not registered"],
     });
+    expect(auth.audits).toContainEqual(
+      expect.objectContaining({ action: "guard.escalation", actorId: "agent-a" }),
+    );
+  });
+
+  it("refuses a revoked agent because no API key resolves", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/guard/visas", {
+      method: "POST",
+      headers: headers({ "x-api-key": "revoked-key" }),
+      body: JSON.stringify(requestBody),
+    });
+    expect(response.status).toBe(401);
+  });
+});
+
+describe("rate limiting", () => {
+  it("blocks the first request over the window budget", () => {
+    const limiter = new MemoryRateLimiter(2, 60_000);
+    expect(limiter.allow("agent:a")).toBe(true);
+    expect(limiter.allow("agent:a")).toBe(true);
+    expect(limiter.allow("agent:a")).toBe(false);
+    expect(limiter.allow("agent:b")).toBe(true);
+  });
+});
+
+describe("console isolation and emergency", () => {
+  it("lists agents for the session organization only", async () => {
+    const { app, auth } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin" },
+    });
+    expect(response.status).toBe(200);
+    expect(auth.listedOrganizations).toEqual(["org-1"]);
+  });
+
+  it("records an audit row and triggers emergency cancellation for a member", async () => {
+    const signedOperation: VaultOperation = {
+      ...operation,
+      state: "PossiblySigned",
+      signed_transaction: [0x02, 0x01],
+    };
+    const { app, auth } = testApp({ operation: signedOperation });
+    const response = await app.request("/v1/emergency/cancel", {
+      method: "POST",
+      headers: headers({ cookie: "session-member" }),
+      body: JSON.stringify({ ...requestBody, gasLimit: "21000", maxFeePerGas: "1", maxPriorityFeePerGas: "1" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      nearTransactionHash: "near-cancel-hash",
+      opId: requestBody.opId,
+    });
+    expect(auth.audits.map((event) => event.action)).toEqual([
+      "emergency.cancel.requested",
+      "emergency.cancel.submitted",
+    ]);
+  });
+
+  it("forbids a member from creating agent credentials", async () => {
+    const { app, auth } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: headers({ cookie: "session-member" }),
+      body: JSON.stringify({
+        name: "Research agent",
+        role: "researcher",
+        nearAccountId: "agent-c.near",
+        nearPublicKey: "ed25519:11111111111111111111111111111111",
+        vaultAccountId: "vault-1.near",
+        mpcPath: "agents/researcher/base",
+      }),
+    });
+    expect(response.status).toBe(403);
+    expect(auth.created).toEqual([]);
+  });
+
+  it("creates an agent inside the session organization", async () => {
+    const { app, auth } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: headers({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Research agent",
+        role: "researcher",
+        nearAccountId: "agent-c.near",
+        nearPublicKey: "ed25519:11111111111111111111111111111111",
+        vaultAccountId: "vault-1.near",
+        mpcPath: "agents/researcher/base",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(auth.created).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        nearAccountId: "agent-c.near",
+        nearPublicKey: "ed25519:11111111111111111111111111111111",
+      }),
+    ]);
+    expect(auth.audits).toContainEqual(
+      expect.objectContaining({ action: "agent.created", actorId: "user-admin" }),
+    );
+  });
+
+  it("does not revoke an agent from another organization", async () => {
+    const { app, auth } = testApp();
+    const response = await app.request("/v1/console/agents/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/revoke", {
+      method: "POST",
+      headers: { cookie: "session-admin" },
+    });
+    expect(response.status).toBe(404);
+    expect(auth.revoked).toEqual([
+      { organizationId: "org-1", agentId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+    ]);
   });
 });

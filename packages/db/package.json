@@ -7,12 +7,21 @@
     "build": "DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} prisma generate && tsc -p tsconfig.json",
     "typecheck": "DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} prisma validate && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} prisma generate"
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} prisma generate",
+    "prepare": "DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} prisma generate && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@prisma/client": "^6.10.0"
   },
   "devDependencies": {
     "prisma": "^6.10.0"
+  },
+  "main": "./dist/client.js",
+  "types": "./dist/client.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
   }
 }

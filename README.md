@@ -6,7 +6,7 @@ MandateOS assigns each agent a role, a budget, permitted assets, approved destin
 
 > Hackathon scope: NEAR Hackathon 2026, track 06 — AI Security & Defense.
 >
-> Project status: Phase 1 runs end to end on NEAR testnet + Base Sepolia: DAO-governed Vault, Guard visa, real MPC signature, Zodiac/Safe execution, 1 TestUSDC (token de test) payment and signed confirmation report. Phase 2 Intents and the production governance relay remain roadmap.
+> Project status: Phase 1 runs end to end on NEAR testnet + Base Sepolia: DAO-governed Vault, Guard visa, real MPC signature, Zodiac/Safe execution, 1 TestUSDC (test token) payment, signed confirmation, `0xGOV` governance and council veto. Phase 2 Intents and production deployment/hardening remain roadmap.
 
 ## Problem
 
@@ -70,17 +70,20 @@ The MPC address `0xAAA` is derived from `(Vault account, agent path)`. The Vault
 
 The current repository contains:
 
-- `contracts/vault`: `prepare`, domain-separated Guard visas, EIP-1559 construction, `PossiblySigned`, nonce cancellation and signed confirmation reports;
+- `contracts/vault`: `prepare`, domain-separated Guard visas, EIP-1559 construction, `PossiblySigned`, permissionless `submit_signature` recovery for failed MPC callbacks, nonce cancellation and signed confirmation reports;
+- `contracts/governance-relay`: DAO-only Delay calls, sequential `0xGOV` nonces, MPC signing, `PossiblySigned`, `submit_signature` recovery and same-nonce cancellation;
 - `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
-- `contracts/tests`: nine DAO tests and seven Vault tests using NEAR Sandbox;
+- `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
-- `packages/deployer`: guarded viem deployment script for Safe 1.4.1, Roles 2.1.1 and Delay 1.1.1, plus a tested USDC permission compiler;
-- `packages/db`: validated Prisma schema for clients, environments, agents, vendors, policy snapshots and operations;
+- `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
+- `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto;
+- `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
 - [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
 - [`docs/vault-testnet.md`](./docs/vault-testnet.md): Vault protocol, test coverage and testnet deployment evidence;
-- [`deployments/near-testnet.json`](./deployments/near-testnet.json): machine-readable deployed accounts and measured MPC gas.
+- [`docs/api.md`](./docs/api.md): console and agent authentication, routes, errors, audit rows and local setup;
+- [`deployments/near-testnet.json`](./deployments/near-testnet.json) and [`deployments/base-sepolia.json`](./deployments/base-sepolia.json): observed addresses, policies and transaction hashes.
 
-Guard and Roles policy behavior run locally. NEP-366 sponsorship, governance relay, console, SDK, Base contracts and Base broadcast are not implemented or deployed unless an address and transaction hash appear in the deployment manifests.
+Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. NEP-366 sponsorship, console, SDK, Phase 2 Intents and production hardening remain unimplemented.
 
 ## Architecture target
 
@@ -92,7 +95,7 @@ Phase 1 is complete only when this path runs end to end:
 2. the Vault reserves the role budget and business reference, assigns `op_id` and the next EVM nonce, builds the canonical EIP-1559 transaction and exposes `tx_digest`;
 3. Guard reads that prepared operation, applies exact registry and policy rules, and signs the Borsh-encoded visa;
 4. the agent calls `authorize(op_id, visa)`;
-5. before calling the MPC, the Vault consumes the visa, enters `PossiblySigned` and permanently advances the EVM nonce; callback failure or timeout never releases the reservation;
+5. before calling the MPC, the Vault consumes the visa, enters `PossiblySigned` and permanently advances the EVM nonce; callback failure or timeout never releases the reservation, and a public `submit_signature` rebuilds the exact signed transaction for the original or cancellation digest;
 6. a relayer broadcasts the signed transaction without modifying it, or signs a higher-fee zero-value cancellation at the same nonce after a circuit breaker;
 7. Zodiac validates the USDC target, `transfer` function, recipient and allowance before the Safe executes it.
 
@@ -114,23 +117,26 @@ Funds credited to `0xINT` are protected by the Vault but no longer by Zodiac. Th
 
 - member voting accounts restricted to on-chain votes and backed by passkeys;
 - multi-client deployment factory, after the single-client ACME deployment script is stable;
+- NEP-366 sponsorship for agent and relayer calls;
+- production `0xGOV` deployment on NEAR mainnet with Delay cooldown `86 400` seconds;
 - additional assets and chains;
-- on-chain or independently verified Base receipt proofs instead of a Guard-signed confirmation report;
-- audited replacement or audit coverage for the transaction-building dependency before production use.
+- on-chain or independently verified Base receipt proofs instead of trusted confirmation calls;
+- audit coverage for `omni-transaction` and the MandateOS contracts before production use.
 
-The console itself uses Better Auth passkeys for login, prepares proposals and displays state. It never signs an on-chain proposal or treasury transaction ([Better Auth passkey plugin][better-auth-passkey]).
+The target console uses Better Auth passkeys for login, prepares proposals and displays state. It never signs an on-chain proposal or treasury transaction ([Better Auth passkey plugin][better-auth-passkey]).
 
 ## Governance
 
-The UAT governance path follows the Zodiac Key Challenge pattern:
+The UAT governance path is implemented:
 
-1. at least three company members use standard NEAR wallets to vote in Trezu with explicit weight `2`;
-2. the approved proposal calls the per-client NEAR relay;
-3. Chain Signatures signs a Delay call for `0xGOV`;
-4. `0xGOV`, directly or through an administrative Roles modifier, queues the change in Delay for 24 hours;
-5. after the cooldown, Delay forwards the change through the Safe to the operational Roles modifier.
+1. three company members vote through Sputnik/Trezu with absolute threshold `2`;
+2. an approved proposal calls `gov-relay-v1.mandateos-root-20261021.testnet`;
+3. the relay, owned by the DAO and without access keys, builds `Delay.execTransactionFromModule`, advances the sequential EVM nonce and asks Chain Signatures to sign for `0xGOV`;
+4. `0xGOV` queues the call in Delay;
+5. Base Sepolia uses a `300`-second cooldown, then `executeNextTx` forwards the call through the Safe;
+6. production keeps a `86 400`-second cooldown.
 
-`0xGOV` is not a Safe owner. The Safe owners are a human security council using three hardware keys with threshold 2/3. The Safe owns Roles and Delay; the council can veto queued changes with `setTxNonce` and retains direct emergency authority. Agent payments use `0xAAA → Roles → Safe` without Delay. See [`Architecture.md`](./Architecture.md#gouvernance).
+`0xGOV` is `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`; it is a Delay module, never a Safe owner. The Safe owners are the three council addresses listed in the deployment manifest, threshold 2/3. A council veto calls `setTxNonce`; the demonstrated post-veto `executeNextTx` reverted with `Transaction queue is empty`.
 
 ## Non-custodial properties
 
@@ -150,7 +156,7 @@ The DAO and Vault properties are exercised by automated tests. Safe/Zodiac and t
 |---|---|---|
 | Agent calls `authorize` without a visa | Vault rejects | No payment |
 | Visa is changed, expired or replayed | Vault rejects signature, digest, expiry or nonce | No payment |
-| MPC response is late or its callback fails | Operation remains `PossiblySigned`; nonce cannot be reused | Denial of service until same-nonce cancellation |
+| MPC response is late or its callback fails | Operation remains `PossiblySigned`; nonce cannot be reused; anyone may store the published signature with `submit_signature` | Confirmation waits for the exact signature or a same-nonce cancellation |
 | Vault is paused or agent is revoked after `sign` | Reservation remains; emergency worker requests `cancel_nonce` | No automatic reopening |
 | Agent requests an MPC signature directly | Derived address differs from the role member | Zodiac rejects |
 | Prompt injection changes the recipient | Guard registry check, Vault allowlist and Zodiac parameter condition reject | No payment |
@@ -174,6 +180,7 @@ MandateOS/
 │   └── clients/acme/          # Exact hackathon vendor registry
 ├── contracts/
 │   ├── vault/
+│   ├── governance-relay/
 │   ├── mock-mpc/
 │   ├── test-ft/
 │   ├── tests/
@@ -182,6 +189,7 @@ MandateOS/
 │   ├── db/                    # Prisma schema and shared client
 │   └── deployer/              # viem Safe/Roles/Delay deployment
 ├── docs/
+│   ├── api.md
 │   ├── dao-spike.md
 │   └── vault-testnet.md
 ├── deployments/
@@ -192,7 +200,7 @@ MandateOS/
 └── README.md
 ```
 
-Still-targeted packages are `auth`, `agent-wallet`, `protocol`, `policy`, `sdk` and `cli`; the governance relay and console are also roadmap work. The API uses [Hono][hono]. [Prisma][prisma] defines the future PostgreSQL source of truth. MandateOS is independent and does not import or copy JOIN code.
+Still-targeted packages are `agent-wallet`, `protocol`, `policy`, `sdk` and `cli`; the console remains roadmap work. Authentication lives in `apps/api` (Better Auth with Prisma). The API uses [Hono][hono]. [Prisma][prisma] defines the future PostgreSQL source of truth. MandateOS is independent and does not import or copy JOIN code.
 
 ## Getting started
 
@@ -200,6 +208,8 @@ Run all local checks:
 
 ```bash
 pnpm install
+DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} \
+  pnpm --filter @mandateos/db exec prisma db push
 pnpm typecheck
 pnpm test
 cd contracts
@@ -207,7 +217,7 @@ cd contracts
 cargo test -p tests -- --nocapture
 ```
 
-`build.sh` rebuilds the Vault and its two local test dependencies with the NEAR-compatible Rust 1.86 toolchain. The contract suite deploys Sputnik DAO and the Vault, removes their access keys and exercises DAO-only governance, visa checks, `PossiblySigned`, reservations, cancellation, EIP-1559 construction and delayed MPC responses. The TypeScript suite covers exact Guard escalation, domain-separated visas and the compiled Roles recipient/allowance conditions.
+`build.sh` rebuilds the Vault and its two local test dependencies with the NEAR-compatible Rust 1.86 toolchain. The contract suite deploys Sputnik DAO and the Vault, removes their access keys and exercises DAO-only governance, visa checks, `PossiblySigned`, reservations, cancellation, EIP-1559 construction and delayed MPC responses. The TypeScript suite covers exact Guard escalation, domain-separated visas, agent/console credential separation, organization isolation and the compiled Roles recipient/allowance conditions. `apps/api/src/auth-gateway.integration.test.ts` runs the real Prisma adapter when `TEST_DATABASE_URL` points at a migrated database.
 
 Run the local API only after filling a non-committed `.env` from [`env.example`](./env.example):
 
@@ -217,6 +227,8 @@ source .env
 set +a
 pnpm --filter @mandateos/api dev
 ```
+
+The passkey relying party is `PASSKEY_RP_ID=localhost` and `BETTER_AUTH_URL=http://localhost:3000`. Email/password is disabled; console users authenticate with a passkey. Agent credentials are per-agent API keys in `x-api-key`, documented in [`docs/api.md`](./docs/api.md).
 
 The Base Sepolia script performs no transaction unless every required variable is present and `BASE_DEPLOY_CONFIRM=DEPLOY_ACME_BASE_SEPOLIA`. On success it writes observed addresses, code hashes and transaction hashes to `deployments/base-sepolia.json`:
 
@@ -229,12 +241,12 @@ pnpm --filter @mandateos/deployer deploy:base-sepolia
 The three-minute demonstration is considered valid only with public explorer links:
 
 1. show the approved ACME role, budget, registry entry and corresponding Zodiac permission;
-2. pay the monthly ACME invoice in TestUSDC (token de test) from the Safe;
-3. pay a separate approved purchase order;
-4. submit an invoice with a different recipient and show the human escalation without payment;
-5. resubmit the monthly invoice and show the idempotence rejection;
-6. call `authorize` without a visa, then replay a consumed visa, and show both rejections;
-7. sign through a different MPC caller/path and show Zodiac rejecting the resulting address.
+2. pay 1 TestUSDC (test token) from the Safe through the Vault/MPC path;
+3. show Guard refusing to issue a visa, Vault refusing an out-of-allowlist `prepare`, and Zodiac reverting a signed direct call;
+4. approve proposal `19` with two council votes to raise the researcher allowance to 10 TestUSDC (test token);
+5. queue through `0xGOV`, wait 300 seconds, execute through Delay, and verify the 10 TestUSDC (test token) allowance;
+6. approve malicious proposal `23`, queue it, veto with `setTxNonce(3)`, then show `executeNextTx` reverting;
+7. show `cancel_nonce` keeping the same nonce and ending in `Cancelled` after cancellation confirmation.
 
 ## Deployments
 
@@ -249,25 +261,36 @@ The current UAT uses the security-corrected Vault and Base Sepolia chain ID `845
 | MPC signer | `v1.signer-prod.testnet` | — |
 | Safe 1.4.1 | — | `0x19C06E5bfCd7C31c71508f14df2f1C70d9D199cD` |
 | Operational Roles 2.1.1 | — | `0x7178555779097cAE1BA20C5D7ED7205708a5ed40` |
-| TestUSDC (token de test) | — | `0x418A2b47911dE05e21688F7490195F5324B49474` |
+| TestUSDC (test token) | — | `0x418A2b47911dE05e21688F7490195F5324B49474` |
 | Delay 1.1.1 | — | `0xDd860F2a45b62b84A94ABF61F7f6c2f262549533` |
-| Temporary `0xGOV` module | — | `0x7e4FBed7A7B20A5671095DFBEb6B8A034934EAa6` |
+| Governance relay | `gov-relay-v1.mandateos-root-20261021.testnet` | `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb` |
 | Researcher `0xAAA` | — | `0x10EdE0F3C618321919934Fd63df173DD37F037Af` |
 
 Observed NEAR state is recorded in [`deployments/near-testnet.json`](./deployments/near-testnet.json). Base Sepolia addresses, bytecode hashes, council policy and transaction hashes are recorded in [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
 
-On-chain verification observed Safe owners `3`, threshold `2`, both modules enabled, Delay `86 400 / 604 800`, an initial Safe balance of `5 TestUSDC (token de test)`, funded gas for `0xAAA`, a confirmed 1 TestUSDC (token de test) payment, a successful allowlisted permission simulation, and a `ConditionViolation` for an unregistered recipient.
+On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Roles + Delay, Delay module `0xGOV`, Delay `300 / 604 800`, funded gas accounts, a confirmed 1 TestUSDC (test token) payment, researcher allowance raised to 10 TestUSDC (test token), and a veto that advanced `txNonce` to `queueNonce = 3`. Separate failures prove Guard, Vault and Zodiac each reject independently.
+
+| Governance proof | Base Sepolia transaction |
+|---|---|
+| Queue allowance 10 TestUSDC (test token) | `0x0a0f5f6adb19b287499abf82923300a63abb9b2cd60d4c8e39b1908b89f56f84` |
+| Execute allowance after cooldown | `0x08a2fb37cf467fbfaf440b322d58093a2c2d138814d50ff77403637d09752e57` |
+| Queue malicious allowance | `0xc4cdf2767f875e2b73dee0a2c0068352ec534821555ca8a5ec5d8f0b117f7586` |
+| Council veto `setTxNonce(3)` | `0xab38cd090d4864c1826fdd45bff0f8291a2749f35230a0d0f1a3175a5760e324` |
+| Rejected execution after veto | `0x5f24a2d514917499de2a81d8e60cb181d00c4471deda7f0b35ee288ecdbf14df` |
+| Signed direct Zodiac attack rejected | `0xaddc852fa9967d6171127c424ba5c2c1e819e6ea98b98634e640faa9b1688ebb` |
 
 ## Limits
 
-- The contracts and backend have not been audited. Testnet uses deterministic Guard credentials and placeholder EVM addresses.
-- An MPC signature is considered public as soon as `sign` is called. Callback failure, timeout, pause or revocation does not release a `PossiblySigned` reservation; a confirmed same-nonce cancellation is required.
+- The contracts and backend have not been audited. UAT uses deterministic/test-only Guard and council credentials and assets without financial value.
+- The deployed UAT Vault (`11cb6f03…acc21`) and relay (`4f0bf6b1…3ac41`) predate the `submit_signature` recovery fix; the fix is covered by Sandbox tests and requires a governed redeployment. Local build hashes are recorded in `deployments/near-testnet.json`.
+- The three council keys used for the UAT veto demo are stored in one `.env` on one machine; production requires separate hardware keys.
+- The UAT `allowedRecipient` (`0xa7BE833AD5422421204198E47C04516B0026F9B6`) is also council owner 3, so the demo recipient and one veto key share an address.
+- An MPC signature is considered public as soon as `sign` is called. Callback failure, timeout, pause or revocation does not release a `PossiblySigned` reservation; `submit_signature` stores the published signature after verification with `ecrecover`, otherwise a confirmed same-nonce cancellation is required.
 - The Vault depends on NEAR Chain Signatures availability. Testnet uses `v1.signer-prod.testnet`; production targets `v1.signer` ([MPC repository][near-mpc]).
 - `omni-transaction` 0.3 builds the EIP-1559 preimage and does not publish an audit report in its repository ([omni-transaction][omni-transaction]).
 - Agent-side NEAR gas sponsorship through NEP-366 is designed but not yet implemented; testnet smoke accounts are faucet-funded ([NEAR meta-transactions][near-meta-transactions]).
 - Phase 1 is confirmed end to end. The payment transaction is `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4`; the Vault state is `Confirmed`, with `1_000_000` spent and no reservation.
-- Phase 1 Base Sepolia utilise `TestUSDC (token de test)`, un ERC-20 à 6 décimales déployé par le script UAT. Il ne s'agit pas de l'USDC Circle et il n'a aucune valeur.
-- Le `0xGOV` Base Sepolia est un EOA temporaire activé uniquement pour vérifier le wiring Delay ; le relais Trezu → MPC n'est pas encore déployé et cette adresse n'est pas utilisée.
+- Phase 1 Base Sepolia uses `TestUSDC (test token)`, a 6-decimal ERC-20 deployed by the UAT script. It is not Circle USDC and has no value.
 - A Guard-signed status report can only confirm the exact original transaction. Only the DAO owner can confirm an on-chain cancellation.
 - A reverted transaction is never reopened automatically; DAO governance is required.
 - The Safe security council retains full 2/3 emergency authority; operational policy limits it to veto and incidents.

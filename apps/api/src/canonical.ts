@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { signAsync } from "@noble/ed25519";
+import type { KmsSigner } from "./kms.js";
 import type { GuardVisa, StatusReport } from "./types.js";
 
 const textEncoder = new TextEncoder();
@@ -69,11 +69,11 @@ export function serializeStatusReport(report: StatusReport): Uint8Array {
 export async function signDomainPayload(
   domain: "mandateos:visa:v1" | "mandateos:status:v1",
   payload: Uint8Array,
-  privateKey: Uint8Array,
+  signer: KmsSigner,
 ): Promise<string> {
-  if (privateKey.length !== 32) throw new Error("GUARD_ED25519_PRIVATE_KEY_BASE64 must decode to 32 bytes");
   const message = concat(textEncoder.encode(domain), payload);
-  return Buffer.from(await signAsync(message, privateKey)).toString("base64");
+  const signature = await signer.sign(message);
+  return Buffer.from(signature).toString("base64");
 }
 
 export function randomSafeNonce(): number {

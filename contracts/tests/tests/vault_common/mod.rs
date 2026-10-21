@@ -21,7 +21,8 @@ pub const TOKEN: [u8; 20] = [0x83; 20];
 pub const ROLES_MODIFIER: [u8; 20] = [0x44; 20];
 pub const RECIPIENT: [u8; 20] = [0x66; 20];
 pub const ROLE_KEY: [u8; 32] = [0x55; 32];
-pub const MPC_PUBLIC_KEY: &str = "secp256k1:4No43FuGUrLugkr3DYjSa7ieGvmBvLC674qyaPtpEhW96kxmr2DRgHKJbUZv7dstGJEeHAvc5sTcsiQbuFs7APHN";
+pub const MPC_SECRET: [u8; 32] = [0x42; 32];
+pub const MPC_PUBLIC_KEY: &str = "secp256k1:jCrfJ5wjMBroDh6Mefb1bohaBtzE9me5MaKEhmfmFqK5CudvdSWviXXxfowdtttqh9KWN3zNK9QQu5kq8FfXBK8";
 
 const VAULT_WASM: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/vault.wasm"));
 const MOCK_MPC_WASM: &[u8] =
@@ -290,7 +291,20 @@ pub fn signed_transaction_hash(operation: &Value, cancellation: bool) -> [u8; 32
 }
 
 pub fn status_report(fixture: &Fixture, operation: &Value, report_nonce: u64) -> Value {
-    let tx_hash = signed_transaction_hash(operation, false);
+    status_report_with_hash(
+        fixture,
+        operation,
+        signed_transaction_hash(operation, false),
+        report_nonce,
+    )
+}
+
+pub fn status_report_with_hash(
+    fixture: &Fixture,
+    operation: &Value,
+    tx_hash: [u8; 32],
+    report_nonce: u64,
+) -> Value {
     let report = StatusReportForSigning {
         client_id: CLIENT_ID.to_string(),
         op_id: op_id(operation),
@@ -354,6 +368,14 @@ pub fn op_id(operation: &Value) -> [u8; 32] {
     array32(&operation["op_id"])
 }
 
+pub fn operation_digest(operation: &Value) -> [u8; 32] {
+    array32(&operation["tx_digest"])
+}
+
+pub fn cancellation_digest(operation: &Value) -> [u8; 32] {
+    array32(&operation["cancellation"]["tx_digest"])
+}
+
 pub fn expected_evm_address(public_key: &str) -> [u8; 20] {
     let decoded = bs58::decode(public_key.strip_prefix("secp256k1:").expect("secp key"))
         .into_vec()
@@ -361,6 +383,24 @@ pub fn expected_evm_address(public_key: &str) -> [u8; 20] {
     assert_eq!(decoded.len(), 64);
     let hash = Keccak256::digest(decoded);
     hash[12..].try_into().expect("20 byte address")
+}
+
+/// Signs `digest` with the fixture MPC secret and returns the Chain Signatures
+/// JSON shape: compressed R, scalar s and recovery id.
+pub fn mpc_signature(digest: [u8; 32]) -> Value {
+    use k256::ecdsa::SigningKey;
+
+    let signing_key = SigningKey::from_bytes((&MPC_SECRET).into()).expect("fixture MPC key");
+    let (signature, recovery_id) = signing_key
+        .sign_prehash_recoverable(&digest)
+        .expect("fixture MPC signature");
+    let mut big_r = vec![0x02 + recovery_id.to_byte()];
+    big_r.extend_from_slice(&signature.r().to_bytes());
+    json!({
+        "big_r": big_r,
+        "s": signature.s().to_bytes().to_vec(),
+        "recovery_id": recovery_id.to_byte()
+    })
 }
 
 pub fn assert_failure_contains(outcome: &ExecutionFinalResult, expected: &str) {

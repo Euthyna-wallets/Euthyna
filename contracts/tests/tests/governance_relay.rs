@@ -13,7 +13,8 @@ const RELAY_WASM: &[u8] = include_bytes!(concat!(
 ));
 const MOCK_MPC_WASM: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/mock_mpc.wasm"));
-const MPC_PUBLIC_KEY: &str = "secp256k1:4No43FuGUrLugkr3DYjSa7ieGvmBvLC674qyaPtpEhW96kxmr2DRgHKJbUZv7dstGJEeHAvc5sTcsiQbuFs7APHN";
+const MPC_SECRET: [u8; 32] = [0x42; 32];
+const MPC_PUBLIC_KEY: &str = "secp256k1:jCrfJ5wjMBroDh6Mefb1bohaBtzE9me5MaKEhmfmFqK5CudvdSWviXXxfowdtttqh9KWN3zNK9QQu5kq8FfXBK8";
 const DELAY: [u8; 20] = [0x44; 20];
 const TARGET: [u8; 20] = [0x66; 20];
 
@@ -131,6 +132,33 @@ fn expected_evm_address() -> [u8; 20] {
         .expect("base58 key");
     let hash = Keccak256::digest(decoded);
     hash[12..].try_into().expect("20 byte address")
+}
+
+fn mpc_signature(digest: [u8; 32]) -> Value {
+    use k256::ecdsa::SigningKey;
+
+    let signing_key = SigningKey::from_bytes((&MPC_SECRET).into()).expect("fixture MPC key");
+    let (signature, recovery_id) = signing_key
+        .sign_prehash_recoverable(&digest)
+        .expect("fixture MPC signature");
+    let mut big_r = vec![0x02 + recovery_id.to_byte()];
+    big_r.extend_from_slice(&signature.r().to_bytes());
+    json!({
+        "big_r": big_r,
+        "s": signature.s().to_bytes().to_vec(),
+        "recovery_id": recovery_id.to_byte()
+    })
+}
+
+fn digest(value: &Value) -> [u8; 32] {
+    value
+        .as_array()
+        .expect("byte array")
+        .iter()
+        .map(|byte| byte.as_u64().expect("byte") as u8)
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("32 bytes")
 }
 
 fn assert_failure_contains(
@@ -318,5 +346,146 @@ async fn late_mpc_response_never_reopens_or_reuses_nonce() -> Result<()> {
     let resumed = get_active_operation(&fixture).await?;
     assert_eq!(resumed["state"], "PossiblySigned");
     assert!(!resumed["signed_transaction"].is_null());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_mpc_callback_can_be_recovered_through_submit_signature() -> Result<()> {
+    let fixture = setup().await?;
+    fixture
+        .mpc
+        .call("set_mode")
+        .args_json(json!({"mode": "Fail"}))
+        .transact()
+        .await?
+        .into_result()?;
+    let operation = propose(&fixture).await?;
+    assert_eq!(operation["state"], "PossiblySigned");
+    assert!(operation["signed_transaction"].is_null());
+
+    let wrong = fixture
+        .outsider
+        .call(fixture.relay.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": operation["op_id"],
+            "signature": mpc_signature([0x99; 32])
+        }))
+        .transact()
+        .await?;
+    assert_failure_contains(&wrong, "ERR_SIGNATURE_MISMATCH");
+
+    let direct = fixture
+        .owner
+        .call(fixture.relay.id(), "confirm_original")
+        .args_json(json!({
+            "op_id": operation["op_id"],
+            "tx_hash": vec![0u8; 32],
+            "mpc_signature": mpc_signature([0x98; 32])
+        }))
+        .transact()
+        .await?;
+    assert_failure_contains(&direct, "ERR_SIGNATURE_MISMATCH");
+
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": operation["op_id"],
+            "signature": mpc_signature(digest(&operation["tx_digest"]))
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let recovered = get_active_operation(&fixture).await?;
+    assert!(!recovered["signed_transaction"].is_null());
+    fixture
+        .owner
+        .call(fixture.relay.id(), "confirm_original")
+        .args_json(json!({
+            "op_id": recovered["op_id"],
+            "tx_hash": signed_transaction_hash(&recovered, false)
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let confirmed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": operation["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("confirmed operation")?;
+    assert_eq!(confirmed["state"], "Confirmed");
+
+    let second = propose(&fixture).await?;
+    assert_eq!(second["evm_nonce"], 1);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_cancellation_callback_can_be_recovered_through_submit_signature() -> Result<()> {
+    let fixture = setup().await?;
+    fixture
+        .mpc
+        .call("set_mode")
+        .args_json(json!({"mode": "Fail"}))
+        .transact()
+        .await?
+        .into_result()?;
+    let operation = propose(&fixture).await?;
+    fixture
+        .owner
+        .call(fixture.relay.id(), "cancel_nonce")
+        .args_json(json!({
+            "op_id": operation["op_id"],
+            "gas_limit": "21000",
+            "max_fee_per_gas": "30000000000",
+            "max_priority_fee_per_gas": "2000000000"
+        }))
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?
+        .into_result()?;
+    let cancelling = get_active_operation(&fixture).await?;
+    assert!(cancelling["cancellation"]["signed_transaction"].is_null());
+
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "submit_signature")
+        .args_json(json!({
+            "op_id": cancelling["op_id"],
+            "signature": mpc_signature(digest(&cancelling["cancellation"]["tx_digest"]))
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let recovered = get_active_operation(&fixture).await?;
+    assert!(!recovered["cancellation"]["signed_transaction"].is_null());
+    fixture
+        .owner
+        .call(fixture.relay.id(), "confirm_cancellation")
+        .args_json(json!({
+            "op_id": recovered["op_id"],
+            "tx_hash": signed_transaction_hash(&recovered, true)
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let cancelled: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": operation["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("cancelled operation")?;
+    assert_eq!(cancelled["state"], "Cancelled");
+    assert_eq!(
+        fixture.relay.view("next_evm_nonce").await?.json::<u64>()?,
+        1
+    );
     Ok(())
 }

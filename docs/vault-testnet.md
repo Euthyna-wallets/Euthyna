@@ -2,7 +2,7 @@
 
 ## Status
 
-The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The current Base Sepolia WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21` (`2CTrDibuU42kqQBxNpQRkABgjYk5AuGLcv3mdefpyv9n` in Base58).
+The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The deployed WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21`; the latest reproducible local build with `submit_signature` is `ffe7b4af70f4a92242f60d1c4ce55504e7da750973fc41e1f1654d75b38fcb19`.
 
 Local verification:
 
@@ -12,7 +12,7 @@ cd contracts
 cargo test -p tests -- --nocapture
 ```
 
-Observed result: **16 passed, 0 failed** across four suites: nine DAO tests and seven Vault tests.
+Observed result: **25 passed, 0 failed** across the DAO, Vault and governance-relay suites: nine DAO tests, ten Vault tests and six relay tests.
 
 ## Testnet deployment
 
@@ -37,7 +37,9 @@ The machine-readable manifests are [`deployments/near-testnet.json`](../deployme
 | Base payment | `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4` |
 | NEAR confirmation | `8u2G2cZrxwviWYnKqnGm4W59XMeCK9K2QrFVCM9qGTmK` |
 
-The live MPC call used 1 yoctoNEAR and returned a valid secp256k1 signature. Base Sepolia included the signed EIP-1559 transaction successfully; Zodiac transferred 1 TestUSDC from the Safe to the registered recipient. The Guard-signed report then moved the Vault operation from `PossiblySigned` to `Confirmed`.
+The live MPC call used 1 yoctoNEAR and returned a valid secp256k1 signature. Base Sepolia included the signed EIP-1559 transaction successfully; Zodiac transferred 1 TestUSDC (token de test) from the Safe to the registered recipient. The Guard-signed report then moved the Vault operation from `PossiblySigned` to `Confirmed`.
+
+The DAO-owned governance relay is `gov-relay-v1.mandateos-root-20261021.testnet`, with no access keys. It derives `0xGOV = 0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`, which is the sole Delay module. Proposal `19` raised the researcher allowance to 10 TestUSDC (token de test) after the 300-second Sepolia cooldown. Proposal `23` attempted a 1 000 TestUSDC (token de test) allowance; the Safe council vetoed it with `setTxNonce(3)`, and the post-veto execution reverted.
 
 ## Contract responsibilities
 
@@ -105,7 +107,7 @@ It consumes `visa_nonce`, advances the agent's EVM nonce and moves the operation
 }
 ```
 
-The MPC callback stores `(big_r, s, recovery_id)` and assembles the signed EIP-1559 transaction when a response is available. It never decides whether budget, reference or nonce can be released.
+The MPC callback stores `(big_r, s, recovery_id)` and assembles the signed EIP-1559 transaction when a response is available. If the callback fails, `submit_signature` accepts the published signature only when `ecrecover` returns the agent address for the exact original or cancellation digest, then stores the same fields. Neither path decides whether budget, reference or nonce can be released.
 
 ### Failure handling
 

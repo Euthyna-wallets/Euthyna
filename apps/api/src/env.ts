@@ -9,7 +9,10 @@ const schema = z.object({
   GUARD_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
   NEAR_RELAYER_ACCOUNT_ID: z.string().min(1),
   NEAR_RELAYER_PRIVATE_KEY: z.string().min(1),
-  AGENT_API_TOKEN: z.string().min(24),
+  DATABASE_URL: z.string().min(1),
+  BETTER_AUTH_SECRET: z.string().min(32),
+  BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
+  PASSKEY_RP_ID: z.string().min(1).default("localhost"),
 });
 
 export type Env = z.infer<typeof schema>;

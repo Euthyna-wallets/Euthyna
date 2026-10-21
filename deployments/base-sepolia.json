@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-10-21T00:20:07.842Z",
+  "observedAt": "2026-10-21T09:30:18+02:00",
   "chainId": 84532,
   "network": "base-sepolia",
   "versions": {
@@ -28,7 +28,7 @@
     "councilOwner3": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
     "researcher": "0x10EdE0F3C618321919934Fd63df173DD37F037Af",
     "allowedRecipient": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
-    "usdcAllowanceBaseUnits": "5000000",
+    "usdcAllowanceBaseUnits": "10000000",
     "cooldownSeconds": 300,
     "expirationSeconds": 604800,
     "govAddress": "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb",
@@ -58,7 +58,13 @@
     "disableTemporaryGovOnDelay": "0x6149b2996aedf21000da5c16d7229ffc62bc8a31b28ac8c20a367e11c0c09343",
     "setSepoliaCooldown300": "0xa57fa355832c255e4ab4cb85b936371ebde6a5bb5d9073743dda4e20e5a1ef22",
     "fundGovernanceRelayGas": "0x4168309124e6d803794ec4405208930c5c5ce48cba30ab185e091a9b4a8e505a",
-    "zodiacDirectAttackRejected": "0xaddc852fa9967d6171127c424ba5c2c1e819e6ea98b98634e640faa9b1688ebb"
+    "zodiacDirectAttackRejected": "0xaddc852fa9967d6171127c424ba5c2c1e819e6ea98b98634e640faa9b1688ebb",
+    "vetoDelayNonce3": "0xab38cd090d4864c1826fdd45bff0f8291a2749f35230a0d0f1a3175a5760e324",
+    "governanceAllowanceQueue": "0x0a0f5f6adb19b287499abf82923300a63abb9b2cd60d4c8e39b1908b89f56f84",
+    "governanceAllowanceExecute": "0x08a2fb37cf467fbfaf440b322d58093a2c2d138814d50ff77403637d09752e57",
+    "duplicateAllowanceQueue": "0xa4f6ce86fe1eca269968d4761d3bd8ccf6e568714d2fc254863bdc614d6431d4",
+    "maliciousAllowanceQueue": "0xc4cdf2767f875e2b73dee0a2c0068352ec534821555ca8a5ec5d8f0b117f7586",
+    "postVetoExecuteRejected": "0x5f24a2d514917499de2a81d8e60cb181d00c4471deda7f0b35ee288ecdbf14df"
   },
   "codeHashes": {
     "safeSingleton": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff",
@@ -87,6 +93,9 @@
       "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb"
     ],
     "delayCooldownSeconds": 300,
-    "delayExpirationSeconds": 604800
+    "delayExpirationSeconds": 604800,
+    "delayTxNonce": 3,
+    "delayQueueNonce": 3,
+    "researcherAllowanceBaseUnits": "10000000"
   }
 }

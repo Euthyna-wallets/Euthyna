@@ -4,6 +4,7 @@ import { bytesToHex, concatHex, hexToBytes, keccak256, stringToHex } from "viem"
 import { serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { Guard } from "./guard.js";
+import { EnvKmsSigner } from "./kms.js";
 import type { Registry, VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
@@ -66,7 +67,7 @@ function operationFor(target: `0x${string}` = recipient): VaultOperation {
 describe("Guard exact rules", () => {
   it("signs the exact prepared transaction and produces a verifiable domain-separated visa", async () => {
     const privateKey = Uint8Array.from({ length: 32 }, () => 7);
-    const guard = new Guard(registry, privateKey);
+    const guard = new Guard(registry, new EnvKmsSigner(privateKey));
     const result = await guard.approve(operationFor());
     expect(result.decision).toBe("approve");
     if (result.decision !== "approve") throw new Error("expected approval");
@@ -84,14 +85,14 @@ describe("Guard exact rules", () => {
   });
 
   it("Guard refuses an uncovered recipient and emits no visa", async () => {
-    const guard = new Guard(registry, Uint8Array.from({ length: 32 }, () => 7));
+    const guard = new Guard(registry, new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
     const result = await guard.approve(operationFor("0x2222222222222222222222222222222222222222"));
     expect(result).toEqual({ decision: "escalate", reasons: ["recipient not registered"] });
     expect("approval" in result).toBe(false);
   });
 
   it("escalates when the persisted digest no longer matches the transaction", async () => {
-    const guard = new Guard(registry, Uint8Array.from({ length: 32 }, () => 7));
+    const guard = new Guard(registry, new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
     const operation = operationFor();
     operation.tx_digest[0] = (operation.tx_digest[0] ?? 0) ^ 1;
     const result = await guard.approve(operation);
@@ -102,7 +103,7 @@ describe("Guard exact rules", () => {
   });
 
   it("refuses to confirm a hash other than the stored raw transaction hash", async () => {
-    const guard = new Guard(registry, Uint8Array.from({ length: 32 }, () => 7));
+    const guard = new Guard(registry, new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
     const operation = operationFor();
     operation.state = "PossiblySigned";
     operation.signed_transaction = [0x02, 0x01, 0x02];

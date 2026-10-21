@@ -1,5 +1,5 @@
 {
-  "observed_at": "2026-10-21T03:05:11+02:00",
+  "observed_at": "2026-10-21T09:30:18+02:00",
   "network": "testnet",
   "factory": {
     "account_id": "sputnikv2.testnet",
@@ -18,6 +18,7 @@
     "account_id": "vault-v4.mandateos-root-20261021.testnet",
     "code_hash_sha256_hex": "11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21",
     "code_hash_sha256_bs58": "2CTrDibuU42kqQBxNpQRkABgjYk5AuGLcv3mdefpyv9n",
+    "latest_local_code_hash_sha256_hex": "ffe7b4af70f4a92242f60d1c4ce55504e7da750973fc41e1f1654d75b38fcb19",
     "access_key_count": 0,
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "client_id": "acme",
@@ -38,11 +39,14 @@
     "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",
     "code_hash_sha256_bs58": "6KZnkemmuysJwuRfZkaqEifTmTdaGUpTKr128GhDJsMA",
     "access_key_count": 0,
+    "latest_local_code_hash_sha256_hex": "62a70f5ab3b0d269dac14c7dc6be00cffe6af747110e06e4dc07efae61934fb3",
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "mpc_path": "governance/base-sepolia",
     "derived_public_key": "secp256k1:3cuFpPFwraKRy7vUjRRetafeZnyp4WBNEwuUtjRNWkhbLam21jcmribNomTFEzQzczqcKvbjEdRhUYf7qgf6b4cs",
     "evm_address": "0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb",
-    "derivation_proposal_id": 18
+    "derivation_proposal_id": 18,
+    "next_evm_nonce": 3,
+    "active_operation": null
   },
   "operation": {
     "op_id": "0xe505ff589ddcc3b4383750077bc8f86dea338cf2f507c02583a0a0cd5424bd74",
@@ -63,6 +67,19 @@
     "near_confirmation_report": "8u2G2cZrxwviWYnKqnGm4W59XMeCK9K2QrFVCM9qGTmK"
   },
   "base_transaction_broadcast": true,
+  "governance_demo": {
+    "allowance_proposal_id": 19,
+    "allowance_confirmation_proposal_id": 20,
+    "allowance_queue_tx": "0x0a0f5f6adb19b287499abf82923300a63abb9b2cd60d4c8e39b1908b89f56f84",
+    "allowance_execute_tx": "0x08a2fb37cf467fbfaf440b322d58093a2c2d138814d50ff77403637d09752e57",
+    "allowance_after": "10000000",
+    "malicious_proposal_id": 23,
+    "malicious_confirmation_proposal_id": 24,
+    "malicious_queue_tx": "0xc4cdf2767f875e2b73dee0a2c0068352ec534821555ca8a5ec5d8f0b117f7586",
+    "veto_tx": "0xab38cd090d4864c1826fdd45bff0f8291a2749f35230a0d0f1a3175a5760e324",
+    "post_veto_execute_tx": "0x5f24a2d514917499de2a81d8e60cb181d00c4471deda7f0b35ee288ecdbf14df",
+    "post_veto_execute_status": "reverted: Transaction queue is empty"
+  },
   "superseded_deployment": {
     "dao": "mandateos-uat-92530026.sputnikv2.testnet",
     "vault": "dev-20261020210039-23270069158069.testnet",
