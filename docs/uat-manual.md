@@ -13,8 +13,8 @@ attendu.
 |---|---|
 | Comptes NEAR council | 3 (Meteor), dont le fondateur |
 | Comptes EVM council | 3 adresses (MetaMask), dont `0x1D693a4425bf7eD10FE7775E2b65b072019FFceb`, seuil Safe **2/3** |
-| NEAR fondateur | **≥ 10 NEAR** pour la factory + **5 NEAR** par Vault/relay |
-| NEAR total conseillé | **19 NEAR** (DAO 7,5 + Vault 5 + relay 5 + agent/propositions) |
+| Company + DAO | **0,25 NEAR** via `factory.mandateos.testnet` + Sputnik global immuable |
+| Treasury complète | **8,75 NEAR** : DAO 0,25 + Vault 5 + relay 3,5 ; dépôts de stockage |
 | ETH Base Sepolia (owner 1) | **≥ 0,01 ETH** (Safe + 3 modules + batch Safe) |
 | TestUSDC Base Sepolia | 10 unités sur le Safe (`0x418A2b47911dE05e21688F7490195F5324B49474`) |
 | Test FT NEAR | 10 unités vers le DAO (`test-ft-v4.mandateos-root-20261021.testnet`, `mint` public) |

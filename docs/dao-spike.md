@@ -235,7 +235,7 @@ Create the DAO:
 near contract call-function as-transaction "$FACTORY_ID" create \
   json-args "$FACTORY_CREATE_ARGS" \
   prepaid-gas '150 Tgas' \
-  attached-deposit '12 NEAR' \
+  attached-deposit '6 NEAR' \
   sign-as "$CREATOR" \
   network-config testnet \
   sign-with-keychain send
@@ -251,7 +251,27 @@ near contract call-function as-read-only "$DAO_ID" get_factory_info \
   json-args '{}' network-config testnet now
 ```
 
-The 12 NEAR deposit follows the official testnet deployment script example ([`deploy_factory_testnet.sh:L66-L68`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/scripts/deploy_factory_testnet.sh#L66-L68)). Recheck the factory's current minimum and default code hash immediately before a real deployment.
+The current official NEAR DAO primitive uses a 6 NEAR deposit for `sputnikv2.testnet` ([NEAR DAO documentation](https://docs.near.org/primitives/dao#create-a-dao)). The observed three-member MandateOS DAO uses 540,372 bytes, or 5.40372 NEAR at the live `10^19` yoctoNEAR/byte storage price, leaving 0.59628 NEAR for state growth and gas. Recheck the factory's default code hash and protocol storage price immediately before a real deployment.
+
+### MandateOS global factory
+
+For the hackathon multi-Company flow, `factory.mandateos.testnet` reuses the
+official immutable Sputnik global hash
+`Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD` instead of duplicating the DAO
+WASM. The factory is owner-only, has zero access keys and transfers the attached
+balance into `<slug>.factory.mandateos.testnet` before `new`.
+
+Observed proof:
+
+- factory deployment: `GJgBDDpjcznHwnzZFjsGb2GS61PQopXnfhgwEvCBzeH9`;
+- DAO creation: `5zMZUBfP9cvkSDunnSM5SL5N9RDU6rvDASBk8C67sXJH`;
+- DAO: `global-smoke.factory.mandateos.testnet`;
+- `global_contract_hash` equals the configured immutable hash;
+- zero access keys, threshold `2`, three council members;
+- balance `0.25 NEAR`, storage usage `810` bytes (`0.00810 NEAR` minimum).
+
+The standard 6 NEAR `sputnikv2.testnet` path remains a compatibility fallback;
+the MandateOS factory is the default hackathon path.
 
 ## Surprises and operational notes
 

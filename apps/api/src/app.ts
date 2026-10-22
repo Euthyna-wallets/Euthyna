@@ -294,7 +294,7 @@ export function createApp({
     if (nearAccountId.length > 64) {
       return context.json({ error: "near_account_too_long" }, 500);
     }
-    await near.createSubaccount(nearAccountId, input.nearPublicKey, "1000000000000000000000000");
+    await near.createSubaccount(nearAccountId, input.nearPublicKey, "500000000000000000000000");
     return new Response(JSON.stringify({ ...payload, nearAccountId }), {
       status: response.status,
       headers: response.headers,
@@ -564,6 +564,15 @@ export function createApp({
       metadata: { environment: input.environment, status: refreshed.status },
     });
     return context.json(refreshed);
+  });
+
+  app.get("/v1/console/treasury/sponsor-status", requireConsole(auth, consoleLimiter), async (context) => {
+    const account = await near.getAccount(nearParentAccount);
+    return context.json({
+      accountId: nearParentAccount,
+      balanceYocto: account.amount,
+      storageUsage: account.storage_usage ?? null,
+    });
   });
 
   app.post("/v1/console/treasury/create-dao", requireConsoleAdmin(auth, consoleLimiter), async (context) => {

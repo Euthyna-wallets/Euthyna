@@ -191,6 +191,7 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
   let guardCalls = 0;
   const near = {
     getOperation: async () => options?.operation ?? operation,
+    getAccount: async () => ({ code_hash: "11111111111111111111111111111111", amount: "832000000000000000000000", storage_usage: 182 }),
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
       method === "get_agent" ? { role: "researcher", active: true, evm_address: [1, 2] } : 3,
@@ -563,6 +564,19 @@ describe("treasury onboarding", () => {
     });
     expect(response.status).toBe(200);
     expect(treasuryCalls.plans).toEqual([{ organizationId: "org-1", daoName: "acme" }]);
+  });
+
+  it("returns the public sponsor balance without requiring admin role", async () => {
+    const { app } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/treasury/sponsor-status", {
+      headers: consoleHeaders({ cookie: "session-member" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      accountId: "mandateos.testnet",
+      balanceYocto: "832000000000000000000000",
+      storageUsage: 182,
+    });
   });
 
   it("forbids a non-admin from registering a treasury", async () => {

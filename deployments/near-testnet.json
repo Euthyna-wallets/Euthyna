@@ -1,10 +1,31 @@
 {
-  "observed_at": "2026-10-21T09:30:18+02:00",
+  "observed_at": "2026-10-21T23:17:14+02:00",
   "network": "testnet",
   "factory": {
     "account_id": "sputnikv2.testnet",
     "default_code_hash": "AA4nA45vauiac3jdVwJTzSdUP3oj2r1fDaPAb2mHdgcH",
     "default_version": [3, 31]
+  },
+  "mandateos_factory": {
+    "account_id": "factory.mandateos.testnet",
+    "code_hash_sha256_hex": "08da2996e69db9213783ffad20625718c5c1be8d97bd1f46be73746ba1ff1be4",
+    "code_hash_sha256_bs58": "bZCvXWm7Qi9gW6KC46qqSFNL8iNw3WgpCZsSwn8hfto",
+    "access_key_count": 0,
+    "owner_id": "mandateos.testnet",
+    "dao_global_code_hash": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
+    "storage_usage": 150710,
+    "deployment_tx": "GJgBDDpjcznHwnzZFjsGb2GS61PQopXnfhgwEvCBzeH9"
+  },
+  "global_dao_smoke": {
+    "account_id": "global-smoke.factory.mandateos.testnet",
+    "global_contract_hash": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
+    "access_key_count": 0,
+    "balance": "250000000000000000000000",
+    "storage_usage": 810,
+    "auto_update": true,
+    "threshold": "2",
+    "member_count": 3,
+    "creation_tx": "5zMZUBfP9cvkSDunnSM5SL5N9RDU6rvDASBk8C67sXJH"
   },
   "dao": {
     "account_id": "mandateos-uat-92543787.sputnikv2.testnet",

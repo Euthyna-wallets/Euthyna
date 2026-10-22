@@ -69,6 +69,10 @@ moved from `mandateos-root-20261021.testnet`, for 19 NEAR total. Plan deposits
 were reduced from 10/10/10 to the measured UAT storage needs: DAO 7,5 NEAR,
 Vault 5 NEAR, relay 5 NEAR (17,5 NEAR total), leaving a small gas buffer.
 
+This is historical evidence for that UAT run. The current MandateOS factory uses
+the official immutable global Sputnik hash: a DAO receives 0.25 NEAR, while a
+complete new treasury requires 8.75 NEAR for DAO + Vault + relay.
+
 `0x1D693a4425bf7eD10FE7775E2b65b072019FFceb` was funded with 0.002 ETH on Base
 Sepolia. Its private key is not in the harness; it can be a Safe owner signed
 manually in MetaMask. The automated 2/3 batch uses the deployer key and council

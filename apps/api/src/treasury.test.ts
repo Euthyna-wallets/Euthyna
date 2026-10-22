@@ -94,6 +94,7 @@ function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Recor
 type NearOverrides = {
   vaultOwner?: string;
   codeHashes?: Record<string, string>;
+  globalDaoHash?: string;
   policy?: unknown;
   autoUpdate?: boolean;
   vault?: { mpc?: string; chain?: number; guard?: string; token?: string; ttl?: number };
@@ -124,6 +125,9 @@ function fakeNear(overrides?: NearOverrides): NearClient {
     getAccount: async (accountId: string) => ({
       code_hash: overrides?.codeHashes?.[accountId] ?? "factory-hash",
       amount: "0",
+      ...(accountId === daoAccountId && overrides?.globalDaoHash
+        ? { global_contract_hash: overrides.globalDaoHash }
+        : {}),
     }),
     getAccessKeys: async () => ({ keys: [] }),
     viewFunction: async (accountId: string, method: string) => {
@@ -191,6 +195,17 @@ describe("TreasuryService.plan", () => {
       "FunctionCall",
     ]);
     expect(plan.vault.wasmSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not create a redundant separator when the eight-character prefix ends in a dash", async () => {
+    const { prisma } = fakePrisma();
+    const plan = await service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "Factory UI Org",
+      founderNearAccountId: "alice.testnet",
+    });
+    expect(plan.vault.accountId).toBe("factory-v.mandateos.testnet");
+    expect(plan.relay.accountId).toBe("factory-r.mandateos.testnet");
   });
 
   it("refuses a council member without both wallets", async () => {
@@ -321,6 +336,17 @@ describe("TreasuryService.register hardening", () => {
     const near = await validNear({ codeHashes: { ...(await artifactHashes()), [daoAccountId]: "other-hash" } });
     await expect(service(prisma, near).register("org-1", "user-1", registerInput)).rejects.toMatchObject({
       code: "dao_code_hash_mismatch",
+    });
+  });
+
+  it("accepts an immutable global DAO hash matching the factory default", async () => {
+    const { prisma } = fakePrisma();
+    const near = await validNear({
+      codeHashes: { ...(await artifactHashes()), [daoAccountId]: "11111111111111111111111111111111" },
+      globalDaoHash: "factory-hash",
+    });
+    await expect(service(prisma, near).register("org-1", "user-1", registerInput)).resolves.toMatchObject({
+      status: "active",
     });
   });
 

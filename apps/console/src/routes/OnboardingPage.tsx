@@ -37,6 +37,20 @@ function short(value: string): string {
   return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
+const YOCTO_PER_NEAR = 10n ** 24n;
+
+function transferDeposit(actions: TreasuryPlan["vault"]["actions"]): bigint {
+  const transfer = actions.find((action) => action.type === "Transfer");
+  return BigInt(transfer?.type === "Transfer" ? transfer.depositYocto : "0");
+}
+
+function formatNear(yocto: bigint): string {
+  const whole = yocto / YOCTO_PER_NEAR;
+  const milli = (yocto % YOCTO_PER_NEAR) / 10n ** 21n;
+  const fraction = milli.toString().padStart(3, "0").replace(/0+$/, "");
+  return `${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
 export function OnboardingPage() {
   const session = authClient.useSession();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -610,6 +624,15 @@ function TreasuryWizard(props: {
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
   const [daoCreated, setDaoCreated] = useState<string | null>(null);
+  const [sponsor, setSponsor] = useState<{ accountId: string; balanceYocto: string } | null>(null);
+
+  async function refreshSponsor() {
+    setSponsor(await api<{ accountId: string; balanceYocto: string }>("/v1/console/treasury/sponsor-status"));
+  }
+
+  useEffect(() => {
+    void refreshSponsor().catch((cause: unknown) => props.onError(String(cause)));
+  }, []);
 
   async function deployBase() {
     for (const transaction of [
@@ -643,10 +666,32 @@ function TreasuryWizard(props: {
   }
 
   const baseDeployed = transactionHashes.length >= 3;
+  const daoDeposit = BigInt(props.plan.daoCreate.depositYocto);
+  const vaultDeposit = transferDeposit(props.plan.vault.actions);
+  const relayDeposit = transferDeposit(props.plan.relay.actions);
+  const setupDeposit = daoDeposit + vaultDeposit + relayDeposit;
+  const sponsorBalance = sponsor ? BigInt(sponsor.balanceYocto) : null;
+  const contractsDeposit = vaultDeposit + relayDeposit;
+  const daoAffordable = sponsorBalance === null || sponsorBalance >= daoDeposit;
+  const contractsAffordable = sponsorBalance === null || sponsorBalance >= contractsDeposit;
 
   return (
     <section className="card">
       <h2>3. Treasury transactions</h2>
+      <div className="alert">
+        One-time NEAR setup balances (not payment-operation fees): DAO {formatNear(daoDeposit)} +
+        Vault {formatNear(vaultDeposit)} + relay {formatNear(relayDeposit)} ={" "}
+        <strong>{formatNear(setupDeposit)} NEAR</strong>. Most of this balance is locked against
+        contract storage. The observed 14.288 Tgas payment authorization costs about 0.00143 NEAR
+        at the current testnet gas price.
+      </div>
+      {sponsor ? (
+        <div className="muted small">
+          Sponsor <code>{sponsor.accountId}</code>: {formatNear(BigInt(sponsor.balanceYocto))} NEAR available.
+          Create only the DAO for additional hackathon companies; a full payment treasury adds{" "}
+          {formatNear(contractsDeposit)} NEAR for Vault + relay.
+        </div>
+      ) : null}
       <div className="steps">
         <div className="step">
           <h3>a. DAO</h3>
@@ -661,7 +706,7 @@ function TreasuryWizard(props: {
             <input placeholder="founder.testnet" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
             <button
               className="primary"
-              disabled={Boolean(props.busy)}
+              disabled={Boolean(props.busy) || !daoAffordable}
               onClick={() => props.run("dao", async () => {
                 const created = await api<{ daoAccountId: string; txHash: string }>(
                   "/v1/console/treasury/create-dao",
@@ -676,6 +721,7 @@ function TreasuryWizard(props: {
                 );
                 setTransactionHashes((current) => [...current, created.txHash]);
                 setDaoCreated(created.daoAccountId);
+                await refreshSponsor();
               })}
             >
               Create DAO (MandateOS pays)
@@ -725,7 +771,7 @@ function TreasuryWizard(props: {
           <div className="row">
             <button
               className="primary"
-              disabled={Boolean(props.busy)}
+              disabled={Boolean(props.busy) || !contractsAffordable}
               onClick={() => props.run("near-deploy", async () => {
                 const deployed = await api<{ vaultTxHash: string; relayTxHash: string }>(
                   "/v1/console/treasury/deploy-contracts",
@@ -739,6 +785,7 @@ function TreasuryWizard(props: {
                   },
                 );
                 setTransactionHashes((current) => [...current, deployed.vaultTxHash, deployed.relayTxHash]);
+                await refreshSponsor();
               })}
             >
               Deploy Vault + relay (MandateOS pays)
@@ -748,6 +795,12 @@ function TreasuryWizard(props: {
           <div className="muted small">
             Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}
           </div>
+          {!contractsAffordable && sponsor ? (
+            <div className="muted small">
+              Full treasury unavailable: needs {formatNear(contractsDeposit)} NEAR; sponsor has{" "}
+              {formatNear(BigInt(sponsor.balanceYocto))} NEAR. The Company and DAO remain usable.
+            </div>
+          ) : null}
         </div>
 
         <div className="step">

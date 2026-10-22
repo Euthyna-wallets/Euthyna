@@ -426,7 +426,7 @@ export class TreasuryService {
 
     const slug = slugify(input.daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
-    const short = slug.slice(0, 8);
+    const short = slug.slice(0, 8).replace(/-+$/, "");
     const vaultAccountId = `${short}-v.${this.config.accountParent}`;
     const relayAccountId = `${short}-r.${this.config.accountParent}`;
     for (const accountId of [daoAccountId, vaultAccountId, relayAccountId]) {
@@ -656,7 +656,8 @@ export class TreasuryService {
 
     const factoryCodeHash = await this.near.viewFunction<string>(this.config.daoFactoryId, "get_default_code_hash");
     const daoAccount = await this.near.getAccount(input.daoAccountId);
-    if (daoAccount.code_hash !== factoryCodeHash) {
+    const daoCodeHash = daoAccount.global_contract_hash ?? daoAccount.code_hash;
+    if (daoCodeHash !== factoryCodeHash) {
       throw new TreasuryError(422, "dao_code_hash_mismatch", "DAO code hash does not match the factory default");
     }
     const policy = await this.near.viewFunction<SputnikPolicy>(input.daoAccountId, "get_policy");

@@ -94,8 +94,14 @@ export class NearClient {
     return accountId;
   }
 
-  async getAccount(accountId: string): Promise<{ code_hash: string; amount: string }> {
-    return this.rpc<{ code_hash: string; amount: string }>("query", {
+  async getAccount(accountId: string): Promise<{
+    code_hash: string;
+    amount: string;
+    storage_usage?: number;
+    global_contract_hash?: string;
+    global_contract_account_id?: string;
+  }> {
+    return this.rpc("query", {
       request_type: "view_account",
       finality: "final",
       account_id: accountId,

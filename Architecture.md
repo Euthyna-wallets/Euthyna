@@ -12,9 +12,9 @@ Le projet vise la track **06 — AI Security & Defense** du hackathon NEAR 2026.
 |---|---|---|
 | **Phase 1** | Paiement USDC depuis un Safe Base vers un fournisseur enregistré | Doit fonctionner de bout en bout avant toute extension |
 | **Phase 2 — stretch** | Dépôt vers NEAR Intents, swap, puis retrait/bridge vers un wallet enregistré | Architecture cible ; ne doit pas être annoncé comme implémenté avant une preuve on-chain |
-| **Roadmap** | Comptes de vote passkey, factory multi-client, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
+| **Roadmap** | Comptes de vote passkey, code global Vault/relay, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
 
-Le MVP déploie un seul client, **ACME**, au moyen de `scripts/seed-acme.ts` puis d'un script de déploiement. Il n'existe pas de factory dans le périmètre du MVP.
+Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory.mandateos.testnet`, owner-only et sans access key, crée une DAO Sputnik globale `<slug>.factory.mandateos.testnet` par Company. L'API utilise la clé d'infrastructure de `mandateos.testnet` pour financer la factory, les DAO, `v-<slug>.mandateos.testnet` et `r-<slug>.mandateos.testnet`; elle ne crée aucune access key sur ces contrats. La DAO devient owner du Vault et du relais, tandis que la clé d'infrastructure ne peut pas déplacer les fonds du Safe.
 
 Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/dao-spike.md`](./docs/dao-spike.md).
 
@@ -128,6 +128,32 @@ Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format
 Une function-call key NEAR peut être limitée à un receiver et à une liste de méthodes ; elle ne donne pas un accès complet au compte ([documentation access keys][near-access-keys]). Le script ACME crée chaque clé agent côté client, n'envoie au service que la clé publique, puis limite la clé à `prepare`, `authorize` et `expire`.
 
 L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path. Un agent qui appelle le MPC depuis son propre compte obtient donc une adresse différente de `0xAAA`, non assignée au rôle Zodiac ([Chain Signatures][chain-signatures]).
+
+## Modèle multi-client et coût NEAR
+
+Le suffixe `mandateos.testnet` fournit un namespace, pas du stockage gratuit. Chaque organisation garde des comptes d'état séparés : une DAO Sputnik, un Vault et un relais de gouvernance. Cette séparation est intentionnelle :
+
+- le Vault et le relais sont des appelants MPC distincts, donc `0xAAA` et `0xGOV` restent compartimentés ;
+- une faute de configuration ou de contrôle d'accès chez un client ne partage pas de state avec un autre client ;
+- après le batch `CreateAccount → Transfer → DeployContract → new`, aucun des deux comptes n'a d'access key et la DAO est leur seule autorité logique.
+
+Au protocole testnet version 88, le RPC publie `storage_amount_per_byte = 10^19` yoctoNEAR et `1 NEAR = 10^24` yoctoNEAR : 100 000 octets immobilisent 1 NEAR ([stockage NEAR][near-storage]). Les mesures du 21 octobre 2026 sont :
+
+| Compte / action | Stockage observé ou sandbox | Minimum storage | Dépôt configuré | Marge |
+|---|---:|---:|---:|---:|
+| Factory MandateOS (une fois) | 150 710 octets on-chain | 1,50710 NEAR | 2 NEAR | 0,49290 NEAR |
+| DAO Sputnik global `global-smoke` | 810 octets on-chain | 0,00810 NEAR | 0,25 NEAR | 0,24190 NEAR |
+| Vault WASM courant + `new` | 439 560 octets sandbox, sans access key | 4,39560 NEAR | 5 NEAR | 0,60440 NEAR |
+| Relais WASM courant + `new` | 285 313 octets sandbox, sans access key | 2,85313 NEAR | 3,5 NEAR | 0,64687 NEAR |
+| Wallet membre avec une clé | 182 octets on-chain | 0,00182 NEAR | 0,5 NEAR | 0,49818 NEAR pour bonds et gas |
+
+La factory MandateOS `factory.mandateos.testnet` est déployée une fois et n'a aucune access key. Elle crée `<slug>.factory.mandateos.testnet`, transfère 0,25 NEAR, référence par hash immuable le Sputnik global officiel, puis appelle `new`; seuls 810 octets ont été observés pour la DAO de preuve. Une nouvelle Company + DAO coûte donc **0,25 NEAR**. Le setup de paiement complet ajoute **5 NEAR** pour le Vault et **3,5 NEAR** pour le relais, soit **8,75 NEAR** par organisation complète. Le wallet de l'utilisateur reçoit séparément 0,5 NEAR lors de sa première inscription, pas à chaque Company.
+
+Ces soldes ne sont pas des frais par paiement. Le chemin réel `authorize → MPC → callback` a consommé 14,288425743215 Tgas ; au prix testnet observé de `10^8` yoctoNEAR/gas, cela vaut environ **0,00142885 NEAR** ([gas NEAR][near-gas]). Il n'y a pas d'erreur de 24 décimales dans les constantes.
+
+Le sponsor est volontairement réservé à la démo hackathon. Avec le solde courant, la console autorise les Company/DAO abordables et bloque séparément le déploiement Vault/relay lorsqu'il manque 8,5 NEAR. Une ouverture publique exigerait une réservation de crédit atomique et un teardown gouverné ; ce n'est pas le périmètre actuel.
+
+La factory réutilise Sputnik au lieu de réécrire la gouvernance : Trezu conserve les méthodes et policies attendues, tandis que MandateOS choisit le namespace, le financement et le hash immuable. Publier également Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ; c'est une optimisation post-hackathon ([global contracts NEAR][near-global-contracts]). Fusionner Vault et relais économiserait environ 2,85 NEAR par client, mais supprimerait leur frontière MPC et augmenterait le blast radius : ce compromis est rejeté.
 
 ## Déploiement d'ACME
 
@@ -870,3 +896,7 @@ La Phase 1 est implémentée uniquement si les preuves suivantes existent :
 [zodiac-delay-execute-source]: https://github.com/zodiaceco/zodiac-modifier-delay/blob/30f3aafa9b3be3425bcac390fe6ab6bd9afb5f16/contracts/Delay.sol#L170-L201
 [near-meta-transactions]: https://docs.near.org/protocol/transactions/meta-tx
 [near-relayer-guide]: https://docs.near.org/web3-apps/tutorials/meta-transactions
+[near-storage]: https://docs.near.org/tutorials/auction/auction-factory
+[near-gas]: https://near.github.io/nearcore/architecture/how/gas.html
+[near-global-contracts]: https://github.com/near/NEPs/blob/master/neps/nep-0591.md
+[near-dao]: https://docs.near.org/primitives/dao

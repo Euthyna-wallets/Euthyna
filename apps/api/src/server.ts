@@ -49,8 +49,8 @@ const treasury = new TreasuryService(prisma, near, signer, {
   },
   vaultTtlBlocks: 50,
   vaultDepositYocto: "5000000000000000000000000",
-  relayDepositYocto: "5000000000000000000000000",
-  daoCreateDepositYocto: "7500000000000000000000000",
+  relayDepositYocto: "3500000000000000000000000",
+  daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
 });
 const mandates = new MandateService(prisma, near);
 const registryService = new RegistryService(prisma);
