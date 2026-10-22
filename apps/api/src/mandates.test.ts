@@ -1,12 +1,22 @@
 import type { PrismaClient } from "@mandateos/db";
 import { describe, expect, it } from "vitest";
 import { getAddress } from "viem";
+import { z } from "zod";
 
 import { MandateService, type MandateInput } from "./mandates.js";
 import type { NearClient } from "./near.js";
 
 const token = getAddress("0x418A2b47911dE05e21688F7490195F5324B49474");
 const recipients = [getAddress("0x1111111111111111111111111111111111111111")];
+
+// Sputnik DAO 2.3.1 ProposalKind::Transfer at immutable upstream commit 317ea4fb1:
+// https://github.com/near-daos/sputnik-dao-contract/blob/317ea4fb1/sputnikdao2/src/proposals.rs
+const sputnikTransferSchema = z.object({
+  token_id: z.string().min(1),
+  receiver_id: z.string().min(1),
+  amount: z.string().regex(/^\d+$/),
+  msg: z.string().nullable(),
+}).strict();
 
 const input: MandateInput = {
   role: "researcher",
@@ -24,13 +34,19 @@ const input: MandateInput = {
   },
 };
 
-function service(status = "active", currentRole: unknown = null, agentEvmAddress: string | null = null) {
+function service(
+  status = "active",
+  currentRole: unknown = null,
+  agentEvmAddress: string | null = null,
+  budgetTokenDecimals = 6,
+) {
   const updates: unknown[] = [];
   const prisma = {
     treasury: {
       findUnique: async () => ({
         organizationId: "org-1",
         status,
+        environment: "uat",
         daoAccountId: "acme.sputnikv2.testnet",
         vaultAccountId: "acme-vault.alice.testnet",
         relayAccountId: "acme-relay.alice.testnet",
@@ -46,7 +62,13 @@ function service(status = "active", currentRole: unknown = null, agentEvmAddress
     },
   } as unknown as PrismaClient;
   const near = {
-    viewFunction: async (_accountId: string, method: string) => {
+    viewFunction: async (_accountId: string, method: string, args?: Record<string, unknown>) => {
+      if (method === "ft_metadata") return { symbol: "TestUSDC", decimals: budgetTokenDecimals };
+      if (method === "storage_balance_bounds") return { min: "1250000000000000000000" };
+      if (method === "storage_balance_of") {
+        return args?.account_id === "acme.sputnikv2.testnet" ? null : { total: "1250000000000000000000" };
+      }
+      if (method === "ft_balance_of") return "6000000";
       if (method === "get_agent") {
         return {
           active: true,
@@ -76,6 +98,17 @@ describe("MandateService.preview", () => {
     expect(preview.zodiac.calls).toHaveLength(3);
     expect(preview.proposals.vaultSetRole.methodName).toBe("add_proposal");
     expect(preview.proposals.zodiacRelay).toHaveLength(3);
+    expect(preview.proposals.zodiacRelay[0]).toMatchObject({
+      args: {
+        proposal: {
+          kind: {
+            FunctionCall: {
+              actions: [{ gas: "60000000000000" }],
+            },
+          },
+        },
+      },
+    });
     expect(preview.agentStatus).toBe("no_agent");
   });
 
@@ -102,6 +135,44 @@ describe("MandateService.preview", () => {
     expect(preview.zodiac.calls).toHaveLength(4);
     expect(preview.proposals.vaultRegisterAgent).not.toBeNull();
     expect(fixture.updates).toEqual([{ evmAddress: "0x2222222222222222222222222222222222222222" }]);
+  });
+
+  it("emits a Sputnik 2.3.1 FT Transfer with the configured token_id", async () => {
+    const preview = await service("active", null, "0x2222222222222222222222222222222222222222")
+      .service.preview("org-1", {
+        ...input,
+        agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
+      });
+    const transfer = (
+      preview.proposals.funding?.args.proposal as { kind: { Transfer: unknown } }
+    ).kind.Transfer;
+    expect(sputnikTransferSchema.parse(transfer)).toEqual({
+      token_id: "test-ft.testnet",
+      receiver_id: "acme-vault.alice.testnet",
+      amount: "6000000",
+      msg: JSON.stringify({ role: "researcher" }),
+    });
+  });
+
+  it("plans missing UAT storage registrations before mint and reports the DAO balance", async () => {
+    const fixture = service();
+    await expect(fixture.service.budgetTokenPlan("org-1", "6000000")).resolves.toMatchObject({
+      status: {
+        decimals: 6,
+        daoBalance: "6000000",
+        daoStorageRegistered: false,
+        vaultStorageRegistered: true,
+      },
+      actions: [
+        { methodName: "storage_deposit", args: { account_id: "acme.sputnikv2.testnet" } },
+        { methodName: "mint", args: { account_id: "acme.sputnikv2.testnet", amount: "6000000" } },
+      ],
+    });
+  });
+
+  it("refuses a budget token whose decimals differ from USDC", async () => {
+    await expect(service("active", null, null, 18).service.preview("org-1", input))
+      .rejects.toMatchObject({ code: "budget_token_decimals_mismatch" });
   });
 
   it("refuses a pending treasury", async () => {

@@ -86,7 +86,28 @@
   },
   "test_ft": {
     "account_id": "test-ft-v4.mandateos-root-20261021.testnet",
-    "code_hash_sha256_hex": "3362ee79c2255d8ed5a230dad241641759174b7b51187b171516967e8df1e04e"
+    "code_hash_sha256_hex": "b252114b11f28df9da5a63fcd6e2fb128606725a55fbe9e5ec4b21ea34c3a36a",
+    "code_hash_sha256_bs58": "D169mWBjhe8vYDYo4tjXVQoM8PNEQ1CQcPcaWa4mJCg1",
+    "upgrade_transaction_hash": "7BUDD5yePCzWd86Tx3cuTV15xUmCUfcTHbkCbeZS2DVj",
+    "upgrade_block_height": 274277694,
+    "symbol": "TestUSDC",
+    "decimals": 6,
+    "repeat_mint_proof": {
+      "transactions": [
+        "45g1ndvpzkVsq7pRUPondccgXGLAVQH6Y3hWB9VEqgEN",
+        "FPAYYBoaHrfdwpj1w7GFhcQQg9gv5Zk949zQs8RFwRjn"
+      ],
+      "dao_balance_after": "3"
+    }
+  },
+  "pr_b_relay_vote_gas_proof": {
+    "proposal_id": 26,
+    "final_vote_transaction_hash": "5ypaNTsPnJbiKBT67MRwuPhoeQJ4b4f2ZAg4F7VHmeaj",
+    "final_vote_gas": "19662169450795",
+    "action_prepaid_gas": "60000000000000",
+    "vote_prepaid_gas": "450000000000000",
+    "cleanup_proposal_id": 27,
+    "cleanup_final_vote_transaction_hash": "HbDvWUB2DtwBPc1vT9tpCHUd7G36Grt4D4zC3GFEbZRJ"
   },
   "agent": {
     "account_id": "agent-v4.mandateos-root-20261021.testnet",

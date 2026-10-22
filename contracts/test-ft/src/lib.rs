@@ -1,3 +1,6 @@
+use near_contract_standards::fungible_token::metadata::{
+    FT_METADATA_SPEC, FungibleTokenMetadata, FungibleTokenMetadataProvider,
+};
 use near_contract_standards::fungible_token::{
     FungibleToken, FungibleTokenCore, FungibleTokenResolver,
 };
@@ -23,7 +26,9 @@ impl TestFt {
     }
 
     pub fn mint(&mut self, account_id: AccountId, amount: U128) {
-        self.token.internal_register_account(&account_id);
+        if self.token.accounts.get(&account_id).is_none() {
+            self.token.internal_register_account(&account_id);
+        }
         self.token.internal_deposit(&account_id, amount.0);
     }
 }
@@ -52,6 +57,20 @@ impl FungibleTokenCore for TestFt {
 
     fn ft_balance_of(&self, account_id: AccountId) -> U128 {
         self.token.ft_balance_of(account_id)
+    }
+}
+#[near]
+impl FungibleTokenMetadataProvider for TestFt {
+    fn ft_metadata(&self) -> FungibleTokenMetadata {
+        FungibleTokenMetadata {
+            spec: FT_METADATA_SPEC.to_string(),
+            name: "MandateOS Test USDC".to_string(),
+            symbol: "TestUSDC".to_string(),
+            icon: None,
+            reference: None,
+            reference_hash: None,
+            decimals: 6,
+        }
     }
 }
 
@@ -95,5 +114,25 @@ impl StorageManagement for TestFt {
 
     fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
         self.token.storage_balance_of(account_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exposes_usdc_compatible_metadata() {
+        let metadata = TestFt::new().ft_metadata();
+        assert_eq!(metadata.symbol, "TestUSDC");
+        assert_eq!(metadata.decimals, 6);
+    }
+    #[test]
+    fn mint_reuses_an_existing_storage_registration() {
+        let mut token = TestFt::new();
+        let account_id: AccountId = "dao.testnet".parse().expect("valid account");
+        token.mint(account_id.clone(), U128(1));
+        token.mint(account_id.clone(), U128(2));
+        assert_eq!(token.ft_balance_of(account_id), U128(3));
     }
 }

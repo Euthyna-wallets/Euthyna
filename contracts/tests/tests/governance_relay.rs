@@ -189,6 +189,24 @@ async fn only_dao_owner_can_propose_governance_calls() -> Result<()> {
 
 #[tokio::test]
 #[serial]
+async fn propose_mpc_gas_is_measured() -> Result<()> {
+    let fixture = setup().await?;
+    let outcome = fixture
+        .owner
+        .call(fixture.relay.id(), "propose")
+        .args_json(proposal_args())
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?;
+    let gas_burnt = outcome.total_gas_burnt.as_gas();
+    outcome.into_result()?;
+    println!("MANDATEOS_RELAY_PROPOSE_GAS={gas_burnt}");
+    assert!(gas_burnt > 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn proposal_builds_delay_call_and_confirms_sequential_nonce() -> Result<()> {
     let fixture = setup().await?;
     let operation = propose(&fixture).await?;

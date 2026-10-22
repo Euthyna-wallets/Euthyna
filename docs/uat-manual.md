@@ -101,14 +101,22 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 
 ## 5. Mandat
 
-1. Ouvrir **Agent mandate**, saisir rôle, `maxPerTx`, budget, période,
-   destinataires, token TestUSDC.
-2. **Preview mandate** : vérifier le diff, les 3 artefacts et le statut agent.
-3. Signer chaque proposition avec Meteor (Vault `set_role`, financement, relay
-   0xGOV→Delay).
-4. Voter les propositions dans Trezu (2/3).
-5. Attendre le cooldown Delay (**300 s** sur Sepolia).
-6. Exécuter la file Delay (n’importe qui) et vérifier la permission Zodiac.
+1. Ouvrir **Agent mandate**, connecter le compte NEAR d'un membre du council,
+   puis saisir rôle, `maxPerTx`, budget, période, destinataires et token
+   TestUSDC.
+2. Dans **Budget token (UAT)**, vérifier `TestUSDC`, `6` décimales et le solde
+   FT de la DAO. Cliquer **Register storage and mint test budget** : le wallet
+   signe `storage_deposit` pour la DAO et le Vault uniquement s'ils manquent,
+   puis `mint` vers la DAO. Recharger l'état et vérifier le nouveau solde.
+3. **Preview mandate** : vérifier le diff, les trois artefacts et le statut
+   agent.
+4. Exécuter strictement `set_role → register_agent → financement → Zodiac`.
+   Pour chaque ligne, proposer puis faire voter deux membres. La ligne suivante
+   reste désactivée jusqu'à ce que `get_proposal` affiche **Executed**.
+5. Vérifier qu'une proposition `Failed` ou `Expired` affiche **Re-propose** et
+   ne débloque pas l'étape suivante.
+6. Attendre le cooldown Delay (**300 s** sur Sepolia).
+7. Exécuter la file Delay (n’importe qui) et vérifier la permission Zodiac.
 
 ## 6. Paiement
 

@@ -286,6 +286,33 @@ function testApp(options?: {
       mandateCalls.push({ organizationId, role: input.role });
       return {} as MandatePreview;
     },
+    budgetTokenStatus: async () => ({
+      environment: "uat",
+      tokenAccountId: "test-ft.testnet",
+      symbol: "TestUSDC",
+      decimals: 6,
+      daoAccountId: "dao.testnet",
+      vaultAccountId: "vault.testnet",
+      daoStorageRegistered: true,
+      vaultStorageRegistered: true,
+      daoBalance: "6000000",
+      storageDepositYocto: "1250000000000000000000",
+    }),
+    budgetTokenPlan: async () => ({
+      status: {
+        environment: "uat",
+        tokenAccountId: "test-ft.testnet",
+        symbol: "TestUSDC",
+        decimals: 6,
+        daoAccountId: "dao.testnet",
+        vaultAccountId: "vault.testnet",
+        daoStorageRegistered: true,
+        vaultStorageRegistered: true,
+        daoBalance: "6000000",
+        storageDepositYocto: "1250000000000000000000",
+      },
+      actions: [],
+    }),
   };
   const registry = {
     loadRegistry: async () => ({
@@ -703,6 +730,22 @@ describe("mandate preview", () => {
     expect(response.status).toBe(200);
     expect(mandateCalls).toEqual([{ organizationId: "org-1", role: "researcher" }]);
   });
+  it("returns UAT budget-token state and an unsigned member-executed plan", async () => {
+    const { app } = testApp();
+    const status = await app.request("/v1/console/treasury/budget-token", {
+      headers: consoleHeaders({ cookie: "session-member" }),
+    });
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({ decimals: 6, symbol: "TestUSDC" });
+
+    const plan = await app.request("/v1/console/treasury/budget-token/plan", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({ amount: "6000000" }),
+    });
+    expect(plan.status).toBe(200);
+  });
+
 });
 
 describe("console CSRF protection", () => {

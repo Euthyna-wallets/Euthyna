@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { API_BASE, api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
+import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
 import { demoWalletsEnabled, generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { formatToken } from "../lib/format.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -15,17 +16,22 @@ import {
   connectNearWallet,
   disableFactoryAutoUpdate,
   evmAccounts,
+  findDaoProposalsRpc,
   evmWalletClient,
   nearAccounts,
   readAgentAccessKeyRpc,
   readDaoPolicyRpc,
+  readDaoProposalRpc,
   readNearDeploymentRpc,
   sendEvmTransaction,
   signDaoProposal,
+  signDaoVote,
+  signNearFunctionCalls,
   signNearTransactions,
   signWalletProofChallenge,
   waitForEvmTransaction,
   type DaoPolicyRpc,
+  type DaoProposalRpc,
   type AgentAccessKeyRpcAttestation,
   type NearDeploymentRpcAttestation,
   type WalletProofChallenge,
@@ -1318,6 +1324,23 @@ function AgentForm(props: {
 }
 
 
+function orderedMandateProposals(preview: MandatePreview): MandateProposal[] {
+  return [
+    preview.proposals.vaultSetRole,
+    preview.proposals.vaultRegisterAgent,
+    preview.proposals.funding,
+    ...preview.proposals.zodiacRelay,
+  ].filter((proposal): proposal is MandateProposal => proposal !== null);
+}
+
+function onChainProposalDescription(proposal: MandateProposal): string {
+  const value = (proposal.args.proposal as { description?: unknown } | undefined)?.description;
+  if (typeof value !== "string") throw new Error("DAO proposal description missing");
+  return value;
+}
+
+type ProposalRun = DaoProposalRpc & { transactionHash?: string };
+
 export function MandatePanel(props: {
   treasury: TreasuryView;
   preview: MandatePreview | null;
@@ -1334,6 +1357,9 @@ export function MandatePanel(props: {
   const [signerId, setSignerId] = useState("");
   const [proposalHashes, setProposalHashes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [budgetTokenStatus, setBudgetTokenStatus] = useState<BudgetTokenStatus | null>(null);
+  const [budgetTokenHashes, setBudgetTokenHashes] = useState<string[]>([]);
+  const [proposalRuns, setProposalRuns] = useState<Record<string, ProposalRun>>({});
 
   const [agents, setAgents] = useState<AgentRow[]>([]);
   useEffect(() => {
@@ -1341,6 +1367,35 @@ export function MandatePanel(props: {
       .then((result) => setAgents(result.agents))
       .catch((cause: unknown) => props.onError(String(cause)));
   }, []);
+  async function refreshBudgetToken() {
+    setBudgetTokenStatus(await api<BudgetTokenStatus>("/v1/console/treasury/budget-token"));
+  }
+
+  useEffect(() => {
+    void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)));
+  }, [props.treasury.daoAccountId]);
+  useEffect(() => {
+    if (!props.preview) {
+      setProposalRuns({});
+      return undefined;
+    }
+    let cancelled = false;
+    const descriptions = orderedMandateProposals(props.preview).map(onChainProposalDescription);
+    const refresh = async () => {
+      const runs = await findDaoProposalsRpc(props.treasury.daoAccountId, descriptions);
+      if (!cancelled) setProposalRuns(runs);
+    };
+    void refresh().catch((cause: unknown) => props.onError(String(cause)));
+    const interval = window.setInterval(() => {
+      void refresh().catch((cause: unknown) => props.onError(String(cause)));
+    }, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [props.preview, props.treasury.daoAccountId]);
+
+
 
   return (
     <div className="stack">
@@ -1373,6 +1428,54 @@ export function MandatePanel(props: {
             </option>
           ))}
         </select>
+      </div>
+      <div className="row">
+        <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
+        <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
+          Use connected NEAR account
+        </button>
+      </div>
+      <div className="step">
+        <h3>Budget token (UAT)</h3>
+        <p className="muted small">
+          Test token only. Register the DAO and Vault for FT storage, then mint the mandate budget to the DAO.
+        </p>
+        {budgetTokenStatus ? (
+          <table>
+            <tbody>
+              <tr><td>Token</td><td className="mono">{budgetTokenStatus.tokenAccountId}</td></tr>
+              <tr><td>Decimals</td><td>{budgetTokenStatus.decimals} (USDC-compatible)</td></tr>
+              <tr><td>DAO storage</td><td>{budgetTokenStatus.daoStorageRegistered ? "registered" : "required"}</td></tr>
+              <tr><td>Vault storage</td><td>{budgetTokenStatus.vaultStorageRegistered ? "registered" : "required"}</td></tr>
+              <tr><td>DAO balance</td><td>{formatToken(budgetTokenStatus.daoBalance, budgetTokenStatus.decimals, budgetTokenStatus.symbol)}</td></tr>
+            </tbody>
+          </table>
+        ) : <div className="state">Reading test-token state…</div>}
+        <button
+          className="primary"
+          disabled={!signerId || busy || budgetTokenStatus?.decimals !== 6}
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                const plan = await api<BudgetTokenPlan>("/v1/console/treasury/budget-token/plan", {
+                  method: "POST",
+                  body: JSON.stringify({ amount: budget }),
+                });
+                const hashes = await signNearFunctionCalls(signerId, plan.actions);
+                setBudgetTokenHashes(hashes);
+                await refreshBudgetToken();
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        >
+          Register storage and mint test budget
+        </button>
+        {budgetTokenHashes.length > 0 ? <pre>{budgetTokenHashes.join("\n")}</pre> : null}
       </div>
       <button
         className="primary"
@@ -1456,45 +1559,87 @@ export function MandatePanel(props: {
               <pre>{JSON.stringify(props.preview.guard, null, 2)}</pre>
             </div>
           </div>
-          <h3>Unsigned proposals</h3>
-          <div className="row">
-            <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
-            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
-              Use connected NEAR account
-            </button>
-          </div>
+          <h3>Ordered DAO execution</h3>
           <div className="stack">
-            {[
-              props.preview.proposals.vaultSetRole,
-              props.preview.proposals.vaultRegisterAgent,
-              props.preview.proposals.funding,
-              ...props.preview.proposals.zodiacRelay,
-            ]
-              .filter((proposal): proposal is NonNullable<typeof proposal> => Boolean(proposal))
-              .map((proposal, index) => (
-                <div key={`${proposal.description}-${index}`} className="row">
-                  <span>{proposal.description}</span>
-                  <button
-                    className="primary"
-                    disabled={!signerId || busy}
-                    onClick={() => {
-                      void (async () => {
-                        setBusy(true);
-                        try {
-                          const hash = await signDaoProposal(signerId, proposal);
-                          setProposalHashes((current) => [...current, hash]);
-                        } catch (cause) {
-                          props.onError(cause instanceof Error ? cause.message : String(cause));
-                        } finally {
-                          setBusy(false);
-                        }
-                      })();
-                    }}
-                  >
-                    Sign with NEAR wallet
-                  </button>
+            {orderedMandateProposals(props.preview).map((proposal, index, proposals) => {
+              const description = onChainProposalDescription(proposal);
+              const run = proposalRuns[description];
+              const state = run?.state ?? "Not proposed";
+              const previousDescription = index > 0
+                ? onChainProposalDescription(proposals[index - 1]!)
+                : null;
+              const previousExecuted =
+                previousDescription === null ||
+                proposalRuns[previousDescription]?.state === "Executed";
+              const action =
+                state === "In progress"
+                  ? "Vote approve"
+                  : state === "Failed" || state === "Expired"
+                    ? "Re-propose"
+                    : "Propose";
+              return (
+                <div key={description} className="step">
+                  <div className="row wrap">
+                    <strong>{index + 1}. {proposal.description}</strong>
+                    <span className="pill">
+                      {state}{run ? ` · #${run.id} · ${run.rawStatus}` : ""}
+                    </span>
+                  </div>
+                  {!previousExecuted ? (
+                    <div className="muted small">Waiting for the previous proposal to be Executed on-chain.</div>
+                  ) : null}
+                  {state === "Failed" || state === "Expired" ? (
+                    <div className="alert error">Proposal {state.toLowerCase()}. Re-propose the same deterministic step.</div>
+                  ) : null}
+                  {state !== "Executed" ? (
+                    <button
+                      className="primary"
+                      disabled={!signerId || busy || !previousExecuted}
+                      onClick={() => {
+                        void (async () => {
+                          setBusy(true);
+                          try {
+                            if (state === "In progress" && run) {
+                              const transactionHash = await signDaoVote(
+                                signerId,
+                                props.treasury.daoAccountId,
+                                run.id,
+                              );
+                              const refreshed = await readDaoProposalRpc(props.treasury.daoAccountId, run.id);
+                              setProposalRuns((current) => ({
+                                ...current,
+                                [description]: { ...refreshed, transactionHash },
+                              }));
+                              setProposalHashes((current) => [...current, transactionHash]);
+                            } else {
+                              const submitted = await signDaoProposal(signerId, proposal);
+                              const refreshed = await readDaoProposalRpc(
+                                props.treasury.daoAccountId,
+                                submitted.proposalId,
+                              );
+                              setProposalRuns((current) => ({
+                                ...current,
+                                [description]: {
+                                  ...refreshed,
+                                  transactionHash: submitted.transactionHash,
+                                },
+                              }));
+                              setProposalHashes((current) => [...current, submitted.transactionHash]);
+                            }
+                          } catch (cause) {
+                            props.onError(cause instanceof Error ? cause.message : String(cause));
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      {action}
+                    </button>
+                  ) : null}
                 </div>
-              ))}
+              );
+            })}
           </div>
           {proposalHashes.length ? (
             <details>
@@ -1502,7 +1647,6 @@ export function MandatePanel(props: {
               <pre>{proposalHashes.join("\n")}</pre>
             </details>
           ) : null}
-          <pre>{JSON.stringify(props.preview.proposals, null, 2)}</pre>
         </>
       ) : null}
     </div>

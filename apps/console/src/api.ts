@@ -86,6 +86,31 @@ export function explorerBase(address: string): string {
 }
 
 
+export type BudgetTokenStatus = {
+  environment: string;
+  tokenAccountId: string;
+  symbol: string;
+  decimals: number;
+  daoAccountId: string;
+  vaultAccountId: string;
+  daoStorageRegistered: boolean;
+  vaultStorageRegistered: boolean;
+  daoBalance: string;
+  storageDepositYocto: string;
+};
+
+export type BudgetTokenPlan = {
+  status: BudgetTokenStatus;
+  actions: Array<{
+    receiverId: string;
+    methodName: "storage_deposit" | "mint";
+    args: Record<string, unknown>;
+    gas: string;
+    deposit: string;
+    description: string;
+  }>;
+};
+
 export type MandateProposal = {
   receiverId: string;
   methodName: string;
