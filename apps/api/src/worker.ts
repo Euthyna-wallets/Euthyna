@@ -23,6 +23,7 @@ const worker = new OperationWorker(
   guard,
   {
     pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,
+    confirmations: env.WORKER_CONFIRMATIONS,
     leaseMs: env.WORKER_LEASE_MS,
     stuckBlocks: env.WORKER_STUCK_BLOCKS,
     broadcastTimeoutMs: env.WORKER_BROADCAST_TIMEOUT_MS,

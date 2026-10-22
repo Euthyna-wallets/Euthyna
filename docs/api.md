@@ -157,7 +157,8 @@ resume. Each tick re-reads the Vault as the source of truth:
    transaction receipt and call `submit_signature`;
 2. derive the exact raw-transaction hash, broadcast idempotently and persist it
    before polling;
-3. on a successful Base receipt, sign and submit `report_status`;
+3. wait for `WORKER_CONFIRMATIONS` Base blocks (default `5`) after a successful
+   receipt, then sign and submit `report_status`;
 4. on a revert, store `Reverted` without releasing budget or reference;
 5. on timeout, request a higher-fee same-nonce `cancel_nonce` only after Vault
    pause or agent revocation, as required by the contract;
@@ -169,6 +170,12 @@ A mined cancellation remains `CancellationMined` until the DAO calls
 `confirm_cancellation`; the worker cannot bypass the Vault's DAO-only finalizer.
 Every side effect is recoverable: after a crash it recomputes transaction hashes,
 checks receipts before rebroadcasting, and reconciles terminal Vault state.
+
+A transaction with no receipt that times out while the Vault is neither paused
+nor the agent revoked remains `Broadcast`: the worker is intentionally not
+authorized to call `cancel_nonce` in that state. Resolution is either a human
+Vault pause followed by worker cancellation, or `cancel_nonce` signed directly
+by the agent, which the Vault explicitly authorizes.
 
 ### Console registry (suppliers)
 

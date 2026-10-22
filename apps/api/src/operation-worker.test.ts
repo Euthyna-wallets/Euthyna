@@ -201,6 +201,7 @@ class FakeNear implements WorkerNearGateway {
 class FakeBase implements WorkerBaseGateway {
   broadcasts: Array<number[] | null> = [];
   receipts = new Map<Hex, { status: "success" | "reverted"; blockNumber: bigint } | null>();
+  head = 104n;
 
   rawTransactionHash(raw: number[] | null): Hex {
     return raw?.[0] === 9 ? cancellationHash : originalHash;
@@ -214,10 +215,15 @@ class FakeBase implements WorkerBaseGateway {
   receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null> {
     return Promise.resolve(this.receipts.get(hash) ?? null);
   }
+
+  blockNumber(): Promise<bigint> {
+    return Promise.resolve(this.head);
+  }
 }
 
 const config: WorkerConfig = {
   pollIntervalMs: 1_000,
+  confirmations: 5,
   leaseMs: 10_000,
   stuckBlocks: 5,
   broadcastTimeoutMs: 5_000,
@@ -283,6 +289,22 @@ describe("OperationWorker", () => {
     expect(test.base.broadcasts).toHaveLength(1);
     expect(test.near.reports).toBe(1);
     expect(test.store.operation).toMatchObject({ state: "Confirmed", receiptBlock: 99n });
+  });
+
+  it("does not report a receipt before WORKER_CONFIRMATIONS depth", async () => {
+    const test = harness();
+    test.store.operation.txHash = originalHash;
+    test.store.operation.broadcastAt = new Date(nowStart);
+    test.base.receipts.set(originalHash, { status: "success", blockNumber: 99n });
+    test.base.head = 102n;
+    await test.createWorker().tick();
+    expect(test.near.reports).toBe(0);
+    expect(test.store.operation).toMatchObject({
+      state: "Broadcast",
+      txHash: originalHash,
+      receiptBlock: 99n,
+      lastError: "waiting for Base confirmations 4/5",
+    });
   });
 
   it("recovers after report_status committed but its RPC response was lost", async () => {

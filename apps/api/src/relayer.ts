@@ -53,6 +53,10 @@ export class BaseRelayer {
     }
   }
 
+  async blockNumber(): Promise<bigint> {
+    return this.client.getBlockNumber();
+  }
+
   async balance(address: Address): Promise<bigint> {
     return this.client.getBalance({ address });
   }

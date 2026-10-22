@@ -85,10 +85,12 @@ export interface WorkerBaseGateway {
   rawTransactionHash(rawTransaction: number[] | null): Hex;
   broadcastRaw(rawTransaction: number[] | null): Promise<Hex>;
   receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null>;
+  blockNumber(): Promise<bigint>;
 }
 
 export interface WorkerConfig {
   pollIntervalMs: number;
+  confirmations: number;
   leaseMs: number;
   stuckBlocks: number;
   broadcastTimeoutMs: number;
@@ -404,6 +406,19 @@ export class OperationWorker {
       await this.schedule(record, "Broadcast");
       return;
     }
+    const baseBlock = await this.base.blockNumber();
+    const depth = baseBlock >= receipt.blockNumber ? baseBlock - receipt.blockNumber + 1n : 0n;
+    if (depth < BigInt(this.config.confirmations)) {
+      await this.store.update(record, {
+        state: "Broadcast",
+        txHash: hash,
+        receiptBlock: receipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+      });
+      return;
+    }
     if (receipt.status === "reverted") {
       await this.store.update(record, {
         state: "Reverted",
@@ -474,6 +489,19 @@ export class OperationWorker {
         return;
       }
       await this.schedule(record, "CancellationBroadcast");
+      return;
+    }
+    const baseBlock = await this.base.blockNumber();
+    const depth = baseBlock >= receipt.blockNumber ? baseBlock - receipt.blockNumber + 1n : 0n;
+    if (depth < BigInt(this.config.confirmations)) {
+      await this.store.update(record, {
+        state: "CancellationBroadcast",
+        cancellationTxHash: hash,
+        receiptBlock: receipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+      });
       return;
     }
     if (receipt.status === "reverted") {
