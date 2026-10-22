@@ -22,9 +22,13 @@
   "reproducible_builds": {
     "image": "sourcescan/cargo-near:0.20.3-rust-1.86.0",
     "image_digest": "sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf",
+    "factory_source_commit": "255b04a6b1e34641c880d8a63201bcbcf1095685",
     "factory_sha256_hex": "ad1ed251fc4a556a3070de31c64c2b43442f0ebf5dc1dcf299ba532945312c92",
+    "vault_source_commit": "255b04a6b1e34641c880d8a63201bcbcf1095685",
     "vault_sha256_hex": "cac18ad40a3d04cc7945c8ac3d1a1677197078130b5dbaed62a94234ee8a1538",
-    "relay_sha256_hex": "b173123bebfc39b32c25a1f1f4610afe343f1b153fc1ab3dfc4bc4e7ef17252b",
+    "relay_source_commit": "aa85684859e72a4d0526b85ecc042e1def6f1231",
+    "relay_sha256_hex": "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
+    "relay_sha256_bs58": "AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc",
     "deployed_artifacts_unchanged": true
   },
   "mandateos_factory": {
@@ -95,7 +99,7 @@
     "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",
     "code_hash_sha256_bs58": "6KZnkemmuysJwuRfZkaqEifTmTdaGUpTKr128GhDJsMA",
     "access_key_count": 0,
-    "latest_local_code_hash_sha256_hex": "62a70f5ab3b0d269dac14c7dc6be00cffe6af747110e06e4dc07efae61934fb3",
+    "latest_local_code_hash_sha256_hex": "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "mpc_path": "governance/base-sepolia",
     "derived_public_key": "secp256k1:3cuFpPFwraKRy7vUjRRetafeZnyp4WBNEwuUtjRNWkhbLam21jcmribNomTFEzQzczqcKvbjEdRhUYf7qgf6b4cs",

@@ -18,17 +18,23 @@ Observed result: **28 passed, 0 failed** across the DAO, Vault, governance-relay
 The reproducible build metadata in each production contract pins
 `sourcescan/cargo-near:0.20.3-rust-1.86.0` by digest
 `sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf`.
-The clean source snapshot produced:
+The factory and Vault were reproduced from `255b04a`; the relay wallet-proof
+views were reproduced from `aa85684859e72a4d0526b85ecc042e1def6f1231`:
 
 | Contract | Bytes | Reproducible SHA-256 hex |
 |---|---:|---|
 | DAO factory | 150,945 | `ad1ed251fc4a556a3070de31c64c2b43442f0ebf5dc1dcf299ba532945312c92` |
 | Vault | 439,658 | `cac18ad40a3d04cc7945c8ac3d1a1677197078130b5dbaed62a94234ee8a1538` |
-| Governance relay | 285,457 | `b173123bebfc39b32c25a1f1f4610afe343f1b153fc1ab3dfc4bc4e7ef17252b` |
+| Governance relay | 286,385 | `921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5` |
 
-These hashes prove deterministic builds; they do not silently replace the
-already deployed/keyless UAT artifacts. A deployment cutover must update the
-manifest and re-run on-chain code-hash verification explicitly.
+The relay Base58 code hash is
+`AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc`. Its read-only
+`mpc_contract_id` and `mpc_path` views let each member verify the complete
+deployment directly from NEAR RPC.
+
+These hashes do not silently replace the already deployed/keyless UAT
+artifacts. A deployment cutover must update the manifest and re-run on-chain
+code-hash verification explicitly.
 
 ## Testnet deployment
 

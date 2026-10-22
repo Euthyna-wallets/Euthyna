@@ -51,14 +51,14 @@ describe("readDaoPolicyRpc", () => {
 
 describe("readNearDeploymentRpc", () => {
   it("checks hashes, zero keys and initialization fields without using the API", async () => {
-    const expectedHash = "FkV1kumahhA3NMUrWTTRXQmpHDHLFbsiCMebYC5X7oH1";
+    const expectedHash = "AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc";
     const delay = Buffer.from("4444444444444444444444444444444444444444", "hex").toString("base64");
     const plan = {
       environment: "uat",
       daoAccountId: "acme.factory.mandateos.testnet",
       vault: {
         accountId: "acme-v.mandateos.testnet",
-        wasmSha256: "db274426edb754bd1fcdaf07d356426cbb94b2ceea58f56ce4ee7738922981a8",
+        wasmSha256: "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
         initArgs: {
           owner_id: "acme.factory.mandateos.testnet",
           mpc_contract_id: "v1.signer-prod.testnet",
@@ -70,7 +70,7 @@ describe("readNearDeploymentRpc", () => {
       },
       relay: {
         accountId: "acme-r.mandateos.testnet",
-        wasmSha256: "db274426edb754bd1fcdaf07d356426cbb94b2ceea58f56ce4ee7738922981a8",
+        wasmSha256: "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
         initArgs: {
           owner_id: "acme.factory.mandateos.testnet",
           mpc_contract_id: "v1.signer-prod.testnet",
