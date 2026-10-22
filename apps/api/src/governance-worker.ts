@@ -31,6 +31,7 @@ export interface GovernanceTreasuryRecord {
   organizationId: string;
   relayAccountId: string;
   delayAddress: string;
+  safeAddress: string;
   rolesAddress: string;
   baseChainId: number;
 }
@@ -131,6 +132,7 @@ export class PrismaGovernanceStore implements GovernanceStore {
         id: true,
         organizationId: true,
         relayAccountId: true,
+        safeAddress: true,
         delayAddress: true,
         rolesAddress: true,
         baseChainId: true,
@@ -189,6 +191,7 @@ export class PrismaGovernanceStore implements GovernanceStore {
       organizationId: row.organizationId,
       relayAccountId: row.relayAccountId,
       delayAddress: row.treasury.delayAddress,
+      safeAddress: row.treasury.safeAddress,
       rolesAddress: row.treasury.rolesAddress,
       baseChainId: row.treasury.baseChainId,
       opId: row.opId,
@@ -475,12 +478,60 @@ export class GovernanceWorker {
     if (delayState.entryHash.toLowerCase() !== expectedEntryHash.toLowerCase()) {
       throw new Error(`Delay entry hash ${delayState.entryHash} differs from expected ${expectedEntryHash}`);
     }
-    const checkpointedExecuteReceipt = job.executeTxHash
-      ? await this.base.receipt(job.executeTxHash as Hex)
-      : null;
+    const execution = await this.base.findExecution({
+      safe: getAddress(job.safeAddress),
+      delay,
+      ...operationInput,
+      fromBlock: queueReceipt.blockNumber,
+    });
+    if (execution) {
+      const executionDepth = currentBlock >= execution.blockNumber
+        ? currentBlock - execution.blockNumber + 1n
+        : 0n;
+      if (executionDepth < BigInt(this.config.confirmations)) {
+        await this.store.update(job, {
+          state: job.executeRawTransaction ? "Executing" : "Queued",
+          executeTxHash: execution.transactionHash,
+          executeReceiptBlock: execution.blockNumber,
+          lastAttemptAt: this.now(),
+          nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+          lastError: `waiting for execute confirmations ${executionDepth}/${this.config.confirmations}`,
+        });
+        return;
+      }
+      const rolesVerification = await this.verifyExecuted(job, execution.receipt, true);
+      await this.checkpointFinal(job, "Executed", {
+        txHash: hash,
+        receiptBlock: queueReceipt.blockNumber,
+        executeTxHash: execution.transactionHash,
+        executeReceiptBlock: execution.blockNumber,
+        rolesVerification,
+        executedAt: this.now(),
+      });
+      return;
+    }
+
     const expirationAt = delayState.createdAt + delayState.cooldown + delayState.expiration;
     const expired = delayState.expiration !== 0n && delayState.currentTimestamp > expirationAt;
-    if (delayState.txNonce > entryNonce && checkpointedExecuteReceipt?.status !== "success") {
+    if (delayState.txNonce > entryNonce) {
+      const veto = await this.base.findVeto(delay, entryNonce, queueReceipt.blockNumber);
+      if (veto) {
+        const vetoDepth = currentBlock >= veto.blockNumber ? currentBlock - veto.blockNumber + 1n : 0n;
+        if (vetoDepth < BigInt(this.config.confirmations)) {
+          await this.store.update(job, {
+            state: "Queued",
+            lastAttemptAt: this.now(),
+            nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+            lastError: `waiting for veto confirmations ${vetoDepth}/${this.config.confirmations}`,
+          });
+          return;
+        }
+        await this.checkpointFinal(job, "Vetoed", {
+          txHash: hash,
+          receiptBlock: queueReceipt.blockNumber,
+        });
+        return;
+      }
       if (expired) {
         await this.checkpointFinal(job, "Expired", {
           txHash: hash,
@@ -488,39 +539,12 @@ export class GovernanceWorker {
         });
         return;
       }
-      let rolesVerification: Prisma.InputJsonValue | null = null;
-      let rolesVerificationError: unknown = null;
-      if (maybeZodiacBatchExpectation(job)) {
-        try {
-          rolesVerification = await this.verifyExecuted(job, null, false);
-        } catch (error) {
-          rolesVerificationError = error;
-        }
-      }
-      if (rolesVerification !== null) {
-        await this.checkpointFinal(job, "Executed", {
-          txHash: hash,
-          receiptBlock: queueReceipt.blockNumber,
-          rolesVerification,
-          executedAt: this.now(),
-        });
-      } else if (await this.base.wasVetoed(delay, entryNonce, queueReceipt.blockNumber)) {
-        await this.checkpointFinal(job, "Vetoed", {
-          txHash: hash,
-          receiptBlock: queueReceipt.blockNumber,
-        });
-      } else if (rolesVerificationError) {
-        throw rolesVerificationError;
-      } else {
-        await this.checkpointFinal(job, "Executed", {
-          txHash: hash,
-          receiptBlock: queueReceipt.blockNumber,
-          rolesVerification: { mode: "receipt-only", delayEntryHashVerified: true },
-          executedAt: this.now(),
-        });
-      }
-      return;
+      throw new Error("Delay nonce advanced without matching execution or veto evidence");
     }
+
+    const checkpointedExecuteReceipt = job.executeTxHash
+      ? await this.base.receipt(job.executeTxHash as Hex)
+      : null;
     await this.store.update(job, {
       state: job.executeRawTransaction ? "Executing" : "Queued",
       txHash: hash,
@@ -592,12 +616,9 @@ export class GovernanceWorker {
       return;
     }
 
-    const rolesVerification = await this.verifyExecuted(job, executeReceipt, true);
-    await this.checkpointFinal(job, "Executed", {
-      executeReceiptBlock: executeReceipt.blockNumber,
-      rolesVerification,
-      executedAt: this.now(),
-    });
+    throw new Error(
+      `successful executeNextTx receipt ${executeHash} lacks matching Safe ExecutionFromModuleSuccess evidence`,
+    );
   }
 
   private async verifyExecuted(

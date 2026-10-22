@@ -73,6 +73,7 @@ describe.skipIf(!databaseUrl)("PrismaGovernanceStore against PostgreSQL", () => 
       id: treasuryId,
       organizationId,
       relayAccountId: `relay-${organizationId}.testnet`,
+      safeAddress: "0x1111111111111111111111111111111111111111",
       delayAddress: "0x3333333333333333333333333333333333333333",
       rolesAddress: "0x2222222222222222222222222222222222222222",
       baseChainId: 84532,

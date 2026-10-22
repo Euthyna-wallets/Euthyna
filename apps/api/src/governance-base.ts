@@ -3,6 +3,7 @@ import {
   bytesToHex,
   createPublicClient,
   createWalletClient,
+  decodeFunctionData,
   decodeEventLog,
   encodeFunctionData,
   encodePacked,
@@ -42,6 +43,11 @@ const txNonceSetEvent = {
   name: "TxNonceSet",
   inputs: [{ name: "nonce", type: "uint256", indexed: false }],
 } as const;
+const executionFromModuleSuccessEvent = {
+  type: "event",
+  name: "ExecutionFromModuleSuccess",
+  inputs: [{ name: "module", type: "address", indexed: true }],
+} as const;
 
 
 export interface GovernanceReceipt {
@@ -64,6 +70,17 @@ export interface PreparedDelayExecution {
   hash: Hex;
   rawTransaction: Hex;
 }
+export interface DelayExecutionEvidence {
+  transactionHash: Hex;
+  blockNumber: bigint;
+  receipt: GovernanceReceipt;
+}
+
+export interface DelayVetoEvidence {
+  transactionHash: Hex;
+  blockNumber: bigint;
+}
+
 
 export interface RolesVerification {
   memberEnabled: boolean;
@@ -84,7 +101,16 @@ export interface GovernanceBaseGateway {
   blockNumber(): Promise<bigint>;
   delayState(delay: Address, entryNonce: bigint): Promise<DelayState>;
   expectedDelayHash(input: { to: Address; value: bigint; data: Hex; operation: 0 | 1 }): Hex;
-  wasVetoed(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<boolean>;
+  findExecution(input: {
+    safe: Address;
+    delay: Address;
+    to: Address;
+    value: bigint;
+    data: Hex;
+    operation: 0 | 1;
+    fromBlock: bigint;
+  }): Promise<DelayExecutionEvidence | null>;
+  findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<DelayVetoEvidence | null>;
   prepareExecuteNextTx(input: {
     delay: Address;
     to: Address;
@@ -170,14 +196,79 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     ));
   }
 
-  async wasVetoed(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<boolean> {
+  async findExecution(input: {
+    safe: Address;
+    delay: Address;
+    to: Address;
+    value: bigint;
+    data: Hex;
+    operation: 0 | 1;
+    fromBlock: bigint;
+  }): Promise<DelayExecutionEvidence | null> {
+    const events = await this.publicClient.getLogs({
+      address: input.safe,
+      event: executionFromModuleSuccessEvent,
+      args: { module: input.delay },
+      fromBlock: input.fromBlock,
+      toBlock: "latest",
+    });
+    for (const event of events) {
+      if (event.transactionHash === null || event.blockNumber === null) continue;
+      const transaction = await this.publicClient.getTransaction({ hash: event.transactionHash });
+      if (transaction.to === null || getAddress(transaction.to) !== input.delay) continue;
+      try {
+        const decoded = decodeFunctionData({ abi: delayAbi, data: transaction.input });
+        if (
+          decoded.functionName !== "executeNextTx" ||
+          getAddress(decoded.args[0]) !== input.to ||
+          decoded.args[1] !== input.value ||
+          decoded.args[2].toLowerCase() !== input.data.toLowerCase() ||
+          decoded.args[3] !== input.operation
+        ) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      const receipt = await this.receipt(event.transactionHash);
+      if (receipt?.status === "success") {
+        return { transactionHash: event.transactionHash, blockNumber: event.blockNumber, receipt };
+      }
+    }
+    return null;
+  }
+
+  async findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<DelayVetoEvidence | null> {
     const events = await this.publicClient.getLogs({
       address: delay,
       event: txNonceSetEvent,
       fromBlock,
       toBlock: "latest",
     });
-    return events.some((event) => event.args.nonce !== undefined && event.args.nonce > entryNonce);
+    for (const event of events) {
+      if (
+        event.args.nonce === undefined ||
+        event.args.nonce <= entryNonce ||
+        event.transactionHash === null ||
+        event.blockNumber === null ||
+        event.blockNumber === 0n
+      ) {
+        continue;
+      }
+      const priorNonce = await this.publicClient.readContract({
+        address: delay,
+        abi: delayAbi,
+        functionName: "txNonce",
+        blockNumber: event.blockNumber - 1n,
+      });
+      if (priorNonce <= entryNonce) {
+        return {
+          transactionHash: event.transactionHash,
+          blockNumber: event.blockNumber,
+        };
+      }
+    }
+    return null;
   }
 
   async prepareExecuteNextTx(input: {

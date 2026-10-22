@@ -245,8 +245,11 @@ export class MandateService implements MandateGateway {
       .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after))
       .map(([field, before, after]) => ({ field: String(field), current: before ?? null, next: after }));
     const currentAllowance = await this.readAllowance(treasury.baseChainId, rolesModifier, compiled.allowanceKey);
+    const budget = BigInt(input.budget);
     const allowanceExists = Object.values(currentAllowance).some((value) => value !== 0n);
-    const allowanceBalance = allowanceExists ? currentAllowance.balance : BigInt(input.budget);
+    const allowanceBalance = allowanceExists && currentAllowance.balance < budget
+      ? currentAllowance.balance
+      : budget;
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
     if (resolvedAgentAddress) {

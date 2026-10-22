@@ -136,7 +136,7 @@ L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path.
 
 | Clé serveur | Périmètre autorisé | Incapacité structurelle |
 |---|---|---|
-| Guard ed25519 | Signer les visas et les rapports terminaux `Executed` / `Vetoed` / `Expired` / `Failed` sur le hash exact de transactions déjà engagées | Ne peut ni appeler le Safe, ni choisir une transaction, ni dépasser Vault/Zodiac ; sur le relay, son pire effet est de libérer ou bloquer la file, sans mouvement de fonds ni changement de policy |
+| Guard ed25519 | Signer les visas et les rapports terminaux `Executed` / `Vetoed` / `Expired` / `Failed` sur le hash exact de transactions déjà engagées | Ne peut ni signer ni choisir une transaction EVM. Une clé compromise peut toutefois déclarer `Failed` avant diffusion et libérer le relay alors que la transaction 0xGOV déjà signée reste diffusable ; si elle entre dans Delay, le veto 2/3 du council reste la barrière. Risque résiduel : désordre ou blocage de file, pas transaction arbitraire. |
 | Relayer NEAR | Déployer les comptes sponsorisés, financer leur réserve gas, soumettre `report_status` et les récupérations `submit_signature` | N'obtient aucune clé sur Vault/relay/agent ; l'unique clé agent créée est celle fournie par le client et reste FunctionCall-only |
 | Gas wallet EVM | Signe uniquement l'appel permissionless `Delay.executeNextTx` préparé et checkpointé par le worker ; la diffusion des transactions brutes déjà signées utilise `eth_sendRawTransaction` sans cette clé | N'est ni owner Safe, ni module, ni membre Roles ; ne peut choisir ni cible, ni calldata, ni politique ([`apps/api/src/governance-base.ts`](./apps/api/src/governance-base.ts)) |
 

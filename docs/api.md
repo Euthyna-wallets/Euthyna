@@ -477,11 +477,19 @@ does not call this file `core/Setup.sol`. Its ABI order, verified again by
 | Position | Parameter | MandateOS value |
 |---:|---|---|
 | 1 | `key` | compiled allowance key |
-| 2 | `balance` | period budget on first creation; current on-chain balance on an update |
+| 2 | `balance` | period budget on first creation; `min(current on-chain balance, new budget)` on an update |
 | 3 | `maxRefill` | period budget |
 | 4 | `refill` | period budget |
 | 5 | `period` | `periodDays × 86,400` |
 | 6 | `timestamp` | server time when `POST /v1/console/mandates/zodiac-proposal` creates the proposal |
+
+The update balance is a proposal-time snapshot. Zodiac may refill the allowance
+between proposal creation and execution; executing `setAllowance` then writes
+the encoded snapshot and can reduce that newly refilled balance. It never raises
+the balance above the new budget. Re-propose when a fresh execution-time balance
+is required
+([`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts)).
 
 ### `POST /v1/console/governance/relay-operation`
 
@@ -501,18 +509,30 @@ does not match `keccak256(abi.encodePacked(to,value,data,operation))`. The gas
 wallet signs only the exact `executeNextTx` call; its raw transaction is
 persisted before broadcast.
 
-Delay 1.1.1 does not emit a `TransactionExecuted` event. When `txNonce` has
-advanced outside this worker, a Zodiac operation is `Executed` if the expected
-Roles member and allowance state are present; otherwise `TxNonceSet` is the
-veto evidence. A generic non-Zodiac operation uses the successful transaction
-receipt when available and otherwise records receipt-only execution evidence.
-Expiry is `txCreatedAt + txCooldown + txExpiration`. Reverted queue or
-`executeNextTx` transactions become `Failed`. Guard signs the exact 0xGOV
-transaction hash, Base block number, and final status under
-`mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`
-reports all release the relay's active operation. The DAO-only
+Delay 1.1.1 does not emit a `TransactionExecuted` event. Execution evidence is
+therefore the Safe's `ExecutionFromModuleSuccess(module = Delay)` event plus the
+event transaction decoded as the exact
+`Delay.executeNextTx(to,value,data,operation)` queue entry. This evidence is
+checked first, including when the worker observes it after the expiry time.
+Roles state and events are post-execution verification only; they never classify
+an operation as executed.
+
+Without execution evidence, `TxNonceSet(newNonce > entryNonce)` proves a veto
+only when a historical `txNonce` read at the block immediately before that event
+was still `<= entryNonce`. Without either proof, an elapsed
+`txCreatedAt + txCooldown + txExpiration` classifies the entry as `Expired`.
+A generic non-Zodiac operation uses the same Safe/calldata execution proof and
+records receipt-only post-verification. Reverted queue or `executeNextTx`
+transactions become `Failed`.
+
+Guard signs the exact 0xGOV transaction hash, Base block number, and final status
+under `mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`
+reports all release the relay's active operation. A compromised Guard can submit
+`Failed` before broadcast and release the relay even though the already signed
+0xGOV transaction remains broadcastable. If that transaction is later queued,
+the council's Delay veto remains the safety path. The DAO-only
 `confirm_original` remains the recovery path
-([Delay 1.1.1 source](https://github.com/gnosisguild/zodiac-modifier-delay/blob/v1.1.1/contracts/Delay.sol),
+([Safe ModuleManager source](https://github.com/safe-global/safe-smart-account/blob/v1.4.1/contracts/base/ModuleManager.sol),
 [`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts),
 [`apps/api/src/governance-base.ts`](../apps/api/src/governance-base.ts),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).

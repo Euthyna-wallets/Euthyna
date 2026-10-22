@@ -233,7 +233,7 @@ describe("MandateService.preview", () => {
     ).toBe((preview.proposals.zodiacRelay?.args.proposal as { description: string }).description);
   });
 
-  it("preserves the existing allowance balance when updating refill parameters", async () => {
+  it("preserves the existing allowance balance but clamps it to a lower new budget", async () => {
     const fixture = service(
       "active",
       null,
@@ -268,6 +268,41 @@ describe("MandateService.preview", () => {
     if (allowance.functionName !== "setAllowance") throw new Error("expected setAllowance");
     expect(allowance.args[1]).toBe(1_250_000n);
     expect(allowance.args[5]).toBe(1_700_000_000n);
+    const lowerBudgetFixture = service(
+      "active",
+      null,
+      "0x2222222222222222222222222222222222222222",
+      6,
+      {
+        refill: 9_000_000n,
+        maxRefill: 9_000_000n,
+        period: 86_400n,
+        balance: 9_000_000n,
+        timestamp: 1_600_000_000n,
+      },
+    );
+    const lowerBudgetProposal = await lowerBudgetFixture.service.zodiacProposal("org-1", {
+      ...input,
+      budget: "4000000",
+      maxPerTx: "4000000",
+      agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
+    });
+    const lowerBudgetBody = z.object({
+      kind: z.object({ FunctionCall: z.object({ actions: z.array(z.object({ args: z.string() })).length(1) }) }),
+    }).parse(lowerBudgetProposal.args.proposal);
+    const lowerBudgetRelayArgs = z.object({ data: z.string() }).parse(JSON.parse(Buffer.from(
+      lowerBudgetBody.kind.FunctionCall.actions[0]!.args,
+      "base64",
+    ).toString("utf8")));
+    const lowerBudgetBatch = decodeFunctionData({
+      abi: multiSendAbi,
+      data: bytesToHex(Buffer.from(lowerBudgetRelayArgs.data, "base64")),
+    });
+    if (lowerBudgetBatch.functionName !== "multiSend") throw new Error("expected multiSend");
+    const lowerBudgetCalls = decodeMultiSendTransactions(lowerBudgetBatch.args[0]);
+    const lowerBudgetAllowance = decodeFunctionData({ abi: rolesAbi, data: lowerBudgetCalls[3]!.data });
+    if (lowerBudgetAllowance.functionName !== "setAllowance") throw new Error("expected setAllowance");
+    expect(lowerBudgetAllowance.args[1]).toBe(4_000_000n);
   });
 
   it("emits a Sputnik 2.3.1 FT Transfer with the configured token_id", async () => {
