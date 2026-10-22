@@ -14,7 +14,7 @@ Le projet vise la track **06 — AI Security & Defense** du hackathon NEAR 2026.
 | **Phase 2 — stretch** | Dépôt vers NEAR Intents, swap, puis retrait/bridge vers un wallet enregistré | Architecture cible ; ne doit pas être annoncé comme implémenté avant une preuve on-chain |
 | **Roadmap** | Comptes de vote passkey, code global Vault/relay, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
 
-Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale `<slug>.factory-v2.mandateos.testnet` par Company avec le dépôt fourni par le fondateur. MandateOS sponsorise par défaut le wallet client, mais le serveur ne signe ni la création ni la policy. L'API finance séparément `v-<slug>.mandateos.testnet` et `r-<slug>.mandateos.testnet`, sans access key. La DAO devient owner du Vault et du relais, tandis que la clé d'infrastructure ne peut pas déplacer les fonds du Safe.
+Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale par Company avec le dépôt fourni par le fondateur. En mode UAT explicite, MandateOS réserve puis crée/finance le wallet client juste avant la création DAO, sous plafond journalier PostgreSQL ; l'inscription ne dépense aucun NEAR. Le serveur ne signe ni création ni policy. L'API finance séparément les Vault/relay sans access key.
 
 Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/dao-spike.md`](./docs/dao-spike.md).
 
@@ -71,7 +71,7 @@ NEAR Chain Signatures produit des signatures secp256k1 à partir du compte NEAR 
 
 | Composant | Phase | Responsabilité | Source technique |
 |---|---:|---|---|
-| Console | 1 | Connexion passkey Better Auth, édition des drafts, préparation de propositions, lecture des opérations et escalades. Elle ne signe jamais. | [Better Auth passkey][better-auth-passkey] |
+| Console | 1 | Inscription email + passkey à partir d'un contexte signé court ; email non vérifié, invitations bloquées ; NEAR Wallet Selector et MetaMask/Rabby pour signer. | [Better Auth passkey][better-auth-passkey] |
 | API TypeScript | 1 | Backend HTTP Hono : Guard, authentification, clients, agents, policies, fournisseurs, opérations et relayer. | [Hono][hono] |
 | Relayer NEAR sponsor | 1 | Reçoit un `SignedDelegateAction`, applique l'allowlist MandateOS et paie le gas NEAR depuis un compte relayer financé. | [Meta-transactions NEAR][near-meta-transactions], [guide relayer][near-relayer-guide] |
 | Identité agent | 1 | Client credentials Better Auth pour Guard ; compte NEAR avec une function-call key générée côté client pour le Vault. | [Better Auth OAuth provider][better-auth-oauth], [access keys NEAR][near-access-keys] |
@@ -145,15 +145,19 @@ Au protocole testnet version 88, le RPC publie `storage_amount_per_byte = 10^19`
 | DAO Sputnik global `trezu-proof` | 810 octets on-chain | 0,00810 NEAR | 0,25 NEAR | 0,24190 NEAR |
 | Vault WASM courant + `new` | 439 560 octets sandbox, sans access key | 4,39560 NEAR | 5 NEAR | 0,60440 NEAR |
 | Relais WASM courant + `new` | 285 313 octets sandbox, sans access key | 2,85313 NEAR | 3,5 NEAR | 0,64687 NEAR |
-| Wallet membre avec une clé | 182 octets on-chain | 0,00182 NEAR | 0,5 NEAR | 0,49818 NEAR pour bonds et gas |
+| Wallet membre avec une clé | 182 octets on-chain | 0,00182 NEAR | 0,5 NEAR à la création DAO en mode démo | 0,49818 NEAR pour bond et gas |
 
-La factory MandateOS `factory-v2.mandateos.testnet` est déployée une fois et n'a aucune access key. Le fondateur appelle `create`, paie les 0,25 NEAR depuis son wallet sponsorisé, signe la policy affichée, puis la factory crée `<slug>.factory-v2.mandateos.testnet`, référence le hash global immuable et appelle `new`; le serveur ne choisit jamais seul le council. Une Company + DAO coûte **0,25 NEAR**. Le setup complet ajoute **5 NEAR** pour le Vault et **3,5 NEAR** pour le relais, soit **8,75 NEAR**.
+La factory MandateOS `factory-v2.mandateos.testnet` est déployée une fois et n'a aucune access key. Le fondateur appelle `create`, paie les 0,25 NEAR depuis son wallet, signe la policy affichée, puis la factory référence le hash global immuable. En mode UAT démo, le navigateur génère la clé et MandateOS ne crée/finance le compte qu'immédiatement avant ce call ; l'API vérifie l'identité liée, réserve durablement le sponsoring et applique le plafond UTC quotidien. Hors démo, aucun secret n'est écrit en localStorage : le fondateur utilise NEAR Wallet Selector.
 
 Ces soldes ne sont pas des frais par paiement. Le chemin réel `authorize → MPC → callback` a consommé 14,288425743215 Tgas ; au prix testnet observé de `10^8` yoctoNEAR/gas, cela vaut environ **0,00142885 NEAR** ([gas NEAR][near-gas]). Il n'y a pas d'erreur de 24 décimales dans les constantes.
 
 Le sponsor est volontairement réservé à la démo hackathon. Le navigateur lit directement `get_policy` via le RPC NEAR, exige la confirmation de chaque membre observé et du seuil, puis seulement autorise le déploiement Vault/relay. `auto_update: true` reste un avertissement : la factory keyless n'expose aucune méthode d'update et la DAO référence un hash immuable.
 
 La factory réutilise Sputnik au lieu de réécrire la gouvernance. Le contrat est compatible avec l'UI Sputnik officielle de Trezu configurée pour testnet ; le backend hébergé `testenv.trezu.app` refuse toutefois actuellement les suffixes personnalisés. Publier Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ([global contracts NEAR][near-global-contracts]).
+
+Les builds reproductibles de la factory, du Vault et du relay pinent l'image
+`sourcescan/cargo-near:0.20.3-rust-1.86.0` par digest. Leurs hashes sont séparés
+des bytecodes UAT déjà déployés ; aucun artefact keyless n'est remplacé implicitement.
 
 ## Déploiement d'ACME
 

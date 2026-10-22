@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
@@ -70,8 +72,8 @@ const agentB: AgentIdentity = {
   role: "researcher",
 };
 
-const admin: ConsoleIdentity = { userId: "user-admin", organizationId: "org-1", role: "admin" };
-const member: ConsoleIdentity = { userId: "user-member", organizationId: "org-1", role: "member" };
+const admin: ConsoleIdentity = { userId: "user-admin", organizationId: "org-1", role: "admin", email: "admin@example.test", emailVerified: true };
+const member: ConsoleIdentity = { userId: "user-member", organizationId: "org-1", role: "member", email: "member@example.test", emailVerified: true };
 
 const requestBody = { vaultAccountId: "vault-1.near", opId: Array(32).fill(1) };
 const consoleOrigin = "http://console.test";
@@ -83,6 +85,8 @@ class FakeAuth implements AuthGateway {
   readonly listedOrganizations: string[] = [];
   readonly created: CreateAgentInput[] = [];
   readonly revoked: Array<{ organizationId: string; agentId: string }> = [];
+  sponsorshipReservation: import("./auth-gateway.js").NearSponsorshipReservation = "reserved";
+  readonly completedSponsorships: Array<{ nearAccountId: string; succeeded: boolean }> = [];
 
   handler(): Promise<Response> {
     return Promise.resolve(new Response(null, { status: 404 }));
@@ -170,8 +174,25 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve(agentId === "agent-a" && organizationId === "org-1");
   }
 
-  registerPasswordless(): Promise<Response> {
-    return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  startPasskeyRegistration(): Promise<Response> {
+    return Promise.resolve(new Response(JSON.stringify({ context: "signed-registration-context" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+  }
+
+  reserveNearWalletSponsorship() {
+    return Promise.resolve(this.sponsorshipReservation);
+  }
+
+  completeNearWalletSponsorship(nearAccountId: string, succeeded: boolean): Promise<void> {
+    this.completedSponsorships.push({ nearAccountId, succeeded });
+    return Promise.resolve();
+  }
+
+  isEmailVerified(headers: Headers): Promise<boolean> {
+    const cookie = headers.get("cookie");
+    return Promise.resolve(cookie ? this.consoles.get(cookie)?.emailVerified === true : false);
   }
 
   recordAudit(event: AuditEvent): Promise<void> {
@@ -180,18 +201,37 @@ class FakeAuth implements AuthGateway {
   }
 }
 
-function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" | "member"; treasuryStatus?: string }) {
+function testApp(options?: {
+  operation?: VaultOperation;
+  consoleRole?: "admin" | "member";
+  treasuryStatus?: string;
+  sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
+  emailVerified?: boolean;
+}) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
   auth.agents.set("key-b", agentB);
   auth.consoles.set("session-admin", admin);
   auth.consoles.set("session-member", member);
+  if (options?.emailVerified === false) {
+    auth.consoles.set("session-admin", { ...admin, emailVerified: false });
+    auth.consoles.set("session-member", { ...member, emailVerified: false });
+  }
   if (options?.consoleRole === "member") auth.consoles.delete("session-admin");
+  if (options?.sponsorshipReservation) auth.sponsorshipReservation = options.sponsorshipReservation;
 
   let guardCalls = 0;
+  const nearCalls = {
+    sponsored: [] as Array<{ accountId: string; publicKey: string; amountYocto: string }>,
+  };
   const near = {
     getOperation: async () => options?.operation ?? operation,
     getAccount: async () => ({ code_hash: "11111111111111111111111111111111", amount: "832000000000000000000000", storage_usage: 182 }),
+    getAccessKeys: async () => ({ keys: [] }),
+    createSubaccount: async (accountId: string, publicKey: string, amountYocto: string) => {
+      nearCalls.sponsored.push({ accountId, publicKey, amountYocto });
+      return accountId;
+    },
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
       method === "get_agent" ? { role: "researcher", active: true, evm_address: [1, 2] } : 3,
@@ -257,8 +297,22 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     agentDetail: async () => null,
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin, nearParentAccount: "mandateos.testnet" });
-  return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
+  const app = createApp({
+    near,
+    guard,
+    relayer: {} as BaseRelayer,
+    auth,
+    treasury,
+    mandates,
+    registry,
+    payments,
+    consoleData,
+    consoleOrigin,
+    nearParentAccount: "mandateos.testnet",
+    nearSponsorDailyWalletLimit: 2,
+    nearSponsorWalletAmountYocto: "500000000000000000000000",
+  });
+  return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
@@ -447,25 +501,104 @@ describe("treasury refresh", () => {
 });
 
 describe("passwordless registration", () => {
-  it("creates a session without exposing a password route", async () => {
-    const { app } = testApp();
+  const nearPublicKey = "ed25519:11111111111111111111111111111111";
+  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
+
+  it("issues a signed passkey registration context and defers NEAR funding", async () => {
+    const { app, nearCalls } = testApp();
     const response = await app.request("/api/register/passkey-start", {
       method: "POST",
-      headers: headers({ origin: consoleOrigin }),
-      body: JSON.stringify({ email: "new@example.test", name: "New User" }),
+      headers: headers({ origin: consoleOrigin, "x-real-ip": "198.51.100.1" }),
+      body: JSON.stringify({ email: "NEW@example.test", name: "New User", nearPublicKey }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ context: "signed-registration-context", nearAccountId });
+    expect(nearCalls.sponsored).toEqual([]);
   });
 
-  it("returns 404 for the password sign-up route", async () => {
+
+  it("rate-limits repeated registration by normalized email", async () => {
     const { app } = testApp();
-    const response = await app.request("/api/auth/sign-up/email", {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": `198.51.100.${attempt + 1}` }),
+        body: JSON.stringify({ email: "RateLimit@Example.test", name: "User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 429]);
+  });
+
+  it("rate-limits registration by remote IP across emails", async () => {
+    const { app } = testApp();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.10" }),
+        body: JSON.stringify({ email: `user-${attempt}@example.test`, name: "User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+
+  it("returns 404 for password sign-up and sign-in routes", async () => {
+    const { app } = testApp();
+    for (const path of ["/api/auth/sign-up/email", "/api/auth/sign-in/email"]) {
+      const response = await app.request(path, {
+        method: "POST",
+        headers: headers({}),
+        body: JSON.stringify({ email: "user@example.test", password: "password-123", name: "User" }),
+      });
+      expect(response.status).toBe(404);
+    }
+  });
+
+  it("refuses invitation acceptance for an unverified email", async () => {
+    const { app } = testApp({ emailVerified: false });
+    const response = await app.request("/api/auth/organization/accept-invitation", {
       method: "POST",
-      headers: headers({}),
-      body: JSON.stringify({ email: "user@example.test", password: "password-123", name: "User" }),
+      headers: headers({ cookie: "session-member" }),
+      body: JSON.stringify({ invitationId: "invite-1" }),
     });
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "email_verification_required" });
+  });
+});
+
+describe("founder wallet sponsorship", () => {
+  const nearPublicKey = "ed25519:11111111111111111111111111111111";
+  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
+
+  it("funds the founder wallet only through the authenticated DAO-time route", async () => {
+    const { app, auth, nearCalls } = testApp();
+    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ nearAccountId, nearPublicKey }),
+    });
+    expect(response.status).toBe(201);
+    expect(nearCalls.sponsored).toEqual([{
+      accountId: nearAccountId,
+      publicKey: nearPublicKey,
+      amountYocto: "500000000000000000000000",
+    }]);
+    expect(auth.completedSponsorships).toEqual([{ nearAccountId, succeeded: true }]);
+  });
+
+  it("enforces the durable daily sponsorship cap before funding", async () => {
+    const { app, nearCalls } = testApp({ sponsorshipReservation: "daily_limit" });
+    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ nearAccountId, nearPublicKey }),
+    });
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ error: "daily_sponsorship_limit" });
+    expect(nearCalls.sponsored).toEqual([]);
   });
 });
 

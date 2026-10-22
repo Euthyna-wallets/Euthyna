@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE, api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
-import { generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { demoWalletsEnabled, generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -12,6 +12,7 @@ import {
 import { authClient } from "../auth.js";
 import {
   createDao,
+  connectNearWallet,
   disableFactoryAutoUpdate,
   evmAccounts,
   evmWalletClient,
@@ -66,6 +67,7 @@ export function OnboardingPage() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [mandate, setMandate] = useState<MandatePreview | null>(null);
   const [founderNear, setFounderNear] = useState("");
+  const [passkeyReady, setPasskeyReady] = useState<boolean | null>(null);
 
   const signedIn = Boolean(session.data?.user);
 
@@ -90,10 +92,27 @@ export function OnboardingPage() {
   }
 
   useEffect(() => {
-    if (!signedIn) return;
+    if (!signedIn) {
+      setPasskeyReady(null);
+      return;
+    }
+    if (import.meta.env.VITE_E2E === "1") {
+      setPasskeyReady(true);
+      return;
+    }
+    void authClient.passkey.listUserPasskeys()
+      .then((result) => {
+        if (result.error) throw new Error(result.error.message ?? "Could not read passkeys");
+        setPasskeyReady((result.data?.length ?? 0) > 0);
+      })
+      .catch((cause: unknown) => setError(String(cause)));
+  }, [signedIn]);
+
+  useEffect(() => {
+    if (!signedIn || passkeyReady !== true) return;
     refreshOrganizations().catch((cause: unknown) => setError(String(cause)));
     void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch(() => undefined);
-  }, [signedIn]);
+  }, [signedIn, passkeyReady]);
 
   useEffect(() => {
     if (!activeOrganization) return;
@@ -120,6 +139,17 @@ export function OnboardingPage() {
   if (!signedIn) {
     return <SignIn />;
   }
+  if (passkeyReady === null) {
+    return <div className="auth"><div className="auth-card"><p>Checking passkey enrollment…</p></div></div>;
+  }
+  if (!passkeyReady) {
+    return (
+      <PasskeyEnrollment
+        email={session.data?.user.email ?? ""}
+        onComplete={() => setPasskeyReady(true)}
+      />
+    );
+  }
 
   return (
     <div className="shell">
@@ -134,6 +164,17 @@ export function OnboardingPage() {
         </nav>
         <div className="spacer" />
         <div className="small muted">{session.data?.user.email}</div>
+        <button
+          className="ghost"
+          disabled={Boolean(busy)}
+          onClick={() => void run("passkey", async () => {
+            const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+            if (result.error) throw new Error(result.error.message ?? "Could not add passkey");
+            setNotice("Passkey added.");
+          })}
+        >
+          Add passkey
+        </button>
         <button className="ghost" onClick={() => authClient.signOut()}>Sign out</button>
       </aside>
 
@@ -148,6 +189,12 @@ export function OnboardingPage() {
             {activeOrganization ? <a className="pill" href="/">Open console →</a> : null}
           </div>
         </header>
+        {demoWalletsEnabled() ? (
+          <div className="alert error">
+            UAT DEMO MODE — generated NEAR and EVM private keys are stored in this browser's
+            localStorage. Use testnet assets only. This mode is disabled by default.
+          </div>
+        ) : null}
 
         {error ? <div className="alert error">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
@@ -305,6 +352,44 @@ export function OnboardingPage() {
   );
 }
 
+function PasskeyEnrollment(props: { email: string; onComplete: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function enroll() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+      if (result.error) throw new Error(result.error.message ?? "Could not create passkey");
+      props.onComplete();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth">
+      <div className="auth-card">
+        <div className="brand">MandateOS</div>
+        <h1>Create your passkey</h1>
+        <p className="muted">
+          Profile <strong>{props.email}</strong> must enroll a passkey before accessing the company console.
+        </p>
+        {error ? <div className="alert error">{error}</div> : null}
+        <button className="primary" disabled={busy} onClick={() => void enroll()}>
+          {busy ? "Waiting for your authenticator…" : "Create passkey"}
+        </button>
+        <button className="ghost" disabled={busy} onClick={() => void authClient.signOut()}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SignIn() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -325,28 +410,35 @@ export function SignIn() {
     }
   }
 
+
   async function register(email: string, name: string) {
     setBusy(true);
     setError(null);
     try {
+      const nearPublicKey = demoWalletsEnabled() ? generatedNearPublicKey() : undefined;
       const response = await fetch(`${API_BASE}/api/register/passkey-start`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", origin: window.location.origin },
-        body: JSON.stringify({ email, name, nearPublicKey: generatedNearPublicKey() }),
+        body: JSON.stringify({ email, name, ...(nearPublicKey ? { nearPublicKey } : {}) }),
       });
       if (!response.ok) {
-        if (response.status === 409 || response.status === 422) {
-          setError("This email already has an account. Sign in with your passkey instead.");
-          setMode("login");
-          return;
-        }
+        if (response.status === 429) throw new Error("Too many registration attempts. Try again later.");
         throw new Error((await response.json().catch(() => ({}))).message ?? "Registration failed");
       }
-      const payload = (await response.json().catch(() => ({}))) as { nearAccountId?: string };
-      if (payload.nearAccountId) setGeneratedNearAccountId(payload.nearAccountId);
-      const passkey = await authClient.passkey.addPasskey({ name: "MandateOS console" });
-      if (passkey?.error) setError(passkey.error.message ?? "Could not create the passkey");
+      const payload = (await response.json().catch(() => ({}))) as {
+        context?: string;
+        nearAccountId?: string;
+      };
+      if (!payload.context) throw new Error("Registration context missing");
+      if (demoWalletsEnabled() && payload.nearAccountId) setGeneratedNearAccountId(payload.nearAccountId);
+      const passkey = await authClient.passkey.addPasskey({
+        name: "MandateOS console",
+        context: payload.context,
+        createSession: true,
+      });
+      if (passkey.error) throw new Error(passkey.error.message ?? "Could not create passkey");
+      window.location.assign("/onboarding");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -371,9 +463,14 @@ export function SignIn() {
         <h1>{mode === "login" ? "Sign in" : "Create your account"}</h1>
         <p className="muted">
           {mode === "login"
-            ? "Use the passkey stored on this device. No password, no seed phrase."
-            : "Your email identifies the organization account. Access is protected by a passkey created on this device."}
+            ? "Sign in with your passkey. No email challenge and no password."
+            : "Enter an email identifier, then create the passkey that secures your profile and organizations."}
         </p>
+        {demoWalletsEnabled() ? (
+          <div className="alert error">
+            UAT DEMO MODE — test-only private keys will be stored in localStorage.
+          </div>
+        ) : null}
         {error ? <div className="alert error">{error}</div> : null}
         <div className="tabs">
           <button className={mode === "login" ? "tab active" : "tab"} onClick={() => { setMode("login"); setError(null); }}>Sign in</button>
@@ -388,9 +485,12 @@ export function SignIn() {
             <label>Full name<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
             <label>Work email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             <button className="primary" disabled={busy || !email || !name} onClick={() => void register(email, name)}>
-              {busy ? "Creating your passkey…" : "Create account with passkey"}
+              {busy ? "Creating passkey…" : "Create account with passkey"}
             </button>
-            <p className="muted small">No password is created. The email is only an identifier in this UAT.</p>
+            <p className="muted small">
+              The email is a profile identifier and remains unverified in this hackathon build.
+              Invitation acceptance is disabled until a real email-verification provider is added.
+            </p>
           </>
         )}
       </div>
@@ -554,7 +654,9 @@ function MemberWallets(props: {
           onClick={() =>
             void (async () => {
               try {
-                const accounts = await nearAccounts();
+                const accounts = demoWalletsEnabled()
+                  ? await nearAccounts()
+                  : await connectNearWallet();
                 if (accounts[0]) setNearAccountId(accounts[0]);
               } catch (cause) {
                 props.onError(cause instanceof Error ? cause.message : String(cause));
@@ -562,7 +664,7 @@ function MemberWallets(props: {
             })()
           }
         >
-          Use generated NEAR account
+          {demoWalletsEnabled() ? "Use generated NEAR account" : "Connect NEAR wallet"}
         </button>
         <button
           className="ghost"
@@ -577,7 +679,7 @@ function MemberWallets(props: {
             })()
           }
         >
-          Use generated EVM account
+          {demoWalletsEnabled() ? "Use generated EVM account" : "Connect MetaMask / Rabby"}
         </button>
       </div>
       <div className="row">
@@ -603,9 +705,9 @@ function MemberWallets(props: {
         </button>
       </div>
       <div className="muted small">
-        These wallets are generated in this browser (non-custodial). Fund the NEAR implicit account
-        with testnet NEAR and the EVM address with Base Sepolia ETH before signing treasury
-        transactions. The server never sees the private keys.
+        {demoWalletsEnabled()
+          ? "UAT demo wallets are generated locally and store test-only private keys in localStorage."
+          : "Normal mode signs through NEAR Wallet Selector and an injected MetaMask/Rabby provider. MandateOS never receives private keys."}
       </div>
       {self?.nearAccountId && self?.evmAddress ? null : (
         <div className="muted small">Every member must link both wallets before a plan is built.</div>
@@ -762,6 +864,15 @@ function TreasuryWizard(props: {
                 signerId !== props.plan.founderNearAccountId
               }
               onClick={() => props.run("dao", async () => {
+                if (demoWalletsEnabled()) {
+                  await api("/v1/console/treasury/sponsor-founder-wallet", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      nearAccountId: signerId,
+                      nearPublicKey: generatedNearPublicKey(),
+                    }),
+                  });
+                }
                 const hashes = await createDao(props.plan, signerId);
                 setTransactionHashes((current) => [...current, ...hashes]);
                 setDaoCreated(props.plan.daoAccountId);

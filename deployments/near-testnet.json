@@ -19,6 +19,14 @@
     "sha256_bs58": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
     "rpc_build_match": true
   },
+  "reproducible_builds": {
+    "image": "sourcescan/cargo-near:0.20.3-rust-1.86.0",
+    "image_digest": "sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf",
+    "factory_sha256_hex": "ad1ed251fc4a556a3070de31c64c2b43442f0ebf5dc1dcf299ba532945312c92",
+    "vault_sha256_hex": "cac18ad40a3d04cc7945c8ac3d1a1677197078130b5dbaed62a94234ee8a1538",
+    "relay_sha256_hex": "b173123bebfc39b32c25a1f1f4610afe343f1b153fc1ab3dfc4bc4e7ef17252b",
+    "deployed_artifacts_unchanged": true
+  },
   "mandateos_factory": {
     "account_id": "factory-v2.mandateos.testnet",
     "code_hash_sha256_hex": "97cf2ad71d99eb5590f2df2585c4e1afb451e5fc816798288f043e56c4f954d3",

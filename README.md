@@ -76,12 +76,12 @@ The current repository contains:
 - `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
 - `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds three focused tests for global-hash, keyless creation, name validation and funding guards;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
-- `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; the founder confirms and signs the exact council policy locally; the browser re-reads `get_policy` directly from NEAR RPC before Vault/relay; `/v1/console/treasury/register` re-verifies immutable-global DAO hash, policy, Vault/relay parameters, zero access keys, Safe owners/threshold, module wiring and Delay cooldown;
+- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, unverified-email invitation gate, IP/email registration limits, per-agent API keys and append-only audit rows;
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; the founder confirms/signs the exact policy locally; the browser re-reads `get_policy`; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap;
 - `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
 - `apps/api` agent payments: `POST /v1/operations/pay` (visa / escalation / refusal) with one transaction consuming the reference and storing the visa, idempotent per `opId`; `GET /v1/operations/:opId` merges DB, Vault and stored visa state; suppliers/contracts live in PostgreSQL with `registry_version` and four-eyes address changes;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
-- `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard, treasury status gate and mandate preview/diff/proposals, plus agent registration;
+- `apps/console`: normal signing through NEAR Wallet Selector and MetaMask/Rabby; explicit UAT demo mode may generate test-only keys in localStorage and displays a warning banner;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
 - `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
 - [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
@@ -89,7 +89,7 @@ The current repository contains:
 - [`docs/api.md`](./docs/api.md): console and agent authentication, routes, errors, audit rows and local setup;
 - [`deployments/near-testnet.json`](./deployments/near-testnet.json) and [`deployments/base-sepolia.json`](./deployments/base-sepolia.json): observed addresses, policies and transaction hashes.
 
-Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. NEP-366 sponsorship, the SDK/MCP agent, Phase 2 Intents and production hardening remain unimplemented.
+Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. Founder-wallet setup sponsorship is implemented with a daily cap; NEP-366 agent-call sponsorship, the SDK/MCP agent, Phase 2 Intents and production hardening remain roadmap.
 
 ## Architecture target
 
@@ -122,14 +122,13 @@ Funds credited to `0xINT` are protected by the Vault but no longer by Zodiac. Th
 ## Roadmap
 
 - member voting accounts restricted to on-chain votes and backed by passkeys;
-- multi-client deployment factory, after the single-client ACME deployment script is stable;
 - NEP-366 sponsorship for agent and relayer calls;
 - production `0xGOV` deployment on NEAR mainnet with Delay cooldown `86 400` seconds;
 - additional assets and chains;
 - on-chain or independently verified Base receipt proofs instead of trusted confirmation calls;
 - audit coverage for `omni-transaction` and the MandateOS contracts before production use.
 
-The target console uses Better Auth passkeys for login, prepares proposals and displays state. It never signs an on-chain proposal or treasury transaction ([Better Auth passkey plugin][better-auth-passkey]).
+The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no email is sent and no password exists. The email remains an unverified profile identifier, so invitation acceptance is disabled. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey]).
 
 ## Governance
 
@@ -236,12 +235,16 @@ set +a
 pnpm --filter @mandateos/api dev
 ```
 
-The passkey relying party is `PASSKEY_RP_ID=localhost` and `BETTER_AUTH_URL=http://localhost:3000`. Email/password is enabled once to bootstrap the human account; the console immediately adds a passkey and uses it afterwards. Agent credentials are per-agent API keys in `x-api-key`, documented in [`docs/api.md`](./docs/api.md).
+Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build, so invitations cannot be accepted. Agent credentials are per-agent API keys in `x-api-key`.
 
 Run the console in another terminal:
 
 ```bash
+# Normal mode: NEAR Wallet Selector + MetaMask/Rabby; no localStorage keys.
 pnpm --filter @mandateos/console dev
+
+# Explicit test-only UAT demo mode:
+VITE_UAT_DEMO_MODE=1 pnpm --filter @mandateos/console dev
 ```
 
 It listens on `http://localhost:5173` (`CONSOLE_ORIGIN`) and calls the API at
@@ -301,12 +304,14 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 
 - The contracts and backend have not been audited. UAT uses deterministic/test-only Guard and council credentials and assets without financial value.
 - The deployed UAT Vault (`11cb6f03…acc21`) and relay (`4f0bf6b1…3ac41`) predate the `submit_signature` recovery fix; the fix is covered by Sandbox tests and requires a governed redeployment. Local build hashes are recorded in `deployments/near-testnet.json`.
+- `contracts/build-reproducible.sh` pins a digest-addressed cargo-near image for factory, Vault and relay; reproducible hashes are documented separately from already deployed/keyless UAT bytecode.
 - The three council keys used for the UAT veto demo are stored in one `.env` on one machine; production requires separate hardware keys.
 - The UAT `allowedRecipient` (`0xa7BE833AD5422421204198E47C04516B0026F9B6`) is also council owner 3, so the demo recipient and one veto key share an address.
 - An MPC signature is considered public as soon as `sign` is called. Callback failure, timeout, pause or revocation does not release a `PossiblySigned` reservation; `submit_signature` stores the published signature after verification with `ecrecover`, otherwise a confirmed same-nonce cancellation is required.
 - The Vault depends on NEAR Chain Signatures availability. Testnet uses `v1.signer-prod.testnet`; production targets `v1.signer` ([MPC repository][near-mpc]).
 - `omni-transaction` 0.3 builds the EIP-1559 preimage and does not publish an audit report in its repository ([omni-transaction][omni-transaction]).
 - Agent-side NEAR gas sponsorship through NEP-366 is designed but not yet implemented; testnet smoke accounts are faucet-funded ([NEAR meta-transactions][near-meta-transactions]).
+- Founder-wallet sponsorship is UAT-only, deferred until DAO creation, tied to the authenticated linked wallet and capped per UTC day in PostgreSQL.
 - Phase 1 is confirmed end to end. The payment transaction is `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4`; the Vault state is `Confirmed`, with `1_000_000` spent and no reservation.
 - Phase 1 Base Sepolia uses `TestUSDC (test token)`, a 6-decimal ERC-20 deployed by the UAT script. It is not Circle USDC and has no value.
 - A Guard-signed status report can only confirm the exact original transaction. Only the DAO owner can confirm an on-chain cancellation.
@@ -319,6 +324,7 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 - Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the mandate preview returns a funding payload but does not sign it.
 - `auto_update: true` is reported as a warning for the immutable-hash DAO factory, not a blocker: the keyless factory exposes no update method. The optional council proposal remains defense in depth.
 - Trezu's official Sputnik UI source displays and votes on the custom factory DAO when configured for testnet; the hosted `testenv.trezu.app` indexer currently rejects DAO IDs outside `.sputnik-dao.near`.
+- Browser-generated private keys exist only when `VITE_UAT_DEMO_MODE=1`; normal startup purges legacy demo keys, uses wallet providers and rejects generated-key calls.
 
 ## License
 

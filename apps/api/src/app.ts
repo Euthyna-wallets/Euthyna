@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import { Hono, type Context, type Next } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -132,6 +135,26 @@ const treasuryRegisterSchema = z.object({
   govAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
+const nearSponsorshipSchema = z.object({
+  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
+});
+
+function derivedWalletAccountId(publicKey: string, parent: string): string {
+  const suffix = createHash("sha256").update(publicKey).digest("hex").slice(0, 12);
+  return `w-${suffix}.${parent}`;
+}
+
+function registrationIp(context: Context): string {
+  try {
+    const directIp = getConnInfo(context).remote.address;
+    if (directIp) return directIp;
+  } catch {
+    // In-memory tests do not expose a socket; use the explicit edge header below.
+  }
+  return context.req.header("cf-connecting-ip") ?? context.req.header("x-real-ip") ?? "unknown";
+}
+
 
 interface AppVariables {
   agent: AgentIdentity;
@@ -152,6 +175,8 @@ export interface AppDependencies {
   consoleData: ConsoleDataService;
   consoleOrigin: string;
   nearParentAccount: string;
+  nearSponsorDailyWalletLimit: number;
+  nearSponsorWalletAmountYocto: string;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -251,10 +276,14 @@ export function createApp({
   consoleData,
   consoleOrigin,
   nearParentAccount,
+  nearSponsorDailyWalletLimit,
+  nearSponsorWalletAmountYocto,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
+  const registrationIpLimiter = new MemoryRateLimiter(5, 15 * 60_000);
+  const registrationEmailLimiter = new MemoryRateLimiter(3, 60 * 60_000);
   app.use(
     "*",
     cors({
@@ -267,34 +296,40 @@ export function createApp({
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
-  app.on(["GET", "POST"], "/api/auth/*", (context) => {
+  app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     const path = context.req.path;
     if (path.endsWith("/sign-up/email") || path.endsWith("/sign-in/email")) {
       return context.json({ error: "not_found" }, 404);
+    }
+    if (path.endsWith("/organization/accept-invitation")) {
+      if (!(await auth.isEmailVerified(context.req.raw.headers))) {
+        return context.json({ error: "email_verification_required" }, 403);
+      }
     }
     return auth.handler(context.req.raw);
   });
 
   app.post("/api/register/passkey-start", async (context) => {
     const input = await parseJsonPublic(context, z.object({
-      email: z.string().email(),
+      email: z.string().email().transform((value) => value.trim().toLowerCase()),
       name: z.string().min(1).max(120),
       nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/).optional(),
     }));
-    const url = new URL(context.req.url);
-    const response = await auth.registerPasswordless(`${url.protocol}//${url.host}`, consoleOrigin, input);
+    const ip = registrationIp(context);
+    if (
+      !registrationIpLimiter.allow(`register:ip:${ip}`) ||
+      !registrationEmailLimiter.allow(`register:email:${input.email}`)
+    ) {
+      return context.json({ error: "registration_rate_limited" }, 429);
+    }
+
+    const response = await auth.startPasskeyRegistration(input);
     if (!response.ok || !input.nearPublicKey) return response;
     const payload = (await response.clone().json()) as Record<string, unknown>;
-    const relayer = nearParentAccount;
-    if (/^[0-9a-f]{64}$/.test(relayer)) {
-      return context.json({ error: "relayer_must_be_named", message: "set a named NEAR relayer account to create wallets" }, 500);
-    }
-    const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
-    const nearAccountId = `w-${suffix}.${relayer}`;
+    const nearAccountId = derivedWalletAccountId(input.nearPublicKey, nearParentAccount);
     if (nearAccountId.length > 64) {
       return context.json({ error: "near_account_too_long" }, 500);
     }
-    await near.createSubaccount(nearAccountId, input.nearPublicKey, "500000000000000000000000");
     return new Response(JSON.stringify({ ...payload, nearAccountId }), {
       status: response.status,
       headers: response.headers,
@@ -574,6 +609,71 @@ export function createApp({
       storageUsage: account.storage_usage ?? null,
     });
   });
+  app.post(
+    "/v1/console/treasury/sponsor-founder-wallet",
+    requireConsoleAdmin(auth, consoleLimiter),
+    async (context) => {
+      const consoleIdentity = context.get("console");
+      const input = await parseJson(context, nearSponsorshipSchema);
+      const expectedAccountId = derivedWalletAccountId(input.nearPublicKey, nearParentAccount);
+      if (input.nearAccountId !== expectedAccountId) {
+        return context.json({ error: "near_account_mismatch", expectedAccountId }, 422);
+      }
+
+      const reservation = await auth.reserveNearWalletSponsorship({
+        organizationId: consoleIdentity.organizationId,
+        userId: consoleIdentity.userId,
+        nearAccountId: input.nearAccountId,
+        publicKey: input.nearPublicKey,
+        dailyLimit: nearSponsorDailyWalletLimit,
+      });
+      if (reservation === "already_sponsored") {
+        return context.json({ nearAccountId: input.nearAccountId, status: "already_sponsored" });
+      }
+      if (reservation === "daily_limit") {
+        return context.json({ error: "daily_sponsorship_limit" }, 429);
+      }
+      if (reservation === "in_progress") {
+        return context.json({ error: "sponsorship_in_progress" }, 409);
+      }
+      if (reservation === "member_mismatch") {
+        return context.json({ error: "founder_wallet_mismatch" }, 403);
+      }
+      if (reservation === "conflict") {
+        return context.json({ error: "sponsorship_conflict" }, 409);
+      }
+
+      try {
+        await near.createSubaccount(input.nearAccountId, input.nearPublicKey, nearSponsorWalletAmountYocto);
+        await auth.completeNearWalletSponsorship(input.nearAccountId, true);
+      } catch (cause) {
+        let alreadyCreatedForKey = false;
+        try {
+          const accessKeys = await near.getAccessKeys(input.nearAccountId);
+          alreadyCreatedForKey = accessKeys.keys.some((key) => {
+            if (!key || typeof key !== "object" || !("public_key" in key)) return false;
+            return key.public_key === input.nearPublicKey;
+          });
+        } catch {
+          // Account lookup failed; release the reservation below.
+        }
+        await auth.completeNearWalletSponsorship(input.nearAccountId, alreadyCreatedForKey);
+        if (!alreadyCreatedForKey) throw cause;
+      }
+
+      await auth.recordAudit({
+        organizationId: consoleIdentity.organizationId,
+        actorType: "console",
+        actorId: consoleIdentity.userId,
+        action: "near_wallet.sponsored",
+        targetType: "near_account",
+        targetId: input.nearAccountId,
+        metadata: { amountYocto: nearSponsorWalletAmountYocto },
+      });
+      return context.json({ nearAccountId: input.nearAccountId, status: "sponsored" }, 201);
+    },
+  );
+
 
 
   app.post("/v1/console/treasury/deploy-contracts", requireConsoleAdmin(auth, consoleLimiter), async (context) => {

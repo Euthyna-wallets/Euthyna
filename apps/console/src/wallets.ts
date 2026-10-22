@@ -1,12 +1,13 @@
 import { KeyPair, Near, keyStores, transactions } from "near-api-js";
 import { setupWalletSelector, type WalletSelector } from "@near-wallet-selector/core";
+import { setupModal, type WalletSelectorModal } from "@near-wallet-selector/modal-ui";
 import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
 import { createPublicClient, createWalletClient, custom, http, type Address, type EIP1193Provider, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 
 import type { NearAction, TreasuryPlan } from "./api.js";
-import { generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
+import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
 
 interface WalletAction {
   type: string;
@@ -78,6 +79,7 @@ async function generatedNear(): Promise<E2eNearWallet> {
 }
 
 let selectorPromise: Promise<WalletSelector> | undefined;
+let selectorModal: WalletSelectorModal | undefined;
 
 export function nearSelector(): Promise<WalletSelector> {
   selectorPromise ??= setupWalletSelector({
@@ -87,10 +89,24 @@ export function nearSelector(): Promise<WalletSelector> {
   return selectorPromise;
 }
 
+export async function connectNearWallet(): Promise<string[]> {
+  const selector = await nearSelector();
+  const accounts = selector.store.getState().accounts.map((account) => account.accountId);
+  if (accounts.length === 0) {
+    selectorModal ??= setupModal(selector, { contractId: "" });
+    selectorModal.show();
+  }
+  return accounts;
+}
+
 export async function nearAccounts(): Promise<string[]> {
   const injected = e2eNear();
   if (injected) return (await injected.getAccounts()).map((account) => account.accountId);
-  return (await (await generatedNear()).getAccounts()).map((account) => account.accountId);
+  if (demoWalletsEnabled()) {
+    return (await (await generatedNear()).getAccounts()).map((account) => account.accountId);
+  }
+  const selector = await nearSelector();
+  return selector.store.getState().accounts.map((account) => account.accountId);
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -137,15 +153,26 @@ export async function signNearTransactions(
     });
     return outcomes.map((outcome) => outcome.transaction_outcome.id);
   }
-  const generated = await generatedNear();
-  const outcomes = await generated.signAndSendTransactions({
+  if (demoWalletsEnabled()) {
+    const generated = await generatedNear();
+    const outcomes = await generated.signAndSendTransactions({
+      transactions: transactions.map((transaction) => ({
+        signerId,
+        receiverId: transaction.receiverId,
+        actions: selectorActions(transaction.actions),
+      })),
+    });
+    return outcomes.map((outcome) => outcome.transaction_outcome.id);
+  }
+  const wallet = await (await nearSelector()).wallet();
+  const outcomes = await wallet.signAndSendTransactions({
     transactions: transactions.map((transaction) => ({
       signerId,
       receiverId: transaction.receiverId,
       actions: selectorActions(transaction.actions),
     })),
   });
-  return outcomes.map((outcome) => outcome.transaction_outcome.id);
+  return outcomes?.map((outcome) => outcome.transaction_outcome.id) ?? [];
 }
 
 export async function createDao(plan: TreasuryPlan, signerId: string): Promise<string[]> {
@@ -168,13 +195,30 @@ export async function createDao(plan: TreasuryPlan, signerId: string): Promise<s
     });
     return [outcome.transaction_outcome.id];
   }
-  const generated = await generatedNear();
-  const outcome = await generated.signAndSendTransaction({
+  const action = {
+    type: "FunctionCall" as const,
+    params: {
+      methodName: "create",
+      args: plan.daoCreate.args,
+      gas: "150000000000000",
+      deposit: plan.daoCreate.depositYocto,
+    },
+  };
+  if (demoWalletsEnabled()) {
+    const outcome = await (await generatedNear()).signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoCreate.factoryId,
+      actions: [action],
+    });
+    return [outcome.transaction_outcome.id];
+  }
+  const wallet = await (await nearSelector()).wallet();
+  const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: plan.daoCreate.factoryId,
-    actions: [{ type: "FunctionCall", params: { methodName: "create", args: plan.daoCreate.args, gas: "150000000000000", deposit: plan.daoCreate.depositYocto } }],
+    actions: [action],
   });
-  return [outcome.transaction_outcome.id];
+  return outcome ? [outcome.transaction_outcome.id] : [];
 }
 
 export type DaoPolicyRpc = {
@@ -265,19 +309,31 @@ export async function disableFactoryAutoUpdate(
     });
     return [outcome.transaction_outcome.id];
   }
-  const generated = await generatedNear();
   const args = { proposal: { description: "Disable Sputnik factory auto-update", kind: { FactoryInfoUpdate: { factory_info: { factory_id: plan.daoCreate.factoryId, auto_update: false } } } } };
-  const outcome = await generated.signAndSendTransaction({
+  const action = { type: "FunctionCall" as const, params: { methodName: "add_proposal", args, gas: "100000000000000", deposit: "100000000000000000000000" } };
+  if (demoWalletsEnabled()) {
+    const outcome = await (await generatedNear()).signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoAccountId,
+      actions: [action],
+    });
+    return [outcome.transaction_outcome.id];
+  }
+  const wallet = await (await nearSelector()).wallet();
+  const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: plan.daoAccountId,
-    actions: [{ type: "FunctionCall", params: { methodName: "add_proposal", args, gas: "100000000000000", deposit: "100000000000000000000000" } }],
+    actions: [action],
   });
-  return [outcome.transaction_outcome.id];
+  return outcome ? [outcome.transaction_outcome.id] : [];
 }
 
 export function evmWalletClient() {
-  if (import.meta.env.VITE_E2E === "1" && window.ethereum) {
+  if (window.ethereum) {
     return createWalletClient({ chain: baseSepolia, transport: custom(window.ethereum) });
+  }
+  if (!demoWalletsEnabled()) {
+    throw new Error("Install or unlock MetaMask/Rabby to sign Base Sepolia transactions");
   }
   return createWalletClient({
     account: generatedEvmAccount(),
@@ -287,20 +343,23 @@ export function evmWalletClient() {
 }
 
 export async function evmAccounts(): Promise<Address[]> {
-  if (import.meta.env.VITE_E2E === "1" && window.ethereum) {
+  if (window.ethereum) {
     return (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
+  }
+  if (!demoWalletsEnabled()) {
+    throw new Error("Install or unlock MetaMask/Rabby to connect an EVM wallet");
   }
   return [generatedEvmAccount().address];
 }
 
 export async function switchToBaseSepolia(): Promise<void> {
-  if (import.meta.env.VITE_E2E === "1" && window.ethereum) {
+  if (window.ethereum) {
     try {
       await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x14a34" }] });
     } catch {
       await window.ethereum.request({
         method: "wallet_addEthereumChain",
-        params: [{ chainId: "0x14a34", chainName: "Base Sepolia", nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://sepolia.base.org"], blockExplorerUrls: ["https://basescan.org"] }],
+        params: [{ chainId: "0x14a34", chainName: "Base Sepolia", nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://sepolia.base.org"], blockExplorerUrls: ["https://sepolia.basescan.org"] }],
       });
     }
   }
@@ -309,9 +368,11 @@ export async function switchToBaseSepolia(): Promise<void> {
 export async function sendEvmTransaction(transaction: { to: string; value: string; data: string }): Promise<Hex> {
   await switchToBaseSepolia();
   const wallet = evmWalletClient();
-  const account = import.meta.env.VITE_E2E === "1" && window.ethereum
+  const account = window.ethereum
     ? (await evmAccounts())[0]
-    : generatedEvmAccount();
+    : demoWalletsEnabled()
+      ? generatedEvmAccount()
+      : undefined;
   if (!account) throw new Error("No EVM account");
   return wallet.sendTransaction({
     account,

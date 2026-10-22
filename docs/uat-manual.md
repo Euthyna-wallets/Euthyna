@@ -4,8 +4,8 @@ Objectif : rejouer le parcours console sur **NEAR testnet + Base Sepolia**, sans
 clé privée côté serveur. Cocher dans l'ordre ; chaque étape indique le résultat
 attendu.
 
-> Création de compte : e-mail + passkey uniquement. Aucun mot de passe n’est créé ;
-> les routes `/sign-up/email` et `/sign-in/email` renvoient 404.
+> UAT hackathon : email identifiant + passkey créée directement. Aucun email
+> externe, aucun lien magique, aucun mot de passe.
 
 ## 0. Pré-requis
 
@@ -25,14 +25,14 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
 
 ## 1. Organisation
 
-1. Ouvrir `http://localhost:5173`.
-2. Créer le compte (e-mail + mot de passe) puis ajouter la passkey.
-3. Se reconnecter avec la passkey.
-4. Créer l’entreprise.
-5. Inviter Alice et Bob (liens affichés), accepter chaque lien dans une session
-   distincte.
-6. Chaque membre clique **Use connected NEAR account** et **Use connected EVM
-   account**, puis **Link my wallets**.
+1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1`.
+2. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
+3. Créer l'entreprise.
+4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics.
+5. Lier le wallet du fondateur. Aucun compte NEAR n'est encore créé ou financé.
+
+En mode normal, utiliser NEAR Wallet Selector et MetaMask/Rabby. Vérifier
+qu'aucune clé privée n'apparaît dans localStorage.
 
 Attendu : 3 membres, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour le
 fondateur.
@@ -42,9 +42,9 @@ fondateur.
 1. Saisir le compte NEAR du fondateur, cliquer **Build plan**.
 2. Vérifier la DAO `<slug>.factory-v2.mandateos.testnet`, les trois membres et le
    seuil absolu **2** affichés avant signature.
-3. Cocher la confirmation de policy, connecter exactement le wallet du
-   fondateur, puis **Sign and create DAO** (0,25 NEAR depuis le wallet client
-   sponsorisé).
+3. Cocher la confirmation de policy et cliquer **Sign and create DAO**. En mode
+   démo, l'API réserve le sponsoring journalier, crée/finance alors seulement le
+   wallet client (0,5 NEAR), puis le navigateur signe et attache 0,25 NEAR.
 4. Cliquer **Read get_policy directly from NEAR RPC**, puis confirmer chaque
    membre observé et le seuil. Vault/relay restent bloqués avant ces confirmations.
 5. **Deploy Vault + relay (MandateOS pays)**, puis déployer Safe + modules.

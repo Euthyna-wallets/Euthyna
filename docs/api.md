@@ -7,13 +7,14 @@ agent's NEAR function-call private key: the console registers only its public ke
 
 | Identity | Credential | Header | Routes |
 |---|---|---|---|
-| Console member | Better Auth session (passkey) | `Cookie` | `/api/auth/*`, `/v1/console/*`, `/v1/emergency/cancel`, `/v1/relayer/broadcast` |
+| Console member | Better Auth passkey session (email profile identifier) | `Cookie` | `/api/auth/*`, `/v1/console/*`, `/v1/emergency/cancel`, `/v1/relayer/broadcast` |
 | Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/guard/visas` |
 
-Rate limits: Better Auth limits each API key to 60 requests/minute; the HTTP layer
-adds 120 requests/minute per agent and 600 requests/minute per organization. Both
-counters are in-memory for a single instance; a multi-instance deployment replaces
-the organization limiter with a shared store.
+Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
+15 minutes and 3 requests per normalized email per hour. Agent API keys allow
+60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
+requests/minute per organization. Registration counters are in-memory per API
+instance; wallet sponsorship caps are durable PostgreSQL rows.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console
@@ -23,6 +24,23 @@ grant access because the membership row is re-read on every request.
 Creating or revoking an agent requires the console role `admin` (or `owner`). A
 revoked agent fails closed twice: the API key is disabled and `agent.active` is
 `false`, so an already-cached key stops resolving.
+
+### Passwordless console bootstrap
+
+`POST /api/register/passkey-start` rejects emails that already have a passkey
+and returns a signed, 10-minute registration context. The browser passes it to
+Better Auth's sessionless passkey ceremony. The server validates the context in
+`resolveUser`, creates the profile with `emailVerified=false`, stores the
+passkey and creates the session. It sends no email and stores no magic token or
+password; direct email/password routes return `404`.
+
+The email is a profile identifier in the hackathon build, not a verified
+credential. Invitation acceptance therefore returns `403
+email_verification_required`. Console API identity requires an enrolled passkey.
+In explicit `VITE_UAT_DEMO_MODE=1`, only the NEAR/EVM transaction wallets are
+generated locally; the Better Auth passkey flow is unchanged. Outside demo,
+users connect through NEAR Wallet Selector and MetaMask/Rabby and no private key
+is written to localStorage.
 
 ## Agent routes
 
@@ -228,6 +246,16 @@ Returns the public on-chain balance of the configured MandateOS parent account.
 The console uses it only for the separately sponsored Vault/relay deployment;
 DAO creation is caller-funded from the founder wallet.
 
+
+### `POST /v1/console/treasury/sponsor-founder-wallet`
+
+UAT demo admin only. Immediately before founder-signed DAO creation, reserves a
+durable sponsorship row, validates that the deterministic account is the
+authenticated member's linked wallet, enforces `NEAR_SPONSOR_DAILY_WALLET_LIMIT`,
+then creates/funds it with `NEAR_SPONSOR_WALLET_AMOUNT_YOCTO`. The operation is
+idempotent by account/public key; failed chain creation releases the reservation.
+Normal wallet-selector accounts do not use this route.
+
 ### Funding model
 
 Treasury deposits are one-time storage-backed account balances, not per-payment
@@ -330,7 +358,7 @@ and the console adds the passkey. `/sign-up/email` and `/sign-in/email` return 4
 | `403` | `{ "message": "admin required" }` | Non-admin console role |
 | `404` | `{ "error": "agent_not_found" }` | Agent outside the session organization |
 | `409` | state conflict | Operation not `Prepared` / not `PossiblySigned` |
-| `429` | `{ "message": "rate limit exceeded" }` | Agent or organization window exhausted |
+| `429` | rate-limit or `daily_sponsorship_limit` | Registration or daily wallet sponsorship cap exhausted |
 
 ## Audit
 
@@ -338,6 +366,7 @@ Every sensitive action appends a row to `audit_log`:
 
 - `guard.visa.issued`, `guard.escalation`, `guard.visa.denied`;
 - `agent.created`, `agent.revoked`;
+- `near_wallet.sponsored`;
 - `emergency.cancel.requested`, `emergency.cancel.submitted`, `emergency.cancel.rejected`.
 
 Rows are never updated or deleted by the API. `metadata` carries the operation id,
@@ -354,5 +383,5 @@ pnpm --filter @mandateos/db build
 pnpm --filter @mandateos/api dev
 ```
 
-The passkey origin must match `BETTER_AUTH_URL`; use `http://localhost:3000` for
-local development, not `127.0.0.1`, so the WebAuthn RP id stays `localhost`.
+Passkey ceremonies use `PASSKEY_RP_ID` and `CONSOLE_ORIGIN`; the browser origin
+must match `CONSOLE_ORIGIN`.

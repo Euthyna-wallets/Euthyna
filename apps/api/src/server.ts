@@ -68,6 +68,8 @@ const app = createApp({
   consoleData,
   consoleOrigin: env.CONSOLE_ORIGIN,
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
+  nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
+  nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

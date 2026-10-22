@@ -6,6 +6,20 @@ const EVM_KEY = "mandateos.dev.evm.privateKey";
 const NEAR_KEY = "mandateos.dev.near.secretKey";
 const NEAR_ACCOUNT = "mandateos.dev.near.accountId";
 
+export function demoWalletsEnabled(): boolean {
+  return import.meta.env.VITE_UAT_DEMO_MODE === "1" || import.meta.env.VITE_E2E === "1";
+}
+
+function requireDemoWallets(): void {
+  if (!demoWalletsEnabled()) {
+    throw new Error("browser-generated wallets are disabled outside explicit UAT demo mode");
+  }
+}
+
+export function enforceWalletStoragePolicy(): void {
+  if (!demoWalletsEnabled()) resetGeneratedWallets();
+}
+
 export interface GeneratedNearWallet {
   accountId: string;
   secretKey: string;
@@ -16,6 +30,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 export function generatedEvmAccount(): PrivateKeyAccount {
+  requireDemoWallets();
   let key = localStorage.getItem(EVM_KEY) as Hex | null;
   if (!key) {
     key = generatePrivateKey();
@@ -25,6 +40,7 @@ export function generatedEvmAccount(): PrivateKeyAccount {
 }
 
 export function generatedNearWallet(): GeneratedNearWallet {
+  requireDemoWallets();
   let secretKey = localStorage.getItem(NEAR_KEY);
   if (!secretKey) {
     secretKey = KeyPair.fromRandom("ed25519").toString();
@@ -36,11 +52,13 @@ export function generatedNearWallet(): GeneratedNearWallet {
 }
 
 export function generatedNearPublicKey(): string {
+  requireDemoWallets();
   const { secretKey } = generatedNearWallet();
   return KeyPair.fromString(secretKey as `ed25519:${string}`).getPublicKey().toString();
 }
 
 export function setGeneratedNearAccountId(accountId: string): void {
+  requireDemoWallets();
   localStorage.setItem(NEAR_ACCOUNT, accountId);
 }
 

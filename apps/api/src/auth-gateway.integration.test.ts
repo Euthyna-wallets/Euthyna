@@ -30,7 +30,7 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
         BETTER_AUTH_URL: "http://localhost:3000",
         CONSOLE_ORIGIN: "http://localhost:5173",
         PASSKEY_RP_ID: "localhost",
-            },
+      },
       prisma,
     );
     gateway = new BetterAuthGateway(auth, prisma);
@@ -105,21 +105,55 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
     ).resolves.toBe(1);
   });
 
-  it("registers an email without keeping a password credential", async () => {
+  it("starts the sessionless Better Auth passkey ceremony without a password", async () => {
     const email = `passkey-${randomUUID()}@example.test`;
-    const response = await gateway.registerPasswordless("http://localhost:3000", "http://localhost:5173", {
+    const response = await gateway.startPasskeyRegistration({
       email,
       name: "Passkey User",
     });
     expect(response.status).toBe(200);
-    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
-    await expect(
-      prisma.account.count({ where: { userId: user.id, providerId: "credential" } }),
-    ).resolves.toBe(0);
-    const again = await gateway.registerPasswordless("http://localhost:3000", "http://localhost:5173", {
-      email,
+    const body = await response.json() as { context?: string };
+    expect(body.context?.split(".")).toHaveLength(3);
+    await expect(prisma.user.findUnique({ where: { email } })).resolves.toBeNull();
+
+    const options = await auth.handler(new Request(
+      `http://localhost:3000/api/auth/passkey/generate-register-options?${new URLSearchParams({
+        context: body.context!,
+        name: "MandateOS console",
+      })}`,
+      { headers: { origin: "http://localhost:5173" } },
+    ));
+    expect(options.status).toBe(200);
+    await expect(prisma.user.findUnique({ where: { email } })).resolves.toMatchObject({
       name: "Passkey User",
+      emailVerified: false,
     });
-    expect(again.ok).toBe(false);
+    await expect(
+      prisma.account.count({ where: { providerId: "credential" } }),
+    ).resolves.toBe(0);
+  });
+
+  it("allows an interrupted registration retry but refuses an enrolled email", async () => {
+    const email = `existing-${randomUUID()}@example.test`;
+    const userId = randomUUID();
+    await prisma.user.create({
+      data: { id: userId, name: "Existing", email, emailVerified: false },
+    });
+    const retry = await gateway.startPasskeyRegistration({ email, name: "Existing" });
+    expect(retry.status).toBe(200);
+    await prisma.passkey.create({
+      data: {
+        id: randomUUID(),
+        name: "Test passkey",
+        publicKey: "AQ==",
+        userId,
+        credentialID: randomUUID(),
+        counter: 0,
+        deviceType: "singleDevice",
+        backedUp: false,
+      },
+    });
+    const enrolled = await gateway.startPasskeyRegistration({ email, name: "Existing" });
+    expect(enrolled.status).toBe(409);
   });
 });

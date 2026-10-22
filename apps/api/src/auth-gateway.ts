@@ -17,6 +17,8 @@ export interface ConsoleIdentity {
   userId: string;
   organizationId: string;
   role: string;
+  email: string;
+  emailVerified: boolean;
 }
 
 export interface AgentView {
@@ -67,6 +69,14 @@ export interface AuditEvent {
   metadata?: Record<string, unknown>;
 }
 
+
+export type NearSponsorshipReservation =
+  | "reserved"
+  | "already_sponsored"
+  | "in_progress"
+  | "daily_limit"
+  | "member_mismatch"
+  | "conflict";
 /**
  * Boundary used by the HTTP layer. Tests inject a fake gateway; production uses
  * Better Auth sessions / API keys plus Prisma.
@@ -87,11 +97,18 @@ export interface AuthGateway {
     memberId: string,
     input: { nearAccountId: string; evmAddress: string },
   ): Promise<MemberView | null>;
-  registerPasswordless(
-    baseUrl: string,
-    consoleOrigin: string,
-    input: { email: string; name: string },
+  startPasskeyRegistration(
+    input: { email: string; name: string; nearPublicKey?: string | undefined },
   ): Promise<Response>;
+  reserveNearWalletSponsorship(input: {
+    organizationId: string;
+    userId: string;
+    nearAccountId: string;
+    publicKey: string;
+    dailyLimit: number;
+  }): Promise<NearSponsorshipReservation>;
+  completeNearWalletSponsorship(nearAccountId: string, succeeded: boolean): Promise<void>;
+  isEmailVerified(headers: Headers): Promise<boolean>;
   createAgent(input: CreateAgentInput): Promise<CreatedAgent>;
   revokeAgent(organizationId: string, agentId: string): Promise<boolean>;
   recordAudit(event: AuditEvent): Promise<void>;
@@ -156,6 +173,11 @@ export class BetterAuthGateway implements AuthGateway {
   async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
     const session = await this.auth.api.getSession({ headers });
     if (!session) return null;
+    const enrolledPasskey = await this.prisma.passkey.findFirst({
+      where: { userId: session.user.id },
+      select: { id: true },
+    });
+    if (!enrolledPasskey) return null;
     const rawSession: unknown = session.session;
     if (
       !rawSession ||
@@ -177,30 +199,130 @@ export class BetterAuthGateway implements AuthGateway {
       userId: session.user.id,
       organizationId: member.organizationId,
       role: member.role,
+      email: session.user.email,
+      emailVerified: session.user.emailVerified,
     };
   }
 
-  async registerPasswordless(
-    baseUrl: string,
-    consoleOrigin: string,
-    input: { email: string; name: string },
+  async startPasskeyRegistration(
+    input: { email: string; name: string; nearPublicKey?: string | undefined },
   ): Promise<Response> {
-    const password = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-    const response = await this.auth.handler(
-      new Request(`${baseUrl}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { origin: consoleOrigin, "content-type": "application/json" },
-        body: JSON.stringify({ email: input.email, name: input.name, password }),
-      }),
-    );
-    if (!response.ok) return response;
-    const payload = (await response.clone().json()) as { user?: { id?: string } };
-    if (payload.user?.id) {
-      await this.prisma.account.deleteMany({
-        where: { userId: payload.user.id, providerId: "credential" },
+    const email = input.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      const enrolled = await this.prisma.passkey.findFirst({
+        where: { userId: existing.id },
+        select: { id: true },
       });
+      if (enrolled) {
+        return new Response(JSON.stringify({ error: "account_exists" }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
     }
-    return response;
+    const context = await this.auth.createRegistrationContext({
+      email,
+      name: input.name,
+      userId: existing?.id ?? randomUUID(),
+    });
+    return new Response(JSON.stringify({ context }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  async isEmailVerified(headers: Headers): Promise<boolean> {
+    const session = await this.auth.api.getSession({ headers });
+    return session?.user.emailVerified === true;
+  }
+
+  async reserveNearWalletSponsorship(input: {
+    organizationId: string;
+    userId: string;
+    nearAccountId: string;
+    publicKey: string;
+    dailyLimit: number;
+  }): Promise<NearSponsorshipReservation> {
+    const member = await this.prisma.member.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        nearAccountId: input.nearAccountId,
+      },
+    });
+    if (!member) return "member_mismatch";
+
+    const now = new Date();
+    const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (transaction) => {
+          const existing = await transaction.nearWalletSponsorship.findFirst({
+            where: {
+              OR: [{ nearAccountId: input.nearAccountId }, { publicKey: input.publicKey }],
+            },
+          });
+          if (existing) {
+            if (
+              existing.organizationId !== input.organizationId ||
+              existing.userId !== input.userId ||
+              existing.nearAccountId !== input.nearAccountId ||
+              existing.publicKey !== input.publicKey
+            ) {
+              return "conflict";
+            }
+            if (existing.status === "sponsored") return "already_sponsored";
+            if (existing.status === "reserved") return "in_progress";
+          }
+
+          const sponsoredToday = await transaction.nearWalletSponsorship.count({
+            where: {
+              createdAt: { gte: dayStart, lt: dayEnd },
+              status: { in: ["reserved", "sponsored"] },
+            },
+          });
+          if (sponsoredToday >= input.dailyLimit) return "daily_limit";
+          if (existing) {
+            await transaction.nearWalletSponsorship.update({
+              where: { id: existing.id },
+              data: { status: "reserved" },
+            });
+            return "reserved";
+          }
+          await transaction.nearWalletSponsorship.create({
+            data: {
+              organizationId: input.organizationId,
+              userId: input.userId,
+              nearAccountId: input.nearAccountId,
+              publicKey: input.publicKey,
+            },
+          });
+          return "reserved";
+        }, { isolationLevel: "Serializable" });
+      } catch (error) {
+        if (
+          attempt < 2 &&
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error.code === "P2034" || error.code === "P2002")
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("unable to reserve NEAR sponsorship");
+  }
+
+  async completeNearWalletSponsorship(nearAccountId: string, succeeded: boolean): Promise<void> {
+    await this.prisma.nearWalletSponsorship.update({
+      where: { nearAccountId },
+      data: { status: succeeded ? "sponsored" : "failed" },
+    });
   }
 
   async getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
