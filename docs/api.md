@@ -567,6 +567,14 @@ enabled on Delay, cooldown 300 and expiration 604,800
 ([NEAR manifest](../deployments/near-testnet.json),
 [Base manifest](../deployments/base-sepolia.json)).
 
+The corrected relay artifact was built reproducibly from commit
+`7dbee92054dd32dd2cc624fe50a13c64136992bb` with
+`sourcescan/cargo-near:0.20.3-rust-1.86.0@sha256:a84b…adf`. Its SHA-256 is
+`a03b744e59d2738d8e6b6e11cc2945aab076d85ec8fcaff512eedac6c352fdcc`
+([`contracts/governance-relay`](../contracts/governance-relay),
+[`contracts/res/governance_relay.wasm`](../contracts/res/governance_relay.wasm)).
+This artifact is not claimed as deployed on the superseded UAT relay above.
+
 | Real UAT transition | Transaction |
 |---|---|
 | DAO final vote, single Zodiac batch | [`FMpoLG…`](https://testnet.nearblocks.io/txns/FMpoLG8EKR1zEGiiqRZNMFV7LAuHhaGVArXVe4dNvjTW) |
