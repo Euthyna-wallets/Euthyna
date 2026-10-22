@@ -17,6 +17,7 @@ import {
   evmAccounts,
   evmWalletClient,
   nearAccounts,
+  readAgentAccessKeyRpc,
   readDaoPolicyRpc,
   readNearDeploymentRpc,
   sendEvmTransaction,
@@ -25,6 +26,7 @@ import {
   signWalletProofChallenge,
   waitForEvmTransaction,
   type DaoPolicyRpc,
+  type AgentAccessKeyRpcAttestation,
   type NearDeploymentRpcAttestation,
   type WalletProofChallenge,
 } from "../wallets.js";
@@ -328,7 +330,7 @@ export function OnboardingPage() {
                   onError={setError}
                 />
                 {apiKey ? <pre className="secret">{apiKey}</pre> : null}
-                <AgentList treasury={treasury} onError={setError} />
+                <AgentList key={apiKey ?? "agents"} treasury={treasury} onError={setError} />
               </>
             ) : (
               <>
@@ -1273,7 +1275,6 @@ function AgentForm(props: {
   onError: (message: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [nearAccountId, setNearAccountId] = useState("");
   const [nearPublicKey, setNearPublicKey] = useState("");
   const [role, setRole] = useState("researcher");
 
@@ -1281,7 +1282,6 @@ function AgentForm(props: {
     <div className="stack">
       <div className="row wrap">
         <input placeholder="Agent name" value={name} onChange={(event) => setName(event.target.value)} />
-        <input placeholder="agent.testnet" value={nearAccountId} onChange={(event) => setNearAccountId(event.target.value)} />
         <input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} />
         <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
         <button
@@ -1294,7 +1294,6 @@ function AgentForm(props: {
                   body: JSON.stringify({
                     name,
                     role,
-                    nearAccountId,
                     nearPublicKey,
                     vaultAccountId: props.treasury.vaultAccountId,
                     mpcPath: `agents/${role}/base`,
@@ -1311,7 +1310,8 @@ function AgentForm(props: {
         </button>
       </div>
       <div className="muted small">
-        The agent's NEAR function-call private key stays in the SDK/MCP client. Only the public key is sent.
+        Run <code>mandateos agent init --name "{name || "Compta Bot"}"</code>, then paste only
+        the generated public key. MandateOS derives the account id and never receives the private key.
       </div>
     </div>
   );
@@ -1331,10 +1331,16 @@ export function MandatePanel(props: {
   const [recipients, setRecipients] = useState("");
   const [token, setToken] = useState("0x418A2b47911dE05e21688F7490195F5324B49474");
   const [agentAccount, setAgentAccount] = useState("");
-  const [agentEvm, setAgentEvm] = useState("");
   const [signerId, setSignerId] = useState("");
   const [proposalHashes, setProposalHashes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const [agents, setAgents] = useState<AgentRow[]>([]);
+  useEffect(() => {
+    void api<{ agents: AgentRow[] }>("/v1/console/agents")
+      .then((result) => setAgents(result.agents))
+      .catch((cause: unknown) => props.onError(String(cause)));
+  }, []);
 
   return (
     <div className="stack">
@@ -1351,8 +1357,22 @@ export function MandatePanel(props: {
       <input placeholder="recipient 0x…, comma separated" value={recipients} onChange={(event) => setRecipients(event.target.value)} />
       <input placeholder="token 0x…" value={token} onChange={(event) => setToken(event.target.value)} />
       <div className="row wrap">
-        <input placeholder="agent near account (optional)" value={agentAccount} onChange={(event) => setAgentAccount(event.target.value)} />
-        <input placeholder="agent EVM address (optional)" value={agentEvm} onChange={(event) => setAgentEvm(event.target.value)} />
+        <select
+          value={agentAccount}
+          onChange={(event) => {
+            const accountId = event.target.value;
+            setAgentAccount(accountId);
+            const selected = agents.find((agent) => agent.nearAccountId === accountId);
+            if (selected) setRole(selected.role);
+          }}
+        >
+          <option value="">No agent</option>
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.nearAccountId}>
+              {agent.name} · {agent.evmAddress ?? "0xAAA not derived"}
+            </option>
+          ))}
+        </select>
       </div>
       <button
         className="primary"
@@ -1382,7 +1402,6 @@ export function MandatePanel(props: {
                         agent: {
                           nearAccountId: agentAccount,
                           mpcPath: `agents/${role}/base`,
-                          ...(agentEvm ? { evmAddress: agentEvm } : {}),
                         },
                       }
                     : {}),
@@ -1496,18 +1515,49 @@ type AgentRow = {
   name: string;
   role: string;
   nearAccountId: string;
+  nearPublicKey: string;
   evmAddress: string | null;
   active: boolean;
+};
+
+type AgentProvisioningView = {
+  status: string;
+  transactionHash: string | null;
+  confirmedAt?: string | null;
+  attestation: {
+    valid: boolean;
+    expected: {
+      accountId: string;
+      publicKey: string;
+      vaultAccountId: string;
+      methodNames: string[];
+      allowanceYocto: string;
+    };
+  } | null;
 };
 
 function AgentList(props: { treasury: TreasuryView; onError: (message: string) => void }) {
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [provisioning, setProvisioning] = useState<{
+    agentId: string;
+    server: AgentProvisioningView;
+    browser: AgentAccessKeyRpcAttestation;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
     const result = await api<{ agents: AgentRow[] }>("/v1/console/agents");
     setAgents(result.agents);
+  }
+
+  async function provision(agent: AgentRow) {
+    const server = await api<AgentProvisioningView>(`/v1/console/agents/${agent.id}/provision`, {
+      method: "POST",
+    });
+    if (!server.attestation) throw new Error("server access-key attestation missing");
+    const browser = await readAgentAccessKeyRpc(server.attestation.expected);
+    setProvisioning({ agentId: agent.id, server, browser });
   }
 
   useEffect(() => {
@@ -1521,40 +1571,104 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
         <button className="ghost" onClick={() => void load().catch((cause) => props.onError(String(cause)))}>Refresh</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>EVM</th><th>Status</th><th /></tr></thead>
+        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>0xAAA</th><th>Status</th><th /></tr></thead>
         <tbody>
           {agents.map((agent) => (
             <tr key={agent.id}>
               <td>{agent.name}</td>
               <td>{agent.role}</td>
               <td>{agent.nearAccountId}</td>
-              <td>{agent.evmAddress ? short(agent.evmAddress) : "—"}</td>
+              <td>{agent.evmAddress ? short(agent.evmAddress) : "derive after register_agent"}</td>
               <td>{agent.active ? "active" : "revoked"}</td>
               <td>
-                <button
-                  className="ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        const result = await api<Record<string, unknown>>(`/v1/console/agents/${agent.id}`);
-                        setDetail(result);
-                      } catch (cause) {
-                        props.onError(cause instanceof Error ? cause.message : String(cause));
-                      } finally {
-                        setBusy(false);
-                      }
-                    })();
-                  }}
-                >
-                  On-chain state
-                </button>
+                <div className="row wrap">
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          await provision(agent);
+                        } catch (cause) {
+                          props.onError(cause instanceof Error ? cause.message : String(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Provision
+                  </button>
+                  <button
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          const result = await api<Record<string, unknown>>(`/v1/console/agents/${agent.id}`);
+                          setDetail(result);
+                          await load();
+                        } catch (cause) {
+                          props.onError(cause instanceof Error ? cause.message : String(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    On-chain state
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {provisioning ? (
+        <div className="stack">
+          <h3>Direct RPC access-key attestation</h3>
+          <table>
+            <thead><tr><th>Check</th><th>Expected</th><th>Observed</th><th>Status</th></tr></thead>
+            <tbody>
+              {provisioning.browser.checks.map((check) => (
+                <tr key={check.label}>
+                  <td>{check.label}</td>
+                  <td><code>{short(check.expected)}</code></td>
+                  <td><code>{short(check.actual)}</code></td>
+                  <td>{check.ok ? "match" : "MISMATCH"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button
+            className="primary"
+            disabled={busy || !provisioning.browser.valid}
+            onClick={() => {
+              void (async () => {
+                setBusy(true);
+                try {
+                  const confirmed = await api<AgentProvisioningView>(
+                    `/v1/console/agents/${provisioning.agentId}/provision-confirm`,
+                    { method: "POST" },
+                  );
+                  setProvisioning((current) => current ? ({ ...current, server: confirmed }) : current);
+                } catch (cause) {
+                  props.onError(cause instanceof Error ? cause.message : String(cause));
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            }}
+          >
+            Confirm restricted FunctionCall key
+          </button>
+          {provisioning.server.status === "confirmed" ? (
+            <div className="alert success">Agent provisioning confirmed by the admin.</div>
+          ) : null}
+        </div>
+      ) : null}
       {detail ? <pre>{JSON.stringify(detail, null, 2)}</pre> : null}
     </div>
   );

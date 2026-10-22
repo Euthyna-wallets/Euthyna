@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { prisma } from "@mandateos/db";
+import { AgentProvisioningService } from "./agent-provisioning.js";
 import { Guard } from "./guard.js";
 import { createApp } from "./app.js";
 import { createAuth } from "./auth.js";
@@ -28,6 +29,14 @@ const walletProof = new WalletProofService(
   env.NEAR_ACCOUNT_PARENT,
   84532,
   env.UAT_DEMO_WALLETS_ENABLED,
+);
+const agentProvisioning = new AgentProvisioningService(
+  prisma,
+  near,
+  env.NEAR_ACCOUNT_PARENT,
+  env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
+  env.NEAR_AGENT_GAS_RESERVE_YOCTO,
+  env.NEAR_AGENT_FC_ALLOWANCE_YOCTO,
 );
 const treasury = new TreasuryService(prisma, near, signer, {
   nearNetwork: env.NEAR_NETWORK_ID,
@@ -71,6 +80,7 @@ const app = createApp({
   auth,
   walletProof,
   treasury,
+  agentProvisioning,
   mandates,
   registry: registryService,
   payments,

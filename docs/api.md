@@ -14,7 +14,8 @@ Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
 15 minutes and 3 requests per normalized email per hour. Agent API keys allow
 60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
 requests/minute per organization. Registration counters are in-memory per API
-instance; wallet sponsorship caps are durable PostgreSQL rows.
+instance; wallet and agent-account sponsorship share one durable PostgreSQL
+daily cap.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console
@@ -77,23 +78,56 @@ curl -sS http://localhost:3000/v1/console/agents -H "Cookie: $SESSION_COOKIE"
 
 ### `POST /v1/console/agents`
 
-Creates an agent and a per-agent API key. The key is returned once and never stored
-in clear. The request body:
+Creates the off-chain agent identity and one-time API key. The admin supplies
+the name, role and public ed25519 key printed by `mandateos agent init`; the
+server derives `<slug>-agent.<NEAR_ACCOUNT_PARENT>`. The private key never
+leaves `AGENT_KEY_PATH` ([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts),
+[`packages/sdk/src/index.ts`](../packages/sdk/src/index.ts)).
 
 ```json
 {
-  "name": "Research agent",
+  "name": "Compta Bot",
   "role": "researcher",
-  "nearAccountId": "agent-v5.example.testnet",
   "nearPublicKey": "ed25519:...",
-  "vaultAccountId": "vault-v4.example.testnet",
+  "vaultAccountId": "acme-v.mandateos.testnet",
   "mpcPath": "agents/researcher/base"
 }
 ```
 
-The client generates the NEAR function-call key pair locally and sends only
-`nearPublicKey`. The server stores the public key and returns the API key. Signed
-`add_key` / `revoke_agent` proposals are produced by the role compiler (backend D).
+### `POST /v1/console/agents/:id/provision`
+
+Admin only, 10 requests/hour per admin and subject to the shared durable daily
+NEAR sponsorship cap. The relayer emits one transaction containing
+`CreateAccount`, `Transfer` (`NEAR_AGENT_GAS_RESERVE_YOCTO`, default 0.3 NEAR)
+and one `AddKey`. That key is FunctionCall-only, has allowance
+`NEAR_AGENT_FC_ALLOWANCE_YOCTO`, receiver = Vault, and exactly
+`prepare`, `authorize`, `cancel_nonce`, `request_derived_public_key`. No
+full-access key is added
+([`apps/api/src/agent-provisioning.ts`](../apps/api/src/agent-provisioning.ts),
+[`apps/api/src/near.ts`](../apps/api/src/near.ts)).
+
+`GET /v1/console/agents/:id/provision` returns the server observation.
+`POST /v1/console/agents/:id/provision-confirm` repeats the RPC attestation and
+stores the admin confirmation. The browser independently calls
+`view_access_key_list` and displays every expected/observed field before that
+confirmation ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
+
+Observed testnet integration (the reserve was overridden to `0.03 NEAR` for
+this isolated proof; UAT default remains `0.3 NEAR`):
+
+- account `pr-a-1761141000-agent.mandateos.testnet`;
+- transaction
+  [`4VxqUr3CyDpF5n8b7HwwtcqPUPtwy41BuEFWX23Qmf4Y`](https://testnet.nearblocks.io/txns/4VxqUr3CyDpF5n8b7HwwtcqPUPtwy41BuEFWX23Qmf4Y);
+- finalized block `274267811`;
+- exactly one key, `FunctionCall`, allowance `0.01 NEAR`, receiver
+  `vault-v4.mandateos-root-20261021.testnet`, and the four documented methods;
+- local key file permission observed as `0600`.
+
+`request_derived_public_key` requires no attached deposit. Its focused Sandbox
+run burnt `6.306 Tgas`; the SDK attaches `50 Tgas` to cover the MPC call and
+callback ([`contracts/tests/tests/vault_operations.rs`](../contracts/tests/tests/vault_operations.rs)).
+
+![Agent restricted-key attestation](./console/agent-provisioning.webp)
 
 ### `POST /v1/console/agents/:id/revoke`
 

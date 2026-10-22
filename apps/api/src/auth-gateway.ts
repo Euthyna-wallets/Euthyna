@@ -94,6 +94,7 @@ export interface AuthGateway {
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
+  setAgentEvmAddress(organizationId: string, agentId: string, evmAddress: string): Promise<AgentView | null>;
   listMembers(organizationId: string): Promise<MemberView[]>;
   addMember(
     organizationId: string,
@@ -316,13 +317,21 @@ export class BetterAuthGateway implements AuthGateway {
             if (existing.status === "reserved") return "in_progress";
           }
 
-          const sponsoredToday = await transaction.nearWalletSponsorship.count({
-            where: {
-              createdAt: { gte: dayStart, lt: dayEnd },
-              status: { in: ["reserved", "sponsored"] },
-            },
-          });
-          if (sponsoredToday >= input.dailyLimit) return "daily_limit";
+          const [sponsoredWalletsToday, provisionedAgentsToday] = await Promise.all([
+            transaction.nearWalletSponsorship.count({
+              where: {
+                createdAt: { gte: dayStart, lt: dayEnd },
+                status: { in: ["reserved", "sponsored"] },
+              },
+            }),
+            transaction.agentProvisioning.count({
+              where: {
+                createdAt: { gte: dayStart, lt: dayEnd },
+                status: { in: ["reserved", "provisioned", "confirmed"] },
+              },
+            }),
+          ]);
+          if (sponsoredWalletsToday + provisionedAgentsToday >= input.dailyLimit) return "daily_limit";
           if (existing) {
             await transaction.nearWalletSponsorship.update({
               where: { id: existing.id },
@@ -366,6 +375,19 @@ export class BetterAuthGateway implements AuthGateway {
   async getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
     const agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId } });
     return agent ? toAgentView(agent) : null;
+  }
+
+  async setAgentEvmAddress(
+    organizationId: string,
+    agentId: string,
+    evmAddress: string,
+  ): Promise<AgentView | null> {
+    const updated = await this.prisma.agent.updateMany({
+      where: { id: agentId, organizationId },
+      data: { evmAddress: getAddress(evmAddress) },
+    });
+    if (updated.count === 0) return null;
+    return toAgentView(await this.prisma.agent.findUniqueOrThrow({ where: { id: agentId } }));
   }
 
   async addMember(

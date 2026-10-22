@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@mandateos/db";
 import { hexToBytes, type Hex } from "viem";
 
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
@@ -24,6 +25,7 @@ export interface WorkerOperationRecord {
   opId: string;
   agentId: string;
   agentNearAccountId: string;
+  agentEvmAddress: string | null;
   vaultAccountId: string;
   reference: string;
   state: string;
@@ -62,6 +64,7 @@ export interface WorkerStore {
   listReady(now: Date): Promise<WorkerOperationRecord[]>;
   update(operation: WorkerOperationRecord, data: WorkerOperationUpdate): Promise<void>;
   releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void>;
+  syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void>;
 }
 
 export interface WorkerNearGateway {
@@ -156,7 +159,7 @@ export class PrismaWorkerStore implements WorkerStore {
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },
       include: {
-        agent: { select: { nearAccountId: true, vaultAccountId: true } },
+        agent: { select: { nearAccountId: true, vaultAccountId: true, evmAddress: true } },
       },
       orderBy: { updatedAt: "asc" },
       take: 100,
@@ -166,6 +169,7 @@ export class PrismaWorkerStore implements WorkerStore {
       opId: operation.opId,
       agentId: operation.agentId,
       agentNearAccountId: operation.agent.nearAccountId,
+      agentEvmAddress: operation.agent.evmAddress,
       vaultAccountId: operation.agent.vaultAccountId,
       reference: operation.reference,
       state: operation.state,
@@ -195,6 +199,13 @@ export class PrismaWorkerStore implements WorkerStore {
     });
   }
 
+
+  async syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void> {
+    await this.prisma.agent.updateMany({
+      where: { id: operation.agentId, organizationId: operation.organizationId },
+      data: { evmAddress },
+    });
+  }
   async releaseReference(
     operation: WorkerOperationRecord,
     terminalState: "Cancelled" | "Expired",
@@ -263,6 +274,13 @@ export class OperationWorker {
   private async process(record: WorkerOperationRecord, blockHeight: number): Promise<void> {
     const id = opBytes(record.opId);
     let operation = await this.near.getOperation(record.vaultAccountId, id);
+    const chainAgent = await this.near.viewFunction<unknown>(record.vaultAccountId, "get_agent", {
+      agent: record.agentNearAccountId,
+    });
+    const derivedAddress = onChainAgentEvmAddress(chainAgent);
+    if (derivedAddress && derivedAddress !== record.agentEvmAddress) {
+      await this.store.syncAgentEvmAddress(record, derivedAddress);
+    }
     if (operation.state === "Confirmed") {
       const txHash = operation.signed_transaction
         ? this.base.rawTransactionHash(operation.signed_transaction)

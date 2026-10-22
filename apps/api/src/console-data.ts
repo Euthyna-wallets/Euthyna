@@ -2,6 +2,7 @@ import type { PrismaClient } from "@mandateos/db";
 import { createPublicClient, getAddress, http, erc20Abi } from "viem";
 import { base, baseSepolia } from "viem/chains";
 
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
 
 function plain<T>(value: T): T {
@@ -111,11 +112,12 @@ export class ConsoleDataService {
   }
 
   async agentDetail(organizationId: string, agentId: string) {
-    const agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId } });
+    let agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId } });
     if (!agent) return null;
-    const [treasury, audits] = await Promise.all([
+    const [treasury, audits, provisioning] = await Promise.all([
       this.prisma.treasury.findFirst({ where: { organizationId } }),
       this.prisma.auditLog.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.agentProvisioning.findUnique({ where: { agentId } }),
     ]);
     let onChain: unknown = null;
     let mandate: unknown = null;
@@ -123,6 +125,13 @@ export class ConsoleDataService {
     if (treasury) {
       try {
         onChain = await this.near.viewFunction(treasury.vaultAccountId, "get_agent", { agent: agent.nearAccountId });
+        const derivedAddress = onChainAgentEvmAddress(onChain);
+        if (derivedAddress && derivedAddress !== agent.evmAddress) {
+          agent = await this.prisma.agent.update({
+            where: { id: agent.id },
+            data: { evmAddress: derivedAddress },
+          });
+        }
         mandate = await this.near.viewFunction(treasury.vaultAccountId, "get_role", { role: agent.role });
       } catch {
         onChain = null;
@@ -151,7 +160,7 @@ export class ConsoleDataService {
         nonce = null;
       }
     }
-    return plain({ agent, treasury, onChain, mandate, budget, nonce, ethBalance, audit: audits });
+    return plain({ agent, treasury, provisioning, onChain, mandate, budget, nonce, ethBalance, audit: audits });
   }
 
   async governance(organizationId: string) {

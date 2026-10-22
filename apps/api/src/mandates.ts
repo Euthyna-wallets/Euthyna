@@ -2,6 +2,7 @@ import type { PrismaClient } from "@mandateos/db";
 import { compilePaymentPermission, rolesAbi, type FlatCondition } from "@mandateos/deployer";
 import { encodeFunctionData, getAddress, type Address, type Hex } from "viem";
 
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
 import { TreasuryError } from "./treasury.js";
 
@@ -124,6 +125,33 @@ export class MandateService implements MandateGateway {
       ...roleConfig(input, rolesModifier, token),
       role_key: Array.from(Buffer.from(compiled.roleKey.slice(2), "hex")),
     };
+    let resolvedAgentAddress: Address | null = null;
+    let storedAgent: { id: string; evmAddress: string | null } | null = null;
+    if (input.agent) {
+      storedAgent = await this.prisma.agent.findFirst({
+        where: { organizationId, nearAccountId: input.agent.nearAccountId, active: true },
+        select: { id: true, evmAddress: true },
+      });
+      if (storedAgent) {
+        const onChainAgent = await this.near.viewFunction<unknown>(
+          treasury.vaultAccountId,
+          "get_agent",
+          { agent: input.agent.nearAccountId },
+        );
+        const derivedAddress = onChainAgentEvmAddress(onChainAgent);
+        if (derivedAddress) {
+          resolvedAgentAddress = derivedAddress;
+          if (derivedAddress !== storedAgent.evmAddress) {
+            await this.prisma.agent.update({
+              where: { id: storedAgent.id },
+              data: { evmAddress: derivedAddress },
+            });
+          }
+        } else if (storedAgent.evmAddress) {
+          resolvedAgentAddress = getAddress(storedAgent.evmAddress);
+        }
+      }
+    }
     const current = await this.near.viewFunction<unknown>(treasury.vaultAccountId, "get_role", { role: input.role });
     const currentConfig =
       current && typeof current === "object" && "config" in current
@@ -142,15 +170,15 @@ export class MandateService implements MandateGateway {
       .map(([field, before, after]) => ({ field: String(field), current: before ?? null, next: after }));
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
-    if (input.agent?.evmAddress) {
+    if (resolvedAgentAddress) {
       zodiacCalls.push({
         to: rolesModifier,
         data: encodeFunctionData({
           abi: rolesAbi,
           functionName: "assignRoles",
-          args: [input.agent.evmAddress, [compiled.roleKey], [true]],
+          args: [resolvedAgentAddress, [compiled.roleKey], [true]],
         }),
-        description: `Assign role ${input.role} to ${input.agent.evmAddress}`,
+        description: `Assign role ${input.role} to ${resolvedAgentAddress}`,
       });
     }
     zodiacCalls.push(
@@ -267,9 +295,9 @@ export class MandateService implements MandateGateway {
       deposit: "100000000000000000000000",
     }));
 
-    const agentStatus = !input.agent
+    const agentStatus = !input.agent || !storedAgent
       ? "no_agent"
-      : input.agent.evmAddress
+      : resolvedAgentAddress
         ? "ready"
         : "needs_agent_address";
 

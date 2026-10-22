@@ -1,4 +1,4 @@
-import { keyStores, KeyPair, Near, transactions, type Account } from "near-api-js";
+import { keyStores, KeyPair, Near, transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
@@ -136,6 +136,33 @@ export class NearClient {
     const account = await this.accountPromise;
     await account.createAccount(accountId, publicKey, amountYocto);
     return accountId;
+  }
+
+  async provisionFunctionCallAccount(input: {
+    accountId: string;
+    publicKey: string;
+    receiverId: string;
+    methodNames: string[];
+    reserveYocto: string;
+    allowanceYocto: string;
+  }): Promise<string> {
+    const account = await this.accountPromise;
+    const outcome = await account.signAndSendTransaction({
+      receiverId: input.accountId,
+      actions: [
+        transactions.createAccount(),
+        transactions.transfer(BigInt(input.reserveYocto)),
+        transactions.addKey(
+          utils.PublicKey.fromString(input.publicKey),
+          transactions.functionCallAccessKey(
+            input.receiverId,
+            input.methodNames,
+            BigInt(input.allowanceYocto),
+          ),
+        ),
+      ],
+    });
+    return outcome.transaction_outcome.id;
   }
 
   async getAccount(accountId: string): Promise<{

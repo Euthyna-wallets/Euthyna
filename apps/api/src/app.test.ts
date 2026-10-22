@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
+import type { AgentProvisioningService } from "./agent-provisioning.js";
 import { MemoryRateLimiter } from "./rate-limit.js";
 import type {
   AgentIdentity,
@@ -114,6 +115,10 @@ class FakeAuth implements AuthGateway {
   listAgents(organizationId: string): Promise<AgentView[]> {
     this.listedOrganizations.push(organizationId);
     return Promise.resolve([]);
+  }
+
+  setAgentEvmAddress(organizationId: string, agentId: string, evmAddress: string) {
+    return this.getAgent(organizationId, agentId).then((agent) => agent ? ({ ...agent, evmAddress }) : null);
   }
 
   listMembers(): Promise<import("./auth-gateway.js").MemberView[]> {
@@ -239,7 +244,7 @@ function testApp(options?: {
     },
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
-      method === "get_agent" ? { role: "researcher", active: true, evm_address: [1, 2] } : 3,
+      method === "get_agent" ? { role: "researcher", active: true, evm_address: Array(20).fill(1) } : 3,
   } as unknown as NearClient;
   const guard = {
     approve: async () => {
@@ -330,12 +335,31 @@ function testApp(options?: {
     }),
     verify: async () => ({ memberId: admin.memberId, organizationId: admin.organizationId }),
   };
+  const agentProvisioning = {
+    provision: async () => ({
+      status: "provisioned",
+      transactionHash: "near-provision",
+      attestation: { valid: true },
+    }),
+    status: async () => ({
+      status: "provisioned",
+      transactionHash: "near-provision",
+      confirmedAt: null,
+      attestation: { valid: true },
+    }),
+    confirm: async () => ({
+      status: "confirmed",
+      confirmedAt: new Date(0),
+      attestation: { valid: true },
+    }),
+  } as unknown as AgentProvisioningService;
   const app = createApp({
     near,
     guard,
     relayer: {} as BaseRelayer,
     auth,
     walletProof,
+    agentProvisioning,
     treasury,
     mandates,
     registry,
@@ -456,6 +480,7 @@ describe("agent detail", () => {
     const body = (await response.json()) as { agent: { id: string }; onChain: { agent: unknown; nextEvmNonce: number } };
     expect(body.agent.id).toBe("11111111-1111-4111-8111-111111111111");
     expect(body.onChain.nextEvmNonce).toBe(3);
+    expect(body.agent).toMatchObject({ evmAddress: "0x0101010101010101010101010101010101010101" });
   });
 
   it("does not expose another organization's agent", async () => {
@@ -862,7 +887,7 @@ describe("console isolation and emergency", () => {
       body: JSON.stringify({
         name: "Research agent",
         role: "researcher",
-        nearAccountId: "agent-c.near",
+        nearAccountId: "research-agent-agent.mandateos.testnet",
         nearPublicKey: "ed25519:11111111111111111111111111111111",
         vaultAccountId: "vault-1.near",
         mpcPath: "agents/researcher/base",
@@ -872,12 +897,28 @@ describe("console isolation and emergency", () => {
     expect(auth.created).toEqual([
       expect.objectContaining({
         organizationId: "org-1",
-        nearAccountId: "agent-c.near",
+        nearAccountId: "research-agent-agent.mandateos.testnet",
         nearPublicKey: "ed25519:11111111111111111111111111111111",
       }),
     ]);
     expect(auth.audits).toContainEqual(
       expect.objectContaining({ action: "agent.created", actorId: "user-admin" }),
+    );
+  });
+
+  it("provisions an agent and rate-limits repeated sponsor requests", async () => {
+    const { app, auth } = testApp();
+    const path = "/v1/console/agents/11111111-1111-4111-8111-111111111111/provision";
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      statuses.push((await app.request(path, {
+        method: "POST",
+        headers: consoleHeaders({ cookie: "session-admin" }),
+      })).status);
+    }
+    expect(statuses).toEqual([...Array(10).fill(201), 429]);
+    expect(auth.audits).toContainEqual(
+      expect.objectContaining({ action: "agent.provisioned", actorId: "user-admin" }),
     );
   });
 

@@ -63,6 +63,7 @@ function record(overrides: Partial<WorkerOperationRecord> = {}): WorkerOperation
     opId,
     agentId: "agent-1",
     agentNearAccountId: "agent.testnet",
+    agentEvmAddress: null,
     vaultAccountId: "vault.testnet",
     reference: "INV-1",
     state: "PossiblySigned",
@@ -85,6 +86,7 @@ class FakeStore implements WorkerStore {
   leased = true;
   released: string[] = [];
   updates: WorkerOperationUpdate[] = [];
+  syncedAgentAddresses: string[] = [];
 
   constructor(readonly operation: WorkerOperationRecord) {}
 
@@ -103,6 +105,11 @@ class FakeStore implements WorkerStore {
     return Promise.resolve();
   }
 
+  syncAgentEvmAddress(_operation: WorkerOperationRecord, evmAddress: string): Promise<void> {
+    this.syncedAgentAddresses.push(evmAddress);
+    return Promise.resolve();
+  }
+
   releaseReference(_operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void> {
     this.released.push(terminalState);
     this.operation.state = terminalState;
@@ -118,6 +125,7 @@ class FakeNear implements WorkerNearGateway {
   cancellationFees: Array<{ gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> = [];
   reportFailsAfterCommit = false;
   status: import("./near.js").NearTransactionStatus = {};
+  agentState: Record<string, unknown> = { active: false };
 
   constructor(public operation: VaultOperation) {}
 
@@ -183,7 +191,7 @@ class FakeNear implements WorkerNearGateway {
 
   viewFunction<T>(_accountId: string, methodName: string): Promise<T> {
     if (methodName === "is_paused") return Promise.resolve(true as T);
-    if (methodName === "get_agent") return Promise.resolve({ active: false } as T);
+    if (methodName === "get_agent") return Promise.resolve(this.agentState as T);
     if (methodName === "get_role") {
       return Promise.resolve({
         config: {
@@ -334,6 +342,13 @@ describe("OperationWorker", () => {
     expect(test.base.broadcasts).toEqual([[2, 1]]);
   });
 
+
+  it("synchronizes the derived 0xAAA while processing an operation", async () => {
+    const test = harness();
+    test.near.agentState = { active: true, evm_address: Array(20).fill(0x11) };
+    await test.createWorker().tick();
+    expect(test.store.syncedAgentAddresses).toEqual(["0x1111111111111111111111111111111111111111"]);
+  });
   it("requests and broadcasts a same-nonce cancellation, then releases only after on-chain confirmation", async () => {
     const test = harness({ signature: null, signed_transaction: null });
     test.near.blockHeight = 20;
