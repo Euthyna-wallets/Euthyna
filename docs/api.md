@@ -8,7 +8,7 @@ agent's NEAR function-call private key: the console registers only its public ke
 | Identity | Credential | Header | Routes |
 |---|---|---|---|
 | Console member | Better Auth passkey session (email profile identifier) | `Cookie` | `/api/auth/*`, `/v1/console/*`, `/v1/emergency/cancel`, `/v1/relayer/broadcast` |
-| Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/guard/visas` |
+| Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/operations/*` |
 
 Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
 15 minutes and 3 requests per normalized email per hour. Agent API keys allow
@@ -115,8 +115,8 @@ curl -sS -X POST http://localhost:3000/v1/emergency/cancel \
 
 ### `POST /v1/relayer/broadcast`
 
-Console admin only. Broadcasts the stored signed transaction and submits the
-Guard-signed confirmation report.
+Console-admin fallback for one operation. Normal operation uses the separate
+`worker.ts` process; this route remains available for incident recovery.
 
 ## Agent payments and escalations
 
@@ -132,11 +132,43 @@ already called `prepare` on the Vault with its client-held function-call key.
   reference, state).
 - Repeating the same `opId` returns the stored visa/escalation, never a second one.
 
+### `POST /v1/operations/:opId/authorization`
+
+Agent credential. After the client-held NEAR key calls Vault `authorize`, the
+agent records the finalized NEAR transaction hash here. The server verifies
+that the Vault operation belongs to that agent and is `PossiblySigned` or
+`Confirmed`. The worker uses this hash to recover a published MPC response and
+call permissionless `submit_signature` when the callback missed it. A different
+hash for the same operation is rejected with `409 authorization_tx_conflict`.
+
 ### `GET /v1/operations/:opId`
 
 Agent only, own operations. Merges the DB (`Prepared`, `Escalated`, `Rejected`,
 `Broadcast`, `Confirmed`, `Cancelled`, `Reverted`) with the Vault state and the
 stored visa/escalation.
+
+### Payment worker
+
+Run `pnpm --filter @mandateos/api worker` as a separate process. PostgreSQL
+`WorkerLease` permits one active worker; an expired lease lets another process
+resume. Each tick re-reads the Vault as the source of truth:
+
+1. recover missing original/cancellation signatures from the stored NEAR
+   transaction receipt and call `submit_signature`;
+2. derive the exact raw-transaction hash, broadcast idempotently and persist it
+   before polling;
+3. on a successful Base receipt, sign and submit `report_status`;
+4. on a revert, store `Reverted` without releasing budget or reference;
+5. on timeout, request a higher-fee same-nonce `cancel_nonce` only after Vault
+   pause or agent revocation, as required by the contract;
+6. broadcast and follow the cancellation receipt;
+7. release the PostgreSQL consumed reference only after the Vault reports
+   `Cancelled` or `Expired`.
+
+A mined cancellation remains `CancellationMined` until the DAO calls
+`confirm_cancellation`; the worker cannot bypass the Vault's DAO-only finalizer.
+Every side effect is recoverable: after a crash it recomputes transaction hashes,
+checks receipts before rebroadcasting, and reconciles terminal Vault state.
 
 ### Console registry (suppliers)
 
@@ -413,6 +445,8 @@ export DATABASE_URL=postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos
 pnpm --filter @mandateos/db exec prisma db push
 pnpm --filter @mandateos/db build
 pnpm --filter @mandateos/api dev
+# separate terminal/process
+pnpm --filter @mandateos/api worker
 ```
 
 Passkey ceremonies use `PASSKEY_RP_ID` and `CONSOLE_ORIGIN`; the browser origin

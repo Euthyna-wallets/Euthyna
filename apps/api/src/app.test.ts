@@ -53,8 +53,11 @@ const operation: VaultOperation = {
   },
   tx_digest: Array(32).fill(2),
   expires_at_block: 100,
+  possibly_signed_at_block: null,
   state: "Prepared",
+  signature: null,
   signed_transaction: null,
+  cancellation: null,
 };
 
 const agentA: AgentIdentity = {
@@ -292,6 +295,18 @@ function testApp(options?: {
   const payments = {
     pay: async () => ({ status: 200, body: {} }),
     getOperation: async () => ({}),
+    recordAuthorization: async (
+      organizationId: string,
+      agent: AgentIdentity,
+      opId: number[],
+      nearTransactionHash: string,
+    ) => ({
+      organizationId,
+      agentId: agent.agentId,
+      opId,
+      nearTransactionHash,
+      state: "PossiblySigned",
+    }),
     listEscalations: async () => [],
     decideEscalation: async () => ({}),
   } as unknown as PaymentService;
@@ -381,6 +396,23 @@ describe("agent and console boundaries", () => {
       body: JSON.stringify({ opId: Array(32).fill(1) }),
     });
     expect(response.status).toBe(200);
+  });
+
+  it("records the finalized NEAR authorization transaction for worker recovery", async () => {
+    const { app } = testApp();
+    const nearTransactionHash = "1".repeat(43);
+    const response = await app.request(`/v1/operations/0x${"01".repeat(32)}/authorization`, {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
+      body: JSON.stringify({ nearTransactionHash }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      organizationId: "org-1",
+      agentId: "agent-a",
+      nearTransactionHash,
+      state: "PossiblySigned",
+    });
   });
 
   it("refuses a revoked agent because no API key resolves", async () => {

@@ -57,8 +57,11 @@ function operationFor(target: `0x${string}` = recipient): VaultOperation {
     },
     tx_digest: Array(32).fill(0) as number[],
     expires_at_block: 1_000,
+    possibly_signed_at_block: null,
     state: "Prepared",
+    signature: null,
     signed_transaction: null,
+    cancellation: null,
   };
   operation.tx_digest = hexToByteArray(digestVaultTransaction(operation));
   return operation;

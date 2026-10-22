@@ -25,6 +25,12 @@ const schema = z.object({
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
   BUDGET_TOKEN_ACCOUNT_ID: z.string().min(1),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(5_000),
+  WORKER_LEASE_MS: z.coerce.number().int().min(1_000).default(20_000),
+  WORKER_STUCK_BLOCKS: z.coerce.number().int().positive().default(120),
+  WORKER_BROADCAST_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
+  WORKER_RETRY_BASE_MS: z.coerce.number().int().min(100).default(1_000),
+  WORKER_RETRY_MAX_MS: z.coerce.number().int().min(1_000).default(60_000),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 

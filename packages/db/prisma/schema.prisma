@@ -420,30 +420,39 @@ model PolicySnapshot {
 }
 
 model Operation {
-  organizationId String
-  opId           String
-  agentId        String
-  reference      String
-  state          String
-  txDigest       String
-  evmNonce       BigInt
-  amount         Decimal      @db.Decimal(78, 0)
-  visaNonce      BigInt?
-  reportNonce    BigInt?
-  txHash         String?
-  broadcastAt    DateTime?
-  revertedAt     DateTime?
-  attempts       Int          @default(0)
-  lastError      String?
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Restrict)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  organizationId          String
+  opId                    String
+  agentId                 String
+  reference               String
+  state                   String
+  txDigest                String
+  evmNonce                BigInt
+  amount                  Decimal      @db.Decimal(78, 0)
+  visaNonce               BigInt?
+  reportNonce             BigInt?
+  txHash                  String?
+  cancellationTxHash      String?
+  nearAuthorizationTxHash String?
+  nearCancellationTxHash  String?
+  receiptBlock            BigInt?
+  broadcastAt             DateTime?
+  cancellationRequestedAt DateTime?
+  cancellationBroadcastAt DateTime?
+  revertedAt              DateTime?
+  lastAttemptAt           DateTime?
+  nextAttemptAt           DateTime?
+  attempts                Int          @default(0)
+  lastError               String?
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent                   Agent        @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
 
   @@id([organizationId, opId])
-  @@unique([organizationId, reference])
   @@unique([organizationId, visaNonce])
   @@unique([organizationId, reportNonce])
+  @@index([organizationId, reference])
+  @@index([state, nextAttemptAt])
   @@map("operation")
 }
 

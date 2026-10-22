@@ -47,8 +47,11 @@ function operation(opIdHex: `0x${string}`, reference: string): VaultOperation {
     },
     tx_digest: Array(32).fill(0),
     expires_at_block: 10_000,
+    possibly_signed_at_block: null,
     state: "Prepared",
+    signature: null,
     signed_transaction: null,
+    cancellation: null,
   };
   operation.tx_digest = hexToByteArray(digestVaultTransaction(operation));
   return operation;
@@ -59,6 +62,7 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
   let service: PaymentService;
   let organizationId: string;
   let agentId: string;
+  let currentOperation: VaultOperation;
 
   beforeAll(async () => {
     if (!databaseUrl) throw new Error("TEST_DATABASE_URL required");
@@ -123,9 +127,9 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     await prisma.registryVersion.create({ data: { organizationId, version: 1 } });
     const registry = new RegistryService(prisma);
     const guard = new Guard(new EnvKmsSigner(new Uint8Array(32).fill(7)));
-    const current = { operation: operation(`0x${"11".repeat(32)}`, "INV-CONCURRENT") };
+    currentOperation = operation(`0x${"11".repeat(32)}`, "INV-CONCURRENT");
     const near = {
-      getOperation: async () => current.operation,
+      getOperation: async () => currentOperation,
     } as unknown as NearClient;
     service = new PaymentService(prisma, near, guard, registry);
   });
@@ -144,5 +148,30 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     expect([first.status, second.status]).toEqual([200, 200]);
     expect(await prisma.paymentVisa.count({ where: { organizationId } })).toBe(1);
     expect(await prisma.consumedReference.count({ where: { organizationId } })).toBe(1);
+  });
+
+  it("persists the finalized authorization transaction for worker recovery", async () => {
+    const opId = Array.from(Buffer.from("11".repeat(32), "hex"));
+    const agent = { agentId, nearAccountId: "agent.testnet", vaultAccountId: "vault.testnet", role: "researcher" };
+    if (!(await prisma.operation.findUnique({
+      where: { organizationId_opId: { organizationId, opId: `0x${"11".repeat(32)}` } },
+    }))) {
+      await service.pay(organizationId, agent, opId);
+    }
+    currentOperation = {
+      ...currentOperation,
+      state: "PossiblySigned",
+      possibly_signed_at_block: 100,
+    };
+    const nearTransactionHash = "1".repeat(43);
+    await expect(
+      service.recordAuthorization(organizationId, agent, opId, nearTransactionHash),
+    ).resolves.toMatchObject({
+      nearTransactionHash,
+      state: "PossiblySigned",
+    });
+    await expect(prisma.operation.findUnique({
+      where: { organizationId_opId: { organizationId, opId: `0x${"11".repeat(32)}` } },
+    })).resolves.toMatchObject({ nearAuthorizationTxHash: nearTransactionHash });
   });
 });
