@@ -14,7 +14,7 @@ Le projet vise la track **06 — AI Security & Defense** du hackathon NEAR 2026.
 | **Phase 2 — stretch** | Dépôt vers NEAR Intents, swap, puis retrait/bridge vers un wallet enregistré | Architecture cible ; ne doit pas être annoncé comme implémenté avant une preuve on-chain |
 | **Roadmap** | Comptes de vote passkey, code global Vault/relay, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
 
-Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory.mandateos.testnet`, owner-only et sans access key, crée une DAO Sputnik globale `<slug>.factory.mandateos.testnet` par Company. L'API utilise la clé d'infrastructure de `mandateos.testnet` pour financer la factory, les DAO, `v-<slug>.mandateos.testnet` et `r-<slug>.mandateos.testnet`; elle ne crée aucune access key sur ces contrats. La DAO devient owner du Vault et du relais, tandis que la clé d'infrastructure ne peut pas déplacer les fonds du Safe.
+Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale `<slug>.factory-v2.mandateos.testnet` par Company avec le dépôt fourni par le fondateur. MandateOS sponsorise par défaut le wallet client, mais le serveur ne signe ni la création ni la policy. L'API finance séparément `v-<slug>.mandateos.testnet` et `r-<slug>.mandateos.testnet`, sans access key. La DAO devient owner du Vault et du relais, tandis que la clé d'infrastructure ne peut pas déplacer les fonds du Safe.
 
 Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/dao-spike.md`](./docs/dao-spike.md).
 
@@ -141,19 +141,19 @@ Au protocole testnet version 88, le RPC publie `storage_amount_per_byte = 10^19`
 
 | Compte / action | Stockage observé ou sandbox | Minimum storage | Dépôt configuré | Marge |
 |---|---:|---:|---:|---:|
-| Factory MandateOS (une fois) | 150 710 octets on-chain | 1,50710 NEAR | 2 NEAR | 0,49290 NEAR |
-| DAO Sputnik global `global-smoke` | 810 octets on-chain | 0,00810 NEAR | 0,25 NEAR | 0,24190 NEAR |
+| Factory MandateOS permissionless (une fois) | 150 623 octets on-chain | 1,50623 NEAR | 2 NEAR | 0,49377 NEAR |
+| DAO Sputnik global `trezu-proof` | 810 octets on-chain | 0,00810 NEAR | 0,25 NEAR | 0,24190 NEAR |
 | Vault WASM courant + `new` | 439 560 octets sandbox, sans access key | 4,39560 NEAR | 5 NEAR | 0,60440 NEAR |
 | Relais WASM courant + `new` | 285 313 octets sandbox, sans access key | 2,85313 NEAR | 3,5 NEAR | 0,64687 NEAR |
 | Wallet membre avec une clé | 182 octets on-chain | 0,00182 NEAR | 0,5 NEAR | 0,49818 NEAR pour bonds et gas |
 
-La factory MandateOS `factory.mandateos.testnet` est déployée une fois et n'a aucune access key. Elle crée `<slug>.factory.mandateos.testnet`, transfère 0,25 NEAR, référence par hash immuable le Sputnik global officiel, puis appelle `new`; seuls 810 octets ont été observés pour la DAO de preuve. Une nouvelle Company + DAO coûte donc **0,25 NEAR**. Le setup de paiement complet ajoute **5 NEAR** pour le Vault et **3,5 NEAR** pour le relais, soit **8,75 NEAR** par organisation complète. Le wallet de l'utilisateur reçoit séparément 0,5 NEAR lors de sa première inscription, pas à chaque Company.
+La factory MandateOS `factory-v2.mandateos.testnet` est déployée une fois et n'a aucune access key. Le fondateur appelle `create`, paie les 0,25 NEAR depuis son wallet sponsorisé, signe la policy affichée, puis la factory crée `<slug>.factory-v2.mandateos.testnet`, référence le hash global immuable et appelle `new`; le serveur ne choisit jamais seul le council. Une Company + DAO coûte **0,25 NEAR**. Le setup complet ajoute **5 NEAR** pour le Vault et **3,5 NEAR** pour le relais, soit **8,75 NEAR**.
 
 Ces soldes ne sont pas des frais par paiement. Le chemin réel `authorize → MPC → callback` a consommé 14,288425743215 Tgas ; au prix testnet observé de `10^8` yoctoNEAR/gas, cela vaut environ **0,00142885 NEAR** ([gas NEAR][near-gas]). Il n'y a pas d'erreur de 24 décimales dans les constantes.
 
-Le sponsor est volontairement réservé à la démo hackathon. Avec le solde courant, la console autorise les Company/DAO abordables et bloque séparément le déploiement Vault/relay lorsqu'il manque 8,5 NEAR. Une ouverture publique exigerait une réservation de crédit atomique et un teardown gouverné ; ce n'est pas le périmètre actuel.
+Le sponsor est volontairement réservé à la démo hackathon. Le navigateur lit directement `get_policy` via le RPC NEAR, exige la confirmation de chaque membre observé et du seuil, puis seulement autorise le déploiement Vault/relay. `auto_update: true` reste un avertissement : la factory keyless n'expose aucune méthode d'update et la DAO référence un hash immuable.
 
-La factory réutilise Sputnik au lieu de réécrire la gouvernance : Trezu conserve les méthodes et policies attendues, tandis que MandateOS choisit le namespace, le financement et le hash immuable. Publier également Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ; c'est une optimisation post-hackathon ([global contracts NEAR][near-global-contracts]). Fusionner Vault et relais économiserait environ 2,85 NEAR par client, mais supprimerait leur frontière MPC et augmenterait le blast radius : ce compromis est rejeté.
+La factory réutilise Sputnik au lieu de réécrire la gouvernance. Le contrat est compatible avec l'UI Sputnik officielle de Trezu configurée pour testnet ; le backend hébergé `testenv.trezu.app` refuse toutefois actuellement les suffixes personnalisés. Publier Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ([global contracts NEAR][near-global-contracts]).
 
 ## Déploiement d'ACME
 
@@ -282,7 +282,7 @@ Les secrets ne sont pas enregistrés dans les snapshots. PostgreSQL conserve uni
 
 ### Onboarding et mandats (implémenté)
 
-`apps/api/src/treasury.ts` construit un plan non signé (DAO, Vault, relay, Safe/Roles/Delay) puis vérifie l'état on-chain avant d'enregistrer une `Treasury` : code hash du DAO égal à `get_default_code_hash()` de la factory, council, seuil absolu, `RoleWeight`, quorum `0`, absence de `Everyone:AddProposal` et absence de tout autre rôle portant `Vote*`/`AddProposal` (Sputnik évalue les rôles en OU), `get_factory_info().auto_update`, paramètres d'init du Vault (`mpc_contract_id`, `evm_chain_id`, `guard_public_key`, `token_id`, TTL), `delay_address`/`evm_chain_id` du relay, owners/seuil/modules du Safe et cooldown du Delay par environnement (`uat` 300 s, `production` 86 400 s). Tant que `auto_update` est vrai, le statut est `pending_dao_hardening` et l'API refuse la création d'agent.
+`apps/api/src/treasury.ts` construit un plan non signé (DAO, Vault, relay, Safe/Roles/Delay). Le fondateur signe localement la création DAO après affichage de la policy ; le navigateur compare ensuite directement `get_policy` avec chaque membre attendu et le seuil absolu. Avant d'enregistrer une `Treasury`, l'API vérifie : hash global du DAO égal à `get_default_code_hash()` de la factory, council, seuil, `RoleWeight`, quorum `0`, absence de rôles concurrents, paramètres Vault/relay, owners/seuil/modules du Safe et cooldown du Delay. `auto_update: true` produit l'avertissement audité `dao_auto_update_enabled` sans bloquer le statut `active`, car la factory est keyless, sans méthode d'update, et le code DAO est référencé par hash immuable.
 
 `apps/api/src/mandates.ts` compile un rôle en trois artefacts : config `set_role` du Vault, permission Zodiac (`scopeTarget`, `scopeFunction` avec conditions de destinataires et allowance, `assignRoles`) et policy Guard. Il renvoie un diff déterministe et des propositions Trezu non signées ; le serveur ne signe jamais ([`apps/api/src/treasury.ts`](./apps/api/src/treasury.ts), [`apps/api/src/mandates.ts`](./apps/api/src/mandates.ts), [`packages/deployer/src/roles-policy.ts`](./packages/deployer/src/roles-policy.ts)).
 

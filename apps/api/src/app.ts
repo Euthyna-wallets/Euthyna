@@ -575,19 +575,6 @@ export function createApp({
     });
   });
 
-  app.post("/v1/console/treasury/create-dao", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, treasuryPlanSchema);
-    const created = await treasury.createDao(consoleIdentity.organizationId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "treasury.dao_created",
-      metadata: created,
-    });
-    return context.json(created);
-  });
 
   app.post("/v1/console/treasury/deploy-contracts", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");

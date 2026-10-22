@@ -50,7 +50,6 @@ impl DaoFactory {
 
     #[payable]
     pub fn create(&mut self, name: String, args: Base64VecU8) -> Promise {
-        require!(env::predecessor_account_id() == self.owner_id, "ERR_OWNER_ONLY");
         let amount = env::attached_deposit();
         require!(amount >= MIN_DAO_BALANCE, "ERR_DAO_BALANCE_TOO_LOW");
 
@@ -116,7 +115,7 @@ mod tests {
     fn context(predecessor: &str, deposit: NearToken) {
         testing_env!(
             VMContextBuilder::new()
-                .current_account_id(account("factory.mandateos.testnet"))
+                .current_account_id(account("factory-v2.mandateos.testnet"))
                 .predecessor_account_id(account(predecessor))
                 .attached_deposit(deposit)
                 .build()
@@ -125,14 +124,14 @@ mod tests {
 
     #[test]
     fn creates_keyless_account_using_immutable_global_hash() {
-        context("mandateos.testnet", NearToken::from_millinear(250));
+        context("founder.testnet", NearToken::from_millinear(250));
         let hash = [7u8; 32];
         let mut factory = DaoFactory::new(account("mandateos.testnet"), hash.into());
         drop(factory.create("acme".to_owned(), Base64VecU8(br#"{"config":{}}"#.to_vec())));
 
         let receipt = get_created_receipts()
             .into_iter()
-            .find(|receipt| receipt.receiver_id == account("acme.factory.mandateos.testnet"))
+            .find(|receipt| receipt.receiver_id == account("acme.factory-v2.mandateos.testnet"))
             .expect("DAO receipt");
         assert!(receipt.actions.iter().any(|action| matches!(action, MockAction::CreateAccount { .. })));
         assert!(receipt.actions.iter().any(|action| matches!(
@@ -150,13 +149,6 @@ mod tests {
         )));
     }
 
-    #[test]
-    #[should_panic(expected = "ERR_OWNER_ONLY")]
-    fn only_owner_can_spend_factory_balance() {
-        context("attacker.testnet", NearToken::from_millinear(250));
-        let mut factory = DaoFactory::new(account("mandateos.testnet"), [7u8; 32].into());
-        drop(factory.create("acme".to_owned(), Base64VecU8(vec![])));
-    }
 
     #[test]
     #[should_panic(expected = "ERR_DAO_BALANCE_TOO_LOW")]

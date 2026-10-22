@@ -206,15 +206,14 @@ The response contains:
   calls to sign. The Safe is deployed before the modules because their initializers
   reference its address; enabling them is a separate 2/3 Safe batch.
 
-### `POST /v1/console/treasury/create-dao`
+### Browser-signed DAO creation
 
-Admin only. Signs the Sputnik `create` call with the MandateOS relayer and pays the
-attached deposit. The caller only supplies the same identifiers as the plan; no
-member key is required.
-
-```json
-{ "environment": "uat", "daoName": "acme", "founderNearAccountId": "w-....mandateos.testnet" }
-```
+There is no server `create-dao` route. The console displays `daoCreate.args`,
+every council account and the absolute threshold, then requires the founder
+(`founderNearAccountId`) to confirm and sign the factory `create` call locally.
+The attached 0.25 NEAR comes from the founder wallet; MandateOS sponsorship
+pre-funds that client-owned wallet at registration. The permissionless factory
+refunds the caller if asynchronous creation fails.
 
 ### `POST /v1/console/treasury/deploy-contracts`
 
@@ -226,32 +225,33 @@ hold no access key of their own.
 ### `GET /v1/console/treasury/sponsor-status`
 
 Returns the public on-chain balance of the configured MandateOS parent account.
-The console compares it independently with the DAO and Vault/relay deposits, so
-an affordable DAO-only Company remains available when a full treasury is not.
+The console uses it only for the separately sponsored Vault/relay deployment;
+DAO creation is caller-funded from the founder wallet.
 
 ### Funding model
 
 Treasury deposits are one-time storage-backed account balances, not per-payment
-fees. `factory.mandateos.testnet` references the official immutable global
-Sputnik hash, so a new Company + DAO receives 0.25 NEAR and stores no duplicate
-WASM. A full payment treasury adds 5 NEAR for the Vault and 3.5 NEAR for the
-relay (8.75 NEAR total). Registration separately funds the client-owned
-`w-<hex>.mandateos.testnet` wallet with 0.5 NEAR once.
+fees. `factory-v2.mandateos.testnet` references the official immutable global
+Sputnik hash, so a new Company + DAO receives 0.25 NEAR from its founder and
+stores no duplicate WASM. A full payment treasury adds 5 NEAR for the Vault and
+3.5 NEAR for the relay (8.75 NEAR total). Registration separately pre-funds the
+client-owned `w-<hex>.mandateos.testnet` wallet with 0.5 NEAR once.
 
-Observed testnet storage is 150,710 bytes for the one-time factory and only 810
-bytes (0.00810 NEAR minimum) for
-`global-smoke.factory.mandateos.testnet`. Current-artifact sandbox measurements
-after `new` and access-key removal are 439,560 bytes (4.39560 NEAR minimum) for
-the Vault and 285,313 bytes (2.85313 NEAR minimum) for the relay. Testnet
+Observed testnet storage is 150,623 bytes for the permissionless factory and 810
+bytes (0.00810 NEAR minimum) for a global DAO. Current-artifact sandbox
+measurements after `new` and access-key removal are 439,560 bytes (4.39560 NEAR
+minimum) for the Vault and 285,313 bytes (2.85313 NEAR minimum) for the relay.
+Testnet
 protocol configuration reports `10^19` yoctoNEAR per byte; all API amounts use
 `1 NEAR = 10^24` yoctoNEAR. The observed 14.288425743215 Tgas Vault
 authorization costs about 0.00142885 NEAR at `10^8` yoctoNEAR/gas.
 
 ### `POST /v1/console/treasury/refresh`
 
-Admin only. Re-runs every register check against the stored treasury and updates
-its status: `pending_dao_hardening → active` once `get_factory_info().auto_update`
-is `false`. The console exposes a "Re-run verification" button on that state.
+Admin only. Re-runs every treasury check and refreshes observed addresses and
+hashes. `get_factory_info().auto_update === true` is recorded as
+`dao_auto_update_enabled`, but does not change the active status for the
+immutable-hash, keyless MandateOS factory.
 
 ### `GET /v1/console/agents/:id`
 
@@ -275,13 +275,14 @@ Compiles one role into the three locks and returns a diff plus unsigned proposal
 
 Admin only. Verifies on-chain state before inserting `treasury`:
 
-- DAO code hash equals `sputnikv2.testnet.get_default_code_hash()`;
+- DAO local or `global_contract_hash` equals the configured factory's
+  `get_default_code_hash()`;
 - DAO `get_policy()` has the council Group equal to the member NEAR accounts, an
   absolute `RoleWeight` threshold `ceil(2n/3)` with quorum `0`, and no other role
   carrying `Vote*` or `AddProposal` (Sputnik ORs roles); a council `vote_policy`
   is rejected unless each per-kind threshold is at least the expected threshold;
-- DAO `get_factory_info().auto_update === false`; otherwise the treasury is stored
-  as `pending_dao_hardening` and agent creation is blocked;
+- DAO `auto_update: true` is an audit warning, not a registration blocker, because
+  the factory is keyless, has no update method and references immutable code;
 - Vault and relay code hashes equal the local wasm SHA-256, and both have zero
   access keys;
 - Vault `mpc_contract_id`, `evm_chain_id`, `guard_public_key` (KMS key),

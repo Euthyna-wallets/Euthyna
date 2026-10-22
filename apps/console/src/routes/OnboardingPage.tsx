@@ -16,10 +16,12 @@ import {
   evmAccounts,
   evmWalletClient,
   nearAccounts,
+  readDaoPolicyRpc,
   sendEvmTransaction,
   signDaoProposal,
   signNearTransactions,
   waitForEvmTransaction,
+  type DaoPolicyRpc,
 } from "../wallets.js";
 
 type Organization = { id: string; name: string; slug: string };
@@ -625,6 +627,25 @@ function TreasuryWizard(props: {
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
   const [daoCreated, setDaoCreated] = useState<string | null>(null);
   const [sponsor, setSponsor] = useState<{ accountId: string; balanceYocto: string } | null>(null);
+  const [creationPolicyConfirmed, setCreationPolicyConfirmed] = useState(false);
+  const [observedPolicy, setObservedPolicy] = useState<DaoPolicyRpc | null>(null);
+  const [confirmedMembers, setConfirmedMembers] = useState<string[]>([]);
+  const [thresholdConfirmed, setThresholdConfirmed] = useState(false);
+
+  async function verifyDaoPolicy() {
+    const policy = await readDaoPolicyRpc(props.plan.daoAccountId);
+    setObservedPolicy(policy);
+    setConfirmedMembers([]);
+    setThresholdConfirmed(false);
+  }
+
+  function toggleMemberConfirmation(accountId: string) {
+    setConfirmedMembers((current) =>
+      current.includes(accountId)
+        ? current.filter((member) => member !== accountId)
+        : [...current, accountId],
+    );
+  }
 
   async function refreshSponsor() {
     setSponsor(await api<{ accountId: string; balanceYocto: string }>("/v1/console/treasury/sponsor-status"));
@@ -633,6 +654,13 @@ function TreasuryWizard(props: {
   useEffect(() => {
     void refreshSponsor().catch((cause: unknown) => props.onError(String(cause)));
   }, []);
+
+  useEffect(() => {
+    setCreationPolicyConfirmed(false);
+    setObservedPolicy(null);
+    setConfirmedMembers([]);
+    setThresholdConfirmed(false);
+  }, [props.plan.daoAccountId]);
 
   async function deployBase() {
     for (const transaction of [
@@ -670,10 +698,19 @@ function TreasuryWizard(props: {
   const vaultDeposit = transferDeposit(props.plan.vault.actions);
   const relayDeposit = transferDeposit(props.plan.relay.actions);
   const setupDeposit = daoDeposit + vaultDeposit + relayDeposit;
-  const sponsorBalance = sponsor ? BigInt(sponsor.balanceYocto) : null;
   const contractsDeposit = vaultDeposit + relayDeposit;
-  const daoAffordable = sponsorBalance === null || sponsorBalance >= daoDeposit;
-  const contractsAffordable = sponsorBalance === null || sponsorBalance >= contractsDeposit;
+  const contractsAffordable = sponsor === null || BigInt(sponsor.balanceYocto) >= contractsDeposit;
+  const expectedCouncil = props.plan.council.map((member) => member.nearAccountId).sort();
+  const observedMembersMatch =
+    observedPolicy !== null &&
+    observedPolicy.council.length === expectedCouncil.length &&
+    observedPolicy.council.every((member, index) => member === expectedCouncil[index]);
+  const observedThresholdMatches = observedPolicy?.threshold === String(props.plan.threshold);
+  const policyConfirmed =
+    observedMembersMatch &&
+    observedThresholdMatches &&
+    expectedCouncil.every((member) => confirmedMembers.includes(member)) &&
+    thresholdConfirmed;
 
   return (
     <section className="card">
@@ -687,44 +724,51 @@ function TreasuryWizard(props: {
       </div>
       {sponsor ? (
         <div className="muted small">
-          Sponsor <code>{sponsor.accountId}</code>: {formatNear(BigInt(sponsor.balanceYocto))} NEAR available.
-          Create only the DAO for additional hackathon companies; a full payment treasury adds{" "}
-          {formatNear(contractsDeposit)} NEAR for Vault + relay.
+          MandateOS sponsor <code>{sponsor.accountId}</code>: {formatNear(BigInt(sponsor.balanceYocto))} NEAR.
+          The generated founder wallet is pre-funded by MandateOS; the founder remains the caller
+          and signs the exact DAO policy below. A full payment treasury adds {formatNear(contractsDeposit)} NEAR.
         </div>
       ) : null}
       <div className="steps">
         <div className="step">
           <h3>a. DAO</h3>
           <p className="muted">{props.plan.daoAccountId} · threshold {props.plan.threshold}</p>
+          <div className="stack">
+            <strong>Exact initial policy signed by the founder</strong>
+            {expectedCouncil.map((accountId) => <code key={accountId}>{accountId}</code>)}
+            <code>absolute threshold: {props.plan.threshold}</code>
+            <label>
+              <input
+                type="checkbox"
+                checked={creationPolicyConfirmed}
+                onChange={(event) => setCreationPolicyConfirmed(event.target.checked)}
+              />{" "}
+              I confirm this exact council and threshold before signing.
+            </label>
+          </div>
           <div className="row">
             <button
               className="ghost"
               onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}
             >
-              Use connected NEAR account
+              Use founder NEAR account
             </button>
             <input placeholder="founder.testnet" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
             <button
               className="primary"
-              disabled={Boolean(props.busy) || !daoAffordable}
+              disabled={
+                Boolean(props.busy) ||
+                !creationPolicyConfirmed ||
+                signerId !== props.plan.founderNearAccountId
+              }
               onClick={() => props.run("dao", async () => {
-                const created = await api<{ daoAccountId: string; txHash: string }>(
-                  "/v1/console/treasury/create-dao",
-                  {
-                    method: "POST",
-                    body: JSON.stringify({
-                      environment: props.plan.environment,
-                      daoName: props.plan.daoName,
-                      founderNearAccountId: props.plan.founderNearAccountId,
-                    }),
-                  },
-                );
-                setTransactionHashes((current) => [...current, created.txHash]);
-                setDaoCreated(created.daoAccountId);
-                await refreshSponsor();
+                const hashes = await createDao(props.plan, signerId);
+                setTransactionHashes((current) => [...current, ...hashes]);
+                setDaoCreated(props.plan.daoAccountId);
+                await verifyDaoPolicy();
               })}
             >
-              Create DAO (MandateOS pays)
+              Sign and create DAO ({formatNear(daoDeposit)} NEAR)
             </button>
             <button
               className="ghost"
@@ -733,19 +777,19 @@ function TreasuryWizard(props: {
                 !signerId ||
                 !props.plan.council.some((member) => member.nearAccountId === signerId)
               }
-              title={
-                signerId && !props.plan.council.some((member) => member.nearAccountId === signerId)
-                  ? "Connect a council NEAR account to propose"
-                  : undefined
-              }
               onClick={() => props.run("auto-update", async () => {
                 const hashes = await disableFactoryAutoUpdate(props.plan, signerId);
                 setTransactionHashes((current) => [...current, ...hashes]);
               })}
             >
-              Propose auto_update=false
+              Propose auto_update=false (optional)
             </button>
           </div>
+          {signerId && signerId !== props.plan.founderNearAccountId ? (
+            <div className="alert error">
+              Founder signature required: connect <code>{props.plan.founderNearAccountId}</code>.
+            </div>
+          ) : null}
           {daoCreated ? (
             <div className="alert success">
               DAO deployed on-chain: <code>{daoCreated}</code>{" "}
@@ -754,10 +798,50 @@ function TreasuryWizard(props: {
               </a>
             </div>
           ) : null}
-          {signerId && !props.plan.council.some((member) => member.nearAccountId === signerId) ? (
-            <div className="muted small">
-              <code>{signerId}</code> is not in the DAO council ({props.plan.council.map((member) => member.nearAccountId).join(", ")}).
-              The auto-update proposal must be signed by a council member.
+          <button
+            className="ghost"
+            disabled={Boolean(props.busy)}
+            onClick={() => props.run("dao-policy-rpc", verifyDaoPolicy)}
+          >
+            Read get_policy directly from NEAR RPC
+          </button>
+          {observedPolicy ? (
+            <div className="stack">
+              <strong>On-chain policy confirmation</strong>
+              {expectedCouncil.map((accountId) => {
+                const present = observedPolicy.council.includes(accountId);
+                return (
+                  <label key={accountId}>
+                    <input
+                      type="checkbox"
+                      disabled={!present}
+                      checked={confirmedMembers.includes(accountId)}
+                      onChange={() => toggleMemberConfirmation(accountId)}
+                    />{" "}
+                    {present ? "Observed" : "Missing"}: <code>{accountId}</code>
+                  </label>
+                );
+              })}
+              {!observedMembersMatch ? (
+                <div className="alert error">
+                  Observed council differs: <code>{observedPolicy.council.join(", ")}</code>
+                </div>
+              ) : null}
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={!observedThresholdMatches}
+                  checked={thresholdConfirmed}
+                  onChange={(event) => setThresholdConfirmed(event.target.checked)}
+                />{" "}
+                Observed absolute threshold: <code>{observedPolicy.threshold}</code>
+              </label>
+              {observedPolicy.autoUpdate === true ? (
+                <div className="alert">
+                  Warning only: DAO reports <code>auto_update=true</code>. The immutable global hash
+                  cannot be changed by the keyless MandateOS factory, which exposes no update method.
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -771,7 +855,7 @@ function TreasuryWizard(props: {
           <div className="row">
             <button
               className="primary"
-              disabled={Boolean(props.busy) || !contractsAffordable}
+              disabled={Boolean(props.busy) || !contractsAffordable || !policyConfirmed}
               onClick={() => props.run("near-deploy", async () => {
                 const deployed = await api<{ vaultTxHash: string; relayTxHash: string }>(
                   "/v1/console/treasury/deploy-contracts",
@@ -799,6 +883,12 @@ function TreasuryWizard(props: {
             <div className="muted small">
               Full treasury unavailable: needs {formatNear(contractsDeposit)} NEAR; sponsor has{" "}
               {formatNear(BigInt(sponsor.balanceYocto))} NEAR. The Company and DAO remain usable.
+            </div>
+          ) : null}
+          {!policyConfirmed ? (
+            <div className="muted small">
+              Read the DAO policy from NEAR RPC and confirm every council member and the threshold
+              before deploying Vault/relay.
             </div>
           ) : null}
         </div>

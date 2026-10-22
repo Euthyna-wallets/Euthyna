@@ -72,13 +72,13 @@ The current repository contains:
 
 - `contracts/vault`: `prepare`, domain-separated Guard visas, EIP-1559 construction, `PossiblySigned`, permissionless `submit_signature` recovery for failed MPC callbacks, nonce cancellation and signed confirmation reports;
 - `contracts/governance-relay`: DAO-only Delay calls, sequential `0xGOV` nonces, MPC signing, `PossiblySigned`, `submit_signature` recovery and same-nonce cancellation;
-- `contracts/dao-factory`: owner-only, keyless factory that creates per-Company DAOs under `factory.mandateos.testnet` using the official immutable global Sputnik hash; failed creation refunds the attached setup balance;
+- `contracts/dao-factory`: permissionless, keyless factory that creates caller-funded per-Company DAOs under `factory-v2.mandateos.testnet` using the official immutable global Sputnik hash; failed creation refunds the caller;
 - `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
-- `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds four focused unit tests for global-hash, keyless creation and funding guards;
+- `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds three focused tests for global-hash, keyless creation, name validation and funding guards;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
 - `apps/api` auth: Better Auth passkey sessions, organizations and memberships, per-agent API keys bound to the Vault agent account, console-only emergency route and append-only audit rows;
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the DAO, Vault, relay and Base plan; `/v1/console/treasury/sponsor-status` exposes the public sponsor balance; `/v1/console/treasury/register` re-verifies local or immutable-global DAO code hash, policy/auto-update, Vault init parameters, relay delay/chain, zero access keys, Safe owners/threshold, module wiring and Delay cooldown before persisting a `Treasury`;
-- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies a pending DAO and promotes it to active;
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; the founder confirms and signs the exact council policy locally; the browser re-reads `get_policy` directly from NEAR RPC before Vault/relay; `/v1/console/treasury/register` re-verifies immutable-global DAO hash, policy, Vault/relay parameters, zero access keys, Safe owners/threshold, module wiring and Delay cooldown;
+- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
 - `apps/api` agent payments: `POST /v1/operations/pay` (visa / escalation / refusal) with one transaction consuming the reference and storing the visa, idempotent per `opId`; `GET /v1/operations/:opId` merges DB, Vault and stored visa state; suppliers/contracts live in PostgreSQL with `registry_version` and four-eyes address changes;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
 - `apps/console`: React/Vite onboarding console — password bootstrap + passkey, organization and invitations, member wallet linking, treasury plan/wizard, treasury status gate and mandate preview/diff/proposals, plus agent registration;
@@ -317,7 +317,8 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 - The Base withdrawal memo and independent reference-price source remain open design points.
 - Treasury onboarding deploys the Safe first, then deploys Roles/Delay and enables them in a 2/3 Safe batch. Deploying the modules inside Safe `setup` would require predicting module addresses that themselves depend on the Safe address (circular dependency).
 - Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the mandate preview returns a funding payload but does not sign it.
-- A DAO registered before `FactoryInfoUpdate` is stored as `pending_dao_hardening`; the console and API block agent registration until the treasury is re-registered after the proposal executes.
+- `auto_update: true` is reported as a warning for the immutable-hash DAO factory, not a blocker: the keyless factory exposes no update method. The optional council proposal remains defense in depth.
+- Trezu's official Sputnik UI source displays and votes on the custom factory DAO when configured for testnet; the hosted `testenv.trezu.app` indexer currently rejects DAO IDs outside `.sputnik-dao.near`.
 
 ## License
 

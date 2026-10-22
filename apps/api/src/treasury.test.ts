@@ -304,10 +304,14 @@ describe("TreasuryService.refresh", () => {
     );
   });
 
-  it("keeps the treasury pending while auto-update is still enabled", async () => {
-    const { prisma } = fakePrisma({ existingTreasury: existing });
+  it("keeps the treasury active and records a warning while auto-update is enabled", async () => {
+    const { prisma, audits } = fakePrisma({ existingTreasury: existing });
     const treasury = await service(prisma, await validNear({ autoUpdate: true })).refresh("org-1", "user-1", "uat");
-    expect(treasury.status).toBe("pending_dao_hardening");
+    expect(treasury.status).toBe("active");
+    expect(audits).toContainEqual(expect.objectContaining({
+      action: "treasury.refreshed",
+      metadata: expect.objectContaining({ warnings: ["dao_auto_update_enabled"] }),
+    }));
   });
 
   it("returns 404 when no treasury exists", async () => {
@@ -320,15 +324,19 @@ describe("TreasuryService.refresh", () => {
 });
 
 describe("TreasuryService.register hardening", () => {
-  it("keeps the treasury pending while the DAO auto-update is still enabled", async () => {
-    const { prisma, created } = fakePrisma();
+  it("registers an immutable global DAO as active and records auto-update as a warning", async () => {
+    const { prisma, created, audits } = fakePrisma();
     const treasury = await service(prisma, await validNear({ autoUpdate: true })).register(
       "org-1",
       "user-1",
       registerInput,
     );
-    expect(treasury.status).toBe("pending_dao_hardening");
-    expect(created).toEqual([expect.objectContaining({ status: "pending_dao_hardening" })]);
+    expect(treasury.status).toBe("active");
+    expect(created).toEqual([expect.objectContaining({ status: "active" })]);
+    expect(audits).toContainEqual(expect.objectContaining({
+      action: "treasury.registered",
+      metadata: expect.objectContaining({ warnings: ["dao_auto_update_enabled"] }),
+    }));
   });
 
   it("rejects a DAO whose code hash is not the factory default", async () => {

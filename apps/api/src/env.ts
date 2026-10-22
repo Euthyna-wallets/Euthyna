@@ -16,7 +16,7 @@ const schema = z.object({
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
   CONSOLE_ORIGIN: z.string().url().default("http://localhost:5173"),
   PASSKEY_RP_ID: z.string().min(1).optional(),
-  DAO_FACTORY_ID: z.string().min(1).default("factory.mandateos.testnet"),
+  DAO_FACTORY_ID: z.string().min(1).default("factory-v2.mandateos.testnet"),
   DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("250000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),

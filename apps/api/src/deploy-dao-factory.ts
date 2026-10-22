@@ -13,7 +13,10 @@ async function main(): Promise<void> {
 
   const env = loadEnv();
   if (env.NEAR_NETWORK_ID !== "testnet") throw new Error("DAO factory deploy script is testnet-only");
-  const factoryId = `factory.${env.NEAR_ACCOUNT_PARENT}`;
+  const factoryId = env.DAO_FACTORY_ID;
+  if (!factoryId.endsWith(`.${env.NEAR_ACCOUNT_PARENT}`)) {
+    throw new Error(`DAO_FACTORY_ID must be a subaccount of ${env.NEAR_ACCOUNT_PARENT}`);
+  }
   if (factoryId.length > 64) throw new Error(`factory account is too long: ${factoryId}`);
 
   const wasmPath = fileURLToPath(new URL("../../../contracts/res/dao_factory.wasm", import.meta.url));

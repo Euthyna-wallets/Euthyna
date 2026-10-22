@@ -8,15 +8,20 @@ import { baseSepolia } from "viem/chains";
 import type { NearAction, TreasuryPlan } from "./api.js";
 import { generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
 
+interface WalletAction {
+  type: string;
+  params?: Record<string, unknown>;
+}
+
 interface E2eNearWallet {
   getAccounts(): Promise<Array<{ accountId: string }>>;
   signAndSendTransaction(input: {
     signerId: string;
     receiverId: string;
-    actions: Array<{ type: string; params?: Record<string, unknown> }>;
+    actions: WalletAction[];
   }): Promise<{ transaction_outcome: { id: string } }>;
   signAndSendTransactions(input: {
-    transactions: Array<{ signerId: string; receiverId: string; actions: Array<{ type: string; params?: Record<string, unknown> }> }>;
+    transactions: Array<{ signerId: string; receiverId: string; actions: WalletAction[] }>;
   }): Promise<Array<{ transaction_outcome: { id: string } }>>;
 }
 
@@ -37,22 +42,34 @@ async function generatedNear(): Promise<E2eNearWallet> {
   await keyStore.setKey("testnet", wallet.accountId, KeyPair.fromString(wallet.secretKey as `ed25519:${string}`));
   const near = new Near({ networkId: "testnet", nodeUrl: "https://rpc.testnet.near.org", keyStore });
   const account = await near.account(wallet.accountId);
-  const map = (actions: NearAction[]) => actions.map((action) => {
+  const map = (actions: WalletAction[]) => actions.map((action) => {
+    const params = action.params ?? {};
     if (action.type === "CreateAccount") return transactions.createAccount();
-    if (action.type === "Transfer") return transactions.transfer(BigInt(action.depositYocto));
-    if (action.type === "DeployContract") return transactions.deployContract(Uint8Array.from(atob(action.codeBase64), (c) => c.charCodeAt(0)));
-    return transactions.functionCall(action.methodName, action.args ?? {}, BigInt(action.gasTgas) * 1_000_000_000_000n, 0n);
+    if (action.type === "Transfer") return transactions.transfer(BigInt(String(params.deposit ?? "0")));
+    if (action.type === "DeployContract") return transactions.deployContract(params.code as Uint8Array);
+    return transactions.functionCall(
+      String(params.methodName ?? ""),
+      (params.args ?? {}) as Record<string, unknown>,
+      BigInt(String(params.gas ?? "0")),
+      BigInt(String(params.deposit ?? "0")),
+    );
   });
   return {
     getAccounts: async () => [{ accountId: wallet.accountId }],
-    signAndSendTransaction: async ({ receiverId, actions }) => {
-      const outcome = await account.signAndSendTransaction({ receiverId, actions: map(actions as NearAction[]) });
+    signAndSendTransaction: async ({ signerId, receiverId, actions }) => {
+      if (signerId !== wallet.accountId) {
+        throw new Error(`connected NEAR account is ${wallet.accountId}, expected ${signerId}`);
+      }
+      const outcome = await account.signAndSendTransaction({ receiverId, actions: map(actions) });
       return { transaction_outcome: { id: outcome.transaction_outcome.id } };
     },
     signAndSendTransactions: async ({ transactions: list }) => {
       const results: Array<{ transaction_outcome: { id: string } }> = [];
       for (const item of list) {
-        const outcome = await account.signAndSendTransaction({ receiverId: item.receiverId, actions: map(item.actions as NearAction[]) });
+        if (item.signerId !== wallet.accountId) {
+          throw new Error(`connected NEAR account is ${wallet.accountId}, expected ${item.signerId}`);
+        }
+        const outcome = await account.signAndSendTransaction({ receiverId: item.receiverId, actions: map(item.actions) });
         results.push({ transaction_outcome: { id: outcome.transaction_outcome.id } });
       }
       return results;
@@ -158,6 +175,66 @@ export async function createDao(plan: TreasuryPlan, signerId: string): Promise<s
     actions: [{ type: "FunctionCall", params: { methodName: "create", args: plan.daoCreate.args, gas: "150000000000000", deposit: plan.daoCreate.depositYocto } }],
   });
   return [outcome.transaction_outcome.id];
+}
+
+export type DaoPolicyRpc = {
+  council: string[];
+  threshold: string;
+  autoUpdate: boolean | null;
+  factoryId: string | null;
+};
+
+async function nearView<T>(accountId: string, methodName: string): Promise<T> {
+  const response = await fetch(import.meta.env.VITE_NEAR_RPC_URL ?? "https://rpc.testnet.near.org", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "mandateos-browser",
+      method: "query",
+      params: {
+        request_type: "call_function",
+        finality: "final",
+        account_id: accountId,
+        method_name: methodName,
+        args_base64: "e30=",
+      },
+    }),
+  });
+  if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+  const payload = await response.json() as {
+    result?: { result?: number[]; error?: string };
+    error?: { message?: string };
+  };
+  if (payload.error) throw new Error(payload.error.message ?? "NEAR RPC query failed");
+  if (payload.result?.error) throw new Error(payload.result.error);
+  if (!payload.result?.result) throw new Error("NEAR RPC view result missing");
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(payload.result.result))) as T;
+}
+
+export async function readDaoPolicyRpc(daoAccountId: string): Promise<DaoPolicyRpc> {
+  const policy = await nearView<{
+    roles?: Array<{ name?: string; kind?: { Group?: string[] } }>;
+    default_vote_policy?: { threshold?: string | number };
+  }>(daoAccountId, "get_policy");
+  const councilRole = policy.roles?.find((role) => role.name === "council");
+  const council = councilRole?.kind?.Group;
+  if (!Array.isArray(council)) throw new Error("DAO council role missing from get_policy");
+  const threshold = policy.default_vote_policy?.threshold;
+  if (threshold === undefined) throw new Error("DAO threshold missing from get_policy");
+
+  let factoryInfo: { factory_id?: string; auto_update?: boolean } | null = null;
+  try {
+    factoryInfo = await nearView(daoAccountId, "get_factory_info");
+  } catch {
+    // Older Sputnik builds may not expose this view. Policy verification remains valid.
+  }
+  return {
+    council: [...council].sort(),
+    threshold: String(threshold),
+    autoUpdate: factoryInfo?.auto_update ?? null,
+    factoryId: factoryInfo?.factory_id ?? null,
+  };
 }
 
 export async function disableFactoryAutoUpdate(

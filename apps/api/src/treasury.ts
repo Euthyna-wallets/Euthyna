@@ -95,6 +95,7 @@ interface VerifiedTreasury {
   gov: Address;
   vaultWasmSha256: string;
   relayWasmSha256: string;
+  warnings: string[];
 }
 
 export interface TreasuryView {
@@ -154,10 +155,6 @@ export interface TreasuryGateway {
     organizationId: string,
     input: { environment: string; daoName: string; founderNearAccountId: string },
   ): Promise<{ vaultTxHash: string; relayTxHash: string }>;
-  createDao(
-    organizationId: string,
-    input: { environment: string; daoName: string; founderNearAccountId: string },
-  ): Promise<{ daoAccountId: string; txHash: string }>;
   refresh(organizationId: string, actorId: string, environment: string): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
 }
@@ -536,22 +533,6 @@ export class TreasuryService {
     };
   }
 
-  async createDao(
-    organizationId: string,
-    input: { environment: string; daoName: string; founderNearAccountId: string },
-  ): Promise<{ daoAccountId: string; txHash: string }> {
-    const plan = await this.plan(organizationId, input);
-    const txHash = await this.near.executeActions(plan.daoCreate.factoryId, [
-      {
-        type: "FunctionCall",
-        methodName: "create",
-        args: plan.daoCreate.args,
-        gasTgas: 150,
-        depositYocto: plan.daoCreate.depositYocto,
-      },
-    ]);
-    return { daoAccountId: plan.daoAccountId, txHash };
-  }
 
   async deployContracts(
     organizationId: string,
@@ -596,7 +577,12 @@ export class TreasuryService {
         action: "treasury.registered",
         targetType: "treasury",
         targetId: treasury.id,
-        metadata: { daoAccountId: input.daoAccountId, safeAddress: verified.safe, status: verified.status },
+        metadata: {
+          daoAccountId: input.daoAccountId,
+          safeAddress: verified.safe,
+          status: verified.status,
+          warnings: verified.warnings,
+        },
       },
     });
     return this.toView(treasury);
@@ -637,7 +623,12 @@ export class TreasuryService {
         action: "treasury.refreshed",
         targetType: "treasury",
         targetId: existing.id,
-        metadata: { from: existing.status, to: verified.status, environment: environmentName },
+        metadata: {
+          from: existing.status,
+          to: verified.status,
+          environment: environmentName,
+          warnings: verified.warnings,
+        },
       },
     });
     return this.toView(updated);
@@ -663,7 +654,7 @@ export class TreasuryService {
     const policy = await this.near.viewFunction<SputnikPolicy>(input.daoAccountId, "get_policy");
     this.validateDaoPolicy(policy, members.map((member) => member.nearAccountId as string), expectedThreshold);
     const factoryInfo = await this.near.viewFunction<FactoryInfo>(input.daoAccountId, "get_factory_info");
-    const daoHardened = factoryInfo.auto_update === false;
+    const warnings = factoryInfo.auto_update === false ? [] : ["dao_auto_update_enabled"];
 
     await this.verifyNearAccount(input.vaultAccountId, vaultArtifact.sha256);
     await this.verifyNearAccount(input.relayAccountId, relayArtifact.sha256);
@@ -717,13 +708,14 @@ export class TreasuryService {
 
     return {
       environment,
-      status: daoHardened ? "active" : "pending_dao_hardening",
+      status: "active",
       safe,
       roles,
       delay,
       gov: expectedGov,
       vaultWasmSha256: vaultArtifact.sha256,
       relayWasmSha256: relayArtifact.sha256,
+      warnings,
     };
   }
 
