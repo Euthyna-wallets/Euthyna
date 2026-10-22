@@ -36,7 +36,6 @@ const agentProvisioning = new AgentProvisioningService(
   env.NEAR_ACCOUNT_PARENT,
   env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   env.NEAR_AGENT_GAS_RESERVE_YOCTO,
-  env.NEAR_AGENT_FC_ALLOWANCE_YOCTO,
 );
 const treasury = new TreasuryService(prisma, near, signer, {
   nearNetwork: env.NEAR_NETWORK_ID,
@@ -72,7 +71,12 @@ const treasury = new TreasuryService(prisma, near, signer, {
 const mandates = new MandateService(prisma, near);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
-const consoleData = new ConsoleDataService(prisma, near, env.BASE_SEPOLIA_RPC_URL);
+const consoleData = new ConsoleDataService(
+  prisma,
+  near,
+  env.BASE_SEPOLIA_RPC_URL,
+  env.NEAR_AGENT_GAS_LOW_YOCTO,
+);
 const app = createApp({
   near,
   guard,

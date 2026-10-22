@@ -14,6 +14,7 @@ export class ConsoleDataService {
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
     private readonly baseRpcUrl: string,
+    private readonly agentGasLowYocto = "50000000000000000000000",
   ) {}
 
   async overview(organizationId: string) {
@@ -122,6 +123,15 @@ export class ConsoleDataService {
     let onChain: unknown = null;
     let mandate: unknown = null;
     let ethBalance: string | null = null;
+    let nearGasBalanceYocto: string | null = null;
+    try {
+      nearGasBalanceYocto = (await this.near.getAccount(agent.nearAccountId)).amount;
+    } catch {
+      nearGasBalanceYocto = null;
+    }
+    const nearGasLow =
+      nearGasBalanceYocto !== null &&
+      BigInt(nearGasBalanceYocto) < BigInt(this.agentGasLowYocto);
     if (treasury) {
       try {
         onChain = await this.near.viewFunction(treasury.vaultAccountId, "get_agent", { agent: agent.nearAccountId });
@@ -160,7 +170,20 @@ export class ConsoleDataService {
         nonce = null;
       }
     }
-    return plain({ agent, treasury, provisioning, onChain, mandate, budget, nonce, ethBalance, audit: audits });
+    return plain({
+      agent,
+      treasury,
+      provisioning,
+      onChain,
+      mandate,
+      budget,
+      nonce,
+      ethBalance,
+      nearGasBalanceYocto,
+      nearGasLow,
+      nearGasLowThresholdYocto: this.agentGasLowYocto,
+      audit: audits,
+    });
   }
 
   async governance(organizationId: string) {

@@ -11,6 +11,12 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "cancel_nonce",
   "request_derived_public_key",
 ] as const;
+export const AGENT_GAS = {
+  requestDerivedPublicKey: "50000000000000",
+  prepare: "10000000000000",
+  authorize: "50000000000000",
+} as const;
+
 
 export function proposedAgentAccountId(name: string, parent: string): string {
   const slug = name
@@ -158,7 +164,7 @@ export class NearAgentVaultClient {
       contractId: this.vaultAccountId,
       methodName: "request_derived_public_key",
       args: { agent: this.accountId },
-      gas: "50000000000000",
+      gas: AGENT_GAS.requestDerivedPublicKey,
       attachedDeposit: "0",
     }).then((outcome) => outcome.transaction_outcome.id);
     const nearTransactionHash = await this.derivationRequest;
@@ -185,7 +191,16 @@ export class NearAgentVaultClient {
       contractId: this.vaultAccountId,
       methodName: "prepare",
       args: { intent },
-      gas: "120000000000000",
+      gas: AGENT_GAS.prepare,
+      attachedDeposit: "0",
+    });
+  }
+  async authorize(opId: number[] | string, approval: Record<string, unknown>): Promise<unknown> {
+    return this.account.functionCall({
+      contractId: this.vaultAccountId,
+      methodName: "authorize",
+      args: { op_id: opId, approval },
+      gas: AGENT_GAS.authorize,
       attachedDeposit: "0",
     });
   }

@@ -144,7 +144,7 @@ export class NearClient {
     receiverId: string;
     methodNames: string[];
     reserveYocto: string;
-    allowanceYocto: string;
+    allowanceYocto: null;
   }): Promise<string> {
     const account = await this.accountPromise;
     const outcome = await account.signAndSendTransaction({
@@ -157,7 +157,6 @@ export class NearClient {
           transactions.functionCallAccessKey(
             input.receiverId,
             input.methodNames,
-            BigInt(input.allowanceYocto),
           ),
         ),
       ],

@@ -99,35 +99,52 @@ leaves `AGENT_KEY_PATH` ([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts)
 Admin only, 10 requests/hour per admin and subject to the shared durable daily
 NEAR sponsorship cap. The relayer emits one transaction containing
 `CreateAccount`, `Transfer` (`NEAR_AGENT_GAS_RESERVE_YOCTO`, default 0.3 NEAR)
-and one `AddKey`. That key is FunctionCall-only, has allowance
-`NEAR_AGENT_FC_ALLOWANCE_YOCTO`, receiver = Vault, and exactly
-`prepare`, `authorize`, `cancel_nonce`, `request_derived_public_key`. No
-full-access key is added
+and one `AddKey`. That key is FunctionCall-only, has unlimited gas allowance
+(`allowance = null`), receiver = Vault, and exactly `prepare`, `authorize`,
+`cancel_nonce`, `request_derived_public_key`. No full-access key is added. The
+account balance therefore bounds gas spend without making the only key
+permanently unusable when a finite allowance reaches zero
 ([`apps/api/src/agent-provisioning.ts`](../apps/api/src/agent-provisioning.ts),
 [`apps/api/src/near.ts`](../apps/api/src/near.ts)).
 
 `GET /v1/console/agents/:id/provision` returns the server observation.
 `POST /v1/console/agents/:id/provision-confirm` repeats the RPC attestation and
 stores the admin confirmation. The browser independently calls
-`view_access_key_list` and displays every expected/observed field before that
-confirmation ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
+`view_access_key_list` and requires `allowance = null` before confirmation
+([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
 
-Observed testnet integration (the reserve was overridden to `0.03 NEAR` for
+Observed testnet integration (the reserve was overridden to `0.02 NEAR` for
 this isolated proof; UAT default remains `0.3 NEAR`):
 
-- account `pr-a-1761141000-agent.mandateos.testnet`;
+- account `pr-a-unlimited-1761142000-agent.mandateos.testnet`;
 - transaction
-  [`4VxqUr3CyDpF5n8b7HwwtcqPUPtwy41BuEFWX23Qmf4Y`](https://testnet.nearblocks.io/txns/4VxqUr3CyDpF5n8b7HwwtcqPUPtwy41BuEFWX23Qmf4Y);
-- finalized block `274267811`;
-- exactly one key, `FunctionCall`, allowance `0.01 NEAR`, receiver
+  [`FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw`](https://testnet.nearblocks.io/txns/FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw);
+- finalized block `274271995`;
+- exactly one key, `FunctionCall`, `allowance = null`, receiver
   `vault-v4.mandateos-root-20261021.testnet`, and the four documented methods;
 - local key file permission observed as `0600`.
 
 `request_derived_public_key` requires no attached deposit. Its focused Sandbox
 run burnt `6.306 Tgas`; the SDK attaches `50 Tgas` to cover the MPC call and
 callback ([`contracts/tests/tests/vault_operations.rs`](../contracts/tests/tests/vault_operations.rs)).
+On NEAR testnet, `prepare` burnt `3.144851013726 Tgas`
+([tx](https://testnet.nearblocks.io/txns/2K8YMFDYFBFocSDZWSf1aRPq15w3n6giuA3XKuVGwjK3))
+and `authorize` burnt `14.311476888041 Tgas`
+([tx](https://testnet.nearblocks.io/txns/GgU8kFUeypkLjAuB9mQED1TULhqvW1NBSy5KF6dvKWWZ)).
+The SDK attaches `10 Tgas` to `prepare` and `50 Tgas` to `authorize`; the latter
+must also reserve the Vault's `15 Tgas` MPC receipt and `20 Tgas` callback
+([`packages/sdk/src/index.ts`](../packages/sdk/src/index.ts),
+[`contracts/vault/src/lib.rs`](../contracts/vault/src/lib.rs)).
+
+The API and payment worker compare the agent account balance with
+`NEAR_AGENT_GAS_LOW_YOCTO` (default `0.05 NEAR`). A low balance does not block a
+payment attempt: recharge the existing account with a simple NEAR transfer;
+do not replace or add a key
+([`apps/api/src/console-data.ts`](../apps/api/src/console-data.ts),
+[`apps/api/src/operation-worker.ts`](../apps/api/src/operation-worker.ts)).
 
 ![Agent restricted-key attestation](./console/agent-provisioning.webp)
+![Agent low gas balance alert](./console/agent-gas-low.webp)
 
 ### `POST /v1/console/agents/:id/revoke`
 

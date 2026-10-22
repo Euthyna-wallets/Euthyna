@@ -9,7 +9,7 @@ const expected = {
   publicKey: "ed25519:11111111111111111111111111111111",
   vaultAccountId: "vault.testnet",
   methodNames: [...AGENT_FUNCTION_CALL_METHODS],
-  allowanceYocto: "100000000000000000000000",
+  allowanceYocto: null,
 };
 
 const restrictedKey = {
@@ -18,7 +18,7 @@ const restrictedKey = {
     nonce: 0,
     permission: {
       FunctionCall: {
-        allowance: expected.allowanceYocto,
+        allowance: null,
         receiver_id: expected.vaultAccountId,
         method_names: [...expected.methodNames],
       },

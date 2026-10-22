@@ -57,7 +57,7 @@ describe("readAgentAccessKeyRpc", () => {
         access_key: {
           permission: {
             FunctionCall: {
-              allowance: "100",
+              allowance: null,
               receiver_id: "vault.testnet",
               method_names: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
             },
@@ -70,7 +70,7 @@ describe("readAgentAccessKeyRpc", () => {
       publicKey: "ed25519:agent",
       vaultAccountId: "vault.testnet",
       methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
-      allowanceYocto: "100",
+      allowanceYocto: null,
     })).resolves.toMatchObject({ valid: true });
   });
 });

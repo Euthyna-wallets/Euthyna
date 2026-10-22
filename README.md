@@ -290,7 +290,7 @@ The current UAT uses the security-corrected Vault and Base Sepolia chain ID `845
 | ACME Vault | `vault-v4.mandateos-root-20261021.testnet` | — |
 | Test FT | `test-ft-v4.mandateos-root-20261021.testnet` | — |
 | Agent | `agent-v4.mandateos-root-20261021.testnet` | `0x10EdE0F3C618321919934Fd63df173DD37F037Af` |
-| Restricted-key provisioning proof | [`pr-a-1761141000-agent.mandateos.testnet`](https://testnet.nearblocks.io/address/pr-a-1761141000-agent.mandateos.testnet) · [tx](https://testnet.nearblocks.io/txns/4VxqUr3CyDpF5n8b7HwwtcqPUPtwy41BuEFWX23Qmf4Y) | — |
+| Restricted-key provisioning proof | [`pr-a-unlimited-1761142000-agent.mandateos.testnet`](https://testnet.nearblocks.io/address/pr-a-unlimited-1761142000-agent.mandateos.testnet) · [tx](https://testnet.nearblocks.io/txns/FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw) · unlimited (`null`) FC allowance | — |
 | MPC signer | `v1.signer-prod.testnet` | — |
 | Safe 1.4.1 | — | `0x19C06E5bfCd7C31c71508f14df2f1C70d9D199cD` |
 | Operational Roles 2.1.1 | — | `0x7178555779097cAE1BA20C5D7ED7205708a5ed40` |

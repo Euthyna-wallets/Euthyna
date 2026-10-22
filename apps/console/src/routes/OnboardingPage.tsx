@@ -1531,7 +1531,7 @@ type AgentProvisioningView = {
       publicKey: string;
       vaultAccountId: string;
       methodNames: string[];
-      allowanceYocto: string;
+      allowanceYocto: null;
     };
   } | null;
 };

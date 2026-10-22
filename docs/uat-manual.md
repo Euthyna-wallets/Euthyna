@@ -87,11 +87,14 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
    `compta-bot-agent.<parent>`.
 3. Cliquer **Provision**. L'API crée et finance le compte avec une seule
    transaction, puis le navigateur lit directement `view_access_key_list`.
-4. Vérifier exactement une clé `FunctionCall`, receiver = Vault, allowance
-   attendue et méthodes `prepare`, `authorize`, `cancel_nonce`,
+4. Vérifier exactement une clé `FunctionCall`, receiver = Vault,
+   `allowance = null` et méthodes `prepare`, `authorize`, `cancel_nonce`,
    `request_derived_public_key`; confirmer dans la console.
-5. Dans le mandat, exécuter/voter `set_role` avant `register_agent`.
-6. Démarrer le SDK. Il doit voir l'agent enregistré, appeler une seule fois
+5. Vérifier que le solde gas NEAR n'est pas sous le seuil. S'il est bas,
+   envoyer un simple transfert NEAR au compte agent existant ; ne jamais
+   ajouter ou remplacer sa clé.
+6. Dans le mandat, exécuter/voter `set_role` avant `register_agent`.
+7. Démarrer le SDK. Il doit voir l'agent enregistré, appeler une seule fois
    `request_derived_public_key`, puis afficher `0xAAA` dans la fiche agent.
    Avant `register_agent`, le SDK et l'UI doivent afficher l'erreur explicite et
    ne pas appeler `prepare`.

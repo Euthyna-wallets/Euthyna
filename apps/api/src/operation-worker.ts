@@ -69,6 +69,7 @@ export interface WorkerStore {
 
 export interface WorkerNearGateway {
   getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation>;
+  getAccount(accountId: string): Promise<{ amount: string }>;
   currentBlockHeight(): Promise<number>;
   transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus>;
   submitSignature(vaultAccountId: string, opId: number[], signature: MpcSignature): Promise<string>;
@@ -100,6 +101,7 @@ export interface WorkerConfig {
   retryBaseMs: number;
   retryMaxMs: number;
   cancellationSenderAccountId: string;
+  agentGasLowYocto: string;
 }
 
 function opBytes(opId: string): number[] {
@@ -280,6 +282,21 @@ export class OperationWorker {
     const derivedAddress = onChainAgentEvmAddress(chainAgent);
     if (derivedAddress && derivedAddress !== record.agentEvmAddress) {
       await this.store.syncAgentEvmAddress(record, derivedAddress);
+    }
+    try {
+      const agentAccount = await this.near.getAccount(record.agentNearAccountId);
+      if (BigInt(agentAccount.amount) < BigInt(this.config.agentGasLowYocto)) {
+        console.warn(JSON.stringify({
+          event: "agent.gas_balance_low",
+          agentId: record.agentId,
+          nearAccountId: record.agentNearAccountId,
+          balanceYocto: agentAccount.amount,
+          thresholdYocto: this.config.agentGasLowYocto,
+          resolution: `send a simple NEAR transfer to ${record.agentNearAccountId}`,
+        }));
+      }
+    } catch {
+      // Balance alerting must not block payment recovery.
     }
     if (operation.state === "Confirmed") {
       const txHash = operation.signed_transaction

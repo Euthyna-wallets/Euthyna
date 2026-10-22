@@ -511,7 +511,7 @@ model AgentProvisioning {
   vaultAccountId  String
   methodNames     Json
   reserveYocto    String
-  allowanceYocto  String
+  allowanceYocto  String?
   status          String       @default("reserved")
   transactionHash String?
   confirmedAt     DateTime?

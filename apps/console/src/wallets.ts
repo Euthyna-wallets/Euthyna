@@ -335,7 +335,7 @@ export async function readAgentAccessKeyRpc(input: {
   publicKey: string;
   vaultAccountId: string;
   methodNames: string[];
-  allowanceYocto: string;
+  allowanceYocto: null;
 }): Promise<AgentAccessKeyRpcAttestation> {
   const result = await nearRpc<{ keys: unknown[] }>({
     request_type: "view_access_key_list",

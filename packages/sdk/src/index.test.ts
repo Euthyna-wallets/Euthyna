@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AGENT_FUNCTION_CALL_METHODS,
+  AGENT_GAS,
   AgentDerivationPendingError,
   AgentNotRegisteredError,
   FileAgentKeyStore,
@@ -26,7 +27,7 @@ const registered = (evm: number[] | null): VaultAgentState => ({
 
 class FakeAccount implements AgentNearAccount {
   views: Array<VaultAgentState | null> = [];
-  calls: Array<{ methodName: string; args: Record<string, unknown>; deposit: string }> = [];
+  calls: Array<{ methodName: string; args: Record<string, unknown>; gas: string; deposit: string }> = [];
 
   viewFunction(): Promise<unknown> {
     return Promise.resolve(this.views.shift() ?? null);
@@ -35,9 +36,15 @@ class FakeAccount implements AgentNearAccount {
   functionCall(input: {
     methodName: string;
     args: Record<string, unknown>;
+    gas: string;
     attachedDeposit: string;
   }): Promise<{ transaction_outcome: { id: string } }> {
-    this.calls.push({ methodName: input.methodName, args: input.args, deposit: input.attachedDeposit });
+    this.calls.push({
+      methodName: input.methodName,
+      args: input.args,
+      gas: input.gas,
+      deposit: input.attachedDeposit,
+    });
     return Promise.resolve({ transaction_outcome: { id: `tx-${input.methodName}` } });
   }
 }
@@ -82,6 +89,7 @@ describe("NearAgentVaultClient derivation", () => {
     expect(account.calls).toEqual([{
       methodName: "request_derived_public_key",
       args: { agent: "agent.testnet" },
+      gas: AGENT_GAS.requestDerivedPublicKey,
       deposit: "0",
     }]);
   });
@@ -116,5 +124,16 @@ describe("NearAgentVaultClient derivation", () => {
     await expect(client.ensureDerivedAddress({ attempts: 1, intervalMs: 0 }))
       .resolves.toMatchObject({ requested: false });
     expect(account.calls).toHaveLength(1);
+  });
+  it("uses measured gas limits for prepare and authorize", async () => {
+    const account = new FakeAccount();
+    account.views.push(registered(derivedBytes));
+    const client = new NearAgentVaultClient(account, "agent.testnet", "vault.testnet");
+    await client.prepare({ amount: "1" });
+    await client.authorize([1, 2], { visa: {} });
+    expect(account.calls.map(({ methodName, gas }) => ({ methodName, gas }))).toEqual([
+      { methodName: "prepare", gas: AGENT_GAS.prepare },
+      { methodName: "authorize", gas: AGENT_GAS.authorize },
+    ]);
   });
 });

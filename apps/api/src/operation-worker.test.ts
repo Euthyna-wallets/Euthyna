@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Hex } from "viem";
 
 import {
@@ -126,8 +126,12 @@ class FakeNear implements WorkerNearGateway {
   reportFailsAfterCommit = false;
   status: import("./near.js").NearTransactionStatus = {};
   agentState: Record<string, unknown> = { active: false };
+  gasBalanceYocto = "100000000000000000000000";
 
   constructor(public operation: VaultOperation) {}
+  getAccount(): Promise<{ amount: string }> {
+    return Promise.resolve({ amount: this.gasBalanceYocto });
+  }
 
   getOperation(): Promise<VaultOperation> {
     return Promise.resolve(this.operation);
@@ -238,6 +242,7 @@ const config: WorkerConfig = {
   retryBaseMs: 100,
   retryMaxMs: 10_000,
   cancellationSenderAccountId: "mandateos.testnet",
+  agentGasLowYocto: "50000000000000000000000",
 };
 
 function harness(overrides: Partial<VaultOperation> = {}) {
@@ -385,6 +390,16 @@ describe("OperationWorker", () => {
     test.advance(1_000);
     await test.createWorker().tick();
     expect(test.store.released).toEqual(["Cancelled"]);
+  });
+
+  it("warns without blocking when the agent NEAR gas balance is low", async () => {
+    const test = harness();
+    test.near.gasBalanceYocto = "10000000000000000000000";
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await test.createWorker().tick();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"agent.gas_balance_low\""));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("send a simple NEAR transfer to agent.testnet"));
+    warning.mockRestore();
   });
 
   it("expires Prepared operations and releases their references", async () => {

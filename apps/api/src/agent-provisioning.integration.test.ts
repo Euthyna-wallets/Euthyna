@@ -31,7 +31,7 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
     const accessKey = {
       public_key: publicKey,
       access_key: { permission: { FunctionCall: {
-        allowance: "100000000000000000000000",
+        allowance: null,
         receiver_id: "vault.testnet",
         method_names: [...AGENT_FUNCTION_CALL_METHODS],
       } } },
@@ -69,7 +69,6 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
       "mandateos.testnet",
       5,
       "300000000000000000000000",
-      "100000000000000000000000",
     );
     await expect(service.provision(organizationId, agentId)).resolves.toMatchObject({
       status: "provisioned",
@@ -82,7 +81,7 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
       receiverId: "vault.testnet",
       methodNames: [...AGENT_FUNCTION_CALL_METHODS],
       reserveYocto: "300000000000000000000000",
-      allowanceYocto: "100000000000000000000000",
+      allowanceYocto: null,
     }]);
     await expect(service.confirm(organizationId, agentId)).resolves.toMatchObject({
       status: "confirmed",
@@ -118,7 +117,6 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
       "mandateos.testnet",
       1,
       "300000000000000000000000",
-      "100000000000000000000000",
     );
     await expect(capped.provision(organizationId, secondAgentId))
       .rejects.toMatchObject({ code: "daily_sponsorship_limit" });

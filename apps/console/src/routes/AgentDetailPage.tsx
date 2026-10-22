@@ -15,6 +15,9 @@ interface Detail {
   budget: { config?: Record<string, unknown>; funded?: string; reserved?: string; spent?: string; available?: string } | null;
   nonce: number | null;
   ethBalance: string | null;
+  nearGasBalanceYocto: string | null;
+  nearGasLow: boolean;
+  nearGasLowThresholdYocto: string;
   audit: Array<{ id: string; action: string; actorId: string; createdAt: string }>;
 }
 
@@ -41,8 +44,16 @@ export function AgentDetailPage() {
               <div className="metric"><span>Status</span><strong>{query.data.agent.active ? "Active" : "Revoked"}</strong></div>
               <div className="metric"><span>0xAAA</span><strong className="mono small">{short(query.data.agent.evmAddress)}</strong></div>
               <div className="metric"><span>Gas ETH</span><strong>{formatEth(query.data.ethBalance)}</strong></div>
+              <div className="metric"><span>Gas NEAR</span><strong>{formatToken(query.data.nearGasBalanceYocto, 24, "NEAR", 4)}</strong></div>
               <div className="metric"><span>Nonce</span><strong>{formatNonce(query.data.nonce)}</strong></div>
             </div>
+            {query.data.nearGasLow ? (
+              <div className="alert error">
+                Agent gas balance is below {formatToken(query.data.nearGasLowThresholdYocto, 24, "NEAR", 4)}.
+                Recharge it with a simple NEAR transfer to <span className="mono">{query.data.agent.nearAccountId}</span>.
+                Do not add or replace its restricted key.
+              </div>
+            ) : null}
             {!query.data.onChain ? (
               <div className="alert error">
                 Agent is not registered in the Vault. Execute set_role, then register_agent before starting the SDK.

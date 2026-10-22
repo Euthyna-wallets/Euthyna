@@ -26,7 +26,7 @@ it("provisions the agent in one transaction with one restricted FunctionCall key
     receiverId: "vault.testnet",
     methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
     reserveYocto: "300000000000000000000000",
-    allowanceYocto: "100000000000000000000000",
+    allowanceYocto: null,
   })).resolves.toBe("near-provision-hash");
 
   expect(calls).toHaveLength(1);
@@ -50,6 +50,6 @@ it("provisions the agent in one transaction with one restricted FunctionCall key
   expect(actions[2]?.addKey?.accessKey?.permission?.functionCall).toMatchObject({
     receiverId: "vault.testnet",
     methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
-    allowance: 100000000000000000000000n,
+    allowance: undefined,
   });
 });

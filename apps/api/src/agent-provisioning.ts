@@ -8,7 +8,7 @@ export interface AgentAccessKeyExpectation {
   publicKey: string;
   vaultAccountId: string;
   methodNames: string[];
-  allowanceYocto: string;
+  allowanceYocto: null;
 }
 
 export interface AgentAccessKeyAttestation {
@@ -74,7 +74,6 @@ export class AgentProvisioningService {
     private readonly parentAccountId: string,
     private readonly dailyLimit: number,
     private readonly reserveYocto: string,
-    private readonly allowanceYocto: string,
   ) {}
 
   async provision(organizationId: string, agentId: string): Promise<{
@@ -105,7 +104,7 @@ export class AgentProvisioningService {
         receiverId: expectation.vaultAccountId,
         methodNames: expectation.methodNames,
         reserveYocto: this.reserveYocto,
-        allowanceYocto: this.allowanceYocto,
+        allowanceYocto: null,
       });
     } catch (error) {
       const attestation = await this.attestation(expectation).catch(() => null);
@@ -186,7 +185,7 @@ export class AgentProvisioningService {
       publicKey: agent.nearPublicKey,
       vaultAccountId: agent.vaultAccountId,
       methodNames: [...AGENT_FUNCTION_CALL_METHODS],
-      allowanceYocto: this.allowanceYocto,
+      allowanceYocto: null,
     };
   }
 
@@ -227,7 +226,7 @@ export class AgentProvisioningService {
             vaultAccountId: agent.vaultAccountId,
             methodNames: [...AGENT_FUNCTION_CALL_METHODS],
             reserveYocto: this.reserveYocto,
-            allowanceYocto: this.allowanceYocto,
+            allowanceYocto: null,
             status: "reserved",
             transactionHash: null,
             confirmedAt: null,
