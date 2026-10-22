@@ -15,7 +15,7 @@ function fixture(passkey: boolean) {
   } as unknown as MandateAuth;
   const prisma = {
     passkey: { findFirst: async () => passkey ? ({ id: "passkey-1" }) : null },
-    member: { findFirst: async () => ({ userId: "user-1", organizationId: "org-1", role: "owner" }) },
+    member: { findFirst: async () => ({ id: "member-1", userId: "user-1", organizationId: "org-1", role: "owner" }) },
   } as unknown as PrismaClient;
   return new BetterAuthGateway(auth, prisma);
 }
@@ -28,6 +28,7 @@ describe("console email and passkey boundary", () => {
   it("accepts a passkey session while preserving the unverified email state", async () => {
     await expect(fixture(true).identifyConsole(new Headers())).resolves.toEqual({
       userId: "user-1",
+      memberId: "member-1",
       organizationId: "org-1",
       role: "owner",
       email: "member@example.test",

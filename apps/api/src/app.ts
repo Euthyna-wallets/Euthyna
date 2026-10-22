@@ -6,7 +6,7 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
-import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway.js";
+import type { AgentIdentity, AuthGateway, ConsoleIdentity, PasskeyIdentity } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
@@ -16,6 +16,7 @@ import { PaymentError, type PaymentService } from "./payments.js";
 import type { ConsoleDataService } from "./console-data.js";
 import type { MandateGateway } from "./mandates.js";
 import type { BaseRelayer } from "./relayer.js";
+import { WalletProofError, type WalletProofGateway } from "./wallet-proof.js";
 
 const requestSchema = z.object({
   vaultAccountId: z.string().min(2),
@@ -135,9 +136,32 @@ const treasuryRegisterSchema = z.object({
   govAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
+const nearDeploymentAttestationSchema = treasuryRegisterSchema.pick({
+  environment: true,
+  daoAccountId: true,
+  vaultAccountId: true,
+  relayAccountId: true,
+  govAddress: true,
+});
+
 const nearSponsorshipSchema = z.object({
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
   nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
+});
+
+const walletProofChallengeSchema = z.object({
+  memberId: z.string().uuid(),
+  nearAccountId: nearAccountSchema,
+  evmAddress: evmAddressSchema,
+});
+
+const walletProofSubmissionSchema = z.object({
+  challengeId: z.string().uuid(),
+  nearAccountId: nearAccountSchema,
+  nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
+  nearSignature: z.string().min(40).max(200),
+  evmAddress: evmAddressSchema,
+  evmSignature: z.string().regex(/^0x[0-9a-fA-F]+$/).max(300),
 });
 
 function derivedWalletAccountId(publicKey: string, parent: string): string {
@@ -158,9 +182,9 @@ function registrationIp(context: Context): string {
 
 interface AppVariables {
   agent: AgentIdentity;
+  passkey: PasskeyIdentity;
   console: ConsoleIdentity;
 }
-
 type AppContext = Context<{ Variables: AppVariables }>;
 
 export interface AppDependencies {
@@ -168,6 +192,7 @@ export interface AppDependencies {
   guard: Guard;
   relayer: BaseRelayer;
   auth: AuthGateway;
+  walletProof: WalletProofGateway;
   treasury: TreasuryGateway;
   mandates: MandateGateway;
   registry: RegistryService;
@@ -203,6 +228,18 @@ function requireConsole(auth: AuthGateway, limiter: RateLimiter) {
       throw new HTTPException(429, { message: "rate limit exceeded" });
     }
     context.set("console", identity);
+    await next();
+  };
+}
+
+function requirePasskey(auth: AuthGateway, limiter: RateLimiter) {
+  return async (context: AppContext, next: Next) => {
+    const identity = await auth.identifyPasskeyUser(context.req.raw.headers);
+    if (!identity) throw new HTTPException(401, { message: "passkey session required" });
+    if (!limiter.allow(`profile:${identity.userId}`)) {
+      throw new HTTPException(429, { message: "rate limit exceeded" });
+    }
+    context.set("passkey", identity);
     await next();
   };
 }
@@ -269,6 +306,7 @@ export function createApp({
   guard,
   relayer,
   auth,
+  walletProof,
   treasury,
   mandates,
   registry: registryService,
@@ -295,6 +333,7 @@ export function createApp({
   );
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
+  app.use("/v1/profile/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     const path = context.req.path;
@@ -302,9 +341,7 @@ export function createApp({
       return context.json({ error: "not_found" }, 404);
     }
     if (path.endsWith("/organization/accept-invitation")) {
-      if (!(await auth.isEmailVerified(context.req.raw.headers))) {
-        return context.json({ error: "email_verification_required" }, 403);
-      }
+      return context.json({ error: "wallet_proof_required" }, 403);
     }
     return auth.handler(context.req.raw);
   });
@@ -335,6 +372,36 @@ export function createApp({
       headers: response.headers,
     });
   });
+
+  app.post(
+    "/v1/profile/wallet-proof/challenge",
+    requirePasskey(auth, consoleLimiter),
+    async (context) => {
+      const identity = context.get("passkey");
+      const input = await parseJson(context, walletProofChallengeSchema);
+      return context.json(await walletProof.createChallenge(identity.userId, input));
+    },
+  );
+
+  app.post(
+    "/v1/profile/wallet-proof/verify",
+    requirePasskey(auth, consoleLimiter),
+    async (context) => {
+      const identity = context.get("passkey");
+      const input = await parseJson(context, walletProofSubmissionSchema);
+      const result = await walletProof.verify(identity.userId, input);
+      await auth.recordAudit({
+        organizationId: result.organizationId,
+        actorType: "console",
+        actorId: identity.userId,
+        action: "member.wallets_proved",
+        targetType: "member",
+        targetId: result.memberId,
+        metadata: { nearAccountId: input.nearAccountId, evmAddress: input.evmAddress },
+      });
+      return context.json({ ...result, verified: true });
+    },
+  );
 
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const input = await parseJson(context, requestSchema);
@@ -387,19 +454,6 @@ export function createApp({
     return context.json({ nearTransactionHash, opId: input.opId });
   });
 
-  app.patch("/v1/console/members/me/wallets", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, walletsSchema);
-    await treasury.linkWallets(consoleIdentity.organizationId, consoleIdentity.userId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "member.wallets_linked",
-      metadata: { nearAccountId: input.nearAccountId, evmAddress: input.evmAddress },
-    });
-    return context.json({ nearAccountId: input.nearAccountId, evmAddress: input.evmAddress });
-  });
 
   app.post("/v1/operations/pay", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
@@ -573,7 +627,7 @@ export function createApp({
     return context.json({ treasury: await treasury.getTreasury(consoleIdentity.organizationId, environment) });
   });
 
-  app.post("/v1/console/treasury/plan", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/treasury/plan", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, treasuryPlanSchema);
     return context.json(await treasury.plan(consoleIdentity.organizationId, input));
@@ -688,6 +742,32 @@ export function createApp({
       metadata: deployed,
     });
     return context.json(deployed);
+  });
+
+  app.post("/v1/console/treasury/deployment-confirmations/status", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, nearDeploymentAttestationSchema);
+    return context.json(await treasury.nearDeploymentConfirmations(consoleIdentity.organizationId, input));
+  });
+
+  app.post("/v1/console/treasury/deployment-confirmations/confirm", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, nearDeploymentAttestationSchema);
+    const status = await treasury.confirmNearDeployment(
+      consoleIdentity.organizationId,
+      consoleIdentity.memberId,
+      input,
+    );
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "treasury.near_deployment_confirmed",
+      targetType: "member",
+      targetId: consoleIdentity.memberId,
+      metadata: { digest: status.digest },
+    });
+    return context.json(status);
   });
 
   app.post("/v1/console/treasury/register", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -842,6 +922,9 @@ export function createApp({
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof TreasuryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof WalletProofError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof RegistryError) {

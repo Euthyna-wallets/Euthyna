@@ -14,7 +14,7 @@ Le projet vise la track **06 — AI Security & Defense** du hackathon NEAR 2026.
 | **Phase 2 — stretch** | Dépôt vers NEAR Intents, swap, puis retrait/bridge vers un wallet enregistré | Architecture cible ; ne doit pas être annoncé comme implémenté avant une preuve on-chain |
 | **Roadmap** | Comptes de vote passkey, code global Vault/relay, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
 
-Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale par Company avec le dépôt fourni par le fondateur. En mode UAT explicite, MandateOS réserve puis crée/finance le wallet client juste avant la création DAO, sous plafond journalier PostgreSQL ; l'inscription ne dépense aucun NEAR. Le serveur ne signe ni création ni policy. L'API finance séparément les Vault/relay sans access key.
+Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale par Company avec le dépôt fourni par le fondateur. Chaque membre doit prouver le contrôle de ses wallets par NEP-413 et EIP-191 ; une déclaration admin non signée reste hors du council. En mode UAT explicite, MandateOS réserve puis crée/finance le wallet client juste avant la création DAO, sous plafond journalier PostgreSQL ; l'inscription ne dépense aucun NEAR. Le serveur ne signe ni création ni policy. L'API finance séparément les Vault/relay sans access key, puis chaque membre les atteste depuis le RPC NEAR avant le déploiement Safe.
 
 Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/dao-spike.md`](./docs/dao-spike.md).
 
@@ -31,6 +31,8 @@ Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/d
 9. Le relayer ne modifie et ne signe rien ; il diffuse une transaction brute déjà signée.
 10. Une policy modifiée n'entre en vigueur qu'après la gouvernance applicable à sa cible.
 11. Une nouvelle policy reste inactive tant que le Vault et Zodiac n'ont pas confirmé la même version ; Guard l'active en dernier.
+12. Une déclaration de wallets n'accorde aucune autorité : NEP-413, clé NEAR full-access on-chain et EIP-191 doivent tous être vérifiés avant l'inclusion au council.
+13. Safe ne peut être déployé ni la Treasury enregistrée avant la confirmation, par chaque membre prouvé, du même digest Vault/relay vérifié par RPC.
 
 Ces invariants sont des exigences MandateOS. Les primitives externes qui les rendent possibles sont documentées dans les sections correspondantes.
 
@@ -71,7 +73,7 @@ NEAR Chain Signatures produit des signatures secp256k1 à partir du compte NEAR 
 
 | Composant | Phase | Responsabilité | Source technique |
 |---|---:|---|---|
-| Console | 1 | Inscription email + passkey à partir d'un contexte signé court ; email non vérifié, invitations bloquées ; NEAR Wallet Selector et MetaMask/Rabby pour signer. | [Better Auth passkey][better-auth-passkey] |
+| Console | 1 | Inscription email + passkey à partir d'un contexte signé court ; adhésion par preuves NEP-413/EIP-191 plutôt que par email ; lecture RPC et confirmation des déploiements ; NEAR Wallet Selector et MetaMask/Rabby pour signer. | [Better Auth passkey][better-auth-passkey] |
 | API TypeScript | 1 | Backend HTTP Hono : Guard, authentification, clients, agents, policies, fournisseurs, opérations et relayer. | [Hono][hono] |
 | Relayer NEAR sponsor | 1 | Reçoit un `SignedDelegateAction`, applique l'allowlist MandateOS et paie le gas NEAR depuis un compte relayer financé. | [Meta-transactions NEAR][near-meta-transactions], [guide relayer][near-relayer-guide] |
 | Identité agent | 1 | Client credentials Better Auth pour Guard ; compte NEAR avec une function-call key générée côté client pour le Vault. | [Better Auth OAuth provider][better-auth-oauth], [access keys NEAR][near-access-keys] |
@@ -151,7 +153,7 @@ La factory MandateOS `factory-v2.mandateos.testnet` est déployée une fois et n
 
 Ces soldes ne sont pas des frais par paiement. Le chemin réel `authorize → MPC → callback` a consommé 14,288425743215 Tgas ; au prix testnet observé de `10^8` yoctoNEAR/gas, cela vaut environ **0,00142885 NEAR** ([gas NEAR][near-gas]). Il n'y a pas d'erreur de 24 décimales dans les constantes.
 
-Le sponsor est volontairement réservé à la démo hackathon. Le navigateur lit directement `get_policy` via le RPC NEAR, exige la confirmation de chaque membre observé et du seuil, puis seulement autorise le déploiement Vault/relay. `auto_update: true` reste un avertissement : la factory keyless n'expose aucune méthode d'update et la DAO référence un hash immuable.
+Le sponsor est volontairement réservé à la démo hackathon. Le navigateur lit directement `get_policy` via le RPC NEAR, exige la confirmation du council et du seuil, puis autorise le déploiement Vault/relay. Après ce déploiement sponsorisé, chaque membre prouvé lit directement les comptes et vues Vault/relay (`code_hash`, clés, owner, MPC/path, chain, token, Guard/TTL et delay) et confirme le même digest avant Safe. `auto_update: true` reste un avertissement : la factory keyless n'expose aucune méthode d'update et la DAO référence un hash immuable.
 
 La factory réutilise Sputnik au lieu de réécrire la gouvernance. Le contrat est compatible avec l'UI Sputnik officielle de Trezu configurée pour testnet ; le backend hébergé `testenv.trezu.app` refuse toutefois actuellement les suffixes personnalisés. Publier Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ([global contracts NEAR][near-global-contracts]).
 

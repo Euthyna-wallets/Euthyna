@@ -18,6 +18,7 @@ const schema = z.object({
   PASSKEY_RP_ID: z.string().min(1).optional(),
   NEAR_SPONSOR_DAILY_WALLET_LIMIT: z.coerce.number().int().min(0).max(100).default(5),
   NEAR_SPONSOR_WALLET_AMOUNT_YOCTO: z.string().regex(/^\d+$/).default("500000000000000000000000"),
+  UAT_DEMO_WALLETS_ENABLED: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   DAO_FACTORY_ID: z.string().min(1).default("factory-v2.mandateos.testnet"),
   DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("250000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),

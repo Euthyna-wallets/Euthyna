@@ -9,6 +9,11 @@ client-side signature because the headless test browser has no NEAR wallet and n
 injected EVM wallet. No new on-chain transaction was produced by this run; the
 blockers and the exact plan that would have been signed are recorded below.
 
+> Historical evidence only. Current onboarding no longer accepts Better Auth
+> email invitations or unsigned wallet links. Re-run with the NEP-413/EIP-191
+> claim flow and per-member Vault/relay RPC confirmations in
+> [`uat-manual.md`](./uat-manual.md).
+
 ## Steps reached
 
 | # | Step | Result |
@@ -34,10 +39,10 @@ blockers and the exact plan that would have been signed are recorded below.
 - `bob@acme.test` (`member`) ↔ `bob-uat.testnet` /
   `0x3333333333333333333333333333333333333333`
 
-The console generated the invitation links. Because this environment has no
-email delivery, the two invitations were accepted through the Better Auth API
-with the members' own sessions; the console then displayed all three members and
-their linked wallets.
+At that historical revision the console generated email invitation links and
+accepted unsigned wallet declarations. Commit `255b04a` and the subsequent
+wallet-proof hardening supersede that behavior; these rows are not evidence of
+current wallet control.
 
 ### 3. Treasury plan
 
@@ -161,5 +166,7 @@ pnpm --filter @mandateos/api dev
 pnpm --filter @mandateos/console dev
 ```
 
-Then create the organization, invite two members, link wallets, and build the plan.
-The next console run must provide the two wallets above.
+Then create the organization, declare two pending members, have each member
+claim the link with NEP-413 and EIP-191 signatures, and build the plan. After
+Vault/relay deployment, each proven member must independently attest the direct
+RPC result before Safe.

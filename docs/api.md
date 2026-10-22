@@ -35,8 +35,9 @@ passkey and creates the session. It sends no email and stores no magic token or
 password; direct email/password routes return `404`.
 
 The email is a profile identifier in the hackathon build, not a verified
-credential. Invitation acceptance therefore returns `403
-email_verification_required`. Console API identity requires an enrolled passkey.
+credential. Better Auth email-invitation acceptance therefore returns `403
+wallet_proof_required`; membership is claimed by proving both declared wallets.
+Console API identity requires an enrolled passkey.
 In explicit `VITE_UAT_DEMO_MODE=1`, only the NEAR/EVM transaction wallets are
 generated locally; the Better Auth passkey flow is unchanged. Outside demo,
 users connect through NEAR Wallet Selector and MetaMask/Rabby and no private key
@@ -164,50 +165,65 @@ never modifies the registry.
 
 ## Treasury onboarding
 
-All `/v1/console/*` and `/v1/emergency/*` requests require
+All `/v1/console/*`, `/v1/profile/*` and `/v1/emergency/*` requests require
 `Origin: CONSOLE_ORIGIN`. State-changing methods must also send
 `Content-Type: application/json`; otherwise the API returns `403` or `415`.
 
-### `PATCH /v1/console/members/me/wallets`
+### `POST /v1/profile/wallet-proof/challenge`
 
-Links the session member's NEAR account and EVM address. Both are required before a
-treasury plan can be built.
+Requires a passkey session but not an existing organization membership. It
+creates a one-time 10-minute challenge bound to the member id, organization,
+declared NEAR account, checksum EVM address, NEAR recipient and Base Sepolia
+chain id.
 
-```json
-{ "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
-```
+### `POST /v1/profile/wallet-proof/verify`
+
+Verifies a NEP-413 signature, checks that its public key is currently a
+full-access key on the declared NEAR account, and recovers the EIP-191 signer.
+Both signatures cover the same domain-separated challenge. Successful
+verification consumes the challenge, stores both proofs and `verifiedAt`, and
+claims an admin-created pending membership for the authenticated passkey
+profile. Challenges cannot be replayed.
+
+Normal mode requires the NEP-413 public key to be a current full-access key
+returned by NEAR RPC. Only with explicit `UAT_DEMO_WALLETS_ENABLED=1` may an
+unfunded `w-<sha256(public-key)>.<parent>` account pass this association check;
+the signature still verifies cryptographically, and DAO-time sponsorship must
+later create that exact account with that exact key.
 
 ### `GET /v1/console/members`
 
-Returns members of the session organization with their linked `nearAccountId` and
-`evmAddress`. Better Auth's own member listing does not expose application-specific
-columns.
+Returns members of the session organization with their `nearAccountId`,
+`evmAddress`, `walletProofClaimable` and `walletProofVerifiedAt` state. Better
+Auth's own member listing does not expose these application-specific columns.
 
 ### `POST /v1/console/members`
 
-Admin only. Adds a wallet-only council member for the MVP: no email invitation and
-no login. The server creates a local `User` row (synthetic
-`member-<uuid>@members.mandateos.invalid` email) and a `Member` row bound to the
-organization, so the addresses immediately feed the DAO/Safe plan.
+Admin only. Declares a pending wallet membership for the MVP. The declaration
+does not prove wallet control and is excluded from DAO council and Safe owners.
+The generated `/onboarding?member=<id>` claim link becomes effective only when
+the recipient signs the NEP-413 and EIP-191 challenge from a passkey session.
 
 ```json
 { "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
 ```
 
-Both fields accept a pasted wallet label: only the first token is kept and a trailing
-`(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is stored as
-`busyvideo615.testnet`. The EVM address is checksum-normalized. Nothing is signed.
+Both fields accept a pasted wallet label: only the first token is kept and a
+trailing `(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is
+stored as `busyvideo615.testnet`. The EVM address is checksum-normalized.
 
 ### `PATCH /v1/console/members/:id/wallets`
 
-Admin only. Attaches or replaces the wallets of an existing organization member
-(for example the owner created at signup). Uses the same normalization as
-`POST /v1/console/members` and returns the updated member.
+Admin only. Replaces a declaration and clears every previous wallet proof,
+challenge and deployment confirmation. The member remains outside the council
+until both new signatures verify.
 
 ### `POST /v1/console/treasury/plan`
 
-Admin only. Builds the unsigned DAO, Vault, relay and Base plan for the session
-organization. It never signs and never receives a private key.
+Available to every organization member so each signer can independently inspect
+the deterministic plan. Only members with a stored NEP-413 and EIP-191 proof
+appear in the DAO council and Safe owners. It never signs and never receives a
+private key.
 
 ```json
 { "environment": "uat", "daoName": "acme", "founderNearAccountId": "alice.testnet" }
@@ -229,9 +245,10 @@ The response contains:
 There is no server `create-dao` route. The console displays `daoCreate.args`,
 every council account and the absolute threshold, then requires the founder
 (`founderNearAccountId`) to confirm and sign the factory `create` call locally.
-The attached 0.25 NEAR comes from the founder wallet; MandateOS sponsorship
-pre-funds that client-owned wallet at registration. The permissionless factory
-refunds the caller if asynchronous creation fails.
+The attached 0.25 NEAR comes from the founder wallet. In explicit demo mode,
+MandateOS creates and pre-funds that deterministic client wallet only
+immediately before this call. The permissionless factory refunds the caller if
+asynchronous creation fails.
 
 ### `POST /v1/console/treasury/deploy-contracts`
 
@@ -239,6 +256,20 @@ Admin only. Creates and deploys the Vault and governance relay accounts with the
 relayer (`CreateAccount → Transfer → DeployContract → new`), paying from
 `NEAR_RELAYER_ACCOUNT_ID`. Both contracts are initialized with the DAO as owner and
 hold no access key of their own.
+
+### Deployment attestation and member confirmation
+
+After deployment, each proven council member uses the browser to query NEAR RPC
+directly. The console checks zero access keys, reproducible `code_hash`,
+`owner_id`, MPC contract/path, EVM chain, Vault token/Guard/TTL and relay delay.
+Only an all-match result can call
+`POST /v1/console/treasury/deployment-confirmations/confirm`. The server repeats
+the same RPC checks, computes an immutable deployment digest and stores one
+confirmation per member. The Safe deployment stays disabled until every proven
+council member confirms that digest. `treasury/register` enforces the same gate.
+
+`POST /v1/console/treasury/deployment-confirmations/status` re-verifies the
+accounts and returns the required and confirmed member ids.
 
 ### `GET /v1/console/treasury/sponsor-status`
 
@@ -251,8 +282,9 @@ DAO creation is caller-funded from the founder wallet.
 
 UAT demo admin only. Immediately before founder-signed DAO creation, reserves a
 durable sponsorship row, validates that the deterministic account is the
-authenticated member's linked wallet, enforces `NEAR_SPONSOR_DAILY_WALLET_LIMIT`,
-then creates/funds it with `NEAR_SPONSOR_WALLET_AMOUNT_YOCTO`. The operation is
+authenticated member's proved wallet, enforces
+`NEAR_SPONSOR_DAILY_WALLET_LIMIT`, then creates/funds it with
+`NEAR_SPONSOR_WALLET_AMOUNT_YOCTO`. The operation is
 idempotent by account/public key; failed chain creation releases the reservation.
 Normal wallet-selector accounts do not use this route.
 

@@ -105,6 +105,14 @@ impl GovernanceRelay {
         self.evm_chain_id
     }
 
+    pub fn mpc_contract_id(&self) -> AccountId {
+        self.mpc_contract_id.clone()
+    }
+
+    pub fn mpc_path(&self) -> String {
+        self.mpc_path.clone()
+    }
+
     pub fn delay_address(&self) -> Base64VecU8 {
         Base64VecU8(self.delay_address.to_vec())
     }

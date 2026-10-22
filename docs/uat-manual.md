@@ -25,17 +25,24 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
 
 ## 1. Organisation
 
-1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1`.
+1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1` et l'API avec
+   `UAT_DEMO_WALLETS_ENABLED=1`. Les deux flags restent désactivés par défaut.
 2. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
 3. Créer l'entreprise.
-4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics.
-5. Lier le wallet du fondateur. Aucun compte NEAR n'est encore créé ou financé.
+4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
+   `pending` et ne comptent pas encore dans le council.
+5. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
+   passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
+   EVM (EIP-191).
+6. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
+   créé ou financé.
 
 En mode normal, utiliser NEAR Wallet Selector et MetaMask/Rabby. Vérifier
 qu'aucune clé privée n'apparaît dans localStorage.
 
-Attendu : 3 membres, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour le
-fondateur.
+Attendu : 3 membres prouvés, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour
+le fondateur. Ajouter une quatrième déclaration sans signer : elle doit rester
+hors du plan et le seuil doit rester **2/3**.
 
 ## 2. Trésorerie
 
@@ -47,9 +54,15 @@ fondateur.
    wallet client (0,5 NEAR), puis le navigateur signe et attache 0,25 NEAR.
 4. Cliquer **Read get_policy directly from NEAR RPC**, puis confirmer chaque
    membre observé et le seuil. Vault/relay restent bloqués avant ces confirmations.
-5. **Deploy Vault + relay (MandateOS pays)**, puis déployer Safe + modules.
-6. Préparer le batch Safe, collecter deux signatures et exécuter.
-7. Vérifier et enregistrer la Treasury.
+5. **Deploy Vault + relay (MandateOS pays)**.
+6. Depuis la session de chaque membre prouvé, cliquer **Verify by direct RPC and
+   confirm as this member**. Vérifier les `code_hash`, zéro access key,
+   `owner_id`, MPC/path, chain, token, Guard/TTL et delay. Safe reste bloqué
+   jusqu'à 3/3 confirmations sur le même digest.
+7. Déployer Safe + modules, préparer le batch Safe, collecter deux signatures
+   et exécuter.
+8. Vérifier et enregistrer la Treasury. Le serveur doit aussi refuser
+   `register` si une confirmation manque.
 
 Attendu : Treasury `active`. `auto_update=true` apparaît comme avertissement
 non bloquant pour cette factory keyless et son hash global immuable.

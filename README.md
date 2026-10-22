@@ -76,8 +76,8 @@ The current repository contains:
 - `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
 - `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds three focused tests for global-hash, keyless creation, name validation and funding guards;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
-- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, unverified-email invitation gate, IP/email registration limits, per-agent API keys and append-only audit rows;
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` returns the unsigned DAO, Vault, relay and Base plan; the founder confirms/signs the exact policy locally; the browser re-reads `get_policy`; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap;
+- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, wallet-proof membership claims, IP/email registration limits, per-agent API keys and append-only audit rows;
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` includes only members with verified NEP-413 + EIP-191 proofs; the founder confirms/signs the exact policy locally; every member independently re-reads Vault/relay from NEAR RPC and confirms one server-verified digest before Safe; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap;
 - `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
 - `apps/api` agent payments: `POST /v1/operations/pay` (visa / escalation / refusal) with one transaction consuming the reference and storing the visa, idempotent per `opId`; `GET /v1/operations/:opId` merges DB, Vault and stored visa state; suppliers/contracts live in PostgreSQL with `registry_version` and four-eyes address changes;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
@@ -128,7 +128,7 @@ Funds credited to `0xINT` are protected by the Vault but no longer by Zodiac. Th
 - on-chain or independently verified Base receipt proofs instead of trusted confirmation calls;
 - audit coverage for `omni-transaction` and the MandateOS contracts before production use.
 
-The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no email is sent and no password exists. The email remains an unverified profile identifier, so invitation acceptance is disabled. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey]).
+The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no email is sent and no password exists. The email remains an unverified profile identifier. Membership invitations are accepted instead by proving the admin-declared NEAR and EVM wallets with NEP-413 and EIP-191; unsigned declarations never become DAO/Safe signers. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey]).
 
 ## Governance
 
@@ -235,7 +235,7 @@ set +a
 pnpm --filter @mandateos/api dev
 ```
 
-Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build, so invitations cannot be accepted. Agent credentials are per-agent API keys in `x-api-key`.
+Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build. Better Auth email invitations are blocked; a `/onboarding?member=<id>` wallet invitation is claimed only after valid NEP-413 and EIP-191 proofs. Agent credentials are per-agent API keys in `x-api-key`.
 
 Run the console in another terminal:
 
@@ -311,7 +311,7 @@ On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Role
 - The Vault depends on NEAR Chain Signatures availability. Testnet uses `v1.signer-prod.testnet`; production targets `v1.signer` ([MPC repository][near-mpc]).
 - `omni-transaction` 0.3 builds the EIP-1559 preimage and does not publish an audit report in its repository ([omni-transaction][omni-transaction]).
 - Agent-side NEAR gas sponsorship through NEP-366 is designed but not yet implemented; testnet smoke accounts are faucet-funded ([NEAR meta-transactions][near-meta-transactions]).
-- Founder-wallet sponsorship is UAT-only, deferred until DAO creation, tied to the authenticated linked wallet and capped per UTC day in PostgreSQL.
+- Founder-wallet sponsorship is UAT-only, deferred until DAO creation, tied to the authenticated member's proved deterministic wallet and capped per UTC day in PostgreSQL.
 - Phase 1 is confirmed end to end. The payment transaction is `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4`; the Vault state is `Confirmed`, with `1_000_000` spent and no reservation.
 - Phase 1 Base Sepolia uses `TestUSDC (test token)`, a 6-decimal ERC-20 deployed by the UAT script. It is not Circle USDC and has no value.
 - A Guard-signed status report can only confirm the exact original transaction. Only the DAO owner can confirm an on-chain cancellation.

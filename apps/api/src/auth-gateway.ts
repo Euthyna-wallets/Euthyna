@@ -13,11 +13,15 @@ export interface AgentIdentity {
   role: string;
 }
 
-export interface ConsoleIdentity {
+export interface PasskeyIdentity {
   userId: string;
+  email: string;
+}
+
+export interface ConsoleIdentity extends PasskeyIdentity {
+  memberId: string;
   organizationId: string;
   role: string;
-  email: string;
   emailVerified: boolean;
 }
 
@@ -42,6 +46,8 @@ export interface MemberView {
   evmAddress: string | null;
   email: string | null;
   name: string | null;
+  walletProofClaimable: boolean;
+  walletProofVerifiedAt: Date | null;
 }
 
 export interface CreateAgentInput {
@@ -84,6 +90,7 @@ export type NearSponsorshipReservation =
 export interface AuthGateway {
   handler(request: Request): Promise<Response>;
   identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null>;
+  identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null>;
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
@@ -108,7 +115,6 @@ export interface AuthGateway {
     dailyLimit: number;
   }): Promise<NearSponsorshipReservation>;
   completeNearWalletSponsorship(nearAccountId: string, succeeded: boolean): Promise<void>;
-  isEmailVerified(headers: Headers): Promise<boolean>;
   createAgent(input: CreateAgentInput): Promise<CreatedAgent>;
   revokeAgent(organizationId: string, agentId: string): Promise<boolean>;
   recordAudit(event: AuditEvent): Promise<void>;
@@ -137,6 +143,29 @@ function toAgentView(agent: {
     mpcPath: agent.mpcPath,
     active: agent.active,
     createdAt: agent.createdAt,
+  };
+}
+
+function toMemberView(member: {
+  id: string;
+  userId: string;
+  role: string;
+  nearAccountId: string | null;
+  evmAddress: string | null;
+  walletProofClaimable: boolean;
+  walletProofVerifiedAt: Date | null;
+  user: { email: string; name: string };
+}): MemberView {
+  return {
+    id: member.id,
+    userId: member.userId,
+    role: member.role,
+    nearAccountId: member.nearAccountId,
+    evmAddress: member.evmAddress,
+    email: member.user.email,
+    name: member.user.name,
+    walletProofClaimable: member.walletProofClaimable,
+    walletProofVerifiedAt: member.walletProofVerifiedAt,
   };
 }
 
@@ -170,14 +199,26 @@ export class BetterAuthGateway implements AuthGateway {
     };
   }
 
-  async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
+  private async passkeySession(headers: Headers) {
     const session = await this.auth.api.getSession({ headers });
     if (!session) return null;
     const enrolledPasskey = await this.prisma.passkey.findFirst({
       where: { userId: session.user.id },
       select: { id: true },
     });
-    if (!enrolledPasskey) return null;
+    return enrolledPasskey ? session : null;
+  }
+
+  async identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null> {
+    const session = await this.passkeySession(headers);
+    if (!session) return null;
+    return { userId: session.user.id, email: session.user.email };
+  }
+
+  async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
+    const session = await this.passkeySession(headers);
+    if (!session) return null;
+    const passkeyUser = { userId: session.user.id, email: session.user.email };
     const rawSession: unknown = session.session;
     if (
       !rawSession ||
@@ -192,14 +233,14 @@ export class BetterAuthGateway implements AuthGateway {
     }
 
     const member = await this.prisma.member.findFirst({
-      where: { userId: session.user.id, organizationId: activeOrganizationId },
+      where: { userId: passkeyUser.userId, organizationId: activeOrganizationId },
     });
     if (!member) return null;
     return {
-      userId: session.user.id,
+      ...passkeyUser,
+      memberId: member.id,
       organizationId: member.organizationId,
       role: member.role,
-      email: session.user.email,
       emailVerified: session.user.emailVerified,
     };
   }
@@ -232,10 +273,6 @@ export class BetterAuthGateway implements AuthGateway {
     });
   }
 
-  async isEmailVerified(headers: Headers): Promise<boolean> {
-    const session = await this.auth.api.getSession({ headers });
-    return session?.user.emailVerified === true;
-  }
 
   async reserveNearWalletSponsorship(input: {
     organizationId: string;
@@ -249,6 +286,7 @@ export class BetterAuthGateway implements AuthGateway {
         organizationId: input.organizationId,
         userId: input.userId,
         nearAccountId: input.nearAccountId,
+        walletProofVerifiedAt: { not: null },
       },
     });
     if (!member) return "member_mismatch";
@@ -342,7 +380,7 @@ export class BetterAuthGateway implements AuthGateway {
           id: userId,
           name: input.name,
           email: `member-${userId}@members.mandateos.invalid`,
-          emailVerified: true,
+          emailVerified: false,
         },
       }),
       this.prisma.member.create({
@@ -353,6 +391,7 @@ export class BetterAuthGateway implements AuthGateway {
           role: "member",
           nearAccountId: input.nearAccountId,
           evmAddress: getAddress(input.evmAddress),
+          walletProofClaimable: true,
           createdAt: new Date(),
         },
       }),
@@ -361,15 +400,7 @@ export class BetterAuthGateway implements AuthGateway {
       where: { id: memberId },
       include: { user: true },
     });
-    return {
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      nearAccountId: member.nearAccountId,
-      evmAddress: member.evmAddress,
-      email: member.user.email,
-      name: member.user.name,
-    };
+    return toMemberView(member);
   }
 
   async setMemberWallets(
@@ -377,27 +408,31 @@ export class BetterAuthGateway implements AuthGateway {
     memberId: string,
     input: { nearAccountId: string; evmAddress: string },
   ): Promise<MemberView | null> {
-    const updated = await this.prisma.member.updateMany({
+    const member = await this.prisma.member.findFirst({
       where: { id: memberId, organizationId },
-      data: {
-        nearAccountId: input.nearAccountId,
-        evmAddress: getAddress(input.evmAddress),
-      },
     });
-    if (updated.count === 0) return null;
-    const member = await this.prisma.member.findUniqueOrThrow({
+    if (!member) return null;
+    await this.prisma.$transaction([
+      this.prisma.member.update({
+        where: { id: memberId },
+        data: {
+          nearAccountId: input.nearAccountId,
+          evmAddress: getAddress(input.evmAddress),
+          walletProofVerifiedAt: null,
+          walletProofMessage: null,
+          nearProofPublicKey: null,
+          nearProofSignature: null,
+          evmProofSignature: null,
+        },
+      }),
+      this.prisma.walletProofChallenge.deleteMany({ where: { memberId } }),
+      this.prisma.treasuryDeploymentConfirmation.deleteMany({ where: { memberId } }),
+    ]);
+    const updated = await this.prisma.member.findUniqueOrThrow({
       where: { id: memberId },
       include: { user: true },
     });
-    return {
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      nearAccountId: member.nearAccountId,
-      evmAddress: member.evmAddress,
-      email: member.user.email,
-      name: member.user.name,
-    };
+    return toMemberView(updated);
   }
 
   async listMembers(organizationId: string): Promise<MemberView[]> {
@@ -406,15 +441,7 @@ export class BetterAuthGateway implements AuthGateway {
       include: { user: true },
       orderBy: { createdAt: "asc" },
     });
-    return members.map((member) => ({
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      nearAccountId: member.nearAccountId,
-      evmAddress: member.evmAddress,
-      email: member.user.email,
-      name: member.user.name,
-    }));
+    return members.map(toMemberView);
   }
 
   async listAgents(organizationId: string): Promise<AgentView[]> {

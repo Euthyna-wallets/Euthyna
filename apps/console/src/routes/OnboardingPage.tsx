@@ -18,11 +18,15 @@ import {
   evmWalletClient,
   nearAccounts,
   readDaoPolicyRpc,
+  readNearDeploymentRpc,
   sendEvmTransaction,
   signDaoProposal,
   signNearTransactions,
+  signWalletProofChallenge,
   waitForEvmTransaction,
   type DaoPolicyRpc,
+  type NearDeploymentRpcAttestation,
+  type WalletProofChallenge,
 } from "../wallets.js";
 
 type Organization = { id: string; name: string; slug: string };
@@ -34,6 +38,8 @@ type Member = {
   evmAddress: string | null;
   email: string | null;
   name: string | null;
+  walletProofClaimable: boolean;
+  walletProofVerifiedAt: string | null;
 };
 
 function short(value: string): string {
@@ -68,6 +74,7 @@ export function OnboardingPage() {
   const [mandate, setMandate] = useState<MandatePreview | null>(null);
   const [founderNear, setFounderNear] = useState("");
   const [passkeyReady, setPasskeyReady] = useState<boolean | null>(null);
+  const claimMemberId = new URLSearchParams(window.location.search).get("member");
 
   const signedIn = Boolean(session.data?.user);
 
@@ -150,6 +157,18 @@ export function OnboardingPage() {
       />
     );
   }
+  if (claimMemberId && !activeOrganization) {
+    return (
+      <WalletProofPanel
+        memberId={claimMemberId}
+        onVerified={async () => {
+          window.history.replaceState({}, "", "/onboarding");
+          await refreshOrganizations();
+        }}
+        onError={setError}
+      />
+    );
+  }
 
   return (
     <div className="shell">
@@ -223,11 +242,12 @@ export function OnboardingPage() {
           <section className="card">
             <h2>2. Member wallets</h2>
             <p className="muted">
-              Each member links the NEAR account that signs DAO proposals and the EVM address that
-              becomes a Safe owner. The server only stores public addresses.
+              Each member proves the NEAR account that signs DAO proposals and the EVM address
+              that becomes a Safe owner. The server stores public addresses and signed proofs.
             </p>
             <MemberWallets
               members={members}
+              currentUserId={session.data?.user.id ?? ""}
               onSaved={async () => refreshMembers(activeOrganization.id)}
               onError={setError}
             />
@@ -488,8 +508,8 @@ export function SignIn() {
               {busy ? "Creating passkey…" : "Create account with passkey"}
             </button>
             <p className="muted small">
-              The email is a profile identifier and remains unverified in this hackathon build.
-              Invitation acceptance is disabled until a real email-verification provider is added.
+              The email is an unverified profile identifier. Organization membership is accepted
+              by proving the admin-declared NEAR and EVM wallets, not by email.
             </p>
           </>
         )}
@@ -552,7 +572,7 @@ function OrganizationPanel(props: {
       {props.active ? (
         <div className="stack">
           <div className="muted small">
-            Pick an existing member to attach wallets, or add a wallet-only member. Paste
+            Pick an existing member to replace a wallet declaration, or add a pending member. Paste
             accounts as copied from the wallet: <code>busyvideo615.testnet (*testnet)</code>.
           </div>
           <div className="row wrap">
@@ -619,65 +639,48 @@ function OrganizationPanel(props: {
   );
 }
 
-function MemberWallets(props: {
-  members: Member[];
-  onSaved: () => Promise<void>;
+function WalletProofForm(props: {
+  memberId: string;
+  initialNear?: string;
+  initialEvm?: string;
+  onVerified: () => Promise<void>;
   onError: (message: string) => void;
 }) {
-  const [nearAccountId, setNearAccountId] = useState("");
-  const [evmAddress, setEvmAddress] = useState("");
-  const self = props.members[0];
-
-  useEffect(() => {
-    void nearAccounts().then((accounts) => setNearAccountId(accounts[0] ?? "")).catch(() => undefined);
-    void evmAccounts().then((accounts) => setEvmAddress(accounts[0] ?? "")).catch(() => undefined);
-  }, []);
+  const [nearAccountId, setNearAccountId] = useState(props.initialNear ?? "");
+  const [evmAddress, setEvmAddress] = useState(props.initialEvm ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="stack">
-      <table>
-        <thead><tr><th>Member</th><th>Role</th><th>NEAR</th><th>EVM</th></tr></thead>
-        <tbody>
-          {props.members.map((member) => (
-            <tr key={member.id}>
-              <td>{member.name ?? member.email ?? short(member.userId)}</td>
-              <td>{member.role}</td>
-              <td>{member.nearAccountId ?? "—"}</td>
-              <td>{member.evmAddress ? short(member.evmAddress) : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {error ? <div className="alert error">{error}</div> : null}
       <div className="row">
         <button
           className="ghost"
-          onClick={() =>
-            void (async () => {
-              try {
-                const accounts = demoWalletsEnabled()
-                  ? await nearAccounts()
-                  : await connectNearWallet();
-                if (accounts[0]) setNearAccountId(accounts[0]);
-              } catch (cause) {
-                props.onError(cause instanceof Error ? cause.message : String(cause));
-              }
-            })()
-          }
+          disabled={busy}
+          onClick={() => void (async () => {
+            try {
+              const accounts = demoWalletsEnabled() ? await nearAccounts() : await connectNearWallet();
+              if (accounts[0]) setNearAccountId(accounts[0]);
+            } catch (cause) {
+              const message = cause instanceof Error ? cause.message : String(cause);
+              setError(message);
+              props.onError(message);
+            }
+          })()}
         >
           {demoWalletsEnabled() ? "Use generated NEAR account" : "Connect NEAR wallet"}
         </button>
         <button
           className="ghost"
-          onClick={() =>
-            void (async () => {
-              try {
-                const accounts = await evmAccounts();
-                if (accounts[0]) setEvmAddress(accounts[0]);
-              } catch (cause) {
-                props.onError(cause instanceof Error ? cause.message : String(cause));
-              }
-            })()
-          }
+          disabled={busy}
+          onClick={() => void evmAccounts()
+            .then((accounts) => setEvmAddress(accounts[0] ?? ""))
+            .catch((cause: unknown) => {
+              const message = String(cause);
+              setError(message);
+              props.onError(message);
+            })}
         >
           {demoWalletsEnabled() ? "Use generated EVM account" : "Connect MetaMask / Rabby"}
         </button>
@@ -687,31 +690,105 @@ function MemberWallets(props: {
         <input placeholder="0x…" value={evmAddress} onChange={(event) => setEvmAddress(event.target.value)} />
         <button
           className="primary"
-          onClick={() =>
-            void (async () => {
-              try {
-                await api("/v1/console/members/me/wallets", {
-                  method: "PATCH",
-                  body: JSON.stringify({ nearAccountId, evmAddress }),
-                });
-                await props.onSaved();
-              } catch (cause) {
-                props.onError(cause instanceof Error ? cause.message : String(cause));
-              }
-            })()
-          }
+          disabled={busy || !nearAccountId || !evmAddress}
+          onClick={() => void (async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              const challenge = await api<WalletProofChallenge>("/v1/profile/wallet-proof/challenge", {
+                method: "POST",
+                body: JSON.stringify({ memberId: props.memberId, nearAccountId, evmAddress }),
+              });
+              const proof = await signWalletProofChallenge(challenge);
+              await api("/v1/profile/wallet-proof/verify", {
+                method: "POST",
+                body: JSON.stringify(proof),
+              });
+              await props.onVerified();
+            } catch (cause) {
+              const message = cause instanceof Error ? cause.message : String(cause);
+              setError(message);
+              props.onError(message);
+            } finally {
+              setBusy(false);
+            }
+          })()}
         >
-          Link my wallets
+          {busy ? "Waiting for both signatures…" : "Sign NEP-413 + EIP-191 proofs"}
         </button>
       </div>
       <div className="muted small">
-        {demoWalletsEnabled()
-          ? "UAT demo wallets are generated locally and store test-only private keys in localStorage."
-          : "Normal mode signs through NEAR Wallet Selector and an injected MetaMask/Rabby provider. MandateOS never receives private keys."}
+        The challenge is scoped to this member, organization, both wallets, Base Sepolia and a
+        ten-minute nonce. MandateOS verifies the NEAR full-access key and recovered EVM signer.
       </div>
-      {self?.nearAccountId && self?.evmAddress ? null : (
-        <div className="muted small">Every member must link both wallets before a plan is built.</div>
+    </div>
+  );
+}
+
+function WalletProofPanel(props: {
+  memberId: string;
+  onVerified: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  return (
+    <div className="auth">
+      <div className="auth-card">
+        <div className="brand">MandateOS</div>
+        <h1>Accept wallet invitation</h1>
+        <p className="muted">Your passkey identifies your profile. Control of both declared wallets accepts the membership.</p>
+        <WalletProofForm {...props} />
+      </div>
+    </div>
+  );
+}
+
+function MemberWallets(props: {
+  members: Member[];
+  currentUserId: string;
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const self = props.members.find((member) => member.userId === props.currentUserId);
+
+  return (
+    <div className="stack">
+      <table>
+        <thead><tr><th>Member</th><th>Role</th><th>NEAR</th><th>EVM</th><th>Proof</th></tr></thead>
+        <tbody>
+          {props.members.map((member) => (
+            <tr key={member.id}>
+              <td>{member.name ?? member.email ?? short(member.userId)}</td>
+              <td>{member.role}</td>
+              <td>{member.nearAccountId ?? "—"}</td>
+              <td>{member.evmAddress ? short(member.evmAddress) : "—"}</td>
+              <td>
+                {member.walletProofVerifiedAt
+                  ? "proved"
+                  : member.walletProofClaimable
+                    ? <a href={`/onboarding?member=${member.id}`}>claim link</a>
+                    : "signature required"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {self ? (
+        <>
+          <h3>{self.walletProofVerifiedAt ? "Replace my wallet proof" : "Prove my wallets"}</h3>
+          <WalletProofForm
+            memberId={self.id}
+            initialNear={self.nearAccountId ?? ""}
+            initialEvm={self.evmAddress ?? ""}
+            onVerified={props.onSaved}
+            onError={props.onError}
+          />
+        </>
+      ) : (
+        <div className="alert error">This passkey profile is not a member of the active organization.</div>
       )}
+      <div className="muted small">
+        Unproved admin declarations remain pending and are excluded from DAO council and Safe owners.
+      </div>
     </div>
   );
 }
@@ -727,6 +804,13 @@ function TreasuryWizard(props: {
   const [safeBatch, setSafeBatch] = useState<SafeBatch | null>(null);
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
+  const [baseDeploymentHashes, setBaseDeploymentHashes] = useState<string[]>([]);
+  const [nearAttestation, setNearAttestation] = useState<NearDeploymentRpcAttestation | null>(null);
+  const [deploymentConfirmations, setDeploymentConfirmations] = useState<{
+    digest: string;
+    confirmedMemberIds: string[];
+    requiredMemberIds: string[];
+  } | null>(null);
   const [daoCreated, setDaoCreated] = useState<string | null>(null);
   const [sponsor, setSponsor] = useState<{ accountId: string; balanceYocto: string } | null>(null);
   const [creationPolicyConfirmed, setCreationPolicyConfirmed] = useState(false);
@@ -753,6 +837,33 @@ function TreasuryWizard(props: {
     setSponsor(await api<{ accountId: string; balanceYocto: string }>("/v1/console/treasury/sponsor-status"));
   }
 
+  function nearDeploymentInput() {
+    return {
+      environment: props.plan.environment,
+      daoAccountId: props.plan.daoAccountId,
+      vaultAccountId: props.plan.vault.accountId,
+      relayAccountId: props.plan.relay.accountId,
+      govAddress: props.plan.govAddress,
+    };
+  }
+
+  async function verifyNearDeploymentAndConfirm() {
+    const attestation = await readNearDeploymentRpc(props.plan);
+    setNearAttestation(attestation);
+    if (!attestation.valid) throw new Error("Vault/relay RPC attestation contains a mismatch");
+    setDeploymentConfirmations(await api(
+      "/v1/console/treasury/deployment-confirmations/confirm",
+      { method: "POST", body: JSON.stringify(nearDeploymentInput()) },
+    ));
+  }
+
+  async function refreshDeploymentConfirmations() {
+    setDeploymentConfirmations(await api(
+      "/v1/console/treasury/deployment-confirmations/status",
+      { method: "POST", body: JSON.stringify(nearDeploymentInput()) },
+    ));
+  }
+
   useEffect(() => {
     void refreshSponsor().catch((cause: unknown) => props.onError(String(cause)));
   }, []);
@@ -762,6 +873,9 @@ function TreasuryWizard(props: {
     setObservedPolicy(null);
     setConfirmedMembers([]);
     setThresholdConfirmed(false);
+    setNearAttestation(null);
+    setDeploymentConfirmations(null);
+    setBaseDeploymentHashes([]);
   }, [props.plan.daoAccountId]);
 
   async function deployBase() {
@@ -772,6 +886,7 @@ function TreasuryWizard(props: {
     ]) {
       const hash = await sendEvmTransaction(transaction);
       await waitForEvmTransaction(hash);
+      setBaseDeploymentHashes((current) => [...current, hash]);
       setTransactionHashes((current) => [...current, hash]);
     }
   }
@@ -795,7 +910,7 @@ function TreasuryWizard(props: {
     setTransactionHashes((current) => [...current, hash]);
   }
 
-  const baseDeployed = transactionHashes.length >= 3;
+  const baseDeployed = baseDeploymentHashes.length >= 3;
   const daoDeposit = BigInt(props.plan.daoCreate.depositYocto);
   const vaultDeposit = transferDeposit(props.plan.vault.actions);
   const relayDeposit = transferDeposit(props.plan.relay.actions);
@@ -813,6 +928,12 @@ function TreasuryWizard(props: {
     observedThresholdMatches &&
     expectedCouncil.every((member) => confirmedMembers.includes(member)) &&
     thresholdConfirmed;
+  const deploymentConfirmed =
+    deploymentConfirmations !== null &&
+    deploymentConfirmations.requiredMemberIds.length === props.plan.council.length &&
+    deploymentConfirmations.requiredMemberIds.every((memberId) =>
+      deploymentConfirmations.confirmedMemberIds.includes(memberId)
+    );
 
   return (
     <section className="card">
@@ -980,16 +1101,55 @@ function TreasuryWizard(props: {
                   },
                 );
                 setTransactionHashes((current) => [...current, deployed.vaultTxHash, deployed.relayTxHash]);
+                setNearAttestation(null);
+                setDeploymentConfirmations(null);
                 await refreshSponsor();
               })}
             >
               Deploy Vault + relay (MandateOS pays)
             </button>
           </div>
+          <div className="row wrap">
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("near-rpc-attestation", verifyNearDeploymentAndConfirm)}
+            >
+              Verify by direct RPC and confirm as this member
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("near-confirmations", refreshDeploymentConfirmations)}
+            >
+              Refresh member confirmations
+            </button>
+          </div>
           <div className="muted small">Signed by the MandateOS relayer; contracts remain owned by the DAO.</div>
           <div className="muted small">
             Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}
           </div>
+          {nearAttestation ? (
+            <table>
+              <thead><tr><th>Direct NEAR RPC check</th><th>Expected</th><th>Observed</th><th>Status</th></tr></thead>
+              <tbody>
+                {nearAttestation.checks.map((check) => (
+                  <tr key={check.label}>
+                    <td>{check.label}</td>
+                    <td><code>{short(check.expected)}</code></td>
+                    <td><code>{short(check.actual)}</code></td>
+                    <td>{check.ok ? "match" : "MISMATCH"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          {deploymentConfirmations ? (
+            <div className={deploymentConfirmed ? "alert success" : "alert"}>
+              Deployment digest <code>{short(deploymentConfirmations.digest)}</code>:{" "}
+              {deploymentConfirmations.confirmedMemberIds.length}/{deploymentConfirmations.requiredMemberIds.length} proven members confirmed.
+            </div>
+          ) : null}
           {!contractsAffordable && sponsor ? (
             <div className="muted small">
               Full treasury unavailable: needs {formatNear(contractsDeposit)} NEAR; sponsor has{" "}
@@ -1013,7 +1173,7 @@ function TreasuryWizard(props: {
           <div className="row wrap">
             <button
               className="primary"
-              disabled={Boolean(props.busy) || baseDeployed}
+              disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
               onClick={() => props.run("base-deploy", deployBase)}
             >
               Deploy Safe + modules
@@ -1040,6 +1200,12 @@ function TreasuryWizard(props: {
               Execute Safe batch
             </button>
           </div>
+          {!deploymentConfirmed ? (
+            <div className="alert">
+              Safe deployment remains blocked until every proven council member independently reads
+              Vault and relay from NEAR RPC and confirms the same deployment digest.
+            </div>
+          ) : null}
         </div>
       </div>
 

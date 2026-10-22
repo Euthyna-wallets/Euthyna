@@ -76,7 +76,7 @@ describe("NEAR wallet sponsorship reservations", () => {
     await expect(gateway.reserveNearWalletSponsorship(input)).resolves.toBe("daily_limit");
   });
 
-  it("refuses sponsorship when the authenticated user's linked wallet differs", async () => {
+  it("refuses sponsorship when no proved member owns the deterministic wallet", async () => {
     const { gateway } = gatewayFixture({ member: false });
     await expect(gateway.reserveNearWalletSponsorship(input)).resolves.toBe("member_mismatch");
   });

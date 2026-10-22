@@ -26,15 +26,30 @@ export type TreasuryPlan = {
   founderNearAccountId: string;
   threshold: number;
   govAddress: string;
-  council: Array<{ nearAccountId: string; evmAddress: string }>;
+  council: Array<{ memberId: string; nearAccountId: string; evmAddress: string }>;
   daoCreate: { factoryId: string; method: string; args: { name: string; args: string }; depositYocto: string };
   vault: {
     accountId: string;
+    initArgs: {
+      owner_id: string;
+      token_id: string;
+      mpc_contract_id: string;
+      evm_chain_id: number;
+      guard_public_key: string;
+      reservation_ttl_blocks: number;
+    };
     wasmSha256: string;
     actions: NearAction[];
   };
   relay: {
     accountId: string;
+    initArgs: {
+      owner_id: string;
+      mpc_contract_id: string;
+      mpc_path: string;
+      evm_chain_id: number;
+      delay_address: string;
+    };
     wasmSha256: string;
     actions: NearAction[];
   };

@@ -13,6 +13,7 @@ import { MandateService } from "./mandates.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { ConsoleDataService } from "./console-data.js";
+import { WalletProofService } from "./wallet-proof.js";
 
 const env = loadEnv();
 const guardKey = Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"));
@@ -21,6 +22,13 @@ const guard = new Guard(signer);
 const near = new NearClient(env);
 const relayer = createBaseRelayer(env, near, guard);
 const auth = new BetterAuthGateway(createAuth(env, prisma), prisma);
+const walletProof = new WalletProofService(
+  prisma,
+  near,
+  env.NEAR_ACCOUNT_PARENT,
+  84532,
+  env.UAT_DEMO_WALLETS_ENABLED,
+);
 const treasury = new TreasuryService(prisma, near, signer, {
   nearNetwork: env.NEAR_NETWORK_ID,
   daoFactoryId: env.DAO_FACTORY_ID,
@@ -61,6 +69,7 @@ const app = createApp({
   guard,
   relayer,
   auth,
+  walletProof,
   treasury,
   mandates,
   registry: registryService,

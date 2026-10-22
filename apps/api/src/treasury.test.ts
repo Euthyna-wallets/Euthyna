@@ -50,20 +50,33 @@ const config: TreasuryConfig = {
   daoCreateDepositYocto: "10000000000000000000000000",
 };
 
-type TestMember = { id: string; nearAccountId: string | null; evmAddress: string | null };
+type TestMember = {
+  id: string;
+  nearAccountId: string | null;
+  evmAddress: string | null;
+  walletProofVerifiedAt: Date | null;
+};
 
+const provedAt = new Date("2026-01-01T00:00:00.000Z");
 const members: TestMember[] = [
-  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111" },
-  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222" },
-  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333" },
+  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111", walletProofVerifiedAt: provedAt },
+  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222", walletProofVerifiedAt: provedAt },
+  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333", walletProofVerifiedAt: provedAt },
 ];
 
-function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Record<string, unknown> }) {
+function fakePrisma(options?: {
+  members?: TestMember[];
+  existingTreasury?: Record<string, unknown>;
+  confirmedMemberIds?: string[];
+}) {
   const created: unknown[] = [];
   const audits: unknown[] = [];
   const prisma = {
     member: {
-      findMany: async () => options?.members ?? members,
+      findMany: async (args?: { where?: { walletProofVerifiedAt?: { not: null } } }) => {
+        const configured = options?.members ?? members;
+        return args?.where?.walletProofVerifiedAt ? configured.filter((member) => member.walletProofVerifiedAt) : configured;
+      },
       findFirst: async () => ({ id: "m1" }),
       update: async () => ({ id: "m1" }),
     },
@@ -87,6 +100,14 @@ function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Recor
         audits.push(data);
       },
     },
+    treasuryDeploymentConfirmation: {
+      findMany: async () => (options?.confirmedMemberIds ?? (options?.members ?? members)
+        .filter((member) => member.walletProofVerifiedAt)
+        .map((member) => member.id))
+        .map((memberId) => ({ memberId })),
+      upsert: async () => ({}),
+      deleteMany: async () => ({ count: 0 }),
+    },
   } as unknown as PrismaClient;
   return { prisma, created, audits };
 }
@@ -98,7 +119,7 @@ type NearOverrides = {
   policy?: unknown;
   autoUpdate?: boolean;
   vault?: { mpc?: string; chain?: number; guard?: string; token?: string; ttl?: number };
-  relay?: { chain?: number; delay?: string };
+  relay?: { mpc?: string; path?: string; chain?: number; delay?: string };
 };
 
 const daoAccountId = "acme.sputnikv2.testnet";
@@ -136,9 +157,11 @@ function fakeNear(overrides?: NearOverrides): NearClient {
       if (method === "get_policy") return overrides?.policy ?? councilPolicy();
       if (method === "get_factory_info") return { factory_id: "sputnikv2.testnet", auto_update: overrides?.autoUpdate ?? false };
       if (method === "owner_id") return overrides?.vaultOwner ?? daoAccountId;
-      if (method === "evm_address") return Buffer.from(govAddress.slice(2), "hex").toString("base64");
       if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(govAddress.slice(2), "hex").toString("base64");
-      if (method === "mpc_contract_id") return overrides?.vault?.mpc ?? config.mpcContractId;
+      if (method === "mpc_contract_id") {
+        return isVault ? (overrides?.vault?.mpc ?? config.mpcContractId) : (overrides?.relay?.mpc ?? config.mpcContractId);
+      }
+      if (method === "mpc_path") return overrides?.relay?.path ?? config.mpcPath;
       if (method === "evm_chain_id") return isVault ? (overrides?.vault?.chain ?? 84532) : (overrides?.relay?.chain ?? 84532);
       if (method === "guard_public_key") return overrides?.vault?.guard ?? guardKeyBase64;
       if (method === "token_id") return overrides?.vault?.token ?? config.budgetTokenAccountId;
@@ -208,7 +231,7 @@ describe("TreasuryService.plan", () => {
     expect(plan.relay.accountId).toBe("factory-r.mandateos.testnet");
   });
 
-  it("refuses a council member without both wallets", async () => {
+  it("refuses a proven council member missing a wallet", async () => {
     const { prisma } = fakePrisma({
       members: [{ ...members[0]!, evmAddress: null }],
     });
@@ -218,7 +241,24 @@ describe("TreasuryService.plan", () => {
         daoName: "acme",
         founderNearAccountId: "alice.testnet",
       }),
-    ).rejects.toMatchObject({ code: "member_wallets_missing" });
+    ).rejects.toMatchObject({ code: "proven_wallets_missing" });
+  });
+
+  it("excludes an admin-declared member without wallet signatures from the council", async () => {
+    const pending = {
+      id: "m4",
+      nearAccountId: "mallory.testnet",
+      evmAddress: "0x4444444444444444444444444444444444444444",
+      walletProofVerifiedAt: null,
+    };
+    const { prisma } = fakePrisma({ members: [...members, pending] });
+    const plan = await service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "acme",
+      founderNearAccountId: "alice.testnet",
+    });
+    expect(plan.council.map((member) => member.memberId)).toEqual(["m1", "m2", "m3"]);
+    expect(plan.threshold).toBe(2);
   });
 });
 
@@ -268,6 +308,14 @@ describe("TreasuryService.register", () => {
     await expect(service(prisma, near).register("org-1", "user-1", registerInput)).rejects.toMatchObject({
       code: "wasm_hash_mismatch",
     });
+  });
+
+  it("refuses registration until every proven member confirms the deployment digest", async () => {
+    const { prisma } = fakePrisma({ confirmedMemberIds: ["m1", "m2"] });
+    await expect(
+      service(prisma, fakeNear({ codeHashes: await artifactHashes() }))
+        .register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "deployment_confirmations_missing" });
   });
 });
 

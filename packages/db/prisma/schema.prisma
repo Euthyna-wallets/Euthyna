@@ -102,43 +102,52 @@ model Passkey {
 }
 
 model Organization {
-  id                 String                    @id
-  name               String
-  slug               String
-  logo               String?
-  createdAt          DateTime
-  metadata           String?
-  members            Member[]
-  invitations        Invitation[]
-  environments       OrganizationEnvironment[]
-  agents             Agent[]
-  suppliers          Supplier[]
-  contracts          Contract[]
-  consumedReferences ConsumedReference[]
-  registryChanges    RegistryChange[]
-  escalations        Escalation[]
-  visas              PaymentVisa[]
-  registry           RegistryVersion?
-  policies           PolicySnapshot[]
-  operations         Operation[]
-  auditLogs          AuditLog[]
-  treasuries         Treasury[]
-  nearSponsorships   NearWalletSponsorship[]
+  id                      String                           @id
+  name                    String
+  slug                    String
+  logo                    String?
+  createdAt               DateTime
+  metadata                String?
+  members                 Member[]
+  invitations             Invitation[]
+  environments            OrganizationEnvironment[]
+  agents                  Agent[]
+  suppliers               Supplier[]
+  contracts               Contract[]
+  consumedReferences      ConsumedReference[]
+  registryChanges         RegistryChange[]
+  escalations             Escalation[]
+  visas                   PaymentVisa[]
+  registry                RegistryVersion?
+  policies                PolicySnapshot[]
+  operations              Operation[]
+  auditLogs               AuditLog[]
+  treasuries              Treasury[]
+  nearSponsorships        NearWalletSponsorship[]
+  deploymentConfirmations TreasuryDeploymentConfirmation[]
 
   @@unique([slug])
   @@map("organization")
 }
 
 model Member {
-  id             String       @id
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role           String       @default("member")
-  nearAccountId  String?
-  evmAddress     String?
-  createdAt      DateTime
+  id                      String                           @id
+  organizationId          String
+  organization            Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId                  String
+  user                    User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                    String                           @default("member")
+  nearAccountId           String?
+  evmAddress              String?
+  walletProofClaimable    Boolean                          @default(false)
+  walletProofVerifiedAt   DateTime?
+  walletProofMessage      String?
+  nearProofPublicKey      String?
+  nearProofSignature      String?
+  evmProofSignature       String?
+  walletProofChallenges   WalletProofChallenge[]
+  deploymentConfirmations TreasuryDeploymentConfirmation[]
+  createdAt               DateTime
 
   @@index([organizationId])
   @@index([userId])
@@ -160,6 +169,40 @@ model Invitation {
   @@index([organizationId])
   @@index([email])
   @@map("invitation")
+}
+
+model WalletProofChallenge {
+  id            String    @id
+  memberId      String
+  member        Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  userId        String
+  nearAccountId String
+  evmAddress    String
+  message       String
+  nonceBase64   String
+  recipient     String
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([memberId])
+  @@index([userId])
+  @@map("wallet_proof_challenge")
+}
+
+model TreasuryDeploymentConfirmation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment    String
+  memberId       String
+  member         Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  digest         String
+  confirmedAt    DateTime     @default(now())
+
+  @@unique([organizationId, environment, memberId])
+  @@index([organizationId, environment, digest])
+  @@map("treasury_deployment_confirmation")
 }
 
 model Apikey {
