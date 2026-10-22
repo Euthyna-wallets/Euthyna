@@ -24,6 +24,21 @@ export interface PaymentIntent {
   max_priority_fee_per_gas: string;
 }
 
+export interface MpcSignature {
+  big_r: number[];
+  s: Bytes32;
+  recovery_id: number;
+}
+
+export interface CancellationAttempt {
+  transaction: VaultTransaction;
+  tx_digest: Bytes32;
+  signature: MpcSignature | null;
+  signed_transaction: number[] | null;
+  requested_at_block: number;
+  request_count: number;
+}
+
 export interface VaultOperation {
   op_id: Bytes32;
   client_id: string;
@@ -35,9 +50,13 @@ export interface VaultOperation {
   evm_nonce: number;
   transaction: VaultTransaction;
   tx_digest: Bytes32;
+  created_at_block?: number;
   expires_at_block: number;
+  possibly_signed_at_block: number | null;
   state: "Prepared" | "PossiblySigned" | "Confirmed" | "Cancelled" | "Expired";
+  signature: MpcSignature | null;
   signed_transaction: number[] | null;
+  cancellation: CancellationAttempt | null;
 }
 
 export interface GuardVisa {

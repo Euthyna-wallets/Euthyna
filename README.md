@@ -79,7 +79,7 @@ The current repository contains:
 - `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, wallet-proof membership claims, IP/email registration limits, per-agent API keys and append-only audit rows;
 - `apps/api` treasury onboarding: `/v1/console/treasury/plan` includes only members with verified NEP-413 + EIP-191 proofs; the founder confirms/signs the exact policy locally; every member independently re-reads Vault/relay from NEAR RPC and confirms one server-verified digest before Safe; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap;
 - `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
-- `apps/api` agent payments: `POST /v1/operations/pay` (visa / escalation / refusal) with one transaction consuming the reference and storing the visa, idempotent per `opId`; `GET /v1/operations/:opId` merges DB, Vault and stored visa state; suppliers/contracts live in PostgreSQL with `registry_version` and four-eyes address changes;
+- `apps/api` agent payments: `POST /v1/operations/pay` issues a visa/escalation/refusal, then the leased `worker.ts` recovers missed MPC callbacks, broadcasts exact raw transactions, follows receipts, sends `report_status`, requests governed same-nonce cancellation and releases references only after terminal Vault state;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
 - `apps/console`: normal signing through NEAR Wallet Selector and MetaMask/Rabby; explicit UAT demo mode may generate test-only keys in localStorage and displays a warning banner;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
@@ -180,7 +180,7 @@ Current monorepo layout:
 ```text
 MandateOS/
 ├── apps/
-│   ├── api/                   # Hono Guard, Base relayer and emergency cancellation endpoint
+│   ├── api/                   # Hono API plus leased crash-recoverable Base/NEAR worker
 │   └── console/               # React/Vite console: overview, agents, payments, escalations, onboarding
 ├── config/
 │   └── clients/acme/          # Exact hackathon vendor registry
@@ -233,6 +233,8 @@ set -a
 source .env
 set +a
 pnpm --filter @mandateos/api dev
+# separate terminal/process:
+pnpm --filter @mandateos/api worker
 ```
 
 Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build. Better Auth email invitations are blocked; a `/onboarding?member=<id>` wallet invitation is claimed only after valid NEP-413 and EIP-191 proofs. Agent credentials are per-agent API keys in `x-api-key`.

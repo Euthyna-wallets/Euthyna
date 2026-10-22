@@ -11,6 +11,9 @@ export type OperationStatus =
   | "PossiblySigned"
   | "Broadcast"
   | "Confirmed"
+  | "CancellationRequested"
+  | "CancellationBroadcast"
+  | "CancellationMined"
   | "Cancelled"
   | "Escalated"
   | "Rejected"
@@ -181,6 +184,46 @@ export class PaymentService {
       visa: visa ? { visa: visa.visa, signature: visa.signature } : null,
       txHash: stored?.txHash ?? null,
       lastError: stored?.lastError ?? null,
+    };
+  }
+
+  async recordAuthorization(
+    organizationId: string,
+    agent: { agentId: string; nearAccountId: string; vaultAccountId: string },
+    opId: number[],
+    nearTransactionHash: string,
+  ): Promise<Record<string, unknown>> {
+    const hex = opHex(opId);
+    const stored = await this.prisma.operation.findUnique({
+      where: { organizationId_opId: { organizationId, opId: hex } },
+    });
+    if (!stored) throw new PaymentError(404, "operation_not_found", "operation must be registered before authorization");
+    if (stored.agentId !== agent.agentId) {
+      throw new PaymentError(403, "agent_mismatch", "operation belongs to another agent");
+    }
+    if (stored.nearAuthorizationTxHash && stored.nearAuthorizationTxHash !== nearTransactionHash) {
+      throw new PaymentError(409, "authorization_tx_conflict", "a different authorization transaction is already registered");
+    }
+    const operation = await this.near.getOperation(agent.vaultAccountId, opId);
+    if (operation.agent !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "Vault operation belongs to another agent");
+    }
+    if (operation.state !== "PossiblySigned" && operation.state !== "Confirmed") {
+      throw new PaymentError(422, "authorization_not_final", `operation state is ${operation.state}`);
+    }
+    const updated = await this.prisma.operation.update({
+      where: { organizationId_opId: { organizationId, opId: hex } },
+      data: {
+        nearAuthorizationTxHash: nearTransactionHash,
+        state: operation.state,
+        nextAttemptAt: new Date(),
+        lastError: null,
+      },
+    });
+    return {
+      opId: hex,
+      nearTransactionHash: updated.nearAuthorizationTxHash,
+      state: updated.state,
     };
   }
 

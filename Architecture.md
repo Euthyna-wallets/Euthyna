@@ -523,6 +523,22 @@ Le Vault couvre dans `tx_digest` :
 
 Il vérifie également `maxFeePerGas × gasLimit` contre le plafond de frais du rôle. Le relayer reçoit uniquement le raw transaction produit après la signature MPC et le transmet à `eth_sendRawTransaction` ([RPC Ethereum][eth-send-raw]). Une modification d'un octet invalide la signature.
 
+Le worker est un processus séparé, singleton par lease PostgreSQL expirante. Il
+ne fait confiance ni à son état mémoire ni à une réponse RPC précédente : à
+chaque reprise il relit l'opération du Vault, recalcule le hash de la
+transaction brute, consulte le receipt Base avant toute rediffusion et
+réconcilie les états terminaux. Le hash de la transaction NEAR `authorize`,
+enregistré par l'agent, permet d'extraire une réponse MPC secp256k1 publiée dans
+les receipt outcomes et d'appeler `submit_signature` si le callback a échoué.
+
+Après un receipt Base réussi, le worker signe `report_status` avec Guard. Un
+revert reste verrouillé et exige la gouvernance. Une transaction sans receipt
+peut être remplacée par `cancel_nonce` seulement si le Vault est en pause ou
+l'agent révoqué, conformément au contrôle d'accès on-chain. Le worker diffuse
+ensuite l'annulation mais attend `confirm_cancellation` par la DAO avant de
+libérer la référence PostgreSQL. Les références `Expired` sont également
+libérées ; les références `Confirmed` et `Reverted` ne le sont jamais.
+
 ## Rapports de statut
 
 Le Vault ne lit pas directement Base dans la Phase 1. Après un receipt réussi de la transaction originale, Guard signe :

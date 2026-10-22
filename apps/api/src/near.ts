@@ -1,10 +1,54 @@
 import { keyStores, KeyPair, Near, transactions, type Account } from "near-api-js";
 import type { Env } from "./env.js";
-import type { VaultOperation } from "./types.js";
+import type { MpcSignature, VaultOperation } from "./types.js";
 
 interface RpcResponse<T> {
   result?: T;
   error?: { message: string; data?: unknown };
+}
+
+type NearOutcome = {
+  outcome?: { status?: { SuccessValue?: string; Failure?: unknown } };
+};
+
+export type NearTransactionStatus = {
+  transaction_outcome?: NearOutcome;
+  receipts_outcome?: NearOutcome[];
+};
+
+function hexBytes(value: unknown, expectedLength: number): number[] | null {
+  if (typeof value !== "string" || !new RegExp(`^[0-9a-fA-F]{${expectedLength * 2}}$`).test(value)) return null;
+  return Array.from(Buffer.from(value, "hex"));
+}
+
+export function extractMpcSignatures(status: NearTransactionStatus): MpcSignature[] {
+  const signatures: MpcSignature[] = [];
+  const outcomes = [status.transaction_outcome, ...(status.receipts_outcome ?? [])];
+  for (const outcome of outcomes) {
+    const encoded = outcome?.outcome?.status?.SuccessValue;
+    if (!encoded) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+    } catch {
+      continue;
+    }
+    if (!value || typeof value !== "object" || !("scheme" in value) || value.scheme !== "Secp256k1") continue;
+    const response = value as {
+      big_r?: { affine_point?: unknown };
+      s?: { scalar?: unknown };
+      recovery_id?: unknown;
+    };
+    const bigR = hexBytes(response.big_r?.affine_point, 33);
+    const scalar = hexBytes(response.s?.scalar, 32);
+    if (!bigR || !scalar || !Number.isInteger(response.recovery_id) || Number(response.recovery_id) < 0 || Number(response.recovery_id) > 1) continue;
+    signatures.push({
+      big_r: bigR,
+      s: scalar,
+      recovery_id: Number(response.recovery_id),
+    });
+  }
+  return signatures;
 }
 
 export class NearClient {
@@ -133,8 +177,43 @@ export class NearClient {
     });
   }
 
-  async reportStatus(vaultAccountId: string, signedReport: unknown): Promise<string> {
-    return this.functionCall(vaultAccountId, "report_status", { signed_report: signedReport }, "30000000000000");
+  async reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string> {
+    return this.functionCall(
+      vaultAccountId,
+      "report_status",
+      mpcSignature ? { signed_report: signedReport, mpc_signature: mpcSignature } : { signed_report: signedReport },
+      "30000000000000",
+    );
+  }
+
+  async submitSignature(vaultAccountId: string, opId: number[], signature: MpcSignature): Promise<string> {
+    return this.functionCall(
+      vaultAccountId,
+      "submit_signature",
+      { op_id: opId, signature },
+      "50000000000000",
+    );
+  }
+
+  async expireOperation(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "expire", { op_id: opId }, "30000000000000");
+  }
+
+  async currentBlockHeight(): Promise<number> {
+    const block = await this.rpc<{ header: { height: number } }>("block", { finality: "final" });
+    return block.header.height;
+  }
+
+  async transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus> {
+    try {
+      return await this.rpc<NearTransactionStatus>("tx", {
+        tx_hash: txHash,
+        sender_account_id: senderAccountId,
+        wait_until: "FINAL",
+      });
+    } catch {
+      return this.rpc<NearTransactionStatus>("EXPERIMENTAL_tx_status", [txHash, senderAccountId]);
+    }
   }
 
   async cancelNonce(

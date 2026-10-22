@@ -46,6 +46,9 @@ const addressSchema = z
   .transform((value) => value as `0x${string}`);
 
 const opIdSchema = z.object({ opId: z.array(z.number().int().min(0).max(255)).length(32) });
+const authorizationSchema = z.object({
+  nearTransactionHash: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,64}$/),
+});
 
 const supplierSchema = z.object({
   name: z.string().min(1).max(120),
@@ -460,6 +463,20 @@ export function createApp({
     const input = await parseJson(context, opIdSchema);
     const result = await payments.pay(agent.organizationId, agent, input.opId);
     return context.json(result.body, result.status);
+  });
+
+  app.post("/v1/operations/:opId/authorization", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const raw = context.req.param("opId") ?? "";
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
+    const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
+    const input = await parseJson(context, authorizationSchema);
+    return context.json(await payments.recordAuthorization(
+      agent.organizationId,
+      agent,
+      opId,
+      input.nearTransactionHash,
+    ));
   });
 
   app.get("/v1/operations/:opId", requireAgent(auth, agentLimiter), async (context) => {
