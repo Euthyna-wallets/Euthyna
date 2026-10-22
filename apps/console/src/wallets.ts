@@ -517,11 +517,14 @@ export async function readNearDeploymentRpc(plan: TreasuryPlan): Promise<NearDep
     vaultToken,
     vaultGuard,
     vaultTtl,
+    relayClient,
     relayOwner,
     relayMpc,
     relayPath,
     relayChain,
     relayDelay,
+    relayMultiSend,
+    relayGuard,
   ] = await Promise.all([
     nearRpc<{ code_hash: string }>({ request_type: "view_account", account_id: plan.vault.accountId }),
     nearRpc<{ keys: unknown[] }>({ request_type: "view_access_key_list", account_id: plan.vault.accountId }),
@@ -533,11 +536,14 @@ export async function readNearDeploymentRpc(plan: TreasuryPlan): Promise<NearDep
     nearView<string>(plan.vault.accountId, "token_id"),
     nearView<string>(plan.vault.accountId, "guard_public_key"),
     nearView<number>(plan.vault.accountId, "reservation_ttl_blocks"),
+    nearView<string>(plan.relay.accountId, "client_id"),
     nearView<string>(plan.relay.accountId, "owner_id"),
     nearView<string>(plan.relay.accountId, "mpc_contract_id"),
     nearView<string>(plan.relay.accountId, "mpc_path"),
     nearView<number>(plan.relay.accountId, "evm_chain_id"),
     nearView<string>(plan.relay.accountId, "delay_address"),
+    nearView<string>(plan.relay.accountId, "multisend_address"),
+    nearView<string>(plan.relay.accountId, "guard_public_key"),
   ]);
   const values: Array<[string, unknown, unknown]> = [
     ["Vault has no access key", 0, vaultKeys.keys.length],
@@ -551,10 +557,13 @@ export async function readNearDeploymentRpc(plan: TreasuryPlan): Promise<NearDep
     ["Relay has no access key", 0, relayKeys.keys.length],
     ["Relay code hash", expectedCodeHash(plan.relay.wasmSha256), relayAccount.code_hash],
     ["Relay owner_id", plan.daoAccountId, relayOwner],
+    ["Relay client_id", plan.relay.initArgs.client_id, relayClient],
     ["Relay mpc_contract_id", plan.relay.initArgs.mpc_contract_id, relayMpc],
     ["Relay mpc_path", plan.relay.initArgs.mpc_path, relayPath],
     ["Relay evm_chain_id", plan.relay.initArgs.evm_chain_id, relayChain],
     ["Relay delay_address", plan.relay.initArgs.delay_address, relayDelay],
+    ["Relay multisend_address", plan.relay.initArgs.multisend_address, relayMultiSend],
+    ["Relay guard_public_key", plan.relay.initArgs.guard_public_key, relayGuard],
   ];
   const checks = values.map(([label, expected, actual]) => ({
     label,
@@ -748,7 +757,21 @@ export async function signDaoProposal(
   return { transactionHash, proposalId };
 }
 
-export async function signDaoVote(signerId: string, daoAccountId: string, proposalId: number): Promise<string> {
+export function daoVoteArgs(proposalId: number, proposalKind: unknown) {
+  return {
+    id: proposalId,
+    action: "VoteApprove",
+    proposal: proposalKind,
+    memo: null,
+  };
+}
+
+export async function signDaoVote(
+  signerId: string,
+  daoAccountId: string,
+  proposalId: number,
+  proposalKind: unknown,
+): Promise<string> {
   const wallet = await transactionWallet();
   const outcome = await wallet.signAndSendTransaction({
     signerId,
@@ -757,7 +780,7 @@ export async function signDaoVote(signerId: string, daoAccountId: string, propos
       type: "FunctionCall",
       params: {
         methodName: "act_proposal",
-        args: { id: proposalId, action: "VoteApprove" },
+        args: daoVoteArgs(proposalId, proposalKind),
         gas: DAO_VOTE_GAS,
         deposit: "0",
       },

@@ -15,6 +15,7 @@ pub(crate) fn build_delay_transaction(
     target: EvmAddress,
     value: U128,
     data: &[u8],
+    operation: u8,
     gas_limit: U128,
     max_fee_per_gas: U128,
     max_priority_fee_per_gas: U128,
@@ -37,7 +38,7 @@ pub(crate) fn build_delay_transaction(
         nonce,
         to: delay,
         value: U128(0),
-        input: encode_delay_call(target, value.0, data),
+        input: encode_delay_call(target, value.0, data, operation),
         gas_limit,
         max_fee_per_gas,
         max_priority_fee_per_gas,
@@ -143,14 +144,14 @@ fn unsigned_transaction(transaction: &Eip1559Transaction) -> omni_transaction::e
         .build()
 }
 
-fn encode_delay_call(target: EvmAddress, value: u128, data: &[u8]) -> Vec<u8> {
+fn encode_delay_call(target: EvmAddress, value: u128, data: &[u8], operation: u8) -> Vec<u8> {
     let padded_data_len = data.len().div_ceil(32) * 32;
     let mut encoded = Vec::with_capacity(4 + DELAY_HEAD_SIZE + 32 + padded_data_len);
     encoded.extend_from_slice(&EXEC_FROM_MODULE_SELECTOR);
     encoded.extend_from_slice(&word_address(target));
     encoded.extend_from_slice(&word_u128(value));
     encoded.extend_from_slice(&word_u128(DELAY_HEAD_SIZE as u128));
-    encoded.extend_from_slice(&[0u8; 32]);
+    encoded.extend_from_slice(&word_u128(operation.into()));
     encoded.extend_from_slice(&word_u128(data.len() as u128));
     encoded.extend_from_slice(data);
     encoded.resize(4 + DELAY_HEAD_SIZE + 32 + padded_data_len, 0);

@@ -1,8 +1,9 @@
 mod evm;
 mod types;
 
+use near_sdk::borsh::to_vec;
 use near_sdk::json_types::{Base64VecU8, U128};
-use near_sdk::store::LookupMap;
+use near_sdk::store::{LookupMap, LookupSet};
 use near_sdk::{
     AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, env, ext_contract, near,
     require,
@@ -10,9 +11,11 @@ use near_sdk::{
 
 pub use types::{
     CancellationAttempt, Eip1559Transaction, GovernanceOperation, MpcSignature, OperationState,
+    SignedStatusReport, StatusKind, StatusReport,
 };
 use types::{EvmAddress, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId};
 
+const STATUS_DOMAIN: &[u8] = b"mandateos:relay-status:v1";
 const MPC_DOMAIN_ID: u64 = 0;
 const MPC_SIGN_GAS: Gas = Gas::from_tgas(15);
 const MPC_CALLBACK_GAS: Gas = Gas::from_tgas(20);
@@ -43,11 +46,14 @@ trait ExtSelf {
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct GovernanceRelay {
+    client_id: String,
     owner_id: AccountId,
     mpc_contract_id: AccountId,
     mpc_path: String,
     evm_chain_id: u64,
     delay_address: EvmAddress,
+    multisend_address: EvmAddress,
+    guard_public_key: [u8; 32],
     max_gas_limit: U128,
     max_fee_per_gas: U128,
     max_priority_fee_per_gas: U128,
@@ -58,6 +64,7 @@ pub struct GovernanceRelay {
     next_evm_nonce: u64,
     active_operation: Option<OperationId>,
     operations: LookupMap<OperationId, GovernanceOperation>,
+    used_report_nonces: LookupSet<u64>,
 }
 
 #[near]
@@ -65,25 +72,34 @@ impl GovernanceRelay {
     #[init]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        client_id: String,
         owner_id: AccountId,
         mpc_contract_id: AccountId,
         mpc_path: String,
         evm_chain_id: u64,
         delay_address: Base64VecU8,
+        multisend_address: Base64VecU8,
+        guard_public_key: Base64VecU8,
         max_gas_limit: U128,
         max_fee_per_gas: U128,
         max_priority_fee_per_gas: U128,
         max_total_fee: U128,
     ) -> Self {
+        require!(!client_id.is_empty(), "ERR_EMPTY_CLIENT_ID");
         require!(!mpc_path.is_empty(), "ERR_EMPTY_MPC_PATH");
         require!(evm_chain_id > 0, "ERR_ZERO_CHAIN_ID");
         let delay_address = bytes20(delay_address, "ERR_DELAY_ADDRESS");
+        let multisend_address = bytes20(multisend_address, "ERR_MULTISEND_ADDRESS");
+        let guard_public_key = bytes32(guard_public_key, "ERR_GUARD_KEY");
         Self {
+            client_id,
             owner_id,
             mpc_contract_id,
             mpc_path,
             evm_chain_id,
             delay_address,
+            multisend_address,
+            guard_public_key,
             max_gas_limit,
             max_fee_per_gas,
             max_priority_fee_per_gas,
@@ -94,7 +110,12 @@ impl GovernanceRelay {
             next_evm_nonce: 0,
             active_operation: None,
             operations: LookupMap::new(b"o".to_vec()),
+            used_report_nonces: LookupSet::new(b"r".to_vec()),
         }
+    }
+
+    pub fn client_id(&self) -> String {
+        self.client_id.clone()
     }
 
     pub fn owner_id(&self) -> AccountId {
@@ -115,6 +136,13 @@ impl GovernanceRelay {
 
     pub fn delay_address(&self) -> Base64VecU8 {
         Base64VecU8(self.delay_address.to_vec())
+    }
+    pub fn multisend_address(&self) -> Base64VecU8 {
+        Base64VecU8(self.multisend_address.to_vec())
+    }
+
+    pub fn guard_public_key(&self) -> Base64VecU8 {
+        Base64VecU8(self.guard_public_key.to_vec())
     }
 
     pub fn evm_address(&self) -> Option<Base64VecU8> {
@@ -170,6 +198,7 @@ impl GovernanceRelay {
         target: Base64VecU8,
         value: U128,
         data: Base64VecU8,
+        operation: u8,
         gas_limit: U128,
         max_fee_per_gas: U128,
         max_priority_fee_per_gas: U128,
@@ -178,6 +207,11 @@ impl GovernanceRelay {
         require!(self.active_operation.is_none(), "ERR_ACTIVE_OPERATION");
         require!(self.evm_address.is_some(), "ERR_KEY_NOT_DERIVED");
         let target = bytes20(target, "ERR_TARGET_ADDRESS");
+        require!(operation <= 1, "ERR_OPERATION");
+        require!(
+            operation == 0 || target == self.multisend_address,
+            "ERR_DELEGATECALL_TARGET"
+        );
         let nonce = self.next_evm_nonce;
         let (transaction, tx_digest) = evm::build_delay_transaction(
             self.evm_chain_id,
@@ -186,6 +220,7 @@ impl GovernanceRelay {
             target,
             value,
             &data.0,
+            operation,
             gas_limit,
             max_fee_per_gas,
             max_priority_fee_per_gas,
@@ -201,6 +236,7 @@ impl GovernanceRelay {
             target,
             value,
             data: data.0,
+            operation,
             evm_nonce: nonce,
             transaction,
             tx_digest,
@@ -385,6 +421,63 @@ impl GovernanceRelay {
         env::panic_str("ERR_SIGNATURE_MISMATCH");
     }
 
+    pub fn report_status(
+        &mut self,
+        signed_report: SignedStatusReport,
+        mpc_signature: Option<MpcSignature>,
+    ) {
+        let report = &signed_report.report;
+        require!(report.client_id == self.client_id, "ERR_REPORT_CLIENT");
+        require!(
+            !self.used_report_nonces.contains(&report.report_nonce),
+            "ERR_REPORT_NONCE_USED"
+        );
+        let operation = self
+            .operations
+            .get(&report.op_id)
+            .cloned()
+            .expect("ERR_OPERATION_NOT_FOUND");
+        require!(
+            operation.state == OperationState::PossiblySigned,
+            "ERR_NOT_POSSIBLY_SIGNED"
+        );
+        let serialized =
+            to_vec(report).unwrap_or_else(|_| env::panic_str("ERR_REPORT_SERIALIZATION"));
+        let mut message = Vec::with_capacity(STATUS_DOMAIN.len() + serialized.len());
+        message.extend_from_slice(STATUS_DOMAIN);
+        message.extend_from_slice(&serialized);
+        let signature: [u8; 64] = signed_report
+            .signature
+            .0
+            .try_into()
+            .unwrap_or_else(|_| env::panic_str("ERR_REPORT_SIGNATURE_LENGTH"));
+        require!(
+            env::ed25519_verify(&signature, &message, &self.guard_public_key),
+            "ERR_REPORT_SIGNATURE"
+        );
+        require!(report.kind == StatusKind::Confirmed, "ERR_REPORT_KIND");
+        if let Some(signature) = mpc_signature {
+            if operation.signed_transaction.is_none() {
+                self.submit_signature(report.op_id, signature);
+            }
+        }
+        let signed_transaction = self
+            .operations
+            .get(&report.op_id)
+            .and_then(|operation| operation.signed_transaction.clone())
+            .expect("ERR_ORIGINAL_SIGNATURE_UNAVAILABLE");
+        require!(
+            report.tx_hash == env::keccak256_array(&signed_transaction),
+            "ERR_REPORT_TX_HASH"
+        );
+        self.used_report_nonces.insert(report.report_nonce);
+        self.operations
+            .get_mut(&report.op_id)
+            .expect("ERR_OPERATION_NOT_FOUND")
+            .state = OperationState::Confirmed;
+        self.active_operation = None;
+    }
+
     pub fn confirm_original(
         &mut self,
         op_id: OperationId,
@@ -523,6 +616,10 @@ fn derive_evm_address(public_key: &str) -> EvmAddress {
 }
 
 fn bytes20(value: Base64VecU8, error: &str) -> EvmAddress {
+    value.0.try_into().unwrap_or_else(|_| env::panic_str(error))
+}
+
+fn bytes32(value: Base64VecU8, error: &str) -> [u8; 32] {
     value.0.try_into().unwrap_or_else(|_| env::panic_str(error))
 }
 

@@ -43,7 +43,7 @@ const preview: MandatePreview = {
   guard: {},
   diff: [],
   agentStatus: "ready",
-  proposals: { vaultSetRole: setRole, vaultRegisterAgent: registerAgent, funding, zodiacRelay: [zodiac] },
+  proposals: { vaultSetRole: setRole, vaultRegisterAgent: registerAgent, funding, zodiacRelay: zodiac },
   warnings: [],
 };
 const treasury = {

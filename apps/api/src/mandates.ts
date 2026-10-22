@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@mandateos/db";
-import { compilePaymentPermission, rolesAbi, type FlatCondition } from "@mandateos/deployer";
+import {
+  canonicalMultiSendAddress,
+  compilePaymentPermission,
+  encodeMultiSendTransactions,
+  rolesAbi,
+  type FlatCondition,
+} from "@mandateos/deployer";
 import { encodeFunctionData, getAddress, type Address, type Hex } from "viem";
 
 import { onChainAgentEvmAddress } from "./agent-chain.js";
@@ -81,7 +87,7 @@ export interface MandatePreview {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
     funding: MandateProposal | null;
-    zodiacRelay: MandateProposal[];
+    zodiacRelay: MandateProposal | null;
   };
   warnings: string[];
 }
@@ -115,11 +121,20 @@ function b64(bytes: Hex): string {
   return Buffer.from(bytes.slice(2), "hex").toString("base64");
 }
 
+const multiSendAbi = [{
+  type: "function",
+  name: "multiSend",
+  stateMutability: "payable",
+  inputs: [{ name: "transactions", type: "bytes" }],
+  outputs: [],
+}] as const;
+
 export class MandateService implements MandateGateway {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
     private readonly budgetTokenAccountId = "test-ft.testnet",
+    private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
   ) {}
 
   async preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
@@ -234,9 +249,16 @@ export class MandateService implements MandateGateway {
         data: encodeFunctionData({
           abi: rolesAbi,
           functionName: "setAllowance",
-          args: [compiled.allowanceKey, BigInt(input.budget), 0n, 0n, 0n, 0n],
+          args: [
+            compiled.allowanceKey,
+            BigInt(input.budget),
+            BigInt(input.budget),
+            BigInt(input.budget),
+            BigInt(input.periodDays) * 86_400n,
+            this.nowSeconds(),
+          ],
         }),
-        description: `Set allowance ${input.budget} for ${input.role}`,
+        description: `Set periodic allowance ${input.budget} every ${input.periodDays} days for ${input.role}`,
       },
     );
     const stepDigest = (value: unknown) => createHash("sha256")
@@ -308,43 +330,60 @@ export class MandateService implements MandateGateway {
         }
       : null;
 
-    const zodiacRelay: MandateProposal[] = zodiacCalls.map((call, index) => ({
-      receiverId: treasury.daoAccountId,
-      methodName: "add_proposal",
-      description: `DAO proposal: relay ${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
-      args: {
-        proposal: {
-          description: `${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
-          kind: {
-            FunctionCall: {
-              receiver_id: treasury.relayAccountId,
-              actions: [
-                {
-                  method_name: "propose",
-                  args: functionCallArgs({
-                    target: b64(call.to),
-                    value: "0",
-                    data: b64(call.data),
-                    gas_limit: input.gas.gasLimit,
-                    max_fee_per_gas: input.gas.maxFeePerGas,
-                    max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
-                  }),
-                  gas: "60000000000000",
-                  deposit: "0",
-                },
-              ],
-            },
-          },
-        },
-      },
-      deposit: "100000000000000000000000",
-    }));
-
     const agentStatus = !input.agent || !storedAgent
       ? "no_agent"
       : resolvedAgentAddress
         ? "ready"
         : "needs_agent_address";
+    const multiSendAddress = canonicalMultiSendAddress(treasury.baseChainId);
+    const multiSendTransactions = encodeMultiSendTransactions(zodiacCalls.map((call) => ({
+      operation: 0,
+      to: call.to,
+      value: 0n,
+      data: call.data,
+    })));
+    const multiSendData = encodeFunctionData({
+      abi: multiSendAbi,
+      functionName: "multiSend",
+      args: [multiSendTransactions],
+    });
+    const zodiacDigest = stepDigest({
+      multiSendAddress,
+      multiSendData,
+      operation: 1,
+    });
+    const zodiacRelay: MandateProposal | null = resolvedAgentAddress
+      ? {
+          receiverId: treasury.daoAccountId,
+          methodName: "add_proposal",
+          description: `DAO proposal: batch Zodiac configuration [mandate:${zodiacDigest}:zodiac]`,
+          args: {
+            proposal: {
+              description: `Batch Zodiac configuration [mandate:${zodiacDigest}:zodiac]`,
+              kind: {
+                FunctionCall: {
+                  receiver_id: treasury.relayAccountId,
+                  actions: [{
+                    method_name: "propose",
+                    args: functionCallArgs({
+                      target: b64(multiSendAddress),
+                      value: "0",
+                      data: b64(multiSendData),
+                      operation: 1,
+                      gas_limit: input.gas.gasLimit,
+                      max_fee_per_gas: input.gas.maxFeePerGas,
+                      max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
+                    }),
+                    gas: "60000000000000",
+                    deposit: "0",
+                  }],
+                },
+              },
+            },
+          },
+          deposit: "100000000000000000000000",
+        }
+      : null;
 
     return {
       roleKey: compiled.roleKey,

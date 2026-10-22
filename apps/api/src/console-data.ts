@@ -5,6 +5,22 @@ import { base, baseSepolia } from "viem/chains";
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
 
+const delayAbi = [
+  { type: "function", name: "txNonce", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "queueNonce", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "txCooldown", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "txExpiration", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "txCreatedAt", stateMutability: "view", inputs: [{ name: "nonce", type: "uint256" }], outputs: [{ type: "uint256" }] },
+] as const;
+const safeAbi = [{
+  type: "function",
+  name: "getThreshold",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [{ type: "uint256" }],
+}] as const;
+
+
 function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item))) as T;
 }
@@ -187,16 +203,77 @@ export class ConsoleDataService {
   }
 
   async governance(organizationId: string) {
-    const treasury = await this.prisma.treasury.findFirst({ where: { organizationId } });
-    if (!treasury) return { proposals: [], delay: null, daoAccountId: null };
+    const treasury = await this.prisma.treasury.findFirst({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!treasury) return { proposals: [], operations: [], delay: null, daoAccountId: null };
+    const operations = await this.prisma.governanceOperation.findMany({
+      where: { organizationId, treasuryId: treasury.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
     try {
-      const proposals = await this.near.viewFunction<unknown[]>(treasury.daoAccountId, "get_proposals", {
-        from_index: 0,
-        limit: 20,
+      const client = createPublicClient({
+        chain: treasury.baseChainId === 8453 ? base : baseSepolia,
+        transport: http(this.baseRpcUrl),
       });
-      return plain({ daoAccountId: treasury.daoAccountId, proposals: proposals.reverse(), delay: { address: treasury.delayAddress, cooldownSeconds: 300 } });
+      const [proposals, txNonce, queueNonce, cooldown, expiration, safeThreshold, block] = await Promise.all([
+        this.near.viewFunction<unknown[]>(treasury.daoAccountId, "get_proposals", {
+          from_index: 0,
+          limit: 50,
+        }),
+        client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "txNonce" }),
+        client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "queueNonce" }),
+        client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "txCooldown" }),
+        client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "txExpiration" }),
+        client.readContract({ address: getAddress(treasury.safeAddress), abi: safeAbi, functionName: "getThreshold" }),
+        client.getBlock({ blockTag: "latest" }),
+      ]);
+      const timeline = await Promise.all(operations.map(async (operation) => {
+        const createdAt = operation.queueNonce === null
+          ? null
+          : await client.readContract({
+              address: getAddress(treasury.delayAddress),
+              abi: delayAbi,
+              functionName: "txCreatedAt",
+              args: [operation.queueNonce],
+            });
+        const cooldownEndsAt = createdAt === null ? null : createdAt + cooldown;
+        const expiresAt = createdAt === null ? null : createdAt + expiration;
+        return {
+          ...operation,
+          cooldownEndsAt,
+          expiresAt,
+          countdownSeconds: cooldownEndsAt === null || cooldownEndsAt <= block.timestamp
+            ? "0"
+            : (cooldownEndsAt - block.timestamp).toString(),
+        };
+      }));
+      return plain({
+        daoAccountId: treasury.daoAccountId,
+        treasury,
+        proposals: proposals.reverse(),
+        operations: timeline,
+        delay: {
+          address: treasury.delayAddress,
+          txNonce,
+          queueNonce,
+          cooldownSeconds: cooldown,
+          expirationSeconds: expiration,
+          safeThreshold,
+          currentTimestamp: block.timestamp,
+        },
+      });
     } catch (error) {
-      return { daoAccountId: treasury.daoAccountId, proposals: [], delay: null, error: error instanceof Error ? error.message : String(error) };
+      return {
+        daoAccountId: treasury.daoAccountId,
+        treasury: plain(treasury),
+        proposals: [],
+        operations: plain(operations),
+        delay: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 }

@@ -456,6 +456,104 @@ the previous status is `Approved` (displayed as **Executed**). `Expired`,
 ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
+Zodiac configuration is one relay proposal, not four: the payload calls
+canonical Safe MultiSend 1.4.1 with `operation = 1`; its four packed children
+are `Call` operations to the single Roles instance in this order:
+`assignRoles`, `scopeTarget`, `scopeFunction`, `setAllowance`. The relay rejects
+any DelegateCall whose target is not its immutable, attested MultiSend address
+([`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
+
+The deployed Roles 2.1.1 mastercopy at
+[`0xF296…3D5`](https://base-sepolia.blockscout.com/address/0xF2964CE6161ce0e75964Fe7927cE114cb0B283D5?tab=contract)
+defines `setAllowance` in `contracts/PermissionBuilder.sol`—the deployed source
+does not call this file `core/Setup.sol`. Its ABI order, verified again by
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts), is:
+
+| Position | Parameter | MandateOS value |
+|---:|---|---|
+| 1 | `key` | compiled allowance key |
+| 2 | `balance` | period budget |
+| 3 | `maxRefill` | period budget |
+| 4 | `refill` | period budget |
+| 5 | `period` | `periodDays × 86,400` |
+| 6 | `timestamp` | preview timestamp |
+
+### `POST /v1/console/governance/relay-operation`
+
+After a Zodiac proposal reaches `Approved`, the browser records the public final
+vote hash and signer account. The server verifies that the signer is a proven
+member, the proposal is the deterministic Zodiac batch, and the relay has the
+corresponding active operation; it never receives a private key
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+The governance job shares the payment worker lease. It recovers a missing MPC
+signature from that NEAR transaction, broadcasts the immutable 0xGOV
+transaction, waits `WORKER_CONFIRMATIONS`, and checkpoints the Delay entry.
+`txCooldown`, `txExpiration`, `txCreatedAt`, `txNonce`, and `queueNonce` are
+read on-chain. The gas wallet signs only the exact `executeNextTx` call; its raw
+transaction is persisted before broadcast. Reverted execution becomes
+terminal `Failed`, a skipped queue entry becomes `Vetoed`, and an expired entry
+becomes `Expired`. Successful execution must also prove Roles membership,
+allowance values, and the four configuration events before the relay Guard
+report (`mandateos:relay-status:v1`)
+([`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts),
+[`apps/api/src/governance-base.ts`](../apps/api/src/governance-base.ts),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
+
+### `GET /v1/console/governance`
+
+Returns recent DAO proposals, persisted governance jobs, and direct Base reads
+of Delay `txNonce`, `queueNonce`, `txCooldown`, `txExpiration`,
+`txCreatedAt`, current block time, plus the Safe threshold. The Governance page
+renders `DAO vote → signed by 0xGOV → broadcast → Delay queue → terminal state`
+and computes its countdown only from these on-chain timestamps. **Veto** builds
+the exact Safe EIP-712 transaction `Delay.setTxNonce(queueNonce)`, collects the
+on-chain Safe threshold of council signatures, then submits it through the
+Safe; MandateOS never signs for the council
+([`apps/api/src/console-data.ts`](../apps/api/src/console-data.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx),
+[`apps/console/src/safe.ts`](../apps/console/src/safe.ts)).
+
+![Governance worker timeline and veto](./console/governance-worker-timeline.webp)
+
+Fresh PR C UAT treasury (no migration):
+
+| Component | Address/account |
+|---|---|
+| DAO | `pr-c-uat-1.factory-v2.mandateos.testnet` |
+| Vault | `pr-c-uat-v.mandateos.testnet` |
+| Relay | `pr-c-uat-r.mandateos.testnet` |
+| Safe | `0xD1bBa371CA1e013df74354e6B85Cb25072c4b8f9` |
+| Roles | `0xE2d84feE72C88ee7572e8F7D010334Da0179c84f` |
+| Delay | `0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff` |
+| 0xGOV | `0x3961FA54D0ebDf4DbDe073466f580D48Daac7928` |
+| Canonical MultiSend | `0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526` |
+
+Both NEAR contracts have zero keys and match the local hashes. The relay views
+return the DAO owner, `client_id = pr-c-uat-1`, the Delay, Guard key and
+canonical MultiSend. Base reads confirm three owners, threshold 2, Roles +
+Delay enabled on the Safe, 0xGOV enabled on Delay, cooldown 300 and expiration
+604,800 ([NEAR manifest](../deployments/near-testnet.json),
+[Base manifest](../deployments/base-sepolia.json)).
+
+| Real UAT transition | Transaction |
+|---|---|
+| DAO final vote, single Zodiac batch | [`FMpoLG…`](https://testnet.nearblocks.io/txns/FMpoLG8EKR1zEGiiqRZNMFV7LAuHhaGVArXVe4dNvjTW) |
+| 0xGOV broadcasts into Delay | [`0x6dbf…`](https://sepolia.basescan.org/tx/0x6dbf9d2a7b3ef9e52ac575cc008a79caab2a837fb3802b2f4952294b846fa6e3) |
+| Gas wallet executes after cooldown | [`0xa714…`](https://sepolia.basescan.org/tx/0xa71418caa731dbf68cfe2a34a69a768fa4cce32b7cfdda977f6064af5f7c962d) |
+| Second DAO final vote for veto test | [`ErxsZc…`](https://testnet.nearblocks.io/txns/ErxsZceE4Dj5v4zHZzopnsgyCF9pm5fXhU6RzBmwMSyf) |
+| Second 0xGOV queue transaction | [`0x62dd…`](https://sepolia.basescan.org/tx/0x62dd2a87a8a7686a14543a5aa32a4ef3f4522edd1ca970024a60a1df5199440f) |
+| Council 2/3 veto | [`0xcff3…`](https://sepolia.basescan.org/tx/0xcff3a137fed70ce4baa91a011e3bf3162d2d8c8e53ce75ce1b707b2f54bb527b) |
+
+The first operation ended `Executed` with all four Roles events and periodic
+allowance `6,000,000 / 30 days`. The second ended `Vetoed`, with no
+`executeNextTx` hash. During the first run, public NEAR RPC returned transient
+429 responses; persisted `Broadcast`/`Queued` checkpoints survived and the same
+job resumed to `Executed`, exercising the crash/retry path without changing RPC
+or rotating IPs ([`apps/api/src/governance-worker.test.ts`](../apps/api/src/governance-worker.test.ts)).
+
 Measured execution gas:
 
 | Executed action | Environment | Burnt gas |

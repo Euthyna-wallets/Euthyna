@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { createAuth } from "./auth.js";
 import { BetterAuthGateway } from "./auth-gateway.js";
 import { loadEnv } from "./env.js";
+import { GovernanceService } from "./governance.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { createBaseRelayer } from "./relayer.js";
@@ -69,6 +70,7 @@ const treasury = new TreasuryService(prisma, near, signer, {
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
 });
 const mandates = new MandateService(prisma, near, env.BUDGET_TOKEN_ACCOUNT_ID);
+const governance = new GovernanceService(prisma, near);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
 const consoleData = new ConsoleDataService(
@@ -85,6 +87,7 @@ const app = createApp({
   walletProof,
   treasury,
   agentProvisioning,
+  governance,
   mandates,
   registry: registryService,
   payments,

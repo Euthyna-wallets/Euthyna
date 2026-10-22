@@ -67,7 +67,7 @@ export function serializeStatusReport(report: StatusReport): Uint8Array {
 }
 
 export async function signDomainPayload(
-  domain: "mandateos:visa:v1" | "mandateos:status:v1",
+  domain: "mandateos:visa:v1" | "mandateos:status:v1" | "mandateos:relay-status:v1",
   payload: Uint8Array,
   signer: KmsSigner,
 ): Promise<string> {

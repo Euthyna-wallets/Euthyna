@@ -851,6 +851,7 @@ function TreasuryWizard(props: {
       daoAccountId: props.plan.daoAccountId,
       vaultAccountId: props.plan.vault.accountId,
       relayAccountId: props.plan.relay.accountId,
+      delayAddress: props.plan.base.delayAddress,
       govAddress: props.plan.govAddress,
     };
   }
@@ -1329,7 +1330,7 @@ function orderedMandateProposals(preview: MandatePreview): MandateProposal[] {
     preview.proposals.vaultSetRole,
     preview.proposals.vaultRegisterAgent,
     preview.proposals.funding,
-    ...preview.proposals.zodiacRelay,
+    preview.proposals.zodiacRelay,
   ].filter((proposal): proposal is MandateProposal => proposal !== null);
 }
 
@@ -1337,6 +1338,12 @@ function onChainProposalDescription(proposal: MandateProposal): string {
   const value = (proposal.args.proposal as { description?: unknown } | undefined)?.description;
   if (typeof value !== "string") throw new Error("DAO proposal description missing");
   return value;
+}
+
+function onChainProposalKind(proposal: MandateProposal): unknown {
+  const body = proposal.args.proposal;
+  if (!body || typeof body !== "object" || !("kind" in body)) throw new Error("DAO proposal kind missing");
+  return body.kind;
 }
 
 type ProposalRun = DaoProposalRpc & { transactionHash?: string };
@@ -1604,8 +1611,22 @@ export function MandatePanel(props: {
                                 signerId,
                                 props.treasury.daoAccountId,
                                 run.id,
+                                onChainProposalKind(proposal),
                               );
                               const refreshed = await readDaoProposalRpc(props.treasury.daoAccountId, run.id);
+                              if (
+                                refreshed.state === "Executed" &&
+                                props.preview?.proposals.zodiacRelay === proposal
+                              ) {
+                                await api("/v1/console/governance/relay-operation", {
+                                  method: "POST",
+                                  body: JSON.stringify({
+                                    proposalId: run.id,
+                                    nearTransactionHash: transactionHash,
+                                    signerAccountId: signerId,
+                                  }),
+                                });
+                              }
                               setProposalRuns((current) => ({
                                 ...current,
                                 [description]: { ...refreshed, transactionHash },

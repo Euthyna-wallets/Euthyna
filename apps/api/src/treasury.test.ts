@@ -119,13 +119,14 @@ type NearOverrides = {
   policy?: unknown;
   autoUpdate?: boolean;
   vault?: { mpc?: string; chain?: number; guard?: string; token?: string; ttl?: number };
-  relay?: { mpc?: string; path?: string; chain?: number; delay?: string };
+  relay?: { client?: string; mpc?: string; path?: string; chain?: number; delay?: string; multisend?: string; guard?: string };
 };
 
 const daoAccountId = "acme.sputnikv2.testnet";
 const vaultAccountId = "acme-vault.alice.testnet";
 const relayAccountId = "acme-relay.alice.testnet";
 const guardKeyBase64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+const multiSendAddress = getAddress("0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526");
 
 function councilPolicy() {
   return {
@@ -157,13 +158,17 @@ function fakeNear(overrides?: NearOverrides): NearClient {
       if (method === "get_policy") return overrides?.policy ?? councilPolicy();
       if (method === "get_factory_info") return { factory_id: "sputnikv2.testnet", auto_update: overrides?.autoUpdate ?? false };
       if (method === "owner_id") return overrides?.vaultOwner ?? daoAccountId;
-      if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(govAddress.slice(2), "hex").toString("base64");
+      if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(basePlan.delayAddress.slice(2), "hex").toString("base64");
+      if (method === "client_id") return overrides?.relay?.client ?? "acme";
+      if (method === "multisend_address") return overrides?.relay?.multisend ?? Buffer.from(multiSendAddress.slice(2), "hex").toString("base64");
       if (method === "mpc_contract_id") {
         return isVault ? (overrides?.vault?.mpc ?? config.mpcContractId) : (overrides?.relay?.mpc ?? config.mpcContractId);
       }
       if (method === "mpc_path") return overrides?.relay?.path ?? config.mpcPath;
       if (method === "evm_chain_id") return isVault ? (overrides?.vault?.chain ?? 84532) : (overrides?.relay?.chain ?? 84532);
-      if (method === "guard_public_key") return overrides?.vault?.guard ?? guardKeyBase64;
+      if (method === "guard_public_key") {
+        return isVault ? (overrides?.vault?.guard ?? guardKeyBase64) : (overrides?.relay?.guard ?? guardKeyBase64);
+      }
       if (method === "token_id") return overrides?.vault?.token ?? config.budgetTokenAccountId;
       if (method === "reservation_ttl_blocks") return overrides?.vault?.ttl ?? config.vaultTtlBlocks;
       throw new Error(`unexpected view ${accountId}.${method}`);
@@ -181,6 +186,7 @@ const basePlan = {
   safeAddress: getAddress("0x4444444444444444444444444444444444444444"),
   rolesAddress: getAddress("0x5555555555555555555555555555555555555555"),
   delayAddress: getAddress("0x6666666666666666666666666666666666666666"),
+  multiSendAddress,
   safeDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "safe" },
   rolesDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "roles" },
   delayDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "delay" },
@@ -209,7 +215,9 @@ describe("TreasuryService.plan", () => {
     expect(plan.vault.accountId).toBe("acme-tre-v.mandateos.testnet");
     expect(plan.vault.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.owner_id).toBe(plan.daoAccountId);
-    expect(plan.relay.initArgs.delay_address).toBe(Buffer.from(govAddress.slice(2), "hex").toString("base64"));
+    expect(plan.relay.initArgs.delay_address).toBe(Buffer.from(basePlan.delayAddress.slice(2), "hex").toString("base64"));
+    expect(plan.relay.initArgs.multisend_address).toBe(Buffer.from(multiSendAddress.slice(2), "hex").toString("base64"));
+    expect(plan.relay.initArgs.guard_public_key).toBe(guardKeyBase64);
     expect(plan.base.safeAddress).toBe(basePlan.safeAddress);
     expect(plan.vault.actions.map((action) => action.type)).toEqual([
       "CreateAccount",

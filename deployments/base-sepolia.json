@@ -97,5 +97,57 @@
     "delayTxNonce": 3,
     "delayQueueNonce": 3,
     "researcherAllowanceBaseUnits": "10000000"
+  },
+  "prCUat": {
+    "observedAt": "2026-10-22",
+    "safe": "0xD1bBa371CA1e013df74354e6B85Cb25072c4b8f9",
+    "roles": "0xE2d84feE72C88ee7572e8F7D010334Da0179c84f",
+    "delay": "0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff",
+    "multiSend": "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526",
+    "multiSendCodeHash": "0x0e4f7fc66550a322d1e7688e181b75e217e662a4f3f4d6a29b22bc61217c4b77",
+    "govAddress": "0x3961FA54D0ebDf4DbDe073466f580D48Daac7928",
+    "agentAddress": "0xdBcc813AD68429B6873885060De588e2FfB393a2",
+    "gasWallet": "0x5A342451b818205bc44595A39731f5A6B790E92B",
+    "owners": [
+      "0x7CBa74F6Fb05d35590FEd22c88606Ef83130c0a6",
+      "0x845362eDC9bCCe38dac9aABAabEE49De8Eb1062D",
+      "0xa7BE833AD5422421204198E47C04516B0026F9B6"
+    ],
+    "threshold": 2,
+    "cooldownSeconds": 300,
+    "expirationSeconds": 604800,
+    "transactions": {
+      "deploySafe": "0x0101da2218ce221979ee564a8c3ca624816473f174b55184e47b665bfe8a71ae",
+      "deployRoles": "0x5cfba5dc877bbc61e2f3e40752aa635b86bd22321ce25d962e127456b347f7d4",
+      "deployDelay": "0x1bf933f10e26c9005376abb54b90d9c5820fb77ea36c1b3ffebd8dd66c246e15",
+      "enableModulesBatch": "0xd5c4f2b7c6b229873315d6840e47dfb77c2fc21106b9f0bbe3c53d4d6249c710",
+      "fundGov": [
+        "0x539428ea3cf25eff8f9ec8713cdd0d16690f3ca18df7dd76d8fb4598865ccb89",
+        "0x12256fd74238f5b780ceeebcf6cdf8d25fb4fa7cd4c77b6e348ed94bf897b239"
+      ],
+      "fundGasWallet": "0x715f34509c795528ca21694c38c9ea6a88357b0b8d949b570a0781c1986d243f",
+      "zodiacQueue": "0x6dbf9d2a7b3ef9e52ac575cc008a79caab2a837fb3802b2f4952294b846fa6e3",
+      "zodiacExecute": "0xa71418caa731dbf68cfe2a34a69a768fa4cce32b7cfdda977f6064af5f7c962d",
+      "vetoQueue": "0x62dd2a87a8a7686a14543a5aa32a4ef3f4522edd1ca970024a60a1df5199440f",
+      "veto": "0xcff3a137fed70ce4baa91a011e3bf3162d2d8c8e53ce75ce1b707b2f54bb527b"
+    },
+    "rolesVerification": {
+      "memberEnabled": true,
+      "events": [
+        "AssignRoles",
+        "ScopeTarget",
+        "ScopeFunction",
+        "SetAllowance"
+      ],
+      "allowanceBalance": "6000000",
+      "allowanceMaxRefill": "6000000",
+      "allowanceRefill": "6000000",
+      "allowancePeriod": "2592000",
+      "allowanceTimestamp": "1762000000"
+    },
+    "delayFinal": {
+      "txNonce": "2",
+      "queueNonce": "2"
+    }
   }
 }

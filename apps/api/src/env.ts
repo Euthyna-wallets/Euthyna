@@ -34,6 +34,8 @@ const schema = z.object({
   WORKER_BROADCAST_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
   WORKER_RETRY_BASE_MS: z.coerce.number().int().min(100).default(1_000),
   WORKER_RETRY_MAX_MS: z.coerce.number().int().min(1_000).default(60_000),
+  BASE_GAS_WALLET_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  BASE_GAS_WALLET_MIN_BALANCE_WEI: z.string().regex(/^\d+$/).default("5000000000000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 

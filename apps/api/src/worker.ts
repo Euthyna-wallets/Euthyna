@@ -4,6 +4,8 @@ import { prisma } from "@mandateos/db";
 
 import { loadEnv } from "./env.js";
 import { Guard } from "./guard.js";
+import { BaseGovernanceGateway } from "./governance-base.js";
+import { GovernanceWorker, PrismaGovernanceStore } from "./governance-worker.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { OperationWorker, PrismaWorkerStore } from "./operation-worker.js";
@@ -16,6 +18,21 @@ const signer = new EnvKmsSigner(
 const guard = new Guard(signer);
 const near = new NearClient(env);
 const base = createBaseRelayer(env, near, guard);
+const governance = env.BASE_GAS_WALLET_PRIVATE_KEY
+  ? new GovernanceWorker(
+      new PrismaGovernanceStore(prisma),
+      near,
+      new BaseGovernanceGateway(env.BASE_SEPOLIA_RPC_URL, env.BASE_GAS_WALLET_PRIVATE_KEY),
+      guard,
+      {
+        confirmations: env.WORKER_CONFIRMATIONS,
+        pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,
+        retryBaseMs: env.WORKER_RETRY_BASE_MS,
+        retryMaxMs: env.WORKER_RETRY_MAX_MS,
+        gasWalletMinimumWei: BigInt(env.BASE_GAS_WALLET_MIN_BALANCE_WEI),
+      },
+    )
+  : undefined;
 const worker = new OperationWorker(
   new PrismaWorkerStore(prisma),
   near,
@@ -32,8 +49,9 @@ const worker = new OperationWorker(
     cancellationSenderAccountId: env.NEAR_RELAYER_ACCOUNT_ID,
     agentGasLowYocto: env.NEAR_AGENT_GAS_LOW_YOCTO,
   },
+  undefined,
+  governance,
 );
-
 let running = true;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

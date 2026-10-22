@@ -1,11 +1,14 @@
 import { encodeDeployProxy, predictProxyAddress } from "@gnosis-guild/zodiac-core";
 import { getMultiSendDeployment, getProxyFactoryDeployment, getSafeL2SingletonDeployment } from "@safe-global/safe-deployments";
 import {
+  bytesToBigInt,
+  bytesToHex,
   concatHex,
   createPublicClient,
   encodeFunctionData,
   encodePacked,
   getAddress,
+  hexToBytes,
   http,
   keccak256,
   padHex,
@@ -94,6 +97,7 @@ export interface BaseTreasuryPlan {
   rolesDeployment: UnsignedEvmTransaction;
   delayAddress: Address;
   delayDeployment: UnsignedEvmTransaction;
+  multiSendAddress: Address;
   safeModuleCalls: Array<{ to: Address; value: string; data: Hex; description: string }>;
   saltNonces: { safe: string; roles: string; delay: string };
 }
@@ -109,6 +113,42 @@ export interface BaseTreasuryPlanInput {
   /** Test seam: skip the RPC read of SafeProxyFactory.proxyCreationCode(). */
   proxyCreationCode?: Hex;
 }
+export interface MultiSendTransaction {
+  operation: 0 | 1;
+  to: Address;
+  value: bigint;
+  data: Hex;
+}
+
+export function encodeMultiSendTransactions(calls: MultiSendTransaction[]): Hex {
+  return concatHex(calls.map((call) => concatHex([
+    toHex(call.operation, { size: 1 }),
+    call.to,
+    toHex(call.value, { size: 32 }),
+    toHex(BigInt((call.data.length - 2) / 2), { size: 32 }),
+    call.data,
+  ])));
+}
+export function decodeMultiSendTransactions(value: Hex): MultiSendTransaction[] {
+  const bytes = hexToBytes(value);
+  const calls: MultiSendTransaction[] = [];
+  for (let cursor = 0; cursor < bytes.length;) {
+    if (cursor + 85 > bytes.length) throw new Error("truncated MultiSend transaction");
+    const operation = bytes[cursor];
+    if (operation !== 0 && operation !== 1) throw new Error(`invalid MultiSend operation ${String(operation)}`);
+    const to = getAddress(bytesToHex(bytes.slice(cursor + 1, cursor + 21)));
+    const value = bytesToBigInt(bytes.slice(cursor + 21, cursor + 53));
+    const dataLength = Number(bytesToBigInt(bytes.slice(cursor + 53, cursor + 85)));
+    const dataStart = cursor + 85;
+    const dataEnd = dataStart + dataLength;
+    if (dataEnd > bytes.length) throw new Error("truncated MultiSend calldata");
+    calls.push({ operation, to, value, data: bytesToHex(bytes.slice(dataStart, dataEnd)) });
+    cursor = dataEnd;
+  }
+  return calls;
+}
+
+
 
 function deploymentAddress(
   deployment:
@@ -122,6 +162,14 @@ function deploymentAddress(
   const address = deployment.networkAddresses[String(chainId)] ?? deployment.defaultAddress;
   return getAddress(address);
 }
+export function canonicalMultiSendAddress(chainId: number): Address {
+  return deploymentAddress(
+    getMultiSendDeployment({ network: String(chainId), version: SAFE_VERSION }),
+    "MultiSend",
+    chainId,
+  );
+}
+
 
 function safeSetupInitializer(owners: Address[], threshold: number): Hex {
   return encodeFunctionData({
@@ -168,7 +216,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
   const multiSendDeployment = getMultiSendDeployment({ network: String(chainId), version: SAFE_VERSION });
   const singleton = deploymentAddress(singletonDeployment, "SafeL2", chainId);
   const factory = deploymentAddress(factoryDeployment, "SafeProxyFactory", chainId);
-  const multiSend = deploymentAddress(multiSendDeployment, "MultiSend", chainId);
+  const multiSend = canonicalMultiSendAddress(chainId);
   if (!singletonDeployment || !factoryDeployment || !multiSendDeployment) throw new Error("Safe deployments missing");
 
   const proxyCreationCode =
@@ -251,6 +299,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
       description: `Deploy Zodiac Roles ${ROLES_VERSION}`,
     },
     delayAddress,
+    multiSendAddress: multiSend,
     delayDeployment: {
       to: getAddress(String(delayTransaction.to)),
       value: "0",

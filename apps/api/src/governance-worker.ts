@@ -1,0 +1,613 @@
+import type { Prisma, PrismaClient } from "@mandateos/db";
+import {
+  decodeFunctionData,
+  getAddress,
+  hexToBytes,
+  type Address,
+  type Hex,
+} from "viem";
+import {
+  canonicalMultiSendAddress,
+  decodeMultiSendTransactions,
+  rolesAbi,
+} from "@mandateos/deployer";
+
+import type { GovernanceBaseGateway, GovernanceReceipt } from "./governance-base.js";
+import type { Guard } from "./guard.js";
+import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
+import type { GovernanceOperation, MpcSignature } from "./types.js";
+
+const ACTIVE_STATES = ["PossiblySigned", "Broadcast", "Queued", "Executing", "Reporting"];
+const multiSendAbi = [{
+  type: "function",
+  name: "multiSend",
+  stateMutability: "payable",
+  inputs: [{ name: "transactions", type: "bytes" }],
+  outputs: [],
+}] as const;
+
+export interface GovernanceTreasuryRecord {
+  id: string;
+  organizationId: string;
+  relayAccountId: string;
+  delayAddress: string;
+  rolesAddress: string;
+  baseChainId: number;
+}
+
+export interface GovernanceJobRecord extends GovernanceTreasuryRecord {
+  opId: string;
+  clientId: string;
+  state: string;
+  nearExecutionTxHash: string | null;
+  nearExecutionSignerId: string | null;
+  target: string;
+  value: string;
+  data: string;
+  operation: number;
+  txHash: string | null;
+  receiptBlock: bigint | null;
+  queueNonce: bigint | null;
+  queueCreatedAt: bigint | null;
+  cooldownSeconds: bigint | null;
+  expirationSeconds: bigint | null;
+  executeRawTransaction: string | null;
+  nextAttemptAt: Date | null;
+  executeTxHash: string | null;
+  executeReceiptBlock: bigint | null;
+  attempts: number;
+}
+
+export interface GovernanceJobUpdate {
+  state?: string;
+  txHash?: string | null;
+  receiptBlock?: bigint | null;
+  queueNonce?: bigint | null;
+  queueCreatedAt?: bigint | null;
+  cooldownSeconds?: bigint | null;
+  expirationSeconds?: bigint | null;
+  executeRawTransaction?: string | null;
+  executeTxHash?: string | null;
+  executeReceiptBlock?: bigint | null;
+  rolesVerification?: Prisma.InputJsonValue;
+  reportNonce?: bigint | null;
+  broadcastAt?: Date | null;
+  queuedAt?: Date | null;
+  executedAt?: Date | null;
+  lastAttemptAt?: Date;
+  nextAttemptAt?: Date | null;
+  attempts?: number;
+  lastError?: string | null;
+}
+
+export interface GovernanceStore {
+  listTreasuries(): Promise<GovernanceTreasuryRecord[]>;
+  upsertDiscovered(treasury: GovernanceTreasuryRecord, clientId: string, operation: GovernanceOperation): Promise<void>;
+  listReady(now: Date): Promise<GovernanceJobRecord[]>;
+  update(job: GovernanceJobRecord, update: GovernanceJobUpdate): Promise<void>;
+}
+
+export interface GovernanceNearGateway {
+  viewFunction<T>(accountId: string, methodName: string, args?: Record<string, unknown>): Promise<T>;
+  transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus>;
+  submitSignature(relayAccountId: string, opId: number[], signature: MpcSignature): Promise<string>;
+  reportStatus(relayAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string>;
+}
+
+export interface GovernanceWorkerConfig {
+  confirmations: number;
+  pollIntervalMs: number;
+  retryBaseMs: number;
+  retryMaxMs: number;
+  gasWalletMinimumWei: bigint;
+}
+
+function retryAt(config: GovernanceWorkerConfig, attempts: number, now: Date): Date {
+  const delay = Math.min(config.retryBaseMs * (2 ** Math.min(attempts, 8)), config.retryMaxMs);
+  return new Date(now.getTime() + delay);
+}
+
+function opBytes(opId: string): number[] {
+  return Array.from(hexToBytes(opId as Hex));
+}
+
+
+export class PrismaGovernanceStore implements GovernanceStore {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async listTreasuries(): Promise<GovernanceTreasuryRecord[]> {
+    return this.prisma.treasury.findMany({
+      where: { status: "active" },
+      select: {
+        id: true,
+        organizationId: true,
+        relayAccountId: true,
+        delayAddress: true,
+        rolesAddress: true,
+        baseChainId: true,
+      },
+    });
+  }
+
+  async upsertDiscovered(
+    treasury: GovernanceTreasuryRecord,
+    clientId: string,
+    operation: GovernanceOperation,
+  ): Promise<void> {
+    const opId = `0x${Buffer.from(operation.op_id).toString("hex")}`;
+    const existing = await this.prisma.governanceOperation.findUnique({
+      where: { organizationId_opId: { organizationId: treasury.organizationId, opId } },
+      select: { state: true },
+    });
+    if (existing && ["Executed", "Vetoed", "Expired", "Failed"].includes(existing.state)) return;
+    await this.prisma.governanceOperation.upsert({
+      where: { organizationId_opId: { organizationId: treasury.organizationId, opId } },
+      create: {
+        organizationId: treasury.organizationId,
+        opId,
+        treasuryId: treasury.id,
+        relayAccountId: treasury.relayAccountId,
+        clientId,
+        state: operation.state,
+        target: `0x${Buffer.from(operation.target).toString("hex")}`,
+        value: operation.value,
+        data: `0x${Buffer.from(operation.data).toString("hex")}`,
+        operation: operation.operation,
+        nextAttemptAt: new Date(),
+      },
+      update: {
+        clientId,
+        target: `0x${Buffer.from(operation.target).toString("hex")}`,
+        value: operation.value,
+        data: `0x${Buffer.from(operation.data).toString("hex")}`,
+        operation: operation.operation,
+      },
+    });
+  }
+
+  async listReady(now: Date): Promise<GovernanceJobRecord[]> {
+    const rows = await this.prisma.governanceOperation.findMany({
+      where: {
+        state: { in: ACTIVE_STATES },
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+      },
+      include: { treasury: true },
+      orderBy: { updatedAt: "asc" },
+      take: 10,
+    });
+    return rows.map((row) => ({
+      id: row.treasury.id,
+      organizationId: row.organizationId,
+      relayAccountId: row.relayAccountId,
+      delayAddress: row.treasury.delayAddress,
+      rolesAddress: row.treasury.rolesAddress,
+      baseChainId: row.treasury.baseChainId,
+      opId: row.opId,
+      clientId: row.clientId,
+      state: row.state,
+      nearExecutionTxHash: row.nearExecutionTxHash,
+      nearExecutionSignerId: row.nearExecutionSignerId,
+      target: row.target,
+      value: row.value,
+      data: row.data,
+      operation: row.operation,
+      nextAttemptAt: row.nextAttemptAt,
+      txHash: row.txHash,
+      receiptBlock: row.receiptBlock,
+      queueNonce: row.queueNonce,
+      queueCreatedAt: row.queueCreatedAt,
+      cooldownSeconds: row.cooldownSeconds,
+      expirationSeconds: row.expirationSeconds,
+      executeRawTransaction: row.executeRawTransaction,
+      executeTxHash: row.executeTxHash,
+      executeReceiptBlock: row.executeReceiptBlock,
+      attempts: row.attempts,
+    }));
+  }
+
+  async update(job: GovernanceJobRecord, update: GovernanceJobUpdate): Promise<void> {
+    await this.prisma.governanceOperation.update({
+      where: { organizationId_opId: { organizationId: job.organizationId, opId: job.opId } },
+      data: update,
+    });
+  }
+}
+
+interface ZodiacBatchExpectation {
+  member: Address;
+  allowanceKey: Hex;
+  allowance: {
+    balance: bigint;
+    maxRefill: bigint;
+    refill: bigint;
+    period: bigint;
+    timestamp: bigint;
+  };
+}
+
+function zodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation {
+  const multiSend = canonicalMultiSendAddress(job.baseChainId);
+  if (job.operation !== 1 || getAddress(job.target) !== multiSend) {
+    throw new Error("relay operation is not a canonical MultiSend delegatecall");
+  }
+  const decoded = decodeFunctionData({ abi: multiSendAbi, data: job.data as Hex });
+  if (decoded.functionName !== "multiSend") throw new Error("relay calldata is not multiSend(bytes)");
+  const calls = decodeMultiSendTransactions(decoded.args[0]);
+  if (calls.length !== 4) throw new Error(`expected four Zodiac calls, got ${calls.length}`);
+  const roles = getAddress(job.rolesAddress);
+  if (calls.some((call) => call.operation !== 0 || call.to !== roles || call.value !== 0n)) {
+    throw new Error("Zodiac batch contains a non-Call or a non-Roles target");
+  }
+  const decodedCalls = calls.map((call) => decodeFunctionData({ abi: rolesAbi, data: call.data }));
+  const names = decodedCalls.map((call) => call.functionName);
+  if (JSON.stringify(names) !== JSON.stringify(["assignRoles", "scopeTarget", "scopeFunction", "setAllowance"])) {
+    throw new Error(`unexpected Zodiac call order ${names.join(",")}`);
+  }
+  const assign = decodedCalls[0];
+  const allowance = decodedCalls[3];
+  if (assign?.functionName !== "assignRoles" || allowance?.functionName !== "setAllowance") {
+    throw new Error("Zodiac batch decode failed");
+  }
+  const member = getAddress(assign.args[0]);
+  const enabled = assign.args[2];
+  if (enabled.length !== 1 || enabled[0] !== true) throw new Error("Zodiac member assignment is not enabled");
+  return {
+    member,
+    allowanceKey: allowance.args[0],
+    allowance: {
+      balance: allowance.args[1],
+      maxRefill: allowance.args[2],
+      refill: allowance.args[3],
+      period: allowance.args[4],
+      timestamp: allowance.args[5],
+    },
+  };
+}
+
+function assertRolesVerification(
+  expectation: ZodiacBatchExpectation,
+  verification: Awaited<ReturnType<GovernanceBaseGateway["verifyRoles"]>>,
+): void {
+  if (!verification.memberEnabled) throw new Error("Roles member assignment missing");
+  const expected = expectation.allowance;
+  const actual = verification.allowance;
+  if (
+    actual.balance !== expected.balance ||
+    actual.maxRefill !== expected.maxRefill ||
+    actual.refill !== expected.refill ||
+    actual.period !== expected.period ||
+    actual.timestamp !== expected.timestamp
+  ) {
+    throw new Error("Roles allowance state does not match the governed batch");
+  }
+  const events = new Set(verification.events);
+  for (const event of ["AssignRoles", "ScopeTarget", "ScopeFunction", "SetAllowance"]) {
+    if (!events.has(event)) throw new Error(`Roles ${event} evidence missing`);
+  }
+}
+
+export class GovernanceWorker {
+  private lastDiscoveryAt = 0;
+
+  constructor(
+    private readonly store: GovernanceStore,
+    private readonly near: GovernanceNearGateway,
+    private readonly base: GovernanceBaseGateway,
+    private readonly guard: Pick<Guard, "relayStatusReport">,
+    private readonly config: GovernanceWorkerConfig,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async tick(): Promise<number> {
+    let [job] = await this.store.listReady(this.now());
+    if (!job && this.now().getTime() - this.lastDiscoveryAt >= 60_000) {
+      await this.discover();
+      this.lastDiscoveryAt = this.now().getTime();
+      [job] = await this.store.listReady(this.now());
+    }
+    const balance = await this.base.gasWalletBalance();
+    if (balance < this.config.gasWalletMinimumWei) {
+      console.warn(JSON.stringify({
+        event: "governance.gas_wallet_low",
+        address: this.base.gasWalletAddress(),
+        balanceWei: balance.toString(),
+        thresholdWei: this.config.gasWalletMinimumWei.toString(),
+      }));
+    }
+    if (!job) return 0;
+    try {
+      await this.process(job);
+    } catch (error) {
+      const attempts = job.attempts + 1;
+      await this.store.update(job, {
+        attempts,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: retryAt(this.config, attempts, this.now()),
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return 1;
+  }
+
+  private async discover(): Promise<void> {
+    for (const treasury of await this.store.listTreasuries()) {
+      const opId = await this.near.viewFunction<number[] | null>(treasury.relayAccountId, "active_operation");
+      if (!opId) continue;
+      const [operation, clientId] = await Promise.all([
+        this.near.viewFunction<GovernanceOperation | null>(treasury.relayAccountId, "get_operation", { op_id: opId }),
+        this.near.viewFunction<string>(treasury.relayAccountId, "client_id"),
+      ]);
+      if (operation) await this.store.upsertDiscovered(treasury, clientId, operation);
+    }
+  }
+
+  private async process(job: GovernanceJobRecord): Promise<void> {
+    const id = opBytes(job.opId);
+    if (job.state === "Reporting") {
+      await this.reportExecuted(job, id);
+      return;
+    }
+    let operation: GovernanceOperation | null = null;
+    let hash: Hex;
+    if (job.state === "PossiblySigned" || job.state === "Broadcast") {
+      operation = await this.near.viewFunction<GovernanceOperation | null>(
+        job.relayAccountId,
+        "get_operation",
+        { op_id: id },
+      );
+      if (!operation) throw new Error("relay operation missing");
+      if (operation.state === "Confirmed") {
+        await this.store.update(job, {
+          state: job.executeTxHash ? "Executed" : "Confirmed",
+          ...(job.executeTxHash ? { executedAt: this.now() } : {}),
+          nextAttemptAt: null,
+          lastError: null,
+        });
+        return;
+      }
+      if (operation.state === "Cancelled") {
+        await this.store.update(job, { state: "Vetoed", nextAttemptAt: null });
+        return;
+      }
+      if (!operation.signed_transaction) {
+        if (!job.nearExecutionTxHash || !job.nearExecutionSignerId) {
+          await this.schedule(job, "PossiblySigned", "awaiting final DAO vote transaction hash");
+          return;
+        }
+        await this.recoverSignature(job, id);
+        operation = await this.near.viewFunction<GovernanceOperation | null>(
+          job.relayAccountId,
+          "get_operation",
+          { op_id: id },
+        );
+        if (!operation?.signed_transaction) {
+          await this.schedule(job, "PossiblySigned", "MPC signature is not available yet");
+          return;
+        }
+      }
+      hash = this.base.rawTransactionHash(operation.signed_transaction);
+      if (job.txHash && job.txHash.toLowerCase() !== hash.toLowerCase()) {
+        throw new Error("stored governance hash differs from relay signed transaction");
+      }
+    } else {
+      if (!job.txHash) throw new Error("governance queue hash missing");
+      hash = job.txHash as Hex;
+    }
+    const queueReceipt = await this.base.receipt(hash);
+    if (!queueReceipt) {
+      if (!operation?.signed_transaction) throw new Error("queued governance receipt unavailable");
+      let entryNonce = job.queueNonce;
+      if (entryNonce === null) {
+        entryNonce = (await this.base.delayState(getAddress(job.delayAddress), 0n)).queueNonce;
+        await this.store.update(job, {
+          state: "Broadcast",
+          txHash: hash,
+          queueNonce: entryNonce,
+          broadcastAt: this.now(),
+          lastAttemptAt: this.now(),
+          nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+          lastError: null,
+        });
+      }
+      await this.base.broadcastRaw(operation.signed_transaction);
+      if (job.queueNonce !== null) await this.schedule(job, "Broadcast");
+      return;
+    }
+    const currentBlock = await this.base.blockNumber();
+    const queueDepth = currentBlock >= queueReceipt.blockNumber ? currentBlock - queueReceipt.blockNumber + 1n : 0n;
+    if (queueDepth < BigInt(this.config.confirmations)) {
+      await this.store.update(job, {
+        state: "Broadcast",
+        txHash: hash,
+        receiptBlock: queueReceipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: `waiting for Base confirmations ${queueDepth}/${this.config.confirmations}`,
+      });
+      return;
+    }
+    if (queueReceipt.status === "reverted") {
+      await this.fail(job, hash, queueReceipt.blockNumber, `governance queue transaction ${hash} reverted`);
+      return;
+    }
+
+    const entryNonce = job.queueNonce;
+    if (entryNonce === null) throw new Error("Delay queue nonce was not checkpointed before broadcast");
+    const delay = getAddress(job.delayAddress);
+    const delayState = await this.base.delayState(delay, entryNonce);
+    if (delayState.queueNonce <= entryNonce || delayState.createdAt === 0n) {
+      await this.schedule(job, "Broadcast", "waiting for Delay queue entry");
+      return;
+    }
+    const checkpointedExecuteReceipt = job.executeTxHash
+      ? await this.base.receipt(job.executeTxHash as Hex)
+      : null;
+    if (delayState.txNonce > entryNonce && checkpointedExecuteReceipt?.status !== "success") {
+      await this.store.update(job, { state: "Vetoed", nextAttemptAt: null, lastError: null });
+      return;
+    }
+    await this.store.update(job, {
+      state: job.executeRawTransaction ? "Executing" : "Queued",
+      txHash: hash,
+      receiptBlock: queueReceipt.blockNumber,
+      queueCreatedAt: delayState.createdAt,
+      cooldownSeconds: delayState.cooldown,
+      expirationSeconds: delayState.expiration,
+      ...(job.queueCreatedAt === null ? { queuedAt: this.now() } : {}),
+      lastAttemptAt: this.now(),
+      nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+      lastError: null,
+    });
+
+    if (delayState.currentTimestamp > delayState.createdAt + delayState.expiration) {
+      await this.store.update(job, { state: "Expired", nextAttemptAt: null, lastError: null });
+      return;
+    }
+    if (delayState.currentTimestamp < delayState.createdAt + delayState.cooldown) {
+      const remainingSeconds = delayState.createdAt + delayState.cooldown - delayState.currentTimestamp;
+      await this.store.update(job, {
+        state: "Queued",
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + Number(remainingSeconds) * 1_000),
+        lastError: null,
+      });
+      return;
+    }
+
+    if (!job.executeRawTransaction || !job.executeTxHash) {
+      const prepared = await this.base.prepareExecuteNextTx({
+        delay,
+        to: getAddress(job.target),
+        value: BigInt(job.value),
+        data: job.data as Hex,
+        operation: job.operation === 1 ? 1 : 0,
+      });
+      await this.store.update(job, {
+        state: "Executing",
+        executeRawTransaction: prepared.rawTransaction,
+        executeTxHash: prepared.hash,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: null,
+      });
+      return;
+    }
+
+    const executeHash = job.executeTxHash as Hex;
+    const executeReceipt = checkpointedExecuteReceipt ?? await this.base.receipt(executeHash);
+    if (!executeReceipt) {
+      await this.base.broadcastRaw(job.executeRawTransaction as Hex);
+      await this.schedule(job, "Executing");
+      return;
+    }
+    const executeDepth = currentBlock >= executeReceipt.blockNumber ? currentBlock - executeReceipt.blockNumber + 1n : 0n;
+    if (executeDepth < BigInt(this.config.confirmations)) {
+      await this.store.update(job, {
+        state: "Executing",
+        executeReceiptBlock: executeReceipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: `waiting for execute confirmations ${executeDepth}/${this.config.confirmations}`,
+      });
+      return;
+    }
+    if (executeReceipt.status === "reverted") {
+      await this.fail(job, executeHash, executeReceipt.blockNumber, `Delay executeNextTx ${executeHash} reverted`);
+      return;
+    }
+
+    const expectation = zodiacBatchExpectation(job);
+    const verification = await this.base.verifyRoles({
+      roles: getAddress(job.rolesAddress),
+      member: expectation.member,
+      allowanceKey: expectation.allowanceKey,
+      receipt: executeReceipt,
+    });
+    assertRolesVerification(expectation, verification);
+    await this.store.update(job, {
+      state: "Reporting",
+      executeReceiptBlock: executeReceipt.blockNumber,
+      rolesVerification: {
+        member: expectation.member,
+        allowanceKey: expectation.allowanceKey,
+        events: verification.events,
+        allowance: {
+          refill: verification.allowance.refill.toString(),
+          maxRefill: verification.allowance.maxRefill.toString(),
+          period: verification.allowance.period.toString(),
+          balance: verification.allowance.balance.toString(),
+          timestamp: verification.allowance.timestamp.toString(),
+        },
+      },
+      executedAt: this.now(),
+      lastAttemptAt: this.now(),
+      nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+      lastError: null,
+    });
+  }
+
+  private async reportExecuted(job: GovernanceJobRecord, opId: number[]): Promise<void> {
+    if (!job.txHash || job.receiptBlock === null) throw new Error("queue receipt checkpoint missing");
+    const operation = await this.near.viewFunction<GovernanceOperation | null>(
+      job.relayAccountId,
+      "get_operation",
+      { op_id: opId },
+    );
+    if (!operation) throw new Error("relay operation missing after Delay execution");
+    let reportNonce: bigint | null = null;
+    if (operation.state !== "Confirmed") {
+      const signedReport = await this.guard.relayStatusReport(
+        job.clientId,
+        operation,
+        job.txHash as Hex,
+        job.receiptBlock,
+      );
+      await this.near.reportStatus(job.relayAccountId, signedReport);
+      reportNonce = BigInt(signedReport.report?.report_nonce ?? 0);
+    }
+    await this.store.update(job, {
+      state: "Executed",
+      reportNonce,
+      lastAttemptAt: this.now(),
+      nextAttemptAt: null,
+      lastError: null,
+    });
+  }
+
+  private async recoverSignature(job: GovernanceJobRecord, opId: number[]): Promise<void> {
+    const status = await this.near.transactionStatus(job.nearExecutionTxHash!, job.nearExecutionSignerId!);
+    const signatures = extractMpcSignatures(status);
+    if (signatures.length === 0) throw new Error(`no secp256k1 MPC response in ${job.nearExecutionTxHash}`);
+    let lastError: unknown;
+    for (const signature of signatures) {
+      try {
+        await this.near.submitSignature(job.relayAccountId, opId, signature);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error("relay MPC signature recovery failed");
+  }
+
+  private async schedule(job: GovernanceJobRecord, state: string, lastError: string | null = null): Promise<void> {
+    await this.store.update(job, {
+      state,
+      lastAttemptAt: this.now(),
+      nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+      lastError,
+    });
+  }
+
+  private async fail(job: GovernanceJobRecord, hash: Hex, blockNumber: bigint, message: string): Promise<void> {
+    await this.store.update(job, {
+      state: "Failed",
+      executeTxHash: job.state === "Executing" ? hash : job.executeTxHash,
+      receiptBlock: job.state === "Executing" ? job.receiptBlock : blockNumber,
+      executeReceiptBlock: job.state === "Executing" ? blockNumber : job.executeReceiptBlock,
+      lastAttemptAt: this.now(),
+      nextAttemptAt: null,
+      lastError: message,
+    });
+  }
+}

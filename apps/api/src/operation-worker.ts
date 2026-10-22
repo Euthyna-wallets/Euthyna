@@ -66,6 +66,10 @@ export interface WorkerStore {
   releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void>;
   syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void>;
 }
+export interface GovernanceJobRunner {
+  tick(): Promise<number>;
+}
+
 
 export interface WorkerNearGateway {
   getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation>;
@@ -245,6 +249,7 @@ export class OperationWorker {
     private readonly guard: Pick<Guard, "confirmationReport">,
     private readonly config: WorkerConfig,
     private readonly now: () => Date = () => new Date(),
+    private readonly governance?: GovernanceJobRunner,
   ) {}
 
   async tick(): Promise<{ leased: boolean; processed: number }> {
@@ -253,24 +258,30 @@ export class OperationWorker {
       return { leased: false, processed: 0 };
     }
     const operations = await this.store.listReady(now);
-    if (operations.length === 0) return { leased: true, processed: 0 };
-    const blockHeight = await this.near.currentBlockHeight();
-    for (const operation of operations) {
-      if (!(await this.store.acquireLease(this.now(), this.config.leaseMs))) break;
-      try {
-        await this.process(operation, blockHeight);
-      } catch (error) {
-        const attempts = operation.attempts + 1;
-        const message = error instanceof Error ? error.message : String(error);
-        await this.store.update(operation, {
-          attempts,
-          lastAttemptAt: this.now(),
-          nextAttemptAt: nextRetry(this.config, attempts, this.now()),
-          lastError: message,
-        });
+    let processed = 0;
+    if (operations.length > 0) {
+      const blockHeight = await this.near.currentBlockHeight();
+      for (const operation of operations) {
+        if (!(await this.store.acquireLease(this.now(), this.config.leaseMs))) break;
+        try {
+          await this.process(operation, blockHeight);
+        } catch (error) {
+          const attempts = operation.attempts + 1;
+          const message = error instanceof Error ? error.message : String(error);
+          await this.store.update(operation, {
+            attempts,
+            lastAttemptAt: this.now(),
+            nextAttemptAt: nextRetry(this.config, attempts, this.now()),
+            lastError: message,
+          });
+        }
+        processed += 1;
       }
     }
-    return { leased: true, processed: operations.length };
+    if (this.governance && await this.store.acquireLease(this.now(), this.config.leaseMs)) {
+      processed += await this.governance.tick();
+    }
+    return { leased: true, processed };
   }
 
   private async process(record: WorkerOperationRecord, blockHeight: number): Promise<void> {

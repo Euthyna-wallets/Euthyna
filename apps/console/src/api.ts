@@ -44,11 +44,14 @@ export type TreasuryPlan = {
   relay: {
     accountId: string;
     initArgs: {
+      client_id: string;
       owner_id: string;
       mpc_contract_id: string;
       mpc_path: string;
       evm_chain_id: number;
       delay_address: string;
+      multisend_address: string;
+      guard_public_key: string;
     };
     wasmSha256: string;
     actions: NearAction[];
@@ -57,6 +60,7 @@ export type TreasuryPlan = {
     safeAddress: string;
     rolesAddress: string;
     delayAddress: string;
+    multiSendAddress: string;
     safeDeployment: { to: string; value: string; data: string };
     rolesDeployment: { to: string; value: string; data: string };
     delayDeployment: { to: string; value: string; data: string };
@@ -131,7 +135,7 @@ export type MandatePreview = {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
     funding: MandateProposal | null;
-    zodiacRelay: MandateProposal[];
+    zodiacRelay: MandateProposal | null;
   };
   warnings: string[];
 };

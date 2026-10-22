@@ -11,6 +11,7 @@ import { AgentProvisioningError, type AgentProvisioningService } from "./agent-p
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity, PasskeyIdentity } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
+import { GovernanceError, type GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { TreasuryError, type TreasuryGateway } from "./treasury.js";
@@ -147,6 +148,7 @@ const nearDeploymentAttestationSchema = treasuryRegisterSchema.pick({
   daoAccountId: true,
   vaultAccountId: true,
   relayAccountId: true,
+  delayAddress: true,
   govAddress: true,
 });
 
@@ -157,6 +159,12 @@ const nearSponsorshipSchema = z.object({
 const budgetTokenPlanSchema = z.object({
   amount: z.string().regex(/^[1-9]\d*$/),
 });
+const governanceExecutionSchema = z.object({
+  proposalId: z.number().int().nonnegative(),
+  nearTransactionHash: z.string().min(32).max(64),
+  signerAccountId: nearAccountSchema,
+});
+
 
 
 const walletProofChallengeSchema = z.object({
@@ -205,6 +213,7 @@ export interface AppDependencies {
   walletProof: WalletProofGateway;
   agentProvisioning: AgentProvisioningService;
   treasury: TreasuryGateway;
+  governance: GovernanceGateway;
   mandates: MandateGateway;
   registry: RegistryService;
   payments: PaymentService;
@@ -320,6 +329,7 @@ export function createApp({
   walletProof,
   agentProvisioning,
   treasury,
+  governance,
   mandates,
   registry: registryService,
   payments,
@@ -527,6 +537,12 @@ export function createApp({
   app.get("/v1/console/governance", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json(await consoleData.governance(consoleIdentity.organizationId));
+  });
+
+  app.post("/v1/console/governance/relay-operation", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceExecutionSchema);
+    return context.json(await governance.recordRelayExecution(consoleIdentity.organizationId, input));
   });
 
   app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
@@ -1019,6 +1035,9 @@ export function createApp({
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof TreasuryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof GovernanceError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof WalletProofError) {

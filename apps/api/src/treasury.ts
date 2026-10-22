@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { buildBaseTreasuryPlan, type BaseTreasuryPlan } from "@mandateos/deployer";
+import { buildBaseTreasuryPlan, canonicalMultiSendAddress, type BaseTreasuryPlan } from "@mandateos/deployer";
 import type { PrismaClient } from "@mandateos/db";
 import bs58 from "bs58";
 import { createPublicClient, getAddress, http, keccak256, type Address, type Hex } from "viem";
@@ -90,6 +90,7 @@ export interface NearDeploymentAttestationInput {
   environment: string;
   daoAccountId: string;
   vaultAccountId: string;
+  delayAddress: string;
   relayAccountId: string;
   govAddress: string;
 }
@@ -157,6 +158,7 @@ export interface BaseTreasuryVerifier {
     delayAddress: Address;
     govAddress: Address;
     delayCooldownSeconds: bigint;
+    multiSendAddress: Address;
     delayExpirationSeconds: bigint;
   }): Promise<void>;
 }
@@ -346,18 +348,24 @@ export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
     rolesAddress: Address;
     delayAddress: Address;
     govAddress: Address;
+    multiSendAddress: Address;
     delayCooldownSeconds: bigint;
     delayExpirationSeconds: bigint;
   }): Promise<void> {
-    const { safe, roles, delay, gov, owners, threshold } = {
+    const { safe, roles, delay, gov, multiSend, owners, threshold } = {
       safe: input.safeAddress,
       roles: input.rolesAddress,
       delay: input.delayAddress,
       gov: input.govAddress,
+      multiSend: input.multiSendAddress,
       owners: input.owners,
       threshold: input.threshold,
     };
-    for (const address of [safe, roles, delay]) {
+    const canonicalMultiSend = canonicalMultiSendAddress(this.chainId);
+    if (multiSend !== canonicalMultiSend) {
+      throw new TreasuryError(422, "multisend_address_mismatch", "MultiSend is not the canonical Safe 1.4.1 deployment");
+    }
+    for (const address of [safe, roles, delay, multiSend]) {
       const code = await this.client.getBytecode({ address });
       if (!code || code === "0x") throw new TreasuryError(422, "missing_contract", `${address} has no code`);
     }
@@ -471,6 +479,15 @@ export class TreasuryService {
     );
     const govAddress = nearPublicKeyToEvmAddress(govPublicKey);
     const guardPublicKey = Buffer.from(await this.signer.publicKey()).toString("base64");
+    const base = await this.basePlanner({
+      organizationId,
+      slug,
+      owners: council.map((member) => member.evmAddress),
+      threshold,
+      govAddress,
+      rpcUrl: environment.baseRpcUrl,
+      chainId: environment.baseChainId,
+    });
 
     const vaultArtifact = await loadArtifact(this.config.artifactsDir, "vault.wasm");
     const relayArtifact = await loadArtifact(this.config.artifactsDir, "governance_relay.wasm");
@@ -486,26 +503,19 @@ export class TreasuryService {
       reservation_ttl_blocks: this.config.vaultTtlBlocks,
     };
     const relayInitArgs = {
+      client_id: slug,
       owner_id: daoAccountId,
       mpc_contract_id: this.config.mpcContractId,
       mpc_path: this.config.mpcPath,
       evm_chain_id: environment.baseChainId,
-      delay_address: Buffer.from(govAddress.slice(2), "hex").toString("base64"),
+      delay_address: Buffer.from(base.delayAddress.slice(2), "hex").toString("base64"),
+      multisend_address: Buffer.from(base.multiSendAddress.slice(2), "hex").toString("base64"),
+      guard_public_key: guardPublicKey,
       max_gas_limit: "300000",
       max_fee_per_gas: "100000000000",
       max_priority_fee_per_gas: "10000000000",
       max_total_fee: "30000000000000000",
     };
-
-    const base = await this.basePlanner({
-      organizationId,
-      slug,
-      owners: council.map((member) => member.evmAddress),
-      threshold,
-      govAddress,
-      rpcUrl: environment.baseRpcUrl,
-      chainId: environment.baseChainId,
-    });
 
     const nearDeployment = (accountId: string, artifact: Artifact, initArgs: Record<string, unknown>, depositYocto: string): NearContractPlan => ({
       accountId,
@@ -730,6 +740,7 @@ export class TreasuryService {
       daoAccountId: input.daoAccountId,
       vaultAccountId: input.vaultAccountId,
       relayAccountId: input.relayAccountId,
+      delayAddress: input.delayAddress,
       govAddress: input.govAddress,
     });
     if (requireConfirmations) {
@@ -758,6 +769,7 @@ export class TreasuryService {
       rolesAddress: roles,
       delayAddress: delay,
       govAddress: nearDeployment.expectedGov,
+      multiSendAddress: canonicalMultiSendAddress(environment.baseChainId),
       delayCooldownSeconds: environment.delayCooldownSeconds,
       delayExpirationSeconds: environment.delayExpirationSeconds,
     });
@@ -833,10 +845,16 @@ export class TreasuryService {
       }
     }
 
+    const expectedMultiSend = canonicalMultiSendAddress(environment.baseChainId);
+    const expectedMultiSendBase64 = Buffer.from(expectedMultiSend.slice(2), "hex").toString("base64");
+    const expectedClientId = input.daoAccountId.split(".")[0] ?? "";
     const relayParameters: Array<[string, unknown, unknown, string]> = [
+      ["client_id", await this.near.viewFunction<string>(input.relayAccountId, "client_id"), expectedClientId, "relay_client_mismatch"],
       ["mpc_contract_id", await this.near.viewFunction<string>(input.relayAccountId, "mpc_contract_id"), this.config.mpcContractId, "relay_mpc_mismatch"],
       ["mpc_path", await this.near.viewFunction<string>(input.relayAccountId, "mpc_path"), this.config.mpcPath, "relay_mpc_path_mismatch"],
       ["evm_chain_id", await this.near.viewFunction<number>(input.relayAccountId, "evm_chain_id"), environment.baseChainId, "relay_chain_mismatch"],
+      ["multisend_address", await this.near.viewFunction<string>(input.relayAccountId, "multisend_address"), expectedMultiSendBase64, "relay_multisend_mismatch"],
+      ["guard_public_key", await this.near.viewFunction<string>(input.relayAccountId, "guard_public_key"), expectedGuardKey, "relay_guard_key_mismatch"],
     ];
     for (const [name, actual, expected, code] of relayParameters) {
       if (actual !== expected) {
@@ -845,19 +863,21 @@ export class TreasuryService {
     }
 
     const expectedGov = getAddress(input.govAddress);
+    const expectedDelay = getAddress(input.delayAddress);
     const relayDelay = await this.near.viewFunction<string>(input.relayAccountId, "delay_address");
-    if (Buffer.from(relayDelay, "base64").toString("hex") !== expectedGov.slice(2).toLowerCase()) {
-      throw new TreasuryError(422, "relay_delay_mismatch", "relay delay_address is not the registered 0xGOV");
+    if (Buffer.from(relayDelay, "base64").toString("hex") !== expectedDelay.slice(2).toLowerCase()) {
+      throw new TreasuryError(422, "relay_delay_mismatch", "relay delay_address is not the registered Delay");
     }
 
     const digest = createHash("sha256").update(JSON.stringify({
-      version: 1,
+      version: 2,
       environment: input.environment,
       daoAccountId: input.daoAccountId,
       vaultAccountId: input.vaultAccountId,
       vaultWasmSha256: vaultArtifact.sha256,
       relayAccountId: input.relayAccountId,
       relayWasmSha256: relayArtifact.sha256,
+      clientId: expectedClientId,
       mpcContractId: this.config.mpcContractId,
       mpcPath: this.config.mpcPath,
       baseChainId: environment.baseChainId,
@@ -865,6 +885,8 @@ export class TreasuryService {
       guardPublicKey: expectedGuardKey,
       reservationTtlBlocks: this.config.vaultTtlBlocks,
       govAddress: expectedGov,
+      delayAddress: expectedDelay,
+      multiSendAddress: expectedMultiSend,
     })).digest("hex");
     return {
       digest,

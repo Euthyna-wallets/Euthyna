@@ -135,7 +135,7 @@
     "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",
     "code_hash_sha256_bs58": "6KZnkemmuysJwuRfZkaqEifTmTdaGUpTKr128GhDJsMA",
     "access_key_count": 0,
-    "latest_local_code_hash_sha256_hex": "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
+    "latest_local_code_hash_sha256_hex": "4dd9dbced13746d90eea47151173b653737f047e4af95ace46bf7302370c2668",
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "mpc_path": "governance/base-sepolia",
     "derived_public_key": "secp256k1:3cuFpPFwraKRy7vUjRRetafeZnyp4WBNEwuUtjRNWkhbLam21jcmribNomTFEzQzczqcKvbjEdRhUYf7qgf6b4cs",
@@ -175,6 +175,59 @@
     "veto_tx": "0xab38cd090d4864c1826fdd45bff0f8291a2749f35230a0d0f1a3175a5760e324",
     "post_veto_execute_tx": "0x5f24a2d514917499de2a81d8e60cb181d00c4471deda7f0b35ee288ecdbf14df",
     "post_veto_execute_status": "reverted: Transaction queue is empty"
+  },
+  "pr_c_uat": {
+    "observed_at": "2026-10-22",
+    "dao_account_id": "pr-c-uat-1.factory-v2.mandateos.testnet",
+    "vault_account_id": "pr-c-uat-v.mandateos.testnet",
+    "relay_account_id": "pr-c-uat-r.mandateos.testnet",
+    "relay_deploy_transaction_hash": "9v23rJbND6AgZok2f4ohH3M8ZEYnqJcFAtC8HcfKzTih",
+    "vault_code_hash_bs58": "E84rEHFp7op5PKFHhvpB4idgXidXbg3Y7HnPtytVF1JB",
+    "relay_code_hash_bs58": "6Eu4wkXjwxwJN2iC7jRAyL5hgYqdhUfp4vn5gShJbrBZ",
+    "vault_access_key_count": 0,
+    "relay_access_key_count": 0,
+    "relay_client_id": "pr-c-uat-1",
+    "relay_delay_address": "0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff",
+    "relay_multisend_address": "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526",
+    "relay_evm_address": "0x3961FA54D0ebDf4DbDe073466f580D48Daac7928",
+    "setup_proposals": {
+      "derive_relay": {
+        "id": 2,
+        "final_vote_hash": "51nxYsVjZCoXL961rAUtx2i3xwSVFQVwV3vHX7aH72Qa"
+      },
+      "set_role": {
+        "id": 3,
+        "final_vote_hash": "D7hd7WeHyY8qCF5eHijmikeauuDW1qMpzn8yaxpAnS8i"
+      },
+      "register_agent": {
+        "id": 4,
+        "final_vote_hash": "63kEWXh8pU7wpLivvhRAbTLUJK6JQy5d5jWWrTbkSeQi"
+      },
+      "fund_role": {
+        "id": 5,
+        "final_vote_hash": "2hF3odmb7mn7KcVujZaXQtbMpUuGfMqDrfAJLxtgFqVK"
+      },
+      "zodiac_batch": {
+        "id": 6,
+        "final_vote_hash": "FMpoLG8EKR1zEGiiqRZNMFV7LAuHhaGVArXVe4dNvjTW"
+      },
+      "veto_batch": {
+        "id": 7,
+        "final_vote_hash": "ErxsZceE4Dj5v4zHZzopnsgyCF9pm5fXhU6RzBmwMSyf"
+      }
+    },
+    "executed_operation": {
+      "op_id": "0xbb941ff7ebcb95d6dc687c967bcd33229518794b408e153fc38fb674298b8be1",
+      "queue_transaction_hash": "0x6dbf9d2a7b3ef9e52ac575cc008a79caab2a837fb3802b2f4952294b846fa6e3",
+      "execute_transaction_hash": "0xa71418caa731dbf68cfe2a34a69a768fa4cce32b7cfdda977f6064af5f7c962d",
+      "report_nonce": "222445023220011",
+      "state": "Executed"
+    },
+    "vetoed_operation": {
+      "op_id": "0x027e1e8095d0d494843573d8d6cb8f26e7251498f7fc2ba1a29e200ca992639a",
+      "queue_transaction_hash": "0x62dd2a87a8a7686a14543a5aa32a4ef3f4522edd1ca970024a60a1df5199440f",
+      "state": "Vetoed"
+    }
   },
   "superseded_deployment": {
     "dao": "mandateos-uat-92530026.sputnikv2.testnet",

@@ -15,6 +15,7 @@ import type {
   CreatedAgent,
 } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
+import type { GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
 import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
@@ -380,6 +381,9 @@ function testApp(options?: {
       attestation: { valid: true },
     }),
   } as unknown as AgentProvisioningService;
+  const governance: GovernanceGateway = {
+    recordRelayExecution: async () => ({ opId: `0x${"01".repeat(32)}`, state: "PossiblySigned" }),
+  };
   const app = createApp({
     near,
     guard,
@@ -388,6 +392,7 @@ function testApp(options?: {
     walletProof,
     agentProvisioning,
     treasury,
+    governance,
     mandates,
     registry,
     payments,
