@@ -408,6 +408,29 @@ immutable-hash, keyless MandateOS factory.
 Returns the stored agent plus its on-chain Vault state (`get_agent`,
 `next_evm_nonce`). The console lists agents and shows this state per agent.
 
+### `GET /v1/console/treasury/budget-token`
+
+Returns the configured FT metadata, DAO/Vault storage registration and DAO
+balance. `ft_metadata.decimals` must equal USDC's `6`; any other value is
+rejected. `POST /v1/console/treasury/budget-token/plan` accepts a positive
+integer `amount` and returns unsigned `storage_deposit` calls for missing DAO or
+Vault registrations followed by `mint` to the DAO. The browser submits these
+calls with the connected member wallet. `mint` is exposed only by the UAT
+`test-ft`; production must configure a real six-decimal FT and obtain funds
+through that token's normal issuance or transfer path
+([`contracts/test-ft/src/lib.rs`](../contracts/test-ft/src/lib.rs),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+Testnet metadata and repeatable minting were deployed in
+[`7BUDD5yePCzWd86Tx3cuTV15xUmCUfcTHbkCbeZS2DVj`](https://testnet.nearblocks.io/txns/7BUDD5yePCzWd86Tx3cuTV15xUmCUfcTHbkCbeZS2DVj):
+`TestUSDC`, `6` decimals, code hash
+`D169mWBjhe8vYDYo4tjXVQoM8PNEQ1CQcPcaWa4mJCg1`. Two subsequent mints to the
+already-registered DAO passed in
+[`45g1nd…`](https://testnet.nearblocks.io/txns/45g1ndvpzkVsq7pRUPondccgXGLAVQH6Y3hWB9VEqgEN)
+and [`FPAYYB…`](https://testnet.nearblocks.io/txns/FPAYYBoaHrfdwpj1w7GFhcQQg9gv5Zk949zQs8RFwRjn)
+([`deployments/near-testnet.json`](../deployments/near-testnet.json)).
+
 ### `POST /v1/console/mandates/preview`
 
 Compiles one role into the three locks and returns a diff plus unsigned proposals:
@@ -418,6 +441,48 @@ Compiles one role into the three locks and returns a diff plus unsigned proposal
 - Guard policy snapshot;
 - DAO `add_proposal` payloads for the Vault, funding and relay calls. The console
   signs each proposal with the member's NEAR wallet; the server never signs.
+
+The funding proposal follows Sputnik DAO 2.3.1's exact `Transfer` shape:
+`token_id`, `receiver_id`, `amount`, `msg`. `token_id` is
+`BUDGET_TOKEN_ACCOUNT_ID`; omitting it is invalid
+([immutable upstream `ProposalKind::Transfer`](https://github.com/near-daos/sputnik-dao-contract/blob/317ea4fb1/sputnikdao2/src/proposals.rs),
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts)).
+
+The console discovers deterministic proposal descriptions through direct NEAR
+RPC, then reads every `get_proposal` status. Steps are strictly ordered:
+`set_role → register_agent → funding → Zodiac`; a step remains disabled until
+the previous status is `Approved` (displayed as **Executed**). `Expired`,
+`Rejected`, and other terminal failures display **Re-propose**
+([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+Measured execution gas:
+
+| Executed action | Environment | Burnt gas |
+|---|---|---:|
+| final vote → `set_role` | Sandbox, Sputnik 2.3.1 | 8.708943134269 Tgas |
+| final vote → `register_agent` | Sandbox, Sputnik 2.3.1 | 8.809192150558 Tgas |
+| final vote → FT `Transfer` | Sandbox, Sputnik 2.3.1 | 13.089112041461 Tgas |
+| relay `propose` + mock MPC | Sandbox | 6.574015458889 Tgas |
+| final vote → relay `propose` + real MPC | NEAR testnet | 19.662169450795 Tgas |
+
+The relay action receives `60 Tgas`: above measured burn and enough to reserve
+its `15 Tgas` MPC receipt plus `20 Tgas` callback. Every browser
+`act_proposal` attaches `450 Tgas`, below testnet protocol version 88's
+`max_total_prepaid_gas = 1,000 Tgas`
+([nearcore gas architecture](https://github.com/near/nearcore/blob/master/docs/architecture/how/gas.md),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
+The real-MPC final vote passed in proposal `26`,
+[`5ypaNTsPnJbiKBT67MRwuPhoeQJ4b4f2ZAg4F7VHmeaj`](https://testnet.nearblocks.io/txns/5ypaNTsPnJbiKBT67MRwuPhoeQJ4b4f2ZAg4F7VHmeaj);
+proposal `27` then closed the measurement operation through the DAO rescue path
+in [`HbDvWUB2DtwBPc1vT9tpCHUd7G36Grt4D4zC3GFEbZRJ`](https://testnet.nearblocks.io/txns/HbDvWUB2DtwBPc1vT9tpCHUd7G36Grt4D4zC3GFEbZRJ).
+Sandbox measurements are reproduced by
+[`contracts/tests/tests/dao_governance.rs`](../contracts/tests/tests/dao_governance.rs)
+and [`contracts/tests/tests/governance_relay.rs`](../contracts/tests/tests/governance_relay.rs).
+
+![Budget token and ordered proposal execution](./console/mandate-ordered-proposals.webp)
 
 `swap`/`bridge` are rejected until Phase 2. `maxPerTx` must not exceed the budget.
 

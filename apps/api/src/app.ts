@@ -154,6 +154,10 @@ const nearSponsorshipSchema = z.object({
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
   nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
 });
+const budgetTokenPlanSchema = z.object({
+  amount: z.string().regex(/^[1-9]\d*$/),
+});
+
 
 const walletProofChallengeSchema = z.object({
   memberId: z.string().uuid(),
@@ -643,6 +647,17 @@ export function createApp({
     });
     return context.json(preview);
   });
+  app.get("/v1/console/treasury/budget-token", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json(await mandates.budgetTokenStatus(consoleIdentity.organizationId));
+  });
+
+  app.post("/v1/console/treasury/budget-token/plan", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, budgetTokenPlanSchema);
+    return context.json(await mandates.budgetTokenPlan(consoleIdentity.organizationId, input.amount));
+  });
+
 
   app.get("/v1/console/treasury", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
