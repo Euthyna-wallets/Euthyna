@@ -30,6 +30,7 @@ const worker = new OperationWorker(
     retryBaseMs: env.WORKER_RETRY_BASE_MS,
     retryMaxMs: env.WORKER_RETRY_MAX_MS,
     cancellationSenderAccountId: env.NEAR_RELAYER_ACCOUNT_ID,
+    agentGasLowYocto: env.NEAR_AGENT_GAS_LOW_YOCTO,
   },
 );
 

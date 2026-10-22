@@ -21,6 +21,25 @@ fn expiry(operation: &Value) -> u64 {
 
 #[tokio::test]
 #[serial]
+async fn agent_can_request_derived_public_key_without_attached_deposit() -> Result<()> {
+    let fixture = setup().await?;
+    let outcome = fixture
+        .agent
+        .call(fixture.vault.id(), "request_derived_public_key")
+        .args_json(json!({"agent": fixture.agent.id()}))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?;
+    let gas_burnt = outcome.total_gas_burnt.as_gas();
+    outcome.into_result()?;
+    println!("AGENT_DERIVE_GAS={gas_burnt}");
+    println!("AGENT_DERIVE_GAS_TGAS={:.3}", gas_burnt as f64 / 1_000_000_000_000_f64);
+    assert!(gas_burnt > 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn rejects_missing_replayed_expired_and_modified_visas() -> Result<()> {
     let fixture = setup().await?;
     let operation = prepare(&fixture, "INV-001", 100).await?;

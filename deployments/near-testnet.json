@@ -94,6 +94,21 @@
     "derived_public_key": "secp256k1:5W7hzvx4ML2KuGYByYBbz8PYTbFNztZiShDWVeVgcJFwryFzMH7SoRssVuciUUwj9hCvKAB6eBuoXkouH2GnAkUc",
     "evm_address": "0x10EdE0F3C618321919934Fd63df173DD37F037Af"
   },
+  "agent_provisioning_proof": {
+    "observed_at": "2026-10-22",
+    "account_id": "pr-a-unlimited-1761142000-agent.mandateos.testnet",
+    "transaction_hash": "FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw",
+    "block_height": 274271995,
+    "reserve_yocto": "20000000000000000000000",
+    "uat_default_reserve_yocto": "300000000000000000000000",
+    "public_key": "ed25519:kevtZ6o8g7jGYFzNG91odqYPHnJzgSniVU74UokYMw3",
+    "access_key_count": 1,
+    "permission": "FunctionCall",
+    "receiver_id": "vault-v4.mandateos-root-20261021.testnet",
+    "allowance_yocto": null,
+    "method_names": ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+    "full_access_key_present": false
+  },
   "governance_relay": {
     "account_id": "gov-relay-v1.mandateos-root-20261021.testnet",
     "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",

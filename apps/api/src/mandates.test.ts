@@ -24,7 +24,8 @@ const input: MandateInput = {
   },
 };
 
-function service(status = "active", currentRole: unknown = null) {
+function service(status = "active", currentRole: unknown = null, agentEvmAddress: string | null = null) {
+  const updates: unknown[] = [];
   const prisma = {
     treasury: {
       findUnique: async () => ({
@@ -36,16 +37,35 @@ function service(status = "active", currentRole: unknown = null) {
         rolesAddress: getAddress("0x7777777777777777777777777777777777777777"),
       }),
     },
+    agent: {
+      findFirst: async () => ({ id: "agent-1", evmAddress: null }),
+      update: async ({ data }: { data: unknown }) => {
+        updates.push(data);
+        return data;
+      },
+    },
   } as unknown as PrismaClient;
   const near = {
-    viewFunction: async () => currentRole,
+    viewFunction: async (_accountId: string, method: string) => {
+      if (method === "get_agent") {
+        return {
+          active: true,
+          role: "researcher",
+          mpc_path: "agents/researcher/base",
+          evm_address: agentEvmAddress
+            ? Array.from(Buffer.from(agentEvmAddress.slice(2), "hex"))
+            : null,
+        };
+      }
+      return currentRole;
+    },
   } as unknown as NearClient;
-  return new MandateService(prisma, near);
+  return { service: new MandateService(prisma, near), updates };
 }
 
 describe("MandateService.preview", () => {
   it("builds the three artifacts, a diff and unsigned proposals", async () => {
-    const preview = await service().preview("org-1", input);
+    const preview = await service().service.preview("org-1", input);
     expect(preview.roleKey).toMatch(/^0x[0-9a-f]{64}$/);
     expect(preview.vault.config).toMatchObject({
       enabled: true,
@@ -60,7 +80,7 @@ describe("MandateService.preview", () => {
   });
 
   it("keeps Zodiac assignRoles pending until the agent EVM address exists", async () => {
-    const preview = await service().preview("org-1", {
+    const preview = await service().service.preview("org-1", {
       ...input,
       agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
     });
@@ -70,34 +90,35 @@ describe("MandateService.preview", () => {
   });
 
   it("adds assignRoles when the agent EVM address is known", async () => {
-    const preview = await service().preview("org-1", {
+    const fixture = service("active", null, "0x2222222222222222222222222222222222222222");
+    const preview = await fixture.service.preview("org-1", {
       ...input,
       agent: {
         nearAccountId: "agent.testnet",
         mpcPath: "agents/researcher/base",
-        evmAddress: getAddress("0x2222222222222222222222222222222222222222"),
       },
     });
     expect(preview.agentStatus).toBe("ready");
     expect(preview.zodiac.calls).toHaveLength(4);
     expect(preview.proposals.vaultRegisterAgent).not.toBeNull();
+    expect(fixture.updates).toEqual([{ evmAddress: "0x2222222222222222222222222222222222222222" }]);
   });
 
   it("refuses a pending treasury", async () => {
-    await expect(service("pending_dao_hardening").preview("org-1", input)).rejects.toMatchObject({
+    await expect(service("pending_dao_hardening").service.preview("org-1", input)).rejects.toMatchObject({
       code: "treasury_not_active",
     });
   });
 
   it("refuses swap/bridge before phase 2", async () => {
     await expect(
-      service().preview("org-1", { ...input, operations: ["pay", "swap"] }),
+      service().service.preview("org-1", { ...input, operations: ["pay", "swap"] }),
     ).rejects.toMatchObject({ code: "operation_not_supported" });
   });
 
   it("refuses a per-transaction cap above the budget", async () => {
     await expect(
-      service().preview("org-1", { ...input, maxPerTx: "7000000" }),
+      service().service.preview("org-1", { ...input, maxPerTx: "7000000" }),
     ).rejects.toMatchObject({ code: "cap_above_budget" });
   });
 });

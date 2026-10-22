@@ -125,6 +125,7 @@ model Organization {
   treasuries              Treasury[]
   nearSponsorships        NearWalletSponsorship[]
   deploymentConfirmations TreasuryDeploymentConfirmation[]
+  agentProvisionings      AgentProvisioning[]
 
   @@unique([slug])
   @@map("organization")
@@ -254,11 +255,11 @@ model OrganizationEnvironment {
 }
 
 model Agent {
-  id             String       @id
+  id             String             @id
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  authUserId     String       @unique
-  user           User         @relation("AgentIdentity", fields: [authUserId], references: [id], onDelete: Restrict)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  authUserId     String             @unique
+  user           User               @relation("AgentIdentity", fields: [authUserId], references: [id], onDelete: Restrict)
   name           String
   role           String
   nearAccountId  String
@@ -266,10 +267,11 @@ model Agent {
   vaultAccountId String
   mpcPath        String
   evmAddress     String?
-  active         Boolean      @default(true)
+  active         Boolean            @default(true)
   operations     Operation[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  provisioning   AgentProvisioning?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@unique([organizationId, nearAccountId])
   @@index([organizationId])
@@ -496,6 +498,29 @@ model NearWalletSponsorship {
   @@index([createdAt, status])
   @@index([organizationId, userId])
   @@map("near_wallet_sponsorship")
+}
+
+model AgentProvisioning {
+  id              String       @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentId         String       @unique
+  agent           Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  nearAccountId   String       @unique
+  publicKey       String       @unique
+  vaultAccountId  String
+  methodNames     Json
+  reserveYocto    String
+  allowanceYocto  String?
+  status          String       @default("reserved")
+  transactionHash String?
+  confirmedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([createdAt, status])
+  @@index([organizationId])
+  @@map("agent_provisioning")
 }
 
 model AuditLog {

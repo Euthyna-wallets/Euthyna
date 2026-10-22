@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TreasuryPlan } from "./api.js";
-import { readDaoPolicyRpc, readNearDeploymentRpc } from "./wallets.js";
+import { readAgentAccessKeyRpc, readDaoPolicyRpc, readNearDeploymentRpc } from "./wallets.js";
 
 function rpcResult(value: unknown): Response {
   return new Response(JSON.stringify({
@@ -46,6 +46,32 @@ describe("readDaoPolicyRpc", () => {
     await expect(readDaoPolicyRpc("bad.factory-v2.mandateos.testnet")).rejects.toThrow(
       "DAO council role missing",
     );
+  });
+});
+
+describe("readAgentAccessKeyRpc", () => {
+  it("accepts exactly one FunctionCall key limited to the Vault methods", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(rpcRawResult({
+      keys: [{
+        public_key: "ed25519:agent",
+        access_key: {
+          permission: {
+            FunctionCall: {
+              allowance: null,
+              receiver_id: "vault.testnet",
+              method_names: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+            },
+          },
+        },
+      }],
+    })));
+    await expect(readAgentAccessKeyRpc({
+      accountId: "agent.testnet",
+      publicKey: "ed25519:agent",
+      vaultAccountId: "vault.testnet",
+      methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+      allowanceYocto: null,
+    })).resolves.toMatchObject({ valid: true });
   });
 });
 

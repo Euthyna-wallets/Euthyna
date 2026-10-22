@@ -325,6 +325,49 @@ async function nearView<T>(accountId: string, methodName: string): Promise<T> {
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(result.result))) as T;
 }
 
+export type AgentAccessKeyRpcAttestation = {
+  valid: boolean;
+  checks: Array<{ label: string; expected: string; actual: string; ok: boolean }>;
+};
+
+export async function readAgentAccessKeyRpc(input: {
+  accountId: string;
+  publicKey: string;
+  vaultAccountId: string;
+  methodNames: string[];
+  allowanceYocto: null;
+}): Promise<AgentAccessKeyRpcAttestation> {
+  const result = await nearRpc<{ keys: unknown[] }>({
+    request_type: "view_access_key_list",
+    account_id: input.accountId,
+  });
+  const entry = result.keys.length === 1 && result.keys[0] && typeof result.keys[0] === "object"
+    ? result.keys[0] as { public_key?: unknown; access_key?: { permission?: unknown } }
+    : null;
+  const permission = entry?.access_key?.permission;
+  const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
+    ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
+    : null;
+  const methods = Array.isArray(functionCall?.method_names)
+    ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
+    : [];
+  const values: Array<[string, unknown, unknown]> = [
+    ["Access key count", 1, result.keys.length],
+    ["Public key", input.publicKey, entry?.public_key ?? null],
+    ["Permission", "FunctionCall", functionCall ? "FunctionCall" : permission === "FullAccess" ? "FullAccess" : "unknown"],
+    ["Receiver", input.vaultAccountId, functionCall?.receiver_id ?? null],
+    ["Methods", JSON.stringify([...input.methodNames].sort()), JSON.stringify(methods)],
+    ["Allowance", input.allowanceYocto, functionCall?.allowance ?? null],
+  ];
+  const checks = values.map(([label, expected, actual]) => ({
+    label,
+    expected: String(expected),
+    actual: String(actual),
+    ok: String(actual) === String(expected),
+  }));
+  return { valid: checks.every((check) => check.ok), checks };
+}
+
 export async function readDaoPolicyRpc(daoAccountId: string): Promise<DaoPolicyRpc> {
   const policy = await nearView<{
     roles?: Array<{ name?: string; kind?: { Group?: string[] } }>;

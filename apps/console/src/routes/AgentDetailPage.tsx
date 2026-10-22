@@ -9,11 +9,15 @@ import { formatBytesAddress, formatEth, formatNonce, formatToken } from "../lib/
 interface Detail {
   agent: AgentRow;
   treasury: { vaultAccountId: string; daoAccountId: string } | null;
+  provisioning: { status: string; confirmedAt: string | null } | null;
   onChain: Record<string, unknown> | null;
   mandate: Record<string, unknown> | null;
   budget: { config?: Record<string, unknown>; funded?: string; reserved?: string; spent?: string; available?: string } | null;
   nonce: number | null;
   ethBalance: string | null;
+  nearGasBalanceYocto: string | null;
+  nearGasLow: boolean;
+  nearGasLowThresholdYocto: string;
   audit: Array<{ id: string; action: string; actorId: string; createdAt: string }>;
 }
 
@@ -40,14 +44,32 @@ export function AgentDetailPage() {
               <div className="metric"><span>Status</span><strong>{query.data.agent.active ? "Active" : "Revoked"}</strong></div>
               <div className="metric"><span>0xAAA</span><strong className="mono small">{short(query.data.agent.evmAddress)}</strong></div>
               <div className="metric"><span>Gas ETH</span><strong>{formatEth(query.data.ethBalance)}</strong></div>
+              <div className="metric"><span>Gas NEAR</span><strong>{formatToken(query.data.nearGasBalanceYocto, 24, "NEAR", 4)}</strong></div>
               <div className="metric"><span>Nonce</span><strong>{formatNonce(query.data.nonce)}</strong></div>
             </div>
+            {query.data.nearGasLow ? (
+              <div className="alert error">
+                Agent gas balance is below {formatToken(query.data.nearGasLowThresholdYocto, 24, "NEAR", 4)}.
+                Recharge it with a simple NEAR transfer to <span className="mono">{query.data.agent.nearAccountId}</span>.
+                Do not add or replace its restricted key.
+              </div>
+            ) : null}
+            {!query.data.onChain ? (
+              <div className="alert error">
+                Agent is not registered in the Vault. Execute set_role, then register_agent before starting the SDK.
+              </div>
+            ) : !(query.data.onChain as { evm_address?: unknown }).evm_address ? (
+              <div className="alert">
+                0xAAA is not derived. Start the SDK with this agent key; it will call request_derived_public_key once before prepare.
+              </div>
+            ) : null}
             <Card title="On-chain state">
               <table>
                 <tbody>
                   <tr><td>Active</td><td><Status value={(query.data.onChain as { active?: unknown })?.active === true ? "active" : "revoked"} /></td></tr>
                   <tr><td>Role</td><td>{String((query.data.onChain as { role?: unknown })?.role ?? "—")}</td></tr>
                   <tr><td>0xAAA</td><td className="mono">{formatBytesAddress((query.data.onChain as { evm_address?: unknown })?.evm_address ?? query.data.agent.evmAddress)}</td></tr>
+                  <tr><td>Provisioning</td><td><Status value={query.data.provisioning?.status ?? "not started"} /></td></tr>
                   <tr><td>MPC path</td><td className="mono">{String((query.data.onChain as { mpc_path?: unknown })?.mpc_path ?? query.data.agent.mpcPath)}</td></tr>
                   <tr><td>Nonce</td><td>{formatNonce(query.data.nonce)}</td></tr>
                   <tr><td>Budget funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>

@@ -79,12 +79,25 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 
 ## 4. Agent
 
-1. Créer un compte NEAR `compta-bot.<root>` avec une **function-call key**
-   limitée au Vault, générée côté client.
-2. Renseigner nom, compte NEAR, clé publique ed25519, rôle `researcher`.
-3. **Create agent** ; conserver l’API key affichée une seule fois.
-4. Ajouter la clé au Vault via la proposition `add_key` (Trezu) et voter.
-5. Vérifier la fiche agent (`On-chain state`).
+1. Sur la machine agent, lancer `mandateos agent init --name "Compta Bot"`.
+   Vérifier le fichier `AGENT_KEY_PATH` en mode `0600`; copier uniquement
+   `publicKey`.
+2. Dans **Register agent**, renseigner nom, clé publique et rôle
+   `researcher`, puis créer l'identité/API key. Le compte proposé est
+   `compta-bot-agent.<parent>`.
+3. Cliquer **Provision**. L'API crée et finance le compte avec une seule
+   transaction, puis le navigateur lit directement `view_access_key_list`.
+4. Vérifier exactement une clé `FunctionCall`, receiver = Vault,
+   `allowance = null` et méthodes `prepare`, `authorize`, `cancel_nonce`,
+   `request_derived_public_key`; confirmer dans la console.
+5. Vérifier que le solde gas NEAR n'est pas sous le seuil. S'il est bas,
+   envoyer un simple transfert NEAR au compte agent existant ; ne jamais
+   ajouter ou remplacer sa clé.
+6. Dans le mandat, exécuter/voter `set_role` avant `register_agent`.
+7. Démarrer le SDK. Il doit voir l'agent enregistré, appeler une seule fois
+   `request_derived_public_key`, puis afficher `0xAAA` dans la fiche agent.
+   Avant `register_agent`, le SDK et l'UI doivent afficher l'erreur explicite et
+   ne pas appeler `prepare`.
 
 ## 5. Mandat
 
