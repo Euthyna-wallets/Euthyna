@@ -109,7 +109,7 @@ export function encodeMultiSend(calls: SafeBatchCall[]): Hex {
       concatHex([
         toHex(0, { size: 1 }),
         call.to,
-        toHex(call.value, { size: 32 }),
+        toHex(call.value ?? 0n, { size: 32 }),
         toHex(BigInt((call.data.length - 2) / 2), { size: 32 }),
         call.data,
       ]),
@@ -123,7 +123,7 @@ export async function buildSafeBatch(plan: TreasuryPlan): Promise<SafeBatch> {
   const nonce = await client.readContract({ address: safe, abi: safeAbi, functionName: "nonce" });
   const calls = plan.base.safeModuleCalls.map((call) => ({
     to: getAddress(call.to),
-    value: BigInt(call.value),
+    value: BigInt(call.value ?? "0"),
     data: call.data as Hex,
   }));
   const multiSend = multiSendAddress();

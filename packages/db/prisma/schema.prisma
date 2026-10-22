@@ -14,19 +14,20 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String       @id
-  name          String
-  email         String
-  emailVerified Boolean      @default(false)
-  image         String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  passkeys      Passkey[]
-  members       Member[]
-  invitations   Invitation[]
-  agent         Agent?       @relation("AgentIdentity")
+  id               String                  @id
+  name             String
+  email            String
+  emailVerified    Boolean                 @default(false)
+  image            String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  sessions         Session[]
+  accounts         Account[]
+  passkeys         Passkey[]
+  members          Member[]
+  invitations      Invitation[]
+  agent            Agent?                  @relation("AgentIdentity")
+  nearSponsorships NearWalletSponsorship[]
 
   @@unique([email])
   @@map("user")
@@ -101,42 +102,52 @@ model Passkey {
 }
 
 model Organization {
-  id           String                  @id
-  name         String
-  slug         String
-  logo         String?
-  createdAt    DateTime
-  metadata     String?
-  members      Member[]
-  invitations  Invitation[]
-  environments OrganizationEnvironment[]
-  agents       Agent[]
-  suppliers    Supplier[]
-  contracts    Contract[]
-  consumedReferences ConsumedReference[]
-  registryChanges RegistryChange[]
-  escalations  Escalation[]
-  visas        PaymentVisa[]
-  registry     RegistryVersion?
-  policies     PolicySnapshot[]
-  operations   Operation[]
-  auditLogs    AuditLog[]
-  treasuries   Treasury[]
+  id                      String                           @id
+  name                    String
+  slug                    String
+  logo                    String?
+  createdAt               DateTime
+  metadata                String?
+  members                 Member[]
+  invitations             Invitation[]
+  environments            OrganizationEnvironment[]
+  agents                  Agent[]
+  suppliers               Supplier[]
+  contracts               Contract[]
+  consumedReferences      ConsumedReference[]
+  registryChanges         RegistryChange[]
+  escalations             Escalation[]
+  visas                   PaymentVisa[]
+  registry                RegistryVersion?
+  policies                PolicySnapshot[]
+  operations              Operation[]
+  auditLogs               AuditLog[]
+  treasuries              Treasury[]
+  nearSponsorships        NearWalletSponsorship[]
+  deploymentConfirmations TreasuryDeploymentConfirmation[]
 
   @@unique([slug])
   @@map("organization")
 }
 
 model Member {
-  id             String       @id
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role           String       @default("member")
-  nearAccountId  String?
-  evmAddress     String?
-  createdAt      DateTime
+  id                      String                           @id
+  organizationId          String
+  organization            Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId                  String
+  user                    User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                    String                           @default("member")
+  nearAccountId           String?
+  evmAddress              String?
+  walletProofClaimable    Boolean                          @default(false)
+  walletProofVerifiedAt   DateTime?
+  walletProofMessage      String?
+  nearProofPublicKey      String?
+  nearProofSignature      String?
+  evmProofSignature       String?
+  walletProofChallenges   WalletProofChallenge[]
+  deploymentConfirmations TreasuryDeploymentConfirmation[]
+  createdAt               DateTime
 
   @@index([organizationId])
   @@index([userId])
@@ -158,6 +169,40 @@ model Invitation {
   @@index([organizationId])
   @@index([email])
   @@map("invitation")
+}
+
+model WalletProofChallenge {
+  id            String    @id
+  memberId      String
+  member        Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  userId        String
+  nearAccountId String
+  evmAddress    String
+  message       String
+  nonceBase64   String
+  recipient     String
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([memberId])
+  @@index([userId])
+  @@map("wallet_proof_challenge")
+}
+
+model TreasuryDeploymentConfirmation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment    String
+  memberId       String
+  member         Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  digest         String
+  confirmedAt    DateTime     @default(now())
+
+  @@unique([organizationId, environment, memberId])
+  @@index([organizationId, environment, digest])
+  @@map("treasury_deployment_confirmation")
 }
 
 model Apikey {
@@ -233,14 +278,14 @@ model Agent {
 
 model Supplier {
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  id             String       @id @default(uuid())
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String           @id @default(uuid())
   name           String
   contact        String?
-  active         Boolean      @default(true)
+  active         Boolean          @default(true)
   wallets        SupplierWallet[]
   contracts      Contract[]
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime         @default(now())
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -263,14 +308,14 @@ model SupplierWallet {
 }
 
 model RegistryChange {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   kind           String
   payload        Json
-  status         String   @default("pending")
+  status         String       @default("pending")
   authorId       String
   reviewerId     String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
   decidedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -279,18 +324,18 @@ model RegistryChange {
 }
 
 model Contract {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   reference      String
   role           String
   supplierId     String
-  maxAmount      Decimal  @db.Decimal(78, 0)
+  maxAmount      Decimal      @db.Decimal(78, 0)
   periodicity    String
   token          String
-  active         Boolean  @default(true)
-  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  active         Boolean      @default(true)
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@unique([organizationId, reference])
   @@index([organizationId, role])
@@ -301,7 +346,7 @@ model ConsumedReference {
   organizationId String
   reference      String
   opId           String
-  consumedAt     DateTime @default(now())
+  consumedAt     DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@id([organizationId, reference])
@@ -319,19 +364,19 @@ model RegistryVersion {
 }
 
 model Escalation {
-  id              String   @id @default(uuid())
-  organizationId  String
-  opId            String
-  agentId         String
-  environment     String
-  reasons         Json
-  invoice         Json?
+  id               String       @id @default(uuid())
+  organizationId   String
+  opId             String
+  agentId          String
+  environment      String
+  reasons          Json
+  invoice          Json?
   registrySnapshot Json?
-  status          String   @default("pending")
-  decidedBy       String?
-  createdAt       DateTime @default(now())
-  decidedAt       DateTime?
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status           String       @default("pending")
+  decidedBy        String?
+  createdAt        DateTime     @default(now())
+  decidedAt        DateTime?
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, opId])
   @@index([organizationId, status])
@@ -343,7 +388,7 @@ model PaymentVisa {
   opId           String
   visa           Json
   signature      String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@id([organizationId, opId])
@@ -382,13 +427,13 @@ model Operation {
   state          String
   txDigest       String
   evmNonce       BigInt
-  amount         Decimal  @db.Decimal(78, 0)
+  amount         Decimal      @db.Decimal(78, 0)
   visaNonce      BigInt?
   reportNonce    BigInt?
   txHash         String?
   broadcastAt    DateTime?
   revertedAt     DateTime?
-  attempts       Int      @default(0)
+  attempts       Int          @default(0)
   lastError      String?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Restrict)
@@ -403,28 +448,45 @@ model Operation {
 }
 
 model Treasury {
-  id                String       @id @default(uuid())
-  organizationId    String
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environment       String       @default("uat")
-  nearNetwork       String
-  baseChainId       Int
-  daoAccountId      String
-  vaultAccountId    String
-  relayAccountId    String
-  safeAddress       String
-  rolesAddress      String
-  delayAddress      String
-  govAddress        String
-  vaultWasmSha256   String
-  relayWasmSha256   String
-  status            String       @default("active")
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  id              String       @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment     String       @default("uat")
+  nearNetwork     String
+  baseChainId     Int
+  daoAccountId    String
+  vaultAccountId  String
+  relayAccountId  String
+  safeAddress     String
+  rolesAddress    String
+  delayAddress    String
+  govAddress      String
+  vaultWasmSha256 String
+  relayWasmSha256 String
+  status          String       @default("active")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@unique([organizationId, environment])
   @@index([organizationId])
   @@map("treasury")
+}
+
+model NearWalletSponsorship {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nearAccountId  String       @unique
+  publicKey      String       @unique
+  status         String       @default("reserved")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([createdAt, status])
+  @@index([organizationId, userId])
+  @@map("near_wallet_sponsorship")
 }
 
 model AuditLog {

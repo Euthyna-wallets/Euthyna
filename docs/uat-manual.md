@@ -4,10 +4,8 @@ Objectif : rejouer le parcours console sur **NEAR testnet + Base Sepolia**, sans
 clé privée côté serveur. Cocher dans l'ordre ; chaque étape indique le résultat
 attendu.
 
-> Création de compte : `emailAndPassword` est désactivé par défaut. Pour l’UAT
-> locale, démarrer l’API avec `NODE_ENV=test AUTH_E2E_PASSWORD=1`, créer le compte
-> puis la passkey, et retirer le flag ensuite. Hors test, le démarrage refuse ce
-> flag.
+> UAT hackathon : email identifiant + passkey créée directement. Aucun email
+> externe, aucun lien magique, aucun mot de passe.
 
 ## 0. Pré-requis
 
@@ -15,8 +13,8 @@ attendu.
 |---|---|
 | Comptes NEAR council | 3 (Meteor), dont le fondateur |
 | Comptes EVM council | 3 adresses (MetaMask), dont `0x1D693a4425bf7eD10FE7775E2b65b072019FFceb`, seuil Safe **2/3** |
-| NEAR fondateur | **≥ 10 NEAR** pour la factory + **5 NEAR** par Vault/relay |
-| NEAR total conseillé | **19 NEAR** (DAO 7,5 + Vault 5 + relay 5 + agent/propositions) |
+| Company + DAO | **0,25 NEAR** via `factory-v2.mandateos.testnet` + Sputnik global immuable |
+| Treasury complète | **8,75 NEAR** : DAO 0,25 + Vault 5 + relay 3,5 ; dépôts de stockage |
 | ETH Base Sepolia (owner 1) | **≥ 0,01 ETH** (Safe + 3 modules + batch Safe) |
 | TestUSDC Base Sepolia | 10 unités sur le Safe (`0x418A2b47911dE05e21688F7490195F5324B49474`) |
 | Test FT NEAR | 10 unités vers le DAO (`test-ft-v4.mandateos-root-20261021.testnet`, `mint` public) |
@@ -27,41 +25,57 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
 
 ## 1. Organisation
 
-1. Ouvrir `http://localhost:5173`.
-2. Créer le compte (e-mail + mot de passe) puis ajouter la passkey.
-3. Se reconnecter avec la passkey.
-4. Créer l’entreprise.
-5. Inviter Alice et Bob (liens affichés), accepter chaque lien dans une session
-   distincte.
-6. Chaque membre clique **Use connected NEAR account** et **Use connected EVM
-   account**, puis **Link my wallets**.
+1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1` et l'API avec
+   `UAT_DEMO_WALLETS_ENABLED=1`. Les deux flags restent désactivés par défaut.
+2. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
+3. Créer l'entreprise.
+4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
+   `pending` et ne comptent pas encore dans le council.
+5. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
+   passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
+   EVM (EIP-191).
+6. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
+   créé ou financé.
 
-Attendu : 3 membres, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour le
-fondateur.
+En mode normal, utiliser NEAR Wallet Selector et MetaMask/Rabby. Vérifier
+qu'aucune clé privée n'apparaît dans localStorage.
+
+Attendu : 3 membres prouvés, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour
+le fondateur. Ajouter une quatrième déclaration sans signer : elle doit rester
+hors du plan et le seuil doit rester **2/3**.
 
 ## 2. Trésorerie
 
 1. Saisir le compte NEAR du fondateur, cliquer **Build plan**.
-2. Vérifier le DAO (`<slug>.sputnikv2.testnet`), le seuil **2**, Vault, relay,
-   0xGOV, Safe/Roles/Delay.
-3. **Sign DAO creation** (Meteor, ~7,5 NEAR).
-4. **Sign Vault + relay deployment** (Meteor, 2×5 NEAR).
-5. **Deploy Safe + modules** (MetaMask owner 1).
-6. **Prepare Safe batch**, **Sign as owner** avec owner 1, changer de compte
-   MetaMask, **Sign as owner** avec owner 2, puis **Execute Safe batch**.
-7. **Verify and register treasury**.
+2. Vérifier la DAO `<slug>.factory-v2.mandateos.testnet`, les trois membres et le
+   seuil absolu **2** affichés avant signature.
+3. Cocher la confirmation de policy et cliquer **Sign and create DAO**. En mode
+   démo, l'API réserve le sponsoring journalier, crée/finance alors seulement le
+   wallet client (0,5 NEAR), puis le navigateur signe et attache 0,25 NEAR.
+4. Cliquer **Read get_policy directly from NEAR RPC**, puis confirmer chaque
+   membre observé et le seuil. Vault/relay restent bloqués avant ces confirmations.
+5. **Deploy Vault + relay (MandateOS pays)**.
+6. Depuis la session de chaque membre prouvé, cliquer **Verify by direct RPC and
+   confirm as this member**. Vérifier les `code_hash`, zéro access key,
+   `owner_id`, MPC/path, chain, token, Guard/TTL et delay. Safe reste bloqué
+   jusqu'à 3/3 confirmations sur le même digest.
+7. Déployer Safe + modules, préparer le batch Safe, collecter deux signatures
+   et exécuter.
+8. Vérifier et enregistrer la Treasury. Le serveur doit aussi refuser
+   `register` si une confirmation manque.
 
-Attendu : trésorerie `active` (ou `pending_dao_hardening` si l’auto-update est
-encore actif).
+Attendu : Treasury `active`. `auto_update=true` apparaît comme avertissement
+non bloquant pour cette factory keyless et son hash global immuable.
 
-## 3. Hardening DAO
+## 3. Hardening DAO optionnel
 
-1. Cliquer **Propose auto_update=false** (Meteor, bond 0,1 NEAR).
-2. Dans Trezu ou via Meteor, voter **Approve** avec un deuxième council.
-3. Attendre l’exécution de la proposition.
-4. Dans la console, cliquer **Re-run verification**.
+1. Cliquer **Propose auto_update=false (optional)** (bond 0,1 NEAR).
+2. Voter **Approve** avec deux comptes council.
+3. Vérifier la proposition dans l'UI Sputnik officielle de Trezu configurée
+   pour testnet. Le backend hébergé `testenv.trezu.app` ne permet pas encore
+   d'indexer un suffixe factory personnalisé.
 
-Attendu : statut `active`, création d’agent débloquée.
+Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 
 ## 4. Agent
 

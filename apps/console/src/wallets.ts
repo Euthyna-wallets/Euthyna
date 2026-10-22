@@ -1,20 +1,34 @@
-import { setupWalletSelector, type WalletSelector } from "@near-wallet-selector/core";
+import { Buffer } from "buffer";
+import { KeyPair, Near, keyStores, transactions } from "near-api-js";
+import { serializeNep413, setupWalletSelector, type SignedMessage, type WalletSelector } from "@near-wallet-selector/core";
+import { setupModal, type WalletSelectorModal } from "@near-wallet-selector/modal-ui";
 import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
-import { createPublicClient, createWalletClient, custom, http, type Address, type EIP1193Provider, type Hex } from "viem";
+import { createPublicClient, createWalletClient, custom, getAddress, http, type Address, type EIP1193Provider, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
 
 import type { NearAction, TreasuryPlan } from "./api.js";
+import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
+
+interface WalletAction {
+  type: string;
+  params?: Record<string, unknown>;
+}
 
 interface E2eNearWallet {
   getAccounts(): Promise<Array<{ accountId: string }>>;
   signAndSendTransaction(input: {
     signerId: string;
     receiverId: string;
-    actions: Array<{ type: string; params?: Record<string, unknown> }>;
+    actions: WalletAction[];
   }): Promise<{ transaction_outcome: { id: string } }>;
   signAndSendTransactions(input: {
-    transactions: Array<{ signerId: string; receiverId: string; actions: Array<{ type: string; params?: Record<string, unknown> }> }>;
+    transactions: Array<{ signerId: string; receiverId: string; actions: WalletAction[] }>;
   }): Promise<Array<{ transaction_outcome: { id: string } }>>;
+  signMessage?(input: {
+    message: string;
+    recipient: string;
+    nonce: Buffer;
+  }): Promise<SignedMessage>;
 }
 
 declare global {
@@ -28,7 +42,60 @@ function e2eNear(): E2eNearWallet | undefined {
   return import.meta.env.VITE_E2E === "1" ? window.__MANDATEOS_E2E_NEAR__ : undefined;
 }
 
+async function generatedNear(): Promise<E2eNearWallet> {
+  const wallet = generatedNearWallet();
+  const keyStore = new keyStores.InMemoryKeyStore();
+  await keyStore.setKey("testnet", wallet.accountId, KeyPair.fromString(wallet.secretKey as `ed25519:${string}`));
+  const near = new Near({ networkId: "testnet", nodeUrl: "https://rpc.testnet.near.org", keyStore });
+  const account = await near.account(wallet.accountId);
+  const map = (actions: WalletAction[]) => actions.map((action) => {
+    const params = action.params ?? {};
+    if (action.type === "CreateAccount") return transactions.createAccount();
+    if (action.type === "Transfer") return transactions.transfer(BigInt(String(params.deposit ?? "0")));
+    if (action.type === "DeployContract") return transactions.deployContract(params.code as Uint8Array);
+    return transactions.functionCall(
+      String(params.methodName ?? ""),
+      (params.args ?? {}) as Record<string, unknown>,
+      BigInt(String(params.gas ?? "0")),
+      BigInt(String(params.deposit ?? "0")),
+    );
+  });
+  return {
+    signMessage: async ({ message, recipient, nonce }) => {
+      const keyPair = KeyPair.fromString(wallet.secretKey as `ed25519:${string}`);
+      const payload = serializeNep413({ message, recipient, nonce });
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(payload)));
+      const signed = keyPair.sign(digest);
+      return {
+        accountId: wallet.accountId,
+        publicKey: keyPair.getPublicKey().toString(),
+        signature: Buffer.from(signed.signature).toString("base64"),
+      };
+    },
+    getAccounts: async () => [{ accountId: wallet.accountId }],
+    signAndSendTransaction: async ({ signerId, receiverId, actions }) => {
+      if (signerId !== wallet.accountId) {
+        throw new Error(`connected NEAR account is ${wallet.accountId}, expected ${signerId}`);
+      }
+      const outcome = await account.signAndSendTransaction({ receiverId, actions: map(actions) });
+      return { transaction_outcome: { id: outcome.transaction_outcome.id } };
+    },
+    signAndSendTransactions: async ({ transactions: list }) => {
+      const results: Array<{ transaction_outcome: { id: string } }> = [];
+      for (const item of list) {
+        if (item.signerId !== wallet.accountId) {
+          throw new Error(`connected NEAR account is ${wallet.accountId}, expected ${item.signerId}`);
+        }
+        const outcome = await account.signAndSendTransaction({ receiverId: item.receiverId, actions: map(item.actions) });
+        results.push({ transaction_outcome: { id: outcome.transaction_outcome.id } });
+      }
+      return results;
+    },
+  };
+}
+
 let selectorPromise: Promise<WalletSelector> | undefined;
+let selectorModal: WalletSelectorModal | undefined;
 
 export function nearSelector(): Promise<WalletSelector> {
   selectorPromise ??= setupWalletSelector({
@@ -38,13 +105,75 @@ export function nearSelector(): Promise<WalletSelector> {
   return selectorPromise;
 }
 
+export async function connectNearWallet(): Promise<string[]> {
+  const selector = await nearSelector();
+  const accounts = selector.store.getState().accounts.map((account) => account.accountId);
+  if (accounts.length === 0) {
+    selectorModal ??= setupModal(selector, { contractId: "" });
+    selectorModal.show();
+  }
+  return accounts;
+}
+
 export async function nearAccounts(): Promise<string[]> {
   const injected = e2eNear();
   if (injected) return (await injected.getAccounts()).map((account) => account.accountId);
+  if (demoWalletsEnabled()) {
+    return (await (await generatedNear()).getAccounts()).map((account) => account.accountId);
+  }
   const selector = await nearSelector();
-  const wallet = await selector.wallet();
-  const accounts = await wallet.getAccounts();
-  return accounts.map((account) => account.accountId);
+  return selector.store.getState().accounts.map((account) => account.accountId);
+}
+
+export type WalletProofChallenge = {
+  id: string;
+  memberId: string;
+  nearAccountId: string;
+  evmAddress: string;
+  message: string;
+  nonceBase64: string;
+  recipient: string;
+  expiresAt: string;
+};
+
+export async function signWalletProofChallenge(challenge: WalletProofChallenge): Promise<{
+  challengeId: string;
+  nearAccountId: string;
+  nearPublicKey: string;
+  nearSignature: string;
+  evmAddress: string;
+  evmSignature: Hex;
+}> {
+  const nonce = Buffer.from(challenge.nonceBase64, "base64");
+  const params = { message: challenge.message, recipient: challenge.recipient, nonce };
+  const injected = e2eNear();
+  const nearSigned = injected?.signMessage
+    ? await injected.signMessage(params)
+    : demoWalletsEnabled()
+      ? await (await generatedNear()).signMessage!(params)
+      : await (await nearSelector()).wallet().then((wallet) => wallet.signMessage(params));
+  if (!nearSigned) throw new Error("NEAR wallet did not return a NEP-413 signature");
+  if (nearSigned.accountId !== challenge.nearAccountId) {
+    throw new Error(`NEAR signer ${nearSigned.accountId} does not match ${challenge.nearAccountId}`);
+  }
+
+  await switchToBaseSepolia();
+  const evmAddress = getAddress((await evmAccounts())[0] ?? "");
+  if (evmAddress !== getAddress(challenge.evmAddress)) {
+    throw new Error(`EVM signer ${evmAddress} does not match ${challenge.evmAddress}`);
+  }
+  const evmSignature = await evmWalletClient().signMessage({
+    account: window.ethereum ? evmAddress : generatedEvmAccount(),
+    message: challenge.message,
+  });
+  return {
+    challengeId: challenge.id,
+    nearAccountId: nearSigned.accountId,
+    nearPublicKey: nearSigned.publicKey,
+    nearSignature: nearSigned.signature,
+    evmAddress,
+    evmSignature,
+  };
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -91,8 +220,18 @@ export async function signNearTransactions(
     });
     return outcomes.map((outcome) => outcome.transaction_outcome.id);
   }
-  const selector = await nearSelector();
-  const wallet = await selector.wallet();
+  if (demoWalletsEnabled()) {
+    const generated = await generatedNear();
+    const outcomes = await generated.signAndSendTransactions({
+      transactions: transactions.map((transaction) => ({
+        signerId,
+        receiverId: transaction.receiverId,
+        actions: selectorActions(transaction.actions),
+      })),
+    });
+    return outcomes.map((outcome) => outcome.transaction_outcome.id);
+  }
+  const wallet = await (await nearSelector()).wallet();
   const outcomes = await wallet.signAndSendTransactions({
     transactions: transactions.map((transaction) => ({
       signerId,
@@ -100,8 +239,7 @@ export async function signNearTransactions(
       actions: selectorActions(transaction.actions),
     })),
   });
-  if (!outcomes) throw new Error("wallet returned no transaction outcome");
-  return outcomes.map((outcome) => outcome.transaction_outcome.id);
+  return outcomes?.map((outcome) => outcome.transaction_outcome.id) ?? [];
 }
 
 export async function createDao(plan: TreasuryPlan, signerId: string): Promise<string[]> {
@@ -124,25 +262,189 @@ export async function createDao(plan: TreasuryPlan, signerId: string): Promise<s
     });
     return [outcome.transaction_outcome.id];
   }
-  const selector = await nearSelector();
-  const wallet = await selector.wallet();
+  const action = {
+    type: "FunctionCall" as const,
+    params: {
+      methodName: "create",
+      args: plan.daoCreate.args,
+      gas: "150000000000000",
+      deposit: plan.daoCreate.depositYocto,
+    },
+  };
+  if (demoWalletsEnabled()) {
+    const outcome = await (await generatedNear()).signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoCreate.factoryId,
+      actions: [action],
+    });
+    return [outcome.transaction_outcome.id];
+  }
+  const wallet = await (await nearSelector()).wallet();
   const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: plan.daoCreate.factoryId,
-    actions: [
-      {
-        type: "FunctionCall",
-        params: {
-          methodName: "create",
-          args: plan.daoCreate.args,
-          gas: "150000000000000",
-          deposit: plan.daoCreate.depositYocto,
-        },
-      },
-    ],
+    actions: [action],
   });
-  if (!outcome) throw new Error("wallet returned no transaction outcome");
-  return [outcome.transaction_outcome.id];
+  return outcome ? [outcome.transaction_outcome.id] : [];
+}
+
+export type DaoPolicyRpc = {
+  council: string[];
+  threshold: string;
+  autoUpdate: boolean | null;
+  factoryId: string | null;
+};
+
+async function nearRpc<T>(params: Record<string, unknown>): Promise<T> {
+  const response = await fetch(import.meta.env.VITE_NEAR_RPC_URL ?? "https://rpc.testnet.near.org", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "mandateos-browser",
+      method: "query",
+      params: { finality: "final", ...params },
+    }),
+  });
+  if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+  const payload = await response.json() as { result?: T; error?: { message?: string } };
+  if (payload.error) throw new Error(payload.error.message ?? "NEAR RPC query failed");
+  if (payload.result === undefined) throw new Error("NEAR RPC result missing");
+  return payload.result;
+}
+
+async function nearView<T>(accountId: string, methodName: string): Promise<T> {
+  const result = await nearRpc<{ result?: number[]; error?: string }>({
+    request_type: "call_function",
+    account_id: accountId,
+    method_name: methodName,
+    args_base64: "e30=",
+  });
+  if (result.error) throw new Error(result.error);
+  if (!result.result) throw new Error("NEAR RPC view result missing");
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(result.result))) as T;
+}
+
+export async function readDaoPolicyRpc(daoAccountId: string): Promise<DaoPolicyRpc> {
+  const policy = await nearView<{
+    roles?: Array<{ name?: string; kind?: { Group?: string[] } }>;
+    default_vote_policy?: { threshold?: string | number };
+  }>(daoAccountId, "get_policy");
+  const councilRole = policy.roles?.find((role) => role.name === "council");
+  const council = councilRole?.kind?.Group;
+  if (!Array.isArray(council)) throw new Error("DAO council role missing from get_policy");
+  const threshold = policy.default_vote_policy?.threshold;
+  if (threshold === undefined) throw new Error("DAO threshold missing from get_policy");
+
+  let factoryInfo: { factory_id?: string; auto_update?: boolean } | null = null;
+  try {
+    factoryInfo = await nearView(daoAccountId, "get_factory_info");
+  } catch {
+    // Older Sputnik builds may not expose this view. Policy verification remains valid.
+  }
+  return {
+    council: [...council].sort(),
+    threshold: String(threshold),
+    autoUpdate: factoryInfo?.auto_update ?? null,
+    factoryId: factoryInfo?.factory_id ?? null,
+  };
+}
+
+export type NearDeploymentRpcCheck = {
+  label: string;
+  expected: string;
+  actual: string;
+  ok: boolean;
+};
+
+export type NearDeploymentRpcAttestation = {
+  valid: boolean;
+  checks: NearDeploymentRpcCheck[];
+};
+
+function base58Encode(bytes: Uint8Array): string {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      carry += digits[index]! * 256;
+      digits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let encoded = "";
+  for (let index = 0; index < bytes.length - 1 && bytes[index] === 0; index += 1) encoded += "1";
+  for (let index = digits.length - 1; index >= 0; index -= 1) encoded += alphabet[digits[index]!]!;
+  return encoded;
+}
+
+function expectedCodeHash(sha256Hex: string): string {
+  return base58Encode(Uint8Array.from(sha256Hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)));
+}
+
+export async function readNearDeploymentRpc(plan: TreasuryPlan): Promise<NearDeploymentRpcAttestation> {
+  const [
+    vaultAccount,
+    vaultKeys,
+    relayAccount,
+    relayKeys,
+    vaultOwner,
+    vaultMpc,
+    vaultChain,
+    vaultToken,
+    vaultGuard,
+    vaultTtl,
+    relayOwner,
+    relayMpc,
+    relayPath,
+    relayChain,
+    relayDelay,
+  ] = await Promise.all([
+    nearRpc<{ code_hash: string }>({ request_type: "view_account", account_id: plan.vault.accountId }),
+    nearRpc<{ keys: unknown[] }>({ request_type: "view_access_key_list", account_id: plan.vault.accountId }),
+    nearRpc<{ code_hash: string }>({ request_type: "view_account", account_id: plan.relay.accountId }),
+    nearRpc<{ keys: unknown[] }>({ request_type: "view_access_key_list", account_id: plan.relay.accountId }),
+    nearView<string>(plan.vault.accountId, "owner_id"),
+    nearView<string>(plan.vault.accountId, "mpc_contract_id"),
+    nearView<number>(plan.vault.accountId, "evm_chain_id"),
+    nearView<string>(plan.vault.accountId, "token_id"),
+    nearView<string>(plan.vault.accountId, "guard_public_key"),
+    nearView<number>(plan.vault.accountId, "reservation_ttl_blocks"),
+    nearView<string>(plan.relay.accountId, "owner_id"),
+    nearView<string>(plan.relay.accountId, "mpc_contract_id"),
+    nearView<string>(plan.relay.accountId, "mpc_path"),
+    nearView<number>(plan.relay.accountId, "evm_chain_id"),
+    nearView<string>(plan.relay.accountId, "delay_address"),
+  ]);
+  const values: Array<[string, unknown, unknown]> = [
+    ["Vault has no access key", 0, vaultKeys.keys.length],
+    ["Vault code hash", expectedCodeHash(plan.vault.wasmSha256), vaultAccount.code_hash],
+    ["Vault owner_id", plan.daoAccountId, vaultOwner],
+    ["Vault mpc_contract_id", plan.vault.initArgs.mpc_contract_id, vaultMpc],
+    ["Vault evm_chain_id", plan.vault.initArgs.evm_chain_id, vaultChain],
+    ["Vault token_id", plan.vault.initArgs.token_id, vaultToken],
+    ["Vault guard_public_key", plan.vault.initArgs.guard_public_key, vaultGuard],
+    ["Vault reservation_ttl_blocks", plan.vault.initArgs.reservation_ttl_blocks, vaultTtl],
+    ["Relay has no access key", 0, relayKeys.keys.length],
+    ["Relay code hash", expectedCodeHash(plan.relay.wasmSha256), relayAccount.code_hash],
+    ["Relay owner_id", plan.daoAccountId, relayOwner],
+    ["Relay mpc_contract_id", plan.relay.initArgs.mpc_contract_id, relayMpc],
+    ["Relay mpc_path", plan.relay.initArgs.mpc_path, relayPath],
+    ["Relay evm_chain_id", plan.relay.initArgs.evm_chain_id, relayChain],
+    ["Relay delay_address", plan.relay.initArgs.delay_address, relayDelay],
+  ];
+  const checks = values.map(([label, expected, actual]) => ({
+    label,
+    expected: String(expected),
+    actual: String(actual),
+    ok: String(actual) === String(expected),
+  }));
+  return { valid: checks.every((check) => check.ok), checks };
 }
 
 export async function disableFactoryAutoUpdate(
@@ -173,79 +475,75 @@ export async function disableFactoryAutoUpdate(
     });
     return [outcome.transaction_outcome.id];
   }
-  const selector = await nearSelector();
-  const wallet = await selector.wallet();
+  const args = { proposal: { description: "Disable Sputnik factory auto-update", kind: { FactoryInfoUpdate: { factory_info: { factory_id: plan.daoCreate.factoryId, auto_update: false } } } } };
+  const action = { type: "FunctionCall" as const, params: { methodName: "add_proposal", args, gas: "100000000000000", deposit: "100000000000000000000000" } };
+  if (demoWalletsEnabled()) {
+    const outcome = await (await generatedNear()).signAndSendTransaction({
+      signerId,
+      receiverId: plan.daoAccountId,
+      actions: [action],
+    });
+    return [outcome.transaction_outcome.id];
+  }
+  const wallet = await (await nearSelector()).wallet();
   const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: plan.daoAccountId,
-    actions: [
-      {
-        type: "FunctionCall",
-        params: {
-          methodName: "add_proposal",
-          args: {
-            proposal: {
-              description: "Disable Sputnik factory auto-update",
-              kind: {
-                FactoryInfoUpdate: {
-                  factory_info: { factory_id: plan.daoCreate.factoryId, auto_update: false },
-                },
-              },
-            },
-          },
-          gas: "100000000000000",
-          deposit: "100000000000000000000000",
-        },
-      },
-    ],
+    actions: [action],
   });
-  if (!outcome) throw new Error("wallet returned no transaction outcome");
-  return [outcome.transaction_outcome.id];
+  return outcome ? [outcome.transaction_outcome.id] : [];
 }
 
 export function evmWalletClient() {
-  if (!window.ethereum) throw new Error("No EVM wallet found");
+  if (window.ethereum) {
+    return createWalletClient({ chain: baseSepolia, transport: custom(window.ethereum) });
+  }
+  if (!demoWalletsEnabled()) {
+    throw new Error("Install or unlock MetaMask/Rabby to sign Base Sepolia transactions");
+  }
   return createWalletClient({
+    account: generatedEvmAccount(),
     chain: baseSepolia,
-    transport: custom(window.ethereum),
+    transport: http("https://sepolia.base.org"),
   });
 }
 
 export async function evmAccounts(): Promise<Address[]> {
-  if (!window.ethereum) throw new Error("No EVM wallet found");
-  const accounts = (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
-  return accounts;
+  if (window.ethereum) {
+    return (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
+  }
+  if (!demoWalletsEnabled()) {
+    throw new Error("Install or unlock MetaMask/Rabby to connect an EVM wallet");
+  }
+  return [generatedEvmAccount().address];
 }
 
 export async function switchToBaseSepolia(): Promise<void> {
-  if (!window.ethereum) throw new Error("No EVM wallet found");
-  try {
-    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x14a34" }] });
-  } catch {
-    await window.ethereum.request({
-      method: "wallet_addEthereumChain",
-      params: [
-        {
-          chainId: "0x14a34",
-          chainName: "Base Sepolia",
-          nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 },
-          rpcUrls: ["https://sepolia.base.org"],
-          blockExplorerUrls: ["https://sepolia.basescan.org"],
-        },
-      ],
-    });
+  if (window.ethereum) {
+    try {
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x14a34" }] });
+    } catch {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{ chainId: "0x14a34", chainName: "Base Sepolia", nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://sepolia.base.org"], blockExplorerUrls: ["https://sepolia.basescan.org"] }],
+      });
+    }
   }
 }
 
 export async function sendEvmTransaction(transaction: { to: string; value: string; data: string }): Promise<Hex> {
   await switchToBaseSepolia();
-  const [account] = await evmAccounts();
-  if (!account) throw new Error("No EVM account selected");
   const wallet = evmWalletClient();
+  const account = window.ethereum
+    ? (await evmAccounts())[0]
+    : demoWalletsEnabled()
+      ? generatedEvmAccount()
+      : undefined;
+  if (!account) throw new Error("No EVM account");
   return wallet.sendTransaction({
     account,
     to: transaction.to as Address,
-    value: BigInt(transaction.value),
+    value: BigInt(transaction.value ?? "0"),
     data: transaction.data as Hex,
   });
 }
@@ -280,23 +578,36 @@ export async function signDaoProposal(
     });
     return outcome.transaction_outcome.id;
   }
-  const selector = await nearSelector();
-  const wallet = await selector.wallet();
-  const outcome = await wallet.signAndSendTransaction({
+  const generated = await generatedNear();
+  const outcome = await generated.signAndSendTransaction({
     signerId,
     receiverId: proposal.receiverId,
-    actions: [
-      {
-        type: "FunctionCall",
-        params: {
-          methodName: "add_proposal",
-          args: proposal.args,
-          gas: "150000000000000",
-          deposit: proposal.deposit,
-        },
-      },
-    ],
+    actions: [{ type: "FunctionCall", params: { methodName: "add_proposal", args: proposal.args, gas: "150000000000000", deposit: proposal.deposit } }],
   });
-  if (!outcome) throw new Error("wallet returned no transaction outcome");
+  return outcome.transaction_outcome.id;
+}
+
+
+export async function signDaoVote(signerId: string, daoAccountId: string, proposalId: number): Promise<string> {
+  const injected = e2eNear();
+  if (injected) {
+    const outcome = await injected.signAndSendTransaction({
+      signerId,
+      receiverId: daoAccountId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" },
+        },
+      ],
+    });
+    return outcome.transaction_outcome.id;
+  }
+  const generated = await generatedNear();
+  const outcome = await generated.signAndSendTransaction({
+    signerId,
+    receiverId: daoAccountId,
+    actions: [{ type: "FunctionCall", params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" } }],
+  });
   return outcome.transaction_outcome.id;
 }

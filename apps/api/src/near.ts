@@ -1,4 +1,4 @@
-import { keyStores, KeyPair, Near, type Account } from "near-api-js";
+import { keyStores, KeyPair, Near, transactions, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import type { VaultOperation } from "./types.js";
 
@@ -59,8 +59,49 @@ export class NearClient {
     return operation;
   }
 
-  async getAccount(accountId: string): Promise<{ code_hash: string; amount: string }> {
-    return this.rpc<{ code_hash: string; amount: string }>("query", {
+  async executeActions(
+    receiverId: string,
+    actions: Array<{
+      type: "CreateAccount" | "Transfer" | "DeployContract" | "FunctionCall";
+      depositYocto?: string;
+      codeBase64?: string;
+      methodName?: string;
+      args?: Record<string, unknown>;
+      gasTgas?: number;
+    }>,
+  ): Promise<string> {
+    const account = await this.accountPromise;
+    const mapped = actions.map((action) => {
+      if (action.type === "CreateAccount") return transactions.createAccount();
+      if (action.type === "Transfer") return transactions.transfer(BigInt(action.depositYocto ?? "0"));
+      if (action.type === "DeployContract") {
+        return transactions.deployContract(Uint8Array.from(Buffer.from(action.codeBase64 ?? "", "base64")));
+      }
+      return transactions.functionCall(
+        action.methodName ?? "",
+        action.args ?? {},
+        BigInt(action.gasTgas ?? 100) * 1_000_000_000_000n,
+        BigInt(action.depositYocto ?? "0"),
+      );
+    });
+    const outcome = await account.signAndSendTransaction({ receiverId, actions: mapped });
+    return outcome.transaction_outcome.id;
+  }
+
+  async createSubaccount(accountId: string, publicKey: string, amountYocto: string): Promise<string> {
+    const account = await this.accountPromise;
+    await account.createAccount(accountId, publicKey, amountYocto);
+    return accountId;
+  }
+
+  async getAccount(accountId: string): Promise<{
+    code_hash: string;
+    amount: string;
+    storage_usage?: number;
+    global_contract_hash?: string;
+    global_contract_account_id?: string;
+  }> {
+    return this.rpc("query", {
       request_type: "view_account",
       finality: "final",
       account_id: accountId,

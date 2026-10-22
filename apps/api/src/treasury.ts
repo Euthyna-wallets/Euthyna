@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -25,6 +25,7 @@ export interface TreasuryConfig {
   mpcPath: string;
   budgetTokenAccountId: string;
   artifactsDir: string;
+  accountParent: string;
   environments: Record<string, TreasuryEnvironmentConfig>;
   vaultTtlBlocks: number;
   vaultDepositYocto: string;
@@ -56,6 +57,8 @@ export interface TreasuryPlan {
   nearNetwork: string;
   baseChainId: number;
   daoAccountId: string;
+  daoName: string;
+  founderNearAccountId: string;
   council: Array<{ memberId: string; nearAccountId: string; evmAddress: Address }>;
   threshold: number;
   policy: Record<string, unknown>;
@@ -83,6 +86,20 @@ export interface RegisterTreasuryInput {
   govAddress: string;
 }
 
+export interface NearDeploymentAttestationInput {
+  environment: string;
+  daoAccountId: string;
+  vaultAccountId: string;
+  relayAccountId: string;
+  govAddress: string;
+}
+
+export interface NearDeploymentConfirmationStatus {
+  digest: string;
+  confirmedMemberIds: string[];
+  requiredMemberIds: string[];
+}
+
 interface VerifiedTreasury {
   environment: TreasuryEnvironmentConfig;
   status: string;
@@ -92,6 +109,7 @@ interface VerifiedTreasury {
   gov: Address;
   vaultWasmSha256: string;
   relayWasmSha256: string;
+  warnings: string[];
 }
 
 export interface TreasuryView {
@@ -144,9 +162,21 @@ export interface BaseTreasuryVerifier {
 }
 
 export interface TreasuryGateway {
-  linkWallets(organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }): Promise<void>;
   plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan>;
   register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView>;
+  deployContracts(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ vaultTxHash: string; relayTxHash: string }>;
+  confirmNearDeployment(
+    organizationId: string,
+    memberId: string,
+    input: NearDeploymentAttestationInput,
+  ): Promise<NearDeploymentConfirmationStatus>;
+  nearDeploymentConfirmations(
+    organizationId: string,
+    input: NearDeploymentAttestationInput,
+  ): Promise<NearDeploymentConfirmationStatus>;
   refresh(organizationId: string, actorId: string, environment: string): Promise<TreasuryView>;
   getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null>;
 }
@@ -214,7 +244,7 @@ function isGroupKind(kind: unknown): kind is { Group: string[] } {
 
 export class TreasuryError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 403 | 404 | 409 | 422 | 500,
     readonly code: string,
     message: string,
   ) {
@@ -231,6 +261,7 @@ interface TreasuryMember {
   id: string;
   nearAccountId: string | null;
   evmAddress: string | null;
+  walletProofVerifiedAt: Date | null;
 }
 
 const safeAbi = [
@@ -373,19 +404,6 @@ export class TreasuryService {
     return environment;
   }
 
-  async linkWallets(
-    organizationId: string,
-    userId: string,
-    input: { nearAccountId: string; evmAddress: string },
-  ): Promise<void> {
-    const member = await this.prisma.member.findFirst({ where: { organizationId, userId } });
-    if (!member) throw new TreasuryError(404, "member_not_found", "membership not found");
-    const evmAddress = getAddress(input.evmAddress);
-    await this.prisma.member.update({
-      where: { id: member.id },
-      data: { nearAccountId: input.nearAccountId, evmAddress },
-    });
-  }
 
   async getTreasury(organizationId: string, environment: string): Promise<TreasuryView | null> {
     const treasury = await this.prisma.treasury.findUnique({
@@ -397,12 +415,14 @@ export class TreasuryService {
   async plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan> {
     const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({
-      where: { organizationId },
+      where: { organizationId, walletProofVerifiedAt: { not: null } },
       orderBy: { createdAt: "asc" },
     })) as TreasuryMember[];
-    if (members.length === 0) throw new TreasuryError(409, "no_members", "organization has no members");
+    if (members.length === 0) {
+      throw new TreasuryError(409, "no_proven_members", "organization has no member with both wallet proofs");
+    }
     if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
-      throw new TreasuryError(409, "member_wallets_missing", "every member must link a NEAR and an EVM wallet");
+      throw new TreasuryError(409, "proven_wallets_missing", "a proven member is missing a wallet");
     }
     const council = members.map((member) => ({
       memberId: member.id,
@@ -410,13 +430,14 @@ export class TreasuryService {
       evmAddress: getAddress(member.evmAddress as string),
     }));
     if (!council.some((member) => member.nearAccountId === input.founderNearAccountId)) {
-      throw new TreasuryError(400, "founder_not_in_council", "founderNearAccountId must be a council member");
+      throw new TreasuryError(400, "founder_not_proven", "founder must prove both wallets before joining the council");
     }
 
     const slug = slugify(input.daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
-    const vaultAccountId = `${slug}-vault.${input.founderNearAccountId}`;
-    const relayAccountId = `${slug}-relay.${input.founderNearAccountId}`;
+    const short = slug.slice(0, 8).replace(/-+$/, "");
+    const vaultAccountId = `${short}-v.${this.config.accountParent}`;
+    const relayAccountId = `${short}-r.${this.config.accountParent}`;
     for (const accountId of [daoAccountId, vaultAccountId, relayAccountId]) {
       if (accountId.length > 64) throw new TreasuryError(400, "account_id_too_long", `${accountId} exceeds 64 characters`);
     }
@@ -505,6 +526,8 @@ export class TreasuryService {
       nearNetwork: this.config.nearNetwork,
       baseChainId: environment.baseChainId,
       daoAccountId,
+      daoName: slug,
+      founderNearAccountId: input.founderNearAccountId,
       council,
       threshold,
       policy,
@@ -520,6 +543,68 @@ export class TreasuryService {
       govAddress,
       base,
     };
+  }
+
+
+  async deployContracts(
+    organizationId: string,
+    input: { environment: string; daoName: string; founderNearAccountId: string },
+  ): Promise<{ vaultTxHash: string; relayTxHash: string }> {
+    const plan = await this.plan(organizationId, input);
+    await this.prisma.treasuryDeploymentConfirmation.deleteMany({
+      where: { organizationId, environment: input.environment },
+    });
+    const vaultTxHash = await this.near.executeActions(plan.vault.accountId, plan.vault.actions);
+    const relayTxHash = await this.near.executeActions(plan.relay.accountId, plan.relay.actions);
+    return { vaultTxHash, relayTxHash };
+  }
+
+  async confirmNearDeployment(
+    organizationId: string,
+    memberId: string,
+    input: NearDeploymentAttestationInput,
+  ): Promise<NearDeploymentConfirmationStatus> {
+    const member = await this.prisma.member.findFirst({
+      where: {
+        id: memberId,
+        organizationId,
+        walletProofVerifiedAt: { not: null },
+      },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new TreasuryError(403, "wallet_proof_required", "member must prove both wallets before confirming deployment");
+    }
+    const verified = await this.verifyNearDeployment(input);
+    await this.prisma.treasuryDeploymentConfirmation.upsert({
+      where: {
+        organizationId_environment_memberId: {
+          organizationId,
+          environment: input.environment,
+          memberId,
+        },
+      },
+      create: {
+        id: randomUUID(),
+        organizationId,
+        environment: input.environment,
+        memberId,
+        digest: verified.digest,
+      },
+      update: {
+        digest: verified.digest,
+        confirmedAt: new Date(),
+      },
+    });
+    return this.nearDeploymentConfirmationStatus(organizationId, input.environment, verified.digest);
+  }
+
+  async nearDeploymentConfirmations(
+    organizationId: string,
+    input: NearDeploymentAttestationInput,
+  ): Promise<NearDeploymentConfirmationStatus> {
+    const verified = await this.verifyNearDeployment(input);
+    return this.nearDeploymentConfirmationStatus(organizationId, input.environment, verified.digest);
   }
 
   async register(organizationId: string, actorId: string, input: RegisterTreasuryInput): Promise<TreasuryView> {
@@ -555,7 +640,12 @@ export class TreasuryService {
         action: "treasury.registered",
         targetType: "treasury",
         targetId: treasury.id,
-        metadata: { daoAccountId: input.daoAccountId, safeAddress: verified.safe, status: verified.status },
+        metadata: {
+          daoAccountId: input.daoAccountId,
+          safeAddress: verified.safe,
+          status: verified.status,
+          warnings: verified.warnings,
+        },
       },
     });
     return this.toView(treasury);
@@ -575,7 +665,7 @@ export class TreasuryService {
       rolesAddress: existing.rolesAddress,
       delayAddress: existing.delayAddress,
       govAddress: existing.govAddress,
-    });
+    }, false);
     const updated = await this.prisma.treasury.update({
       where: { id: existing.id },
       data: {
@@ -596,39 +686,138 @@ export class TreasuryService {
         action: "treasury.refreshed",
         targetType: "treasury",
         targetId: existing.id,
-        metadata: { from: existing.status, to: verified.status, environment: environmentName },
+        metadata: {
+          from: existing.status,
+          to: verified.status,
+          environment: environmentName,
+          warnings: verified.warnings,
+        },
       },
     });
     return this.toView(updated);
   }
 
-  private async verify(organizationId: string, input: RegisterTreasuryInput): Promise<VerifiedTreasury> {
+  private async verify(
+    organizationId: string,
+    input: RegisterTreasuryInput,
+    requireConfirmations = true,
+  ): Promise<VerifiedTreasury> {
     const environment = this.environment(input.environment);
-    const members = (await this.prisma.member.findMany({ where: { organizationId } })) as TreasuryMember[];
-    if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
-      throw new TreasuryError(409, "member_wallets_missing", "every member must link a NEAR and an EVM wallet");
+    const members = (await this.prisma.member.findMany({
+      where: { organizationId, walletProofVerifiedAt: { not: null } },
+    })) as TreasuryMember[];
+    if (members.length === 0) {
+      throw new TreasuryError(409, "no_proven_members", "organization has no member with both wallet proofs");
     }
-    const expectedOwners = members.map((member) => getAddress(member.evmAddress as string).toLowerCase()).sort();
+    if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
+      throw new TreasuryError(409, "proven_wallets_missing", "a proven member is missing a wallet");
+    }
     const expectedThreshold = BigInt(Math.ceil((2 * members.length) / 3));
-    const vaultArtifact = await loadArtifact(this.config.artifactsDir, "vault.wasm");
-    const relayArtifact = await loadArtifact(this.config.artifactsDir, "governance_relay.wasm");
 
     const factoryCodeHash = await this.near.viewFunction<string>(this.config.daoFactoryId, "get_default_code_hash");
     const daoAccount = await this.near.getAccount(input.daoAccountId);
-    if (daoAccount.code_hash !== factoryCodeHash) {
+    const daoCodeHash = daoAccount.global_contract_hash ?? daoAccount.code_hash;
+    if (daoCodeHash !== factoryCodeHash) {
       throw new TreasuryError(422, "dao_code_hash_mismatch", "DAO code hash does not match the factory default");
     }
     const policy = await this.near.viewFunction<SputnikPolicy>(input.daoAccountId, "get_policy");
     this.validateDaoPolicy(policy, members.map((member) => member.nearAccountId as string), expectedThreshold);
     const factoryInfo = await this.near.viewFunction<FactoryInfo>(input.daoAccountId, "get_factory_info");
-    const daoHardened = factoryInfo.auto_update === false;
+    const warnings = factoryInfo.auto_update === false ? [] : ["dao_auto_update_enabled"];
 
+    const nearDeployment = await this.verifyNearDeployment({
+      environment: input.environment,
+      daoAccountId: input.daoAccountId,
+      vaultAccountId: input.vaultAccountId,
+      relayAccountId: input.relayAccountId,
+      govAddress: input.govAddress,
+    });
+    if (requireConfirmations) {
+      const confirmationStatus = await this.nearDeploymentConfirmationStatus(
+        organizationId,
+        input.environment,
+        nearDeployment.digest,
+      );
+      const confirmed = new Set(confirmationStatus.confirmedMemberIds);
+      if (!confirmationStatus.requiredMemberIds.every((memberId) => confirmed.has(memberId))) {
+        throw new TreasuryError(
+          409,
+          "deployment_confirmations_missing",
+          "every proven council member must confirm the browser RPC attestation before registration",
+        );
+      }
+    }
+
+    const safe = getAddress(input.safeAddress);
+    const roles = getAddress(input.rolesAddress);
+    const delay = getAddress(input.delayAddress);
+    await this.baseVerifierFactory(environment).verify({
+      owners: members.map((member) => getAddress(member.evmAddress as string)),
+      threshold: expectedThreshold,
+      safeAddress: safe,
+      rolesAddress: roles,
+      delayAddress: delay,
+      govAddress: nearDeployment.expectedGov,
+      delayCooldownSeconds: environment.delayCooldownSeconds,
+      delayExpirationSeconds: environment.delayExpirationSeconds,
+    });
+
+    return {
+      environment,
+      status: "active",
+      safe,
+      roles,
+      delay,
+      gov: nearDeployment.expectedGov,
+      vaultWasmSha256: nearDeployment.vaultWasmSha256,
+      relayWasmSha256: nearDeployment.relayWasmSha256,
+      warnings,
+    };
+  }
+
+  private async nearDeploymentConfirmationStatus(
+    organizationId: string,
+    environment: string,
+    digest: string,
+  ): Promise<NearDeploymentConfirmationStatus> {
+    const [members, confirmations] = await Promise.all([
+      this.prisma.member.findMany({
+        where: { organizationId, walletProofVerifiedAt: { not: null } },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.treasuryDeploymentConfirmation.findMany({
+        where: { organizationId, environment, digest },
+        select: { memberId: true },
+      }),
+    ]);
+    return {
+      digest,
+      confirmedMemberIds: confirmations.map((confirmation) => confirmation.memberId),
+      requiredMemberIds: members.map((member) => member.id),
+    };
+  }
+
+  private async verifyNearDeployment(input: NearDeploymentAttestationInput): Promise<{
+    digest: string;
+    expectedGov: Address;
+    vaultWasmSha256: string;
+    relayWasmSha256: string;
+  }> {
+    const environment = this.environment(input.environment);
+    const vaultArtifact = await loadArtifact(this.config.artifactsDir, "vault.wasm");
+    const relayArtifact = await loadArtifact(this.config.artifactsDir, "governance_relay.wasm");
     await this.verifyNearAccount(input.vaultAccountId, vaultArtifact.sha256);
     await this.verifyNearAccount(input.relayAccountId, relayArtifact.sha256);
+
     const vaultOwner = await this.near.viewFunction<string>(input.vaultAccountId, "owner_id");
     const relayOwner = await this.near.viewFunction<string>(input.relayAccountId, "owner_id");
-    if (vaultOwner !== input.daoAccountId) throw new TreasuryError(422, "vault_owner_mismatch", "Vault owner is not the DAO");
-    if (relayOwner !== input.daoAccountId) throw new TreasuryError(422, "relay_owner_mismatch", "relay owner is not the DAO");
+    if (vaultOwner !== input.daoAccountId) {
+      throw new TreasuryError(422, "vault_owner_mismatch", "Vault owner is not the DAO");
+    }
+    if (relayOwner !== input.daoAccountId) {
+      throw new TreasuryError(422, "relay_owner_mismatch", "relay owner is not the DAO");
+    }
 
     const expectedGuardKey = Buffer.from(await this.signer.publicKey()).toString("base64");
     const vaultParameters: Array<[string, unknown, unknown, string]> = [
@@ -644,42 +833,42 @@ export class TreasuryService {
       }
     }
 
-    const expectedGov = getAddress(input.govAddress);
-    const relayGov = await this.near.viewFunction<string>(input.relayAccountId, "evm_address");
-    const relayGovHex = `0x${Buffer.from(relayGov, "base64").toString("hex")}`;
-    if (getAddress(relayGovHex) !== expectedGov) {
-      throw new TreasuryError(422, "gov_mismatch", "relay does not derive the registered 0xGOV");
+    const relayParameters: Array<[string, unknown, unknown, string]> = [
+      ["mpc_contract_id", await this.near.viewFunction<string>(input.relayAccountId, "mpc_contract_id"), this.config.mpcContractId, "relay_mpc_mismatch"],
+      ["mpc_path", await this.near.viewFunction<string>(input.relayAccountId, "mpc_path"), this.config.mpcPath, "relay_mpc_path_mismatch"],
+      ["evm_chain_id", await this.near.viewFunction<number>(input.relayAccountId, "evm_chain_id"), environment.baseChainId, "relay_chain_mismatch"],
+    ];
+    for (const [name, actual, expected, code] of relayParameters) {
+      if (actual !== expected) {
+        throw new TreasuryError(422, code, `relay ${name} is ${String(actual)}, expected ${String(expected)}`);
+      }
     }
+
+    const expectedGov = getAddress(input.govAddress);
     const relayDelay = await this.near.viewFunction<string>(input.relayAccountId, "delay_address");
     if (Buffer.from(relayDelay, "base64").toString("hex") !== expectedGov.slice(2).toLowerCase()) {
       throw new TreasuryError(422, "relay_delay_mismatch", "relay delay_address is not the registered 0xGOV");
     }
-    const relayChain = await this.near.viewFunction<number>(input.relayAccountId, "evm_chain_id");
-    if (relayChain !== environment.baseChainId) {
-      throw new TreasuryError(422, "relay_chain_mismatch", "relay evm_chain_id is incorrect");
-    }
 
-    const safe = getAddress(input.safeAddress);
-    const roles = getAddress(input.rolesAddress);
-    const delay = getAddress(input.delayAddress);
-    await this.baseVerifierFactory(environment).verify({
-      owners: members.map((member) => getAddress(member.evmAddress as string)),
-      threshold: expectedThreshold,
-      safeAddress: safe,
-      rolesAddress: roles,
-      delayAddress: delay,
+    const digest = createHash("sha256").update(JSON.stringify({
+      version: 1,
+      environment: input.environment,
+      daoAccountId: input.daoAccountId,
+      vaultAccountId: input.vaultAccountId,
+      vaultWasmSha256: vaultArtifact.sha256,
+      relayAccountId: input.relayAccountId,
+      relayWasmSha256: relayArtifact.sha256,
+      mpcContractId: this.config.mpcContractId,
+      mpcPath: this.config.mpcPath,
+      baseChainId: environment.baseChainId,
+      tokenId: this.config.budgetTokenAccountId,
+      guardPublicKey: expectedGuardKey,
+      reservationTtlBlocks: this.config.vaultTtlBlocks,
       govAddress: expectedGov,
-      delayCooldownSeconds: environment.delayCooldownSeconds,
-      delayExpirationSeconds: environment.delayExpirationSeconds,
-    });
-
+    })).digest("hex");
     return {
-      environment,
-      status: daoHardened ? "active" : "pending_dao_hardening",
-      safe,
-      roles,
-      delay,
-      gov: expectedGov,
+      digest,
+      expectedGov,
       vaultWasmSha256: vaultArtifact.sha256,
       relayWasmSha256: relayArtifact.sha256,
     };

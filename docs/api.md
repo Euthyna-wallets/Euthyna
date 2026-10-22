@@ -7,13 +7,14 @@ agent's NEAR function-call private key: the console registers only its public ke
 
 | Identity | Credential | Header | Routes |
 |---|---|---|---|
-| Console member | Better Auth session (passkey) | `Cookie` | `/api/auth/*`, `/v1/console/*`, `/v1/emergency/cancel`, `/v1/relayer/broadcast` |
+| Console member | Better Auth passkey session (email profile identifier) | `Cookie` | `/api/auth/*`, `/v1/console/*`, `/v1/emergency/cancel`, `/v1/relayer/broadcast` |
 | Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/guard/visas` |
 
-Rate limits: Better Auth limits each API key to 60 requests/minute; the HTTP layer
-adds 120 requests/minute per agent and 600 requests/minute per organization. Both
-counters are in-memory for a single instance; a multi-instance deployment replaces
-the organization limiter with a shared store.
+Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
+15 minutes and 3 requests per normalized email per hour. Agent API keys allow
+60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
+requests/minute per organization. Registration counters are in-memory per API
+instance; wallet sponsorship caps are durable PostgreSQL rows.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console
@@ -23,6 +24,24 @@ grant access because the membership row is re-read on every request.
 Creating or revoking an agent requires the console role `admin` (or `owner`). A
 revoked agent fails closed twice: the API key is disabled and `agent.active` is
 `false`, so an already-cached key stops resolving.
+
+### Passwordless console bootstrap
+
+`POST /api/register/passkey-start` rejects emails that already have a passkey
+and returns a signed, 10-minute registration context. The browser passes it to
+Better Auth's sessionless passkey ceremony. The server validates the context in
+`resolveUser`, creates the profile with `emailVerified=false`, stores the
+passkey and creates the session. It sends no email and stores no magic token or
+password; direct email/password routes return `404`.
+
+The email is a profile identifier in the hackathon build, not a verified
+credential. Better Auth email-invitation acceptance therefore returns `403
+wallet_proof_required`; membership is claimed by proving both declared wallets.
+Console API identity requires an enrolled passkey.
+In explicit `VITE_UAT_DEMO_MODE=1`, only the NEAR/EVM transaction wallets are
+generated locally; the Better Auth passkey flow is unchanged. Outside demo,
+users connect through NEAR Wallet Selector and MetaMask/Rabby and no private key
+is written to localStorage.
 
 ## Agent routes
 
@@ -146,29 +165,65 @@ never modifies the registry.
 
 ## Treasury onboarding
 
-All `/v1/console/*` and `/v1/emergency/*` requests require
+All `/v1/console/*`, `/v1/profile/*` and `/v1/emergency/*` requests require
 `Origin: CONSOLE_ORIGIN`. State-changing methods must also send
 `Content-Type: application/json`; otherwise the API returns `403` or `415`.
 
-### `PATCH /v1/console/members/me/wallets`
+### `POST /v1/profile/wallet-proof/challenge`
 
-Links the session member's NEAR account and EVM address. Both are required before a
-treasury plan can be built.
+Requires a passkey session but not an existing organization membership. It
+creates a one-time 10-minute challenge bound to the member id, organization,
+declared NEAR account, checksum EVM address, NEAR recipient and Base Sepolia
+chain id.
 
-```json
-{ "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
-```
+### `POST /v1/profile/wallet-proof/verify`
+
+Verifies a NEP-413 signature, checks that its public key is currently a
+full-access key on the declared NEAR account, and recovers the EIP-191 signer.
+Both signatures cover the same domain-separated challenge. Successful
+verification consumes the challenge, stores both proofs and `verifiedAt`, and
+claims an admin-created pending membership for the authenticated passkey
+profile. Challenges cannot be replayed.
+
+Normal mode requires the NEP-413 public key to be a current full-access key
+returned by NEAR RPC. Only with explicit `UAT_DEMO_WALLETS_ENABLED=1` may an
+unfunded `w-<sha256(public-key)>.<parent>` account pass this association check;
+the signature still verifies cryptographically, and DAO-time sponsorship must
+later create that exact account with that exact key.
 
 ### `GET /v1/console/members`
 
-Returns members of the session organization with their linked `nearAccountId` and
-`evmAddress`. Better Auth's own member listing does not expose application-specific
-columns.
+Returns members of the session organization with their `nearAccountId`,
+`evmAddress`, `walletProofClaimable` and `walletProofVerifiedAt` state. Better
+Auth's own member listing does not expose these application-specific columns.
+
+### `POST /v1/console/members`
+
+Admin only. Declares a pending wallet membership for the MVP. The declaration
+does not prove wallet control and is excluded from DAO council and Safe owners.
+The generated `/onboarding?member=<id>` claim link becomes effective only when
+the recipient signs the NEP-413 and EIP-191 challenge from a passkey session.
+
+```json
+{ "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
+```
+
+Both fields accept a pasted wallet label: only the first token is kept and a
+trailing `(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is
+stored as `busyvideo615.testnet`. The EVM address is checksum-normalized.
+
+### `PATCH /v1/console/members/:id/wallets`
+
+Admin only. Replaces a declaration and clears every previous wallet proof,
+challenge and deployment confirmation. The member remains outside the council
+until both new signatures verify.
 
 ### `POST /v1/console/treasury/plan`
 
-Admin only. Builds the unsigned DAO, Vault, relay and Base plan for the session
-organization. It never signs and never receives a private key.
+Available to every organization member so each signer can independently inspect
+the deterministic plan. Only members with a stored NEP-413 and EIP-191 proof
+appear in the DAO council and Safe owners. It never signs and never receives a
+private key.
 
 ```json
 { "environment": "uat", "daoName": "acme", "founderNearAccountId": "alice.testnet" }
@@ -185,11 +240,78 @@ The response contains:
   calls to sign. The Safe is deployed before the modules because their initializers
   reference its address; enabling them is a separate 2/3 Safe batch.
 
+### Browser-signed DAO creation
+
+There is no server `create-dao` route. The console displays `daoCreate.args`,
+every council account and the absolute threshold, then requires the founder
+(`founderNearAccountId`) to confirm and sign the factory `create` call locally.
+The attached 0.25 NEAR comes from the founder wallet. In explicit demo mode,
+MandateOS creates and pre-funds that deterministic client wallet only
+immediately before this call. The permissionless factory refunds the caller if
+asynchronous creation fails.
+
+### `POST /v1/console/treasury/deploy-contracts`
+
+Admin only. Creates and deploys the Vault and governance relay accounts with the
+relayer (`CreateAccount → Transfer → DeployContract → new`), paying from
+`NEAR_RELAYER_ACCOUNT_ID`. Both contracts are initialized with the DAO as owner and
+hold no access key of their own.
+
+### Deployment attestation and member confirmation
+
+After deployment, each proven council member uses the browser to query NEAR RPC
+directly. The console checks zero access keys, reproducible `code_hash`,
+`owner_id`, MPC contract/path, EVM chain, Vault token/Guard/TTL and relay delay.
+Only an all-match result can call
+`POST /v1/console/treasury/deployment-confirmations/confirm`. The server repeats
+the same RPC checks, computes an immutable deployment digest and stores one
+confirmation per member. The Safe deployment stays disabled until every proven
+council member confirms that digest. `treasury/register` enforces the same gate.
+
+`POST /v1/console/treasury/deployment-confirmations/status` re-verifies the
+accounts and returns the required and confirmed member ids.
+
+### `GET /v1/console/treasury/sponsor-status`
+
+Returns the public on-chain balance of the configured MandateOS parent account.
+The console uses it only for the separately sponsored Vault/relay deployment;
+DAO creation is caller-funded from the founder wallet.
+
+
+### `POST /v1/console/treasury/sponsor-founder-wallet`
+
+UAT demo admin only. Immediately before founder-signed DAO creation, reserves a
+durable sponsorship row, validates that the deterministic account is the
+authenticated member's proved wallet, enforces
+`NEAR_SPONSOR_DAILY_WALLET_LIMIT`, then creates/funds it with
+`NEAR_SPONSOR_WALLET_AMOUNT_YOCTO`. The operation is
+idempotent by account/public key; failed chain creation releases the reservation.
+Normal wallet-selector accounts do not use this route.
+
+### Funding model
+
+Treasury deposits are one-time storage-backed account balances, not per-payment
+fees. `factory-v2.mandateos.testnet` references the official immutable global
+Sputnik hash, so a new Company + DAO receives 0.25 NEAR from its founder and
+stores no duplicate WASM. A full payment treasury adds 5 NEAR for the Vault and
+3.5 NEAR for the relay (8.75 NEAR total). Registration separately pre-funds the
+client-owned `w-<hex>.mandateos.testnet` wallet with 0.5 NEAR once.
+
+Observed testnet storage is 150,623 bytes for the permissionless factory and 810
+bytes (0.00810 NEAR minimum) for a global DAO. Current-artifact sandbox
+measurements after `new` and access-key removal are 439,560 bytes (4.39560 NEAR
+minimum) for the Vault and 285,313 bytes (2.85313 NEAR minimum) for the relay.
+Testnet
+protocol configuration reports `10^19` yoctoNEAR per byte; all API amounts use
+`1 NEAR = 10^24` yoctoNEAR. The observed 14.288425743215 Tgas Vault
+authorization costs about 0.00142885 NEAR at `10^8` yoctoNEAR/gas.
+
 ### `POST /v1/console/treasury/refresh`
 
-Admin only. Re-runs every register check against the stored treasury and updates
-its status: `pending_dao_hardening → active` once `get_factory_info().auto_update`
-is `false`. The console exposes a "Re-run verification" button on that state.
+Admin only. Re-runs every treasury check and refreshes observed addresses and
+hashes. `get_factory_info().auto_update === true` is recorded as
+`dao_auto_update_enabled`, but does not change the active status for the
+immutable-hash, keyless MandateOS factory.
 
 ### `GET /v1/console/agents/:id`
 
@@ -213,13 +335,14 @@ Compiles one role into the three locks and returns a diff plus unsigned proposal
 
 Admin only. Verifies on-chain state before inserting `treasury`:
 
-- DAO code hash equals `sputnikv2.testnet.get_default_code_hash()`;
+- DAO local or `global_contract_hash` equals the configured factory's
+  `get_default_code_hash()`;
 - DAO `get_policy()` has the council Group equal to the member NEAR accounts, an
   absolute `RoleWeight` threshold `ceil(2n/3)` with quorum `0`, and no other role
   carrying `Vote*` or `AddProposal` (Sputnik ORs roles); a council `vote_policy`
   is rejected unless each per-kind threshold is at least the expected threshold;
-- DAO `get_factory_info().auto_update === false`; otherwise the treasury is stored
-  as `pending_dao_hardening` and agent creation is blocked;
+- DAO `auto_update: true` is an audit warning, not a registration blocker, because
+  the factory is keyless, has no update method and references immutable code;
 - Vault and relay code hashes equal the local wasm SHA-256, and both have zero
   access keys;
 - Vault `mpc_contract_id`, `evm_chain_id`, `guard_public_key` (KMS key),
@@ -253,8 +376,9 @@ Admin only. Verifies on-chain state before inserting `treasury`:
 - organizations and active organization (`/api/auth/organization/*`);
 - sessions (`/api/auth/get-session`).
 
-Email/password is enabled only to bootstrap a human account; the console then adds
-a passkey and uses it as the primary credential. The passkey relying party is
+There is no password credential. `POST /api/register/passkey-start` creates the
+user, returns a session cookie, immediately deletes the generated credential row,
+and the console adds the passkey. `/sign-up/email` and `/sign-in/email` return 404. The passkey relying party is
 `PASSKEY_RP_ID` and the expected origin is `BETTER_AUTH_URL`.
 
 ## Errors
@@ -266,7 +390,7 @@ a passkey and uses it as the primary credential. The passkey relying party is
 | `403` | `{ "message": "admin required" }` | Non-admin console role |
 | `404` | `{ "error": "agent_not_found" }` | Agent outside the session organization |
 | `409` | state conflict | Operation not `Prepared` / not `PossiblySigned` |
-| `429` | `{ "message": "rate limit exceeded" }` | Agent or organization window exhausted |
+| `429` | rate-limit or `daily_sponsorship_limit` | Registration or daily wallet sponsorship cap exhausted |
 
 ## Audit
 
@@ -274,6 +398,7 @@ Every sensitive action appends a row to `audit_log`:
 
 - `guard.visa.issued`, `guard.escalation`, `guard.visa.denied`;
 - `agent.created`, `agent.revoked`;
+- `near_wallet.sponsored`;
 - `emergency.cancel.requested`, `emergency.cancel.submitted`, `emergency.cancel.rejected`.
 
 Rows are never updated or deleted by the API. `metadata` carries the operation id,
@@ -290,5 +415,5 @@ pnpm --filter @mandateos/db build
 pnpm --filter @mandateos/api dev
 ```
 
-The passkey origin must match `BETTER_AUTH_URL`; use `http://localhost:3000` for
-local development, not `127.0.0.1`, so the WebAuthn RP id stays `localhost`.
+Passkey ceremonies use `PASSKEY_RP_ID` and `CONSOLE_ORIGIN`; the browser origin
+must match `CONSOLE_ORIGIN`.

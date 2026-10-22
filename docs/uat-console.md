@@ -9,6 +9,11 @@ client-side signature because the headless test browser has no NEAR wallet and n
 injected EVM wallet. No new on-chain transaction was produced by this run; the
 blockers and the exact plan that would have been signed are recorded below.
 
+> Historical evidence only. Current onboarding no longer accepts Better Auth
+> email invitations or unsigned wallet links. Re-run with the NEP-413/EIP-191
+> claim flow and per-member Vault/relay RPC confirmations in
+> [`uat-manual.md`](./uat-manual.md).
+
 ## Steps reached
 
 | # | Step | Result |
@@ -34,10 +39,10 @@ blockers and the exact plan that would have been signed are recorded below.
 - `bob@acme.test` (`member`) ↔ `bob-uat.testnet` /
   `0x3333333333333333333333333333333333333333`
 
-The console generated the invitation links. Because this environment has no
-email delivery, the two invitations were accepted through the Better Auth API
-with the members' own sessions; the console then displayed all three members and
-their linked wallets.
+At that historical revision the console generated email invitation links and
+accepted unsigned wallet declarations. Commit `255b04a` and the subsequent
+wallet-proof hardening supersede that behavior; these rows are not evidence of
+current wallet control.
 
 ### 3. Treasury plan
 
@@ -68,6 +73,11 @@ faucet loop): `mandateos-uat-mvi3degx.testnet` received 10 NEAR, then 9 NEAR wer
 moved from `mandateos-root-20261021.testnet`, for 19 NEAR total. Plan deposits
 were reduced from 10/10/10 to the measured UAT storage needs: DAO 7,5 NEAR,
 Vault 5 NEAR, relay 5 NEAR (17,5 NEAR total), leaving a small gas buffer.
+
+This is historical evidence for that UAT run. The current permissionless
+`factory-v2.mandateos.testnet` uses the official immutable global Sputnik hash:
+the sponsored founder wallet signs and attaches 0.25 NEAR; a complete new
+treasury requires 8.75 NEAR for DAO + Vault + relay.
 
 `0x1D693a4425bf7eD10FE7775E2b65b072019FFceb` was funded with 0.002 ETH on Base
 Sepolia. Its private key is not in the harness; it can be a Safe owner signed
@@ -156,5 +166,7 @@ pnpm --filter @mandateos/api dev
 pnpm --filter @mandateos/console dev
 ```
 
-Then create the organization, invite two members, link wallets, and build the plan.
-The next console run must provide the two wallets above.
+Then create the organization, declare two pending members, have each member
+claim the link with NEP-413 and EIP-191 signatures, and build the plan. After
+Vault/relay deployment, each proven member must independently attest the direct
+RPC result before Safe.

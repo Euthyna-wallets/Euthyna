@@ -160,7 +160,7 @@ Decision: use `Transfer.msg` → `ft_transfer_call` → `ft_on_transfer` as the 
 
 Sputnik initializes `FactoryInfo` with `auto_update: true` ([`lib.rs:L95-L120`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/lib.rs#L95-L120)). `FactoryInfoUpdate` writes the new value when an approved proposal executes ([`proposals.rs:L432-L435`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/proposals.rs#L432-L435)). The test proves that the council can disable it.
 
-MandateOS must submit this proposal immediately after DAO creation and verify `get_factory_info().auto_update == false` before treating the DAO as production-ready.
+For the legacy Sputnik factory path, disabling this flag remains required because the factory can serve replacement code. For `factory-v2.mandateos.testnet`, it is a non-blocking warning: the DAO references an immutable global hash, the keyless factory exposes no update method, and its code cannot be replaced. The council may still set `auto_update: false` as defense in depth; registration no longer waits for that proposal.
 
 ## Gas
 
@@ -235,7 +235,7 @@ Create the DAO:
 near contract call-function as-transaction "$FACTORY_ID" create \
   json-args "$FACTORY_CREATE_ARGS" \
   prepaid-gas '150 Tgas' \
-  attached-deposit '12 NEAR' \
+  attached-deposit '6 NEAR' \
   sign-as "$CREATOR" \
   network-config testnet \
   sign-with-keychain send
@@ -251,7 +251,101 @@ near contract call-function as-read-only "$DAO_ID" get_factory_info \
   json-args '{}' network-config testnet now
 ```
 
-The 12 NEAR deposit follows the official testnet deployment script example ([`deploy_factory_testnet.sh:L66-L68`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/scripts/deploy_factory_testnet.sh#L66-L68)). Recheck the factory's current minimum and default code hash immediately before a real deployment.
+The current official NEAR DAO primitive uses a 6 NEAR deposit for `sputnikv2.testnet` ([NEAR DAO documentation](https://docs.near.org/primitives/dao#create-a-dao)). The observed three-member MandateOS DAO uses 540,372 bytes, or 5.40372 NEAR at the live `10^19` yoctoNEAR/byte storage price, leaving 0.59628 NEAR for state growth and gas. Recheck the factory's default code hash and protocol storage price immediately before a real deployment.
+
+### MandateOS permissionless global factory
+
+For the hackathon multi-Company flow, `factory-v2.mandateos.testnet` reuses the
+official immutable Sputnik global hash
+`Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD` instead of duplicating the DAO
+WASM. `create(name, args)` is permissionless: the predecessor supplies the
+attached 0.25 NEAR, becomes the on-chain caller and receives a refund if the
+promise fails. MandateOS sponsors this by pre-funding the browser-generated
+founder wallet; the server neither signs the call nor chooses the serialized
+policy.
+
+The factory has zero access keys. It creates
+`<slug>.factory-v2.mandateos.testnet`, transfers the caller's deposit, installs
+the global code by immutable hash and calls `new` without adding a key.
+
+Observed factory proof:
+
+- permissionless factory deployment:
+  [`G8Y3XGfsRf5Bm9pbEcH3GxKxsE2nyEDPa7NFyzeJ4Mae`](https://testnet.nearblocks.io/txns/G8Y3XGfsRf5Bm9pbEcH3GxKxsE2nyEDPa7NFyzeJ4Mae);
+- code hash `BDbnNMwsgESgfsXgSrcZRVQJrbp5rf8ZiD6mV9Rvn3dC`;
+- zero access keys, storage usage 150,623 bytes;
+- founder-signed DAO `trezu-proof.factory-v2.mandateos.testnet`;
+- DAO global hash equals the configured immutable hash, with zero access keys,
+  absolute threshold `2` and the exact three-member council read directly by
+  the browser RPC path.
+
+`factory.mandateos.testnet` and `global-smoke.factory.mandateos.testnet` are the
+superseded owner-only proof deployment.
+
+### Global Sputnik provenance and reproducible hash
+
+The global code is published by `dao.globals.primitives.testnet`. NearBlocks
+records the successful by-hash `DEPLOY_GLOBAL_CONTRACT` transaction
+[`48Mc9g1AN3xNoFxPyEcm7u7saYfi8xgm5adZdQKJPWGe`](https://testnet.nearblocks.io/txns/48Mc9g1AN3xNoFxPyEcm7u7saYfi8xgm5adZdQKJPWGe)
+at block `209435665`. The publisher account was created by
+`globals.primitives.testnet` in
+[`HAtzemQYJpY1ufnKvH9Q8Cc347WFE42B4omMfe75gJNP`](https://testnet.nearblocks.io/txns/HAtzemQYJpY1ufnKvH9Q8Cc347WFE42B4omMfe75gJNP).
+
+`near contract inspect` reads the embedded NEP-330 metadata:
+
+- contract version `2.3.1`;
+- source repository `near-daos/sputnik-dao-contract`;
+- source commit `278adc713e795f95a6da4d3007c7e03e8120f153`;
+- NEP-330 version `1.2.0`.
+
+The commit's reproducible-build metadata pins:
+
+```text
+image: sourcescan/cargo-near:0.13.3-rust-1.84.1
+digest: sha256:baa712c5d2b7522d38175e36330d336ad2c4ce32bfaaa41af94ce40407ecd803
+command: cargo near build non-reproducible-wasm --locked
+```
+
+Running `cargo near build reproducible-wasm --manifest-path
+sputnikdao2/Cargo.toml` from that clean commit produced 430,308 bytes and:
+
+```text
+sha256 hex:    c9a502ef08a06cef04e2fce82da60b1fbc78db3066ff41416110f4292fca39ce
+sha256 base58: Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD
+```
+
+Fetching `view_global_contract_code` from testnet produced the same byte length
+and SHA-256 values. This proves byte-for-byte equality between the RPC code and
+the reproducible source build, not merely a matching version label.
+
+### Trezu compatibility result
+
+The official [`near-daos/sputnik-dao-ui`](https://github.com/near-daos/sputnik-dao-ui)
+by Trezu, configured against testnet, reads
+`trezu-proof.factory-v2.mandateos.testnet`, displays proposal `0`, its exact
+`FactoryInfoUpdate` kind and the two approving votes. The council cast real
+votes in
+[`2CoVvPncKsb54Wwz9p3fy3tJTCh3gm1d71TAW14MpcZu`](https://testnet.nearblocks.io/txns/2CoVvPncKsb54Wwz9p3fy3tJTCh3gm1d71TAW14MpcZu)
+and
+[`Dgf9jj9PJ6QTvmW4N4dzscwNwajj9Q9uEHz45fVKhmBL`](https://testnet.nearblocks.io/txns/Dgf9jj9PJ6QTvmW4N4dzscwNwajj9Q9uEHz45fVKhmBL);
+the proposal is `Approved`. See
+[`docs/console/trezu-global-dao.webp`](./console/trezu-global-dao.webp).
+
+The capture uses UI commit
+`f1a35cf05bcddf60877f9d11a880818fddd41635`. Only the transport was adapted:
+`createMainnetClient`/`mainnet` became `createTestnetClient`/`testnet`. The
+current `near-api-ts 0.9.0` bundle also requires a `Uint8Array.toBase64`
+polyfill and explicit JSON argument serialization in Chromium 134. No DAO,
+policy, proposal, permission or voting component was changed.
+
+The hosted `testenv.trezu.app` backend currently rejects custom DAO suffixes:
+`POST /api/monitored-accounts` returns HTTP 400, `Only sputnik-dao accounts can
+be monitored`, unless the account ends in `.sputnik-dao.near`. The hosted
+`sputnik-dao.trezu.org` standalone UI is mainnet-only. Contract/UI compatibility
+is therefore proven, but hosted testnet indexing of
+`*.factory-v2.mandateos.testnet` requires a Trezu allowlist change; this is an
+external merge blocker if the hosted URL, rather than the official source UI,
+is mandatory.
 
 ## Surprises and operational notes
 

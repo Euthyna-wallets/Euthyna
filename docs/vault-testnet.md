@@ -2,17 +2,39 @@
 
 ## Status
 
-The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The deployed WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21`; the latest reproducible local build with `submit_signature` is `c2f758f7be4f0ab13becdda21740068cb4b3be9f2c7d775ee56787fccd200c34`.
+The security-corrected Vault contract is implemented in `contracts/vault`. It constructs configurable-chain EIP-1559 transactions, validates Guard visas and treats every MPC request as potentially public. The deployed UAT WASM SHA-256 is `11cb6f034b43915b313bcb7e62886a0152a4060e46776615159f95f41d9acc21`; deployment and reproducible-build hashes are kept distinct below.
 
 Local verification:
 
 ```bash
 cd contracts
 ./build.sh
-cargo test -p tests -- --nocapture
+cargo test --workspace
+./build-reproducible.sh
 ```
 
-Observed result: **25 passed, 0 failed** across the DAO, Vault and governance-relay suites: nine DAO tests, ten Vault tests and six relay tests.
+Observed result: **28 passed, 0 failed** across the DAO, Vault, governance-relay and factory suites.
+
+The reproducible build metadata in each production contract pins
+`sourcescan/cargo-near:0.20.3-rust-1.86.0` by digest
+`sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf`.
+The factory and Vault were reproduced from `255b04a`; the relay wallet-proof
+views were reproduced from `aa85684859e72a4d0526b85ecc042e1def6f1231`:
+
+| Contract | Bytes | Reproducible SHA-256 hex |
+|---|---:|---|
+| DAO factory | 150,945 | `ad1ed251fc4a556a3070de31c64c2b43442f0ebf5dc1dcf299ba532945312c92` |
+| Vault | 439,658 | `cac18ad40a3d04cc7945c8ac3d1a1677197078130b5dbaed62a94234ee8a1538` |
+| Governance relay | 286,385 | `921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5` |
+
+The relay Base58 code hash is
+`AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc`. Its read-only
+`mpc_contract_id` and `mpc_path` views let each member verify the complete
+deployment directly from NEAR RPC.
+
+These hashes do not silently replace the already deployed/keyless UAT
+artifacts. A deployment cutover must update the manifest and re-run on-chain
+code-hash verification explicitly.
 
 ## Testnet deployment
 
@@ -169,7 +191,8 @@ Rebuild local test artifacts:
 ```bash
 cd contracts
 ./build.sh
-cargo test -p tests
+./build-reproducible.sh
+cargo test --workspace
 ```
 
 Repeat the testnet deployment with a fresh DAO and Vault:

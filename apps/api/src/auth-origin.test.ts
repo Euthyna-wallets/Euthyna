@@ -9,7 +9,6 @@ const authEnv: AuthEnvironment = {
   BETTER_AUTH_URL: "http://api.example.com",
   CONSOLE_ORIGIN: "http://console.example.com",
   PASSKEY_RP_ID: "console.example.com",
-  AUTH_E2E_PASSWORD: "1",
 };
 
 describe("console passkey origin", () => {
@@ -35,9 +34,24 @@ describe("console passkey origin", () => {
     expect(env.PASSKEY_RP_ID).toBe("console.example.com");
   });
 
+  it("keeps email/password disabled and enables sessionless passkey registration", () => {
+    const options = buildAuthOptions(authEnv, undefined, async () => ({
+      id: "user-1",
+      name: "Passkey User",
+      email: "user@example.test",
+      emailVerified: false,
+      image: null,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    }));
+    expect(options.emailAndPassword?.enabled).toBe(false);
+    expect(options.plugins?.map((plugin) => plugin.id)).toContain("passkey");
+  });
+
   it("accepts the console origin for passkey registration and rejects others", async () => {
     const options = buildAuthOptions(authEnv, undefined);
-    const { auth, signInWithTestUser } = await getTestInstance(options, { port: 3001 });
+    const testOptions = { ...options, emailAndPassword: { enabled: true } };
+    const { auth, signInWithTestUser } = await getTestInstance(testOptions, { port: 3001 });
     const { headers } = await signInWithTestUser();
     headers.set("origin", authEnv.CONSOLE_ORIGIN);
 

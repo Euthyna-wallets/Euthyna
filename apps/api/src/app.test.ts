@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
@@ -20,6 +22,7 @@ import type { MandateGateway, MandatePreview } from "./mandates.js";
 import type { RegistryService } from "./registry-db.js";
 import type { PaymentService } from "./payments.js";
 import type { ConsoleDataService } from "./console-data.js";
+import type { WalletProofGateway } from "./wallet-proof.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -70,8 +73,8 @@ const agentB: AgentIdentity = {
   role: "researcher",
 };
 
-const admin: ConsoleIdentity = { userId: "user-admin", organizationId: "org-1", role: "admin" };
-const member: ConsoleIdentity = { userId: "user-member", organizationId: "org-1", role: "member" };
+const admin: ConsoleIdentity = { userId: "user-admin", memberId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", organizationId: "org-1", role: "admin", email: "admin@example.test", emailVerified: true };
+const member: ConsoleIdentity = { userId: "user-member", memberId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", organizationId: "org-1", role: "member", email: "member@example.test", emailVerified: true };
 
 const requestBody = { vaultAccountId: "vault-1.near", opId: Array(32).fill(1) };
 const consoleOrigin = "http://console.test";
@@ -83,6 +86,8 @@ class FakeAuth implements AuthGateway {
   readonly listedOrganizations: string[] = [];
   readonly created: CreateAgentInput[] = [];
   readonly revoked: Array<{ organizationId: string; agentId: string }> = [];
+  sponsorshipReservation: import("./auth-gateway.js").NearSponsorshipReservation = "reserved";
+  readonly completedSponsorships: Array<{ nearAccountId: string; succeeded: boolean }> = [];
 
   handler(): Promise<Response> {
     return Promise.resolve(new Response(null, { status: 404 }));
@@ -92,6 +97,12 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve(apiKey ? (this.agents.get(apiKey) ?? null) : null);
   }
 
+
+  identifyPasskeyUser(headers: Headers) {
+    const cookie = headers.get("cookie");
+    const identity = cookie ? this.consoles.get(cookie) : null;
+    return Promise.resolve(identity ? { userId: identity.userId, email: identity.email } : null);
+  }
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
     const cookie = headers.get("cookie");
     return Promise.resolve(cookie ? (this.consoles.get(cookie) ?? null) : null);
@@ -104,6 +115,34 @@ class FakeAuth implements AuthGateway {
 
   listMembers(): Promise<import("./auth-gateway.js").MemberView[]> {
     return Promise.resolve([]);
+  }
+
+  setMemberWallets(_organizationId: string, memberId: string, input: { nearAccountId: string; evmAddress: string }) {
+    return Promise.resolve({
+      id: memberId,
+      userId: "user-owner",
+      role: "owner",
+      nearAccountId: input.nearAccountId,
+      evmAddress: input.evmAddress,
+      email: "owner@acme.test",
+      name: "Owner",
+      walletProofClaimable: false,
+      walletProofVerifiedAt: null,
+    });
+  }
+
+  addMember(_organizationId: string, input: { name: string; nearAccountId: string; evmAddress: string }) {
+    return Promise.resolve({
+      id: "member-new",
+      userId: "user-new",
+      role: "member",
+      nearAccountId: input.nearAccountId,
+      evmAddress: input.evmAddress,
+      email: null,
+      name: input.name,
+      walletProofClaimable: true,
+      walletProofVerifiedAt: null,
+    });
   }
 
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
@@ -146,23 +185,55 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve(agentId === "agent-a" && organizationId === "org-1");
   }
 
+  startPasskeyRegistration(): Promise<Response> {
+    return Promise.resolve(new Response(JSON.stringify({ context: "signed-registration-context" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+  }
+
+  reserveNearWalletSponsorship() {
+    return Promise.resolve(this.sponsorshipReservation);
+  }
+
+  completeNearWalletSponsorship(nearAccountId: string, succeeded: boolean): Promise<void> {
+    this.completedSponsorships.push({ nearAccountId, succeeded });
+    return Promise.resolve();
+  }
+
+
   recordAudit(event: AuditEvent): Promise<void> {
     this.audits.push(event);
     return Promise.resolve();
   }
 }
 
-function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" | "member"; treasuryStatus?: string }) {
+function testApp(options?: {
+  operation?: VaultOperation;
+  consoleRole?: "admin" | "member";
+  treasuryStatus?: string;
+  sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
+}) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
   auth.agents.set("key-b", agentB);
   auth.consoles.set("session-admin", admin);
   auth.consoles.set("session-member", member);
   if (options?.consoleRole === "member") auth.consoles.delete("session-admin");
+  if (options?.sponsorshipReservation) auth.sponsorshipReservation = options.sponsorshipReservation;
 
   let guardCalls = 0;
+  const nearCalls = {
+    sponsored: [] as Array<{ accountId: string; publicKey: string; amountYocto: string }>,
+  };
   const near = {
     getOperation: async () => options?.operation ?? operation,
+    getAccount: async () => ({ code_hash: "11111111111111111111111111111111", amount: "832000000000000000000000", storage_usage: 182 }),
+    getAccessKeys: async () => ({ keys: [] }),
+    createSubaccount: async (accountId: string, publicKey: string, amountYocto: string) => {
+      nearCalls.sponsored.push({ accountId, publicKey, amountYocto });
+      return accountId;
+    },
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
       method === "get_agent" ? { role: "researcher", active: true, evm_address: [1, 2] } : 3,
@@ -174,29 +245,33 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     },
   } as unknown as Guard;
   const treasuryCalls = {
-    wallets: [] as Array<{ organizationId: string; userId: string; nearAccountId: string; evmAddress: string }>,
     plans: [] as Array<{ organizationId: string; daoName: string }>,
     registers: [] as Array<{ organizationId: string; actorId: string }>,
     refreshes: [] as Array<{ organizationId: string; actorId: string }>,
   };
-  const treasury = {
-    linkWallets: async (organizationId: string, userId: string, input: { nearAccountId: string; evmAddress: string }) => {
-      treasuryCalls.wallets.push({ organizationId, userId, ...input });
-    },
-    plan: async (organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }) => {
+  const confirmationStatus = {
+    digest: "deployment-digest",
+    confirmedMemberIds: [admin.memberId, member.memberId],
+    requiredMemberIds: [admin.memberId, member.memberId],
+  };
+  const treasury: TreasuryGateway = {
+    plan: async (organizationId, input) => {
       treasuryCalls.plans.push({ organizationId, daoName: input.daoName });
       return {} as TreasuryPlan;
     },
-    register: async (organizationId: string, actorId: string) => {
+    register: async (organizationId, actorId) => {
       treasuryCalls.registers.push({ organizationId, actorId });
       return {} as TreasuryView;
     },
-    refresh: async (organizationId: string, actorId: string) => {
+    deployContracts: async () => ({ vaultTxHash: "v", relayTxHash: "r" }),
+    confirmNearDeployment: async () => confirmationStatus,
+    nearDeploymentConfirmations: async () => confirmationStatus,
+    refresh: async (organizationId, actorId) => {
       treasuryCalls.refreshes.push({ organizationId, actorId });
       return { status: "active" } as TreasuryView;
     },
     getTreasury: async () => ({ status: options?.treasuryStatus ?? "active" }) as TreasuryView,
-  } as TreasuryGateway;
+  };
   const mandateCalls: Array<{ organizationId: string; role: string }> = [];
   const mandates: MandateGateway = {
     preview: async (organizationId: string, input: { role: string }) => {
@@ -227,8 +302,36 @@ function testApp(options?: { operation?: VaultOperation; consoleRole?: "admin" |
     agentDetail: async () => null,
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
-  const app = createApp({ near, guard, relayer: {} as BaseRelayer, auth, treasury, mandates, registry, payments, consoleData, consoleOrigin, passwordAuthEnabled: false });
-  return { app, auth, treasuryCalls, mandateCalls, guardCalls: () => guardCalls };
+  const walletProof: WalletProofGateway = {
+    createChallenge: async (_userId, input) => ({
+      id: "11111111-1111-4111-8111-111111111111",
+      memberId: input.memberId,
+      nearAccountId: input.nearAccountId,
+      evmAddress: input.evmAddress,
+      message: "proof",
+      nonceBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      recipient: "mandateos.testnet",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }),
+    verify: async () => ({ memberId: admin.memberId, organizationId: admin.organizationId }),
+  };
+  const app = createApp({
+    near,
+    guard,
+    relayer: {} as BaseRelayer,
+    auth,
+    walletProof,
+    treasury,
+    mandates,
+    registry,
+    payments,
+    consoleData,
+    consoleOrigin,
+    nearParentAccount: "mandateos.testnet",
+    nearSponsorDailyWalletLimit: 2,
+    nearSponsorWalletAmountYocto: "500000000000000000000000",
+  });
+  return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
@@ -332,6 +435,66 @@ describe("agent detail", () => {
   });
 });
 
+describe("members", () => {
+  it("adds a wallet-only member for an admin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Alice",
+        nearAccountId: "alice.testnet",
+        evmAddress: "0x1111111111111111111111111111111111111111",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ nearAccountId: "alice.testnet", name: "Alice" });
+  });
+
+  it("normalizes annotated wallet values", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        name: "Alice",
+        nearAccountId: "busyvideo615.testnet (*testnet)",
+        evmAddress: "0x1111111111111111111111111111111111111111 (Base Sepolia)",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ nearAccountId: "busyvideo615.testnet" });
+  });
+
+  it("lets an admin set wallets on an existing member", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members/member-1/wallets", {
+      method: "PATCH",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({
+        nearAccountId: "owner.testnet",
+        evmAddress: "0x3333333333333333333333333333333333333333",
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ nearAccountId: "owner.testnet" });
+  });
+
+  it("forbids a non-admin member from adding a member", async () => {
+    const { app } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({
+        name: "Bob",
+        nearAccountId: "bob.testnet",
+        evmAddress: "0x2222222222222222222222222222222222222222",
+      }),
+    });
+    expect(response.status).toBe(403);
+  });
+});
+
 describe("treasury refresh", () => {
   it("lets an admin re-run verification", async () => {
     const { app, treasuryCalls } = testApp();
@@ -356,15 +519,105 @@ describe("treasury refresh", () => {
   });
 });
 
-describe("email/password gating", () => {
-  it("returns 404 for sign-up/email when password auth is disabled", async () => {
-    const { app } = testApp();
-    const response = await app.request("/api/auth/sign-up/email", {
+describe("passwordless registration", () => {
+  const nearPublicKey = "ed25519:11111111111111111111111111111111";
+  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
+
+  it("issues a signed passkey registration context and defers NEAR funding", async () => {
+    const { app, nearCalls } = testApp();
+    const response = await app.request("/api/register/passkey-start", {
       method: "POST",
-      headers: headers({}),
-      body: JSON.stringify({ email: "user@example.test", password: "password-123", name: "User" }),
+      headers: headers({ origin: consoleOrigin, "x-real-ip": "198.51.100.1" }),
+      body: JSON.stringify({ email: "NEW@example.test", name: "New User", nearPublicKey }),
     });
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ context: "signed-registration-context", nearAccountId });
+    expect(nearCalls.sponsored).toEqual([]);
+  });
+
+
+  it("rate-limits repeated registration by normalized email", async () => {
+    const { app } = testApp();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": `198.51.100.${attempt + 1}` }),
+        body: JSON.stringify({ email: "RateLimit@Example.test", name: "User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 429]);
+  });
+
+  it("rate-limits registration by remote IP across emails", async () => {
+    const { app } = testApp();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.10" }),
+        body: JSON.stringify({ email: `user-${attempt}@example.test`, name: "User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+
+  it("returns 404 for password sign-up and sign-in routes", async () => {
+    const { app } = testApp();
+    for (const path of ["/api/auth/sign-up/email", "/api/auth/sign-in/email"]) {
+      const response = await app.request(path, {
+        method: "POST",
+        headers: headers({}),
+        body: JSON.stringify({ email: "user@example.test", password: "password-123", name: "User" }),
+      });
+      expect(response.status).toBe(404);
+    }
+  });
+
+  it("refuses Better Auth email invitations in favor of wallet-proof claims", async () => {
+    const { app } = testApp();
+    const response = await app.request("/api/auth/organization/accept-invitation", {
+      method: "POST",
+      headers: headers({ cookie: "session-member" }),
+      body: JSON.stringify({ invitationId: "invite-1" }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "wallet_proof_required" });
+  });
+});
+
+describe("founder wallet sponsorship", () => {
+  const nearPublicKey = "ed25519:11111111111111111111111111111111";
+  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
+
+  it("funds the founder wallet only through the authenticated DAO-time route", async () => {
+    const { app, auth, nearCalls } = testApp();
+    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ nearAccountId, nearPublicKey }),
+    });
+    expect(response.status).toBe(201);
+    expect(nearCalls.sponsored).toEqual([{
+      accountId: nearAccountId,
+      publicKey: nearPublicKey,
+      amountYocto: "500000000000000000000000",
+    }]);
+    expect(auth.completedSponsorships).toEqual([{ nearAccountId, succeeded: true }]);
+  });
+
+  it("enforces the durable daily sponsorship cap before funding", async () => {
+    const { app, nearCalls } = testApp({ sponsorshipReservation: "daily_limit" });
+    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ nearAccountId, nearPublicKey }),
+    });
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ error: "daily_sponsorship_limit" });
+    expect(nearCalls.sponsored).toEqual([]);
   });
 });
 
@@ -435,22 +688,24 @@ describe("console CSRF protection", () => {
 });
 
 describe("treasury onboarding", () => {
-  it("links member wallets inside the session organization", async () => {
-    const { app, treasuryCalls } = testApp();
-    const response = await app.request("/v1/console/members/me/wallets", {
-      method: "PATCH",
+  it("starts a wallet proof challenge from a passkey session", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/profile/wallet-proof/challenge", {
+      method: "POST",
       headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({ nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111" }),
-    });
-    expect(response.status).toBe(200);
-    expect(treasuryCalls.wallets).toEqual([
-      {
-        organizationId: "org-1",
-        userId: "user-member",
+      body: JSON.stringify({
+        memberId: member.memberId,
         nearAccountId: "alice.testnet",
         evmAddress: "0x1111111111111111111111111111111111111111",
-      },
-    ]);
+      }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      memberId: member.memberId,
+      nearAccountId: "alice.testnet",
+      evmAddress: "0x1111111111111111111111111111111111111111",
+      message: "proof",
+    });
   });
 
   it("builds a treasury plan for the session organization", async () => {
@@ -462,6 +717,19 @@ describe("treasury onboarding", () => {
     });
     expect(response.status).toBe(200);
     expect(treasuryCalls.plans).toEqual([{ organizationId: "org-1", daoName: "acme" }]);
+  });
+
+  it("returns the public sponsor balance without requiring admin role", async () => {
+    const { app } = testApp({ consoleRole: "member" });
+    const response = await app.request("/v1/console/treasury/sponsor-status", {
+      headers: consoleHeaders({ cookie: "session-member" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      accountId: "mandateos.testnet",
+      balanceYocto: "832000000000000000000000",
+      storageUsage: 182,
+    });
   });
 
   it("forbids a non-admin from registering a treasury", async () => {

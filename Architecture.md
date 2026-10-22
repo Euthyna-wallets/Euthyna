@@ -12,9 +12,9 @@ Le projet vise la track **06 — AI Security & Defense** du hackathon NEAR 2026.
 |---|---|---|
 | **Phase 1** | Paiement USDC depuis un Safe Base vers un fournisseur enregistré | Doit fonctionner de bout en bout avant toute extension |
 | **Phase 2 — stretch** | Dépôt vers NEAR Intents, swap, puis retrait/bridge vers un wallet enregistré | Architecture cible ; ne doit pas être annoncé comme implémenté avant une preuve on-chain |
-| **Roadmap** | Comptes de vote passkey, factory multi-client, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
+| **Roadmap** | Comptes de vote passkey, code global Vault/relay, preuves de statut Base | Hors hackathon tant que Phase 1 n'est pas stable |
 
-Le MVP déploie un seul client, **ACME**, au moyen de `scripts/seed-acme.ts` puis d'un script de déploiement. Il n'existe pas de factory dans le périmètre du MVP.
+Le MVP de démonstration reste mono-client côté flux de paiement, mais l'onboarding testnet accepte plusieurs organisations. `factory-v2.mandateos.testnet`, permissionless et sans access key, crée une DAO Sputnik globale par Company avec le dépôt fourni par le fondateur. Chaque membre doit prouver le contrôle de ses wallets par NEP-413 et EIP-191 ; une déclaration admin non signée reste hors du council. En mode UAT explicite, MandateOS réserve puis crée/finance le wallet client juste avant la création DAO, sous plafond journalier PostgreSQL ; l'inscription ne dépense aucun NEAR. Le serveur ne signe ni création ni policy. L'API finance séparément les Vault/relay sans access key, puis chaque membre les atteste depuis le RPC NEAR avant le déploiement Safe.
 
 Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/dao-spike.md`](./docs/dao-spike.md).
 
@@ -31,6 +31,8 @@ Le spike exécutable se trouve dans `contracts/` et ses résultats dans [`docs/d
 9. Le relayer ne modifie et ne signe rien ; il diffuse une transaction brute déjà signée.
 10. Une policy modifiée n'entre en vigueur qu'après la gouvernance applicable à sa cible.
 11. Une nouvelle policy reste inactive tant que le Vault et Zodiac n'ont pas confirmé la même version ; Guard l'active en dernier.
+12. Une déclaration de wallets n'accorde aucune autorité : NEP-413, clé NEAR full-access on-chain et EIP-191 doivent tous être vérifiés avant l'inclusion au council.
+13. Safe ne peut être déployé ni la Treasury enregistrée avant la confirmation, par chaque membre prouvé, du même digest Vault/relay vérifié par RPC.
 
 Ces invariants sont des exigences MandateOS. Les primitives externes qui les rendent possibles sont documentées dans les sections correspondantes.
 
@@ -71,7 +73,7 @@ NEAR Chain Signatures produit des signatures secp256k1 à partir du compte NEAR 
 
 | Composant | Phase | Responsabilité | Source technique |
 |---|---:|---|---|
-| Console | 1 | Connexion passkey Better Auth, édition des drafts, préparation de propositions, lecture des opérations et escalades. Elle ne signe jamais. | [Better Auth passkey][better-auth-passkey] |
+| Console | 1 | Inscription email + passkey à partir d'un contexte signé court ; adhésion par preuves NEP-413/EIP-191 plutôt que par email ; lecture RPC et confirmation des déploiements ; NEAR Wallet Selector et MetaMask/Rabby pour signer. | [Better Auth passkey][better-auth-passkey] |
 | API TypeScript | 1 | Backend HTTP Hono : Guard, authentification, clients, agents, policies, fournisseurs, opérations et relayer. | [Hono][hono] |
 | Relayer NEAR sponsor | 1 | Reçoit un `SignedDelegateAction`, applique l'allowlist MandateOS et paie le gas NEAR depuis un compte relayer financé. | [Meta-transactions NEAR][near-meta-transactions], [guide relayer][near-relayer-guide] |
 | Identité agent | 1 | Client credentials Better Auth pour Guard ; compte NEAR avec une function-call key générée côté client pour le Vault. | [Better Auth OAuth provider][better-auth-oauth], [access keys NEAR][near-access-keys] |
@@ -128,6 +130,36 @@ Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format
 Une function-call key NEAR peut être limitée à un receiver et à une liste de méthodes ; elle ne donne pas un accès complet au compte ([documentation access keys][near-access-keys]). Le script ACME crée chaque clé agent côté client, n'envoie au service que la clé publique, puis limite la clé à `prepare`, `authorize` et `expire`.
 
 L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path. Un agent qui appelle le MPC depuis son propre compte obtient donc une adresse différente de `0xAAA`, non assignée au rôle Zodiac ([Chain Signatures][chain-signatures]).
+
+## Modèle multi-client et coût NEAR
+
+Le suffixe `mandateos.testnet` fournit un namespace, pas du stockage gratuit. Chaque organisation garde des comptes d'état séparés : une DAO Sputnik, un Vault et un relais de gouvernance. Cette séparation est intentionnelle :
+
+- le Vault et le relais sont des appelants MPC distincts, donc `0xAAA` et `0xGOV` restent compartimentés ;
+- une faute de configuration ou de contrôle d'accès chez un client ne partage pas de state avec un autre client ;
+- après le batch `CreateAccount → Transfer → DeployContract → new`, aucun des deux comptes n'a d'access key et la DAO est leur seule autorité logique.
+
+Au protocole testnet version 88, le RPC publie `storage_amount_per_byte = 10^19` yoctoNEAR et `1 NEAR = 10^24` yoctoNEAR : 100 000 octets immobilisent 1 NEAR ([stockage NEAR][near-storage]). Les mesures du 21 octobre 2026 sont :
+
+| Compte / action | Stockage observé ou sandbox | Minimum storage | Dépôt configuré | Marge |
+|---|---:|---:|---:|---:|
+| Factory MandateOS permissionless (une fois) | 150 623 octets on-chain | 1,50623 NEAR | 2 NEAR | 0,49377 NEAR |
+| DAO Sputnik global `trezu-proof` | 810 octets on-chain | 0,00810 NEAR | 0,25 NEAR | 0,24190 NEAR |
+| Vault WASM courant + `new` | 439 560 octets sandbox, sans access key | 4,39560 NEAR | 5 NEAR | 0,60440 NEAR |
+| Relais WASM courant + `new` | 285 313 octets sandbox, sans access key | 2,85313 NEAR | 3,5 NEAR | 0,64687 NEAR |
+| Wallet membre avec une clé | 182 octets on-chain | 0,00182 NEAR | 0,5 NEAR à la création DAO en mode démo | 0,49818 NEAR pour bond et gas |
+
+La factory MandateOS `factory-v2.mandateos.testnet` est déployée une fois et n'a aucune access key. Le fondateur appelle `create`, paie les 0,25 NEAR depuis son wallet, signe la policy affichée, puis la factory référence le hash global immuable. En mode UAT démo, le navigateur génère la clé et MandateOS ne crée/finance le compte qu'immédiatement avant ce call ; l'API vérifie l'identité liée, réserve durablement le sponsoring et applique le plafond UTC quotidien. Hors démo, aucun secret n'est écrit en localStorage : le fondateur utilise NEAR Wallet Selector.
+
+Ces soldes ne sont pas des frais par paiement. Le chemin réel `authorize → MPC → callback` a consommé 14,288425743215 Tgas ; au prix testnet observé de `10^8` yoctoNEAR/gas, cela vaut environ **0,00142885 NEAR** ([gas NEAR][near-gas]). Il n'y a pas d'erreur de 24 décimales dans les constantes.
+
+Le sponsor est volontairement réservé à la démo hackathon. Le navigateur lit directement `get_policy` via le RPC NEAR, exige la confirmation du council et du seuil, puis autorise le déploiement Vault/relay. Après ce déploiement sponsorisé, chaque membre prouvé lit directement les comptes et vues Vault/relay (`code_hash`, clés, owner, MPC/path, chain, token, Guard/TTL et delay) et confirme le même digest avant Safe. `auto_update: true` reste un avertissement : la factory keyless n'expose aucune méthode d'update et la DAO référence un hash immuable.
+
+La factory réutilise Sputnik au lieu de réécrire la gouvernance. Le contrat est compatible avec l'UI Sputnik officielle de Trezu configurée pour testnet ; le backend hébergé `testenv.trezu.app` refuse toutefois actuellement les suffixes personnalisés. Publier Vault et relay comme global contracts devient rentable à partir d'environ dix instances, mais exige environ 72,5 NEAR brûlés une fois ([global contracts NEAR][near-global-contracts]).
+
+Les builds reproductibles de la factory, du Vault et du relay pinent l'image
+`sourcescan/cargo-near:0.20.3-rust-1.86.0` par digest. Leurs hashes sont séparés
+des bytecodes UAT déjà déployés ; aucun artefact keyless n'est remplacé implicitement.
 
 ## Déploiement d'ACME
 
@@ -256,7 +288,7 @@ Les secrets ne sont pas enregistrés dans les snapshots. PostgreSQL conserve uni
 
 ### Onboarding et mandats (implémenté)
 
-`apps/api/src/treasury.ts` construit un plan non signé (DAO, Vault, relay, Safe/Roles/Delay) puis vérifie l'état on-chain avant d'enregistrer une `Treasury` : code hash du DAO égal à `get_default_code_hash()` de la factory, council, seuil absolu, `RoleWeight`, quorum `0`, absence de `Everyone:AddProposal` et absence de tout autre rôle portant `Vote*`/`AddProposal` (Sputnik évalue les rôles en OU), `get_factory_info().auto_update`, paramètres d'init du Vault (`mpc_contract_id`, `evm_chain_id`, `guard_public_key`, `token_id`, TTL), `delay_address`/`evm_chain_id` du relay, owners/seuil/modules du Safe et cooldown du Delay par environnement (`uat` 300 s, `production` 86 400 s). Tant que `auto_update` est vrai, le statut est `pending_dao_hardening` et l'API refuse la création d'agent.
+`apps/api/src/treasury.ts` construit un plan non signé (DAO, Vault, relay, Safe/Roles/Delay). Le fondateur signe localement la création DAO après affichage de la policy ; le navigateur compare ensuite directement `get_policy` avec chaque membre attendu et le seuil absolu. Avant d'enregistrer une `Treasury`, l'API vérifie : hash global du DAO égal à `get_default_code_hash()` de la factory, council, seuil, `RoleWeight`, quorum `0`, absence de rôles concurrents, paramètres Vault/relay, owners/seuil/modules du Safe et cooldown du Delay. `auto_update: true` produit l'avertissement audité `dao_auto_update_enabled` sans bloquer le statut `active`, car la factory est keyless, sans méthode d'update, et le code DAO est référencé par hash immuable.
 
 `apps/api/src/mandates.ts` compile un rôle en trois artefacts : config `set_role` du Vault, permission Zodiac (`scopeTarget`, `scopeFunction` avec conditions de destinataires et allowance, `assignRoles`) et policy Guard. Il renvoie un diff déterministe et des propositions Trezu non signées ; le serveur ne signe jamais ([`apps/api/src/treasury.ts`](./apps/api/src/treasury.ts), [`apps/api/src/mandates.ts`](./apps/api/src/mandates.ts), [`packages/deployer/src/roles-policy.ts`](./packages/deployer/src/roles-policy.ts)).
 
@@ -870,3 +902,7 @@ La Phase 1 est implémentée uniquement si les preuves suivantes existent :
 [zodiac-delay-execute-source]: https://github.com/zodiaceco/zodiac-modifier-delay/blob/30f3aafa9b3be3425bcac390fe6ab6bd9afb5f16/contracts/Delay.sol#L170-L201
 [near-meta-transactions]: https://docs.near.org/protocol/transactions/meta-tx
 [near-relayer-guide]: https://docs.near.org/web3-apps/tutorials/meta-transactions
+[near-storage]: https://docs.near.org/tutorials/auction/auction-factory
+[near-gas]: https://near.github.io/nearcore/architecture/how/gas.html
+[near-global-contracts]: https://github.com/near/NEPs/blob/master/neps/nep-0591.md
+[near-dao]: https://docs.near.org/primitives/dao

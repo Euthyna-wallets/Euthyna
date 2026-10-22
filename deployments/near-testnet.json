@@ -1,10 +1,70 @@
 {
-  "observed_at": "2026-10-21T09:30:18+02:00",
+  "observed_at": "2026-10-22T09:07:07+02:00",
   "network": "testnet",
   "factory": {
     "account_id": "sputnikv2.testnet",
     "default_code_hash": "AA4nA45vauiac3jdVwJTzSdUP3oj2r1fDaPAb2mHdgcH",
     "default_version": [3, 31]
+  },
+  "global_dao_code": {
+    "publisher_account_id": "dao.globals.primitives.testnet",
+    "deployment_tx": "48Mc9g1AN3xNoFxPyEcm7u7saYfi8xgm5adZdQKJPWGe",
+    "block_height": 209435665,
+    "version": "2.3.1",
+    "source_repository": "https://github.com/near-daos/sputnik-dao-contract",
+    "source_commit": "278adc713e795f95a6da4d3007c7e03e8120f153",
+    "reproducible_build_image_digest": "sha256:baa712c5d2b7522d38175e36330d336ad2c4ce32bfaaa41af94ce40407ecd803",
+    "wasm_size": 430308,
+    "sha256_hex": "c9a502ef08a06cef04e2fce82da60b1fbc78db3066ff41416110f4292fca39ce",
+    "sha256_bs58": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
+    "rpc_build_match": true
+  },
+  "reproducible_builds": {
+    "image": "sourcescan/cargo-near:0.20.3-rust-1.86.0",
+    "image_digest": "sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf",
+    "factory_source_commit": "255b04a6b1e34641c880d8a63201bcbcf1095685",
+    "factory_sha256_hex": "ad1ed251fc4a556a3070de31c64c2b43442f0ebf5dc1dcf299ba532945312c92",
+    "vault_source_commit": "255b04a6b1e34641c880d8a63201bcbcf1095685",
+    "vault_sha256_hex": "cac18ad40a3d04cc7945c8ac3d1a1677197078130b5dbaed62a94234ee8a1538",
+    "relay_source_commit": "aa85684859e72a4d0526b85ecc042e1def6f1231",
+    "relay_sha256_hex": "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
+    "relay_sha256_bs58": "AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc",
+    "deployed_artifacts_unchanged": true
+  },
+  "mandateos_factory": {
+    "account_id": "factory-v2.mandateos.testnet",
+    "code_hash_sha256_hex": "97cf2ad71d99eb5590f2df2585c4e1afb451e5fc816798288f043e56c4f954d3",
+    "code_hash_sha256_bs58": "BDbnNMwsgESgfsXgSrcZRVQJrbp5rf8ZiD6mV9Rvn3dC",
+    "access_key_count": 0,
+    "permissionless_create": true,
+    "dao_global_code_hash": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
+    "storage_usage": 150623,
+    "deployment_tx": "G8Y3XGfsRf5Bm9pbEcH3GxKxsE2nyEDPa7NFyzeJ4Mae"
+  },
+  "trezu_proof_dao": {
+    "account_id": "trezu-proof.factory-v2.mandateos.testnet",
+    "global_contract_hash": "Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD",
+    "access_key_count": 0,
+    "balance": "250000000000000000000000",
+    "storage_usage": 1343,
+    "auto_update": false,
+    "threshold": "2",
+    "member_count": 3,
+    "proposal_id": 0,
+    "proposal_status": "Approved",
+    "vote_transactions": [
+      "2CoVvPncKsb54Wwz9p3fy3tJTCh3gm1d71TAW14MpcZu",
+      "Dgf9jj9PJ6QTvmW4N4dzscwNwajj9Q9uEHz45fVKhmBL"
+    ],
+    "trezu_capture": "docs/console/trezu-global-dao.webp"
+  },
+  "superseded_factory": {
+    "account_id": "factory.mandateos.testnet",
+    "code_hash_sha256_bs58": "bZCvXWm7Qi9gW6KC46qqSFNL8iNw3WgpCZsSwn8hfto",
+    "access_key_count": 0,
+    "permissionless_create": false,
+    "deployment_tx": "GJgBDDpjcznHwnzZFjsGb2GS61PQopXnfhgwEvCBzeH9",
+    "proof_dao": "global-smoke.factory.mandateos.testnet"
   },
   "dao": {
     "account_id": "mandateos-uat-92543787.sputnikv2.testnet",
@@ -39,7 +99,7 @@
     "code_hash_sha256_hex": "4f0bf6b1ee388b580bedd0ebdce1f9066bc29217d9c4cb29cb329b0f7d73ac41",
     "code_hash_sha256_bs58": "6KZnkemmuysJwuRfZkaqEifTmTdaGUpTKr128GhDJsMA",
     "access_key_count": 0,
-    "latest_local_code_hash_sha256_hex": "62a70f5ab3b0d269dac14c7dc6be00cffe6af747110e06e4dc07efae61934fb3",
+    "latest_local_code_hash_sha256_hex": "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
     "owner_id": "mandateos-uat-92543787.sputnikv2.testnet",
     "mpc_path": "governance/base-sepolia",
     "derived_public_key": "secp256k1:3cuFpPFwraKRy7vUjRRetafeZnyp4WBNEwuUtjRNWkhbLam21jcmribNomTFEzQzczqcKvbjEdRhUYf7qgf6b4cs",

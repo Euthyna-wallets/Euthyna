@@ -29,6 +29,7 @@ const config: TreasuryConfig = {
   mpcPath: "governance/base-sepolia",
   budgetTokenAccountId: "test-ft.testnet",
   artifactsDir,
+  accountParent: "mandateos.testnet",
   environments: {
     uat: {
       baseChainId: 84532,
@@ -49,20 +50,33 @@ const config: TreasuryConfig = {
   daoCreateDepositYocto: "10000000000000000000000000",
 };
 
-type TestMember = { id: string; nearAccountId: string | null; evmAddress: string | null };
+type TestMember = {
+  id: string;
+  nearAccountId: string | null;
+  evmAddress: string | null;
+  walletProofVerifiedAt: Date | null;
+};
 
+const provedAt = new Date("2026-01-01T00:00:00.000Z");
 const members: TestMember[] = [
-  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111" },
-  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222" },
-  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333" },
+  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111", walletProofVerifiedAt: provedAt },
+  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222", walletProofVerifiedAt: provedAt },
+  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333", walletProofVerifiedAt: provedAt },
 ];
 
-function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Record<string, unknown> }) {
+function fakePrisma(options?: {
+  members?: TestMember[];
+  existingTreasury?: Record<string, unknown>;
+  confirmedMemberIds?: string[];
+}) {
   const created: unknown[] = [];
   const audits: unknown[] = [];
   const prisma = {
     member: {
-      findMany: async () => options?.members ?? members,
+      findMany: async (args?: { where?: { walletProofVerifiedAt?: { not: null } } }) => {
+        const configured = options?.members ?? members;
+        return args?.where?.walletProofVerifiedAt ? configured.filter((member) => member.walletProofVerifiedAt) : configured;
+      },
       findFirst: async () => ({ id: "m1" }),
       update: async () => ({ id: "m1" }),
     },
@@ -86,6 +100,14 @@ function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Recor
         audits.push(data);
       },
     },
+    treasuryDeploymentConfirmation: {
+      findMany: async () => (options?.confirmedMemberIds ?? (options?.members ?? members)
+        .filter((member) => member.walletProofVerifiedAt)
+        .map((member) => member.id))
+        .map((memberId) => ({ memberId })),
+      upsert: async () => ({}),
+      deleteMany: async () => ({ count: 0 }),
+    },
   } as unknown as PrismaClient;
   return { prisma, created, audits };
 }
@@ -93,10 +115,11 @@ function fakePrisma(options?: { members?: TestMember[]; existingTreasury?: Recor
 type NearOverrides = {
   vaultOwner?: string;
   codeHashes?: Record<string, string>;
+  globalDaoHash?: string;
   policy?: unknown;
   autoUpdate?: boolean;
   vault?: { mpc?: string; chain?: number; guard?: string; token?: string; ttl?: number };
-  relay?: { chain?: number; delay?: string };
+  relay?: { mpc?: string; path?: string; chain?: number; delay?: string };
 };
 
 const daoAccountId = "acme.sputnikv2.testnet";
@@ -123,6 +146,9 @@ function fakeNear(overrides?: NearOverrides): NearClient {
     getAccount: async (accountId: string) => ({
       code_hash: overrides?.codeHashes?.[accountId] ?? "factory-hash",
       amount: "0",
+      ...(accountId === daoAccountId && overrides?.globalDaoHash
+        ? { global_contract_hash: overrides.globalDaoHash }
+        : {}),
     }),
     getAccessKeys: async () => ({ keys: [] }),
     viewFunction: async (accountId: string, method: string) => {
@@ -131,9 +157,11 @@ function fakeNear(overrides?: NearOverrides): NearClient {
       if (method === "get_policy") return overrides?.policy ?? councilPolicy();
       if (method === "get_factory_info") return { factory_id: "sputnikv2.testnet", auto_update: overrides?.autoUpdate ?? false };
       if (method === "owner_id") return overrides?.vaultOwner ?? daoAccountId;
-      if (method === "evm_address") return Buffer.from(govAddress.slice(2), "hex").toString("base64");
       if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(govAddress.slice(2), "hex").toString("base64");
-      if (method === "mpc_contract_id") return overrides?.vault?.mpc ?? config.mpcContractId;
+      if (method === "mpc_contract_id") {
+        return isVault ? (overrides?.vault?.mpc ?? config.mpcContractId) : (overrides?.relay?.mpc ?? config.mpcContractId);
+      }
+      if (method === "mpc_path") return overrides?.relay?.path ?? config.mpcPath;
       if (method === "evm_chain_id") return isVault ? (overrides?.vault?.chain ?? 84532) : (overrides?.relay?.chain ?? 84532);
       if (method === "guard_public_key") return overrides?.vault?.guard ?? guardKeyBase64;
       if (method === "token_id") return overrides?.vault?.token ?? config.budgetTokenAccountId;
@@ -178,7 +206,7 @@ describe("TreasuryService.plan", () => {
     expect(plan.daoAccountId).toBe("acme-treasury.sputnikv2.testnet");
     expect(plan.threshold).toBe(2);
     expect(plan.govAddress).toBe(govAddress);
-    expect(plan.vault.accountId).toBe("acme-treasury-vault.alice.testnet");
+    expect(plan.vault.accountId).toBe("acme-tre-v.mandateos.testnet");
     expect(plan.vault.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.delay_address).toBe(Buffer.from(govAddress.slice(2), "hex").toString("base64"));
@@ -192,7 +220,18 @@ describe("TreasuryService.plan", () => {
     expect(plan.vault.wasmSha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("refuses a council member without both wallets", async () => {
+  it("does not create a redundant separator when the eight-character prefix ends in a dash", async () => {
+    const { prisma } = fakePrisma();
+    const plan = await service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "Factory UI Org",
+      founderNearAccountId: "alice.testnet",
+    });
+    expect(plan.vault.accountId).toBe("factory-v.mandateos.testnet");
+    expect(plan.relay.accountId).toBe("factory-r.mandateos.testnet");
+  });
+
+  it("refuses a proven council member missing a wallet", async () => {
     const { prisma } = fakePrisma({
       members: [{ ...members[0]!, evmAddress: null }],
     });
@@ -202,7 +241,24 @@ describe("TreasuryService.plan", () => {
         daoName: "acme",
         founderNearAccountId: "alice.testnet",
       }),
-    ).rejects.toMatchObject({ code: "member_wallets_missing" });
+    ).rejects.toMatchObject({ code: "proven_wallets_missing" });
+  });
+
+  it("excludes an admin-declared member without wallet signatures from the council", async () => {
+    const pending = {
+      id: "m4",
+      nearAccountId: "mallory.testnet",
+      evmAddress: "0x4444444444444444444444444444444444444444",
+      walletProofVerifiedAt: null,
+    };
+    const { prisma } = fakePrisma({ members: [...members, pending] });
+    const plan = await service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "acme",
+      founderNearAccountId: "alice.testnet",
+    });
+    expect(plan.council.map((member) => member.memberId)).toEqual(["m1", "m2", "m3"]);
+    expect(plan.threshold).toBe(2);
   });
 });
 
@@ -253,6 +309,14 @@ describe("TreasuryService.register", () => {
       code: "wasm_hash_mismatch",
     });
   });
+
+  it("refuses registration until every proven member confirms the deployment digest", async () => {
+    const { prisma } = fakePrisma({ confirmedMemberIds: ["m1", "m2"] });
+    await expect(
+      service(prisma, fakeNear({ codeHashes: await artifactHashes() }))
+        .register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "deployment_confirmations_missing" });
+  });
 });
 
 
@@ -288,10 +352,14 @@ describe("TreasuryService.refresh", () => {
     );
   });
 
-  it("keeps the treasury pending while auto-update is still enabled", async () => {
-    const { prisma } = fakePrisma({ existingTreasury: existing });
+  it("keeps the treasury active and records a warning while auto-update is enabled", async () => {
+    const { prisma, audits } = fakePrisma({ existingTreasury: existing });
     const treasury = await service(prisma, await validNear({ autoUpdate: true })).refresh("org-1", "user-1", "uat");
-    expect(treasury.status).toBe("pending_dao_hardening");
+    expect(treasury.status).toBe("active");
+    expect(audits).toContainEqual(expect.objectContaining({
+      action: "treasury.refreshed",
+      metadata: expect.objectContaining({ warnings: ["dao_auto_update_enabled"] }),
+    }));
   });
 
   it("returns 404 when no treasury exists", async () => {
@@ -304,15 +372,19 @@ describe("TreasuryService.refresh", () => {
 });
 
 describe("TreasuryService.register hardening", () => {
-  it("keeps the treasury pending while the DAO auto-update is still enabled", async () => {
-    const { prisma, created } = fakePrisma();
+  it("registers an immutable global DAO as active and records auto-update as a warning", async () => {
+    const { prisma, created, audits } = fakePrisma();
     const treasury = await service(prisma, await validNear({ autoUpdate: true })).register(
       "org-1",
       "user-1",
       registerInput,
     );
-    expect(treasury.status).toBe("pending_dao_hardening");
-    expect(created).toEqual([expect.objectContaining({ status: "pending_dao_hardening" })]);
+    expect(treasury.status).toBe("active");
+    expect(created).toEqual([expect.objectContaining({ status: "active" })]);
+    expect(audits).toContainEqual(expect.objectContaining({
+      action: "treasury.registered",
+      metadata: expect.objectContaining({ warnings: ["dao_auto_update_enabled"] }),
+    }));
   });
 
   it("rejects a DAO whose code hash is not the factory default", async () => {
@@ -320,6 +392,17 @@ describe("TreasuryService.register hardening", () => {
     const near = await validNear({ codeHashes: { ...(await artifactHashes()), [daoAccountId]: "other-hash" } });
     await expect(service(prisma, near).register("org-1", "user-1", registerInput)).rejects.toMatchObject({
       code: "dao_code_hash_mismatch",
+    });
+  });
+
+  it("accepts an immutable global DAO hash matching the factory default", async () => {
+    const { prisma } = fakePrisma();
+    const near = await validNear({
+      codeHashes: { ...(await artifactHashes()), [daoAccountId]: "11111111111111111111111111111111" },
+      globalDaoHash: "factory-hash",
+    });
+    await expect(service(prisma, near).register("org-1", "user-1", registerInput)).resolves.toMatchObject({
+      status: "active",
     });
   });
 

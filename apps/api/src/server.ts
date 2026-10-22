@@ -13,6 +13,7 @@ import { MandateService } from "./mandates.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { ConsoleDataService } from "./console-data.js";
+import { WalletProofService } from "./wallet-proof.js";
 
 const env = loadEnv();
 const guardKey = Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"));
@@ -21,6 +22,13 @@ const guard = new Guard(signer);
 const near = new NearClient(env);
 const relayer = createBaseRelayer(env, near, guard);
 const auth = new BetterAuthGateway(createAuth(env, prisma), prisma);
+const walletProof = new WalletProofService(
+  prisma,
+  near,
+  env.NEAR_ACCOUNT_PARENT,
+  84532,
+  env.UAT_DEMO_WALLETS_ENABLED,
+);
 const treasury = new TreasuryService(prisma, near, signer, {
   nearNetwork: env.NEAR_NETWORK_ID,
   daoFactoryId: env.DAO_FACTORY_ID,
@@ -28,6 +36,7 @@ const treasury = new TreasuryService(prisma, near, signer, {
   mpcPath: "governance/base-sepolia",
   budgetTokenAccountId: env.BUDGET_TOKEN_ACCOUNT_ID,
   artifactsDir: env.CONTRACT_ARTIFACTS_DIR,
+  accountParent: env.NEAR_ACCOUNT_PARENT,
   environments: {
     uat: {
       baseChainId: 84532,
@@ -48,8 +57,8 @@ const treasury = new TreasuryService(prisma, near, signer, {
   },
   vaultTtlBlocks: 50,
   vaultDepositYocto: "5000000000000000000000000",
-  relayDepositYocto: "5000000000000000000000000",
-  daoCreateDepositYocto: "7500000000000000000000000",
+  relayDepositYocto: "3500000000000000000000000",
+  daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
 });
 const mandates = new MandateService(prisma, near);
 const registryService = new RegistryService(prisma);
@@ -60,13 +69,16 @@ const app = createApp({
   guard,
   relayer,
   auth,
+  walletProof,
   treasury,
   mandates,
   registry: registryService,
   payments,
   consoleData,
   consoleOrigin: env.CONSOLE_ORIGIN,
-  passwordAuthEnabled: env.AUTH_E2E_PASSWORD === "1",
+  nearParentAccount: env.NEAR_ACCOUNT_PARENT,
+  nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
+  nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
