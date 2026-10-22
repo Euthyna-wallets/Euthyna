@@ -1,5 +1,5 @@
 import { encodeDeployProxy, predictProxyAddress } from "@gnosis-guild/zodiac-core";
-import { getMultiSendDeployment, getProxyFactoryDeployment, getSafeL2SingletonDeployment } from "@safe-global/safe-deployments";
+import { getMultiSendCallOnlyDeployment, getMultiSendDeployment, getProxyFactoryDeployment, getSafeL2SingletonDeployment } from "@safe-global/safe-deployments";
 import {
   bytesToBigInt,
   bytesToHex,
@@ -98,6 +98,7 @@ export interface BaseTreasuryPlan {
   delayAddress: Address;
   delayDeployment: UnsignedEvmTransaction;
   multiSendAddress: Address;
+  multiSendCallOnlyAddress: Address;
   safeModuleCalls: Array<{ to: Address; value: string; data: Hex; description: string }>;
   saltNonces: { safe: string; roles: string; delay: string };
 }
@@ -154,7 +155,8 @@ function deploymentAddress(
   deployment:
     | ReturnType<typeof getSafeL2SingletonDeployment>
     | ReturnType<typeof getProxyFactoryDeployment>
-    | ReturnType<typeof getMultiSendDeployment>,
+    | ReturnType<typeof getMultiSendDeployment>
+    | ReturnType<typeof getMultiSendCallOnlyDeployment>,
   name: string,
   chainId: number,
 ): Address {
@@ -169,6 +171,14 @@ export function canonicalMultiSendAddress(chainId: number): Address {
     chainId,
   );
 }
+export function canonicalMultiSendCallOnlyAddress(chainId: number): Address {
+  return deploymentAddress(
+    getMultiSendCallOnlyDeployment({ network: String(chainId), version: SAFE_VERSION }),
+    "MultiSendCallOnly",
+    chainId,
+  );
+}
+
 
 
 function safeSetupInitializer(owners: Address[], threshold: number): Hex {
@@ -214,10 +224,14 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
   const singletonDeployment = getSafeL2SingletonDeployment({ network: String(chainId), version: SAFE_VERSION });
   const factoryDeployment = getProxyFactoryDeployment({ network: String(chainId), version: SAFE_VERSION });
   const multiSendDeployment = getMultiSendDeployment({ network: String(chainId), version: SAFE_VERSION });
+  const multiSendCallOnlyDeployment = getMultiSendCallOnlyDeployment({ network: String(chainId), version: SAFE_VERSION });
   const singleton = deploymentAddress(singletonDeployment, "SafeL2", chainId);
   const factory = deploymentAddress(factoryDeployment, "SafeProxyFactory", chainId);
   const multiSend = canonicalMultiSendAddress(chainId);
-  if (!singletonDeployment || !factoryDeployment || !multiSendDeployment) throw new Error("Safe deployments missing");
+  const multiSendCallOnly = canonicalMultiSendCallOnlyAddress(chainId);
+  if (!singletonDeployment || !factoryDeployment || !multiSendDeployment || !multiSendCallOnlyDeployment) {
+    throw new Error("Safe deployments missing");
+  }
 
   const proxyCreationCode =
     input.proxyCreationCode ??
@@ -300,6 +314,7 @@ export async function buildBaseTreasuryPlan(input: BaseTreasuryPlanInput): Promi
     },
     delayAddress,
     multiSendAddress: multiSend,
+    multiSendCallOnlyAddress: multiSendCallOnly,
     delayDeployment: {
       to: getAddress(String(delayTransaction.to)),
       value: "0",

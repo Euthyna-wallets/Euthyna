@@ -69,7 +69,12 @@ const treasury = new TreasuryService(prisma, near, signer, {
   relayDepositYocto: "3500000000000000000000000",
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
 });
-const mandates = new MandateService(prisma, near, env.BUDGET_TOKEN_ACCOUNT_ID);
+const mandates = new MandateService(
+  prisma,
+  near,
+  env.BUDGET_TOKEN_ACCOUNT_ID,
+  env.BASE_SEPOLIA_RPC_URL,
+);
 const governance = new GovernanceService(prisma, near);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);

@@ -61,6 +61,13 @@ function service(
   currentRole: unknown = null,
   agentEvmAddress: string | null = null,
   budgetTokenDecimals = 6,
+  currentAllowance = {
+    refill: 0n,
+    maxRefill: 0n,
+    period: 0n,
+    balance: 0n,
+    timestamp: 0n,
+  },
 ) {
   const updates: unknown[] = [];
   const prisma = {
@@ -105,7 +112,17 @@ function service(
       return currentRole;
     },
   } as unknown as NearClient;
-  return { service: new MandateService(prisma, near, "test-ft.testnet", () => 1_700_000_000n), updates };
+  return {
+    service: new MandateService(
+      prisma,
+      near,
+      "test-ft.testnet",
+      "http://127.0.0.1:8545",
+      () => 1_700_000_000n,
+      async () => currentAllowance,
+    ),
+    updates,
+  };
 }
 
 describe("MandateService.preview", () => {
@@ -161,19 +178,21 @@ describe("MandateService.preview", () => {
     expect(fixture.updates).toEqual([{ evmAddress: "0x2222222222222222222222222222222222222222" }]);
   });
 
-  it("encodes all four Roles calls in one canonical MultiSend with periodic allowance arguments", async () => {
-    const preview = await service("active", null, "0x2222222222222222222222222222222222222222")
-      .service.preview("org-1", {
-        ...input,
-        agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
-      });
+  it("encodes all four Roles calls in one canonical MultiSend with proposal-time allowance arguments", async () => {
+    const fixture = service("active", null, "0x2222222222222222222222222222222222222222");
+    const mandateInput = {
+      ...input,
+      agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
+    };
+    const preview = await fixture.service.preview("org-1", mandateInput);
+    const zodiacProposal = await fixture.service.zodiacProposal("org-1", mandateInput);
     const relayProposal = z.object({
       kind: z.object({
         FunctionCall: z.object({
           actions: z.array(z.object({ args: z.string() })).length(1),
         }),
       }),
-    }).parse(preview.proposals.zodiacRelay?.args.proposal);
+    }).parse(zodiacProposal.args.proposal);
     const relayArgs = z.object({
       target: z.string(),
       data: z.string(),
@@ -183,7 +202,7 @@ describe("MandateService.preview", () => {
       "base64",
     ).toString("utf8")));
     expect(bytesToHex(Buffer.from(relayArgs.target, "base64"))).toBe(
-      "0x38869bf66a61cf6bdb996a6ae40d5853fd43b526",
+      "0x9641d764fc13c8b624c04430c7356c1c7c8102e2",
     );
     const decodedMultiSend = decodeFunctionData({
       abi: multiSendAbi,
@@ -209,6 +228,46 @@ describe("MandateService.preview", () => {
       2_592_000n,
       1_700_000_000n,
     ]);
+    expect(
+      (zodiacProposal.args.proposal as { description: string }).description,
+    ).toBe((preview.proposals.zodiacRelay?.args.proposal as { description: string }).description);
+  });
+
+  it("preserves the existing allowance balance when updating refill parameters", async () => {
+    const fixture = service(
+      "active",
+      null,
+      "0x2222222222222222222222222222222222222222",
+      6,
+      {
+        refill: 1_000_000n,
+        maxRefill: 2_000_000n,
+        period: 86_400n,
+        balance: 1_250_000n,
+        timestamp: 1_600_000_000n,
+      },
+    );
+    const proposal = await fixture.service.zodiacProposal("org-1", {
+      ...input,
+      agent: { nearAccountId: "agent.testnet", mpcPath: "agents/researcher/base" },
+    });
+    const body = z.object({
+      kind: z.object({ FunctionCall: z.object({ actions: z.array(z.object({ args: z.string() })).length(1) }) }),
+    }).parse(proposal.args.proposal);
+    const relayArgs = z.object({ data: z.string() }).parse(JSON.parse(Buffer.from(
+      body.kind.FunctionCall.actions[0]!.args,
+      "base64",
+    ).toString("utf8")));
+    const decoded = decodeFunctionData({
+      abi: multiSendAbi,
+      data: bytesToHex(Buffer.from(relayArgs.data, "base64")),
+    });
+    if (decoded.functionName !== "multiSend") throw new Error("expected multiSend");
+    const calls = decodeMultiSendTransactions(decoded.args[0]);
+    const allowance = decodeFunctionData({ abi: rolesAbi, data: calls[3]!.data });
+    if (allowance.functionName !== "setAllowance") throw new Error("expected setAllowance");
+    expect(allowance.args[1]).toBe(1_250_000n);
+    expect(allowance.args[5]).toBe(1_700_000_000n);
   });
 
   it("emits a Sputnik 2.3.1 FT Transfer with the configured token_id", async () => {

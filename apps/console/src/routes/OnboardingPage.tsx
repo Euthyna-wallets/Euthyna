@@ -1401,6 +1401,32 @@ export function MandatePanel(props: {
       window.clearInterval(interval);
     };
   }, [props.preview, props.treasury.daoAccountId]);
+  function mandateInput() {
+    return {
+      role,
+      operations: ["pay"],
+      maxPerTx,
+      budget,
+      periodDays: Number(periodDays),
+      recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
+      token,
+      gas: {
+        gasLimit: "200000",
+        maxFeePerGas: "20000000000",
+        maxPriorityFeePerGas: "1000000000",
+        maxTotalFee: "30000000000000000",
+      },
+      ...(agentAccount
+        ? {
+            agent: {
+              nearAccountId: agentAccount,
+              mpcPath: `agents/${role}/base`,
+            },
+          }
+        : {}),
+    };
+  }
+
 
 
 
@@ -1493,29 +1519,7 @@ export function MandatePanel(props: {
             try {
               const preview = await api<MandatePreview>("/v1/console/mandates/preview", {
                 method: "POST",
-                body: JSON.stringify({
-                  role,
-                  operations: ["pay"],
-                  maxPerTx,
-                  budget,
-                  periodDays: Number(periodDays),
-                  recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
-                  token,
-                  gas: {
-                    gasLimit: "200000",
-                    maxFeePerGas: "20000000000",
-                    maxPriorityFeePerGas: "1000000000",
-                    maxTotalFee: "30000000000000000",
-                  },
-                  ...(agentAccount
-                    ? {
-                        agent: {
-                          nearAccountId: agentAccount,
-                          mpcPath: `agents/${role}/base`,
-                        },
-                      }
-                    : {}),
-                }),
+                body: JSON.stringify(mandateInput()),
               });
               props.onPreview(preview);
             } catch (cause) {
@@ -1633,7 +1637,24 @@ export function MandatePanel(props: {
                               }));
                               setProposalHashes((current) => [...current, transactionHash]);
                             } else {
-                              const submitted = await signDaoProposal(signerId, proposal);
+                              let proposalToSubmit = proposal;
+                              if (props.preview?.proposals.zodiacRelay === proposal) {
+                                proposalToSubmit = await api<MandateProposal>("/v1/console/mandates/zodiac-proposal", {
+                                  method: "POST",
+                                  body: JSON.stringify(mandateInput()),
+                                });
+                                if (onChainProposalDescription(proposalToSubmit) !== description) {
+                                  throw new Error("materialized Zodiac proposal identity changed");
+                                }
+                                props.onPreview({
+                                  ...props.preview,
+                                  proposals: {
+                                    ...props.preview.proposals,
+                                    zodiacRelay: proposalToSubmit,
+                                  },
+                                });
+                              }
+                              const submitted = await signDaoProposal(signerId, proposalToSubmit);
                               const refreshed = await readDaoProposalRpc(
                                 props.treasury.daoAccountId,
                                 submitted.proposalId,

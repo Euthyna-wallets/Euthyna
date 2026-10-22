@@ -25,6 +25,10 @@ pub enum OperationState {
     PossiblySigned,
     Confirmed,
     Cancelled,
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -67,8 +71,11 @@ pub struct GovernanceOperation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
-pub enum StatusKind {
-    Confirmed,
+pub enum FinalStatus {
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -76,7 +83,7 @@ pub enum StatusKind {
 pub struct StatusReport {
     pub client_id: String,
     pub op_id: OperationId,
-    pub kind: StatusKind,
+    pub final_status: FinalStatus,
     pub tx_hash: Digest,
     pub report_nonce: u64,
     pub block_number: u64,

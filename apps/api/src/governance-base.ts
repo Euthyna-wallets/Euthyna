@@ -5,6 +5,7 @@ import {
   createWalletClient,
   decodeEventLog,
   encodeFunctionData,
+  encodePacked,
   getAddress,
   http,
   keccak256,
@@ -22,6 +23,7 @@ const delayAbi = [
   { type: "function", name: "txCooldown", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "txExpiration", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "txCreatedAt", stateMutability: "view", inputs: [{ name: "nonce", type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "txHash", stateMutability: "view", inputs: [{ name: "nonce", type: "uint256" }], outputs: [{ type: "bytes32" }] },
   {
     type: "function",
     name: "executeNextTx",
@@ -35,6 +37,12 @@ const delayAbi = [
     outputs: [{ type: "bool" }],
   },
 ] as const;
+const txNonceSetEvent = {
+  type: "event",
+  name: "TxNonceSet",
+  inputs: [{ name: "nonce", type: "uint256", indexed: false }],
+} as const;
+
 
 export interface GovernanceReceipt {
   status: "success" | "reverted";
@@ -48,6 +56,7 @@ export interface DelayState {
   cooldown: bigint;
   expiration: bigint;
   createdAt: bigint;
+  entryHash: Hex;
   currentTimestamp: bigint;
 }
 
@@ -74,6 +83,8 @@ export interface GovernanceBaseGateway {
   receipt(hash: Hex): Promise<GovernanceReceipt | null>;
   blockNumber(): Promise<bigint>;
   delayState(delay: Address, entryNonce: bigint): Promise<DelayState>;
+  expectedDelayHash(input: { to: Address; value: bigint; data: Hex; operation: 0 | 1 }): Hex;
+  wasVetoed(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<boolean>;
   prepareExecuteNextTx(input: {
     delay: Address;
     to: Address;
@@ -85,7 +96,7 @@ export interface GovernanceBaseGateway {
     roles: Address;
     member: Address;
     allowanceKey: Hex;
-    receipt: GovernanceReceipt;
+    receipt?: GovernanceReceipt | null;
   }): Promise<RolesVerification>;
   gasWalletAddress(): Address;
   gasWalletBalance(): Promise<bigint>;
@@ -140,15 +151,33 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
   }
 
   async delayState(delay: Address, entryNonce: bigint): Promise<DelayState> {
-    const [txNonce, queueNonce, cooldown, expiration, createdAt, block] = await Promise.all([
+    const [txNonce, queueNonce, cooldown, expiration, createdAt, entryHash, block] = await Promise.all([
       this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "txNonce" }),
       this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "queueNonce" }),
       this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "txCooldown" }),
       this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "txExpiration" }),
       this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "txCreatedAt", args: [entryNonce] }),
+      this.publicClient.readContract({ address: delay, abi: delayAbi, functionName: "txHash", args: [entryNonce] }),
       this.publicClient.getBlock({ blockTag: "latest" }),
     ]);
-    return { txNonce, queueNonce, cooldown, expiration, createdAt, currentTimestamp: block.timestamp };
+    return { txNonce, queueNonce, cooldown, expiration, createdAt, entryHash, currentTimestamp: block.timestamp };
+  }
+
+  expectedDelayHash(input: { to: Address; value: bigint; data: Hex; operation: 0 | 1 }): Hex {
+    return keccak256(encodePacked(
+      ["address", "uint256", "bytes", "uint8"],
+      [input.to, input.value, input.data, input.operation],
+    ));
+  }
+
+  async wasVetoed(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<boolean> {
+    const events = await this.publicClient.getLogs({
+      address: delay,
+      event: txNonceSetEvent,
+      fromBlock,
+      toBlock: "latest",
+    });
+    return events.some((event) => event.args.nonce !== undefined && event.args.nonce > entryNonce);
   }
 
   async prepareExecuteNextTx(input: {
@@ -177,7 +206,7 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     roles: Address;
     member: Address;
     allowanceKey: Hex;
-    receipt: GovernanceReceipt;
+    receipt?: GovernanceReceipt | null;
   }): Promise<RolesVerification> {
     const [memberEnabled, allowance] = await Promise.all([
       this.publicClient.readContract({
@@ -194,7 +223,7 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
       }),
     ]);
     const events: string[] = [];
-    for (const log of input.receipt.logs) {
+    for (const log of input.receipt?.logs ?? []) {
       if (log.address.toLowerCase() !== input.roles.toLowerCase()) continue;
       try {
         const decoded = decodeEventLog({ abi: rolesAbi, data: log.data, topics: log.topics, strict: false });

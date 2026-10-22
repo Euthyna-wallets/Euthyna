@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   buildDelayVetoBatch: vi.fn(),
   signSafeBatch: vi.fn(),
   executeSafeBatch: vi.fn(),
+  nearAccounts: vi.fn(),
+  signDaoProposal: vi.fn(),
+  signDaoVote: vi.fn(),
 }));
 
 vi.mock("../api.js", async (importActual) => ({
@@ -19,6 +22,11 @@ vi.mock("../safe.js", async (importActual) => ({
   buildDelayVetoBatch: mocks.buildDelayVetoBatch,
   signSafeBatch: mocks.signSafeBatch,
   executeSafeBatch: mocks.executeSafeBatch,
+}));
+vi.mock("../wallets.js", () => ({
+  nearAccounts: mocks.nearAccounts,
+  signDaoProposal: mocks.signDaoProposal,
+  signDaoVote: mocks.signDaoVote,
 }));
 
 import { GovernancePage } from "./GovernancePage.js";
@@ -42,6 +50,7 @@ const batch = {
 const governance = {
   proposals: [],
   daoAccountId: "dao.testnet",
+  relayActiveOperation: null,
   treasury: {
     organizationId: "org-1",
     environment: "uat",
@@ -111,5 +120,31 @@ describe("GovernancePage", () => {
     fireEvent.click(execute);
     await waitFor(() => expect(mocks.executeSafeBatch).toHaveBeenCalledOnce());
     expect(mocks.buildDelayVetoBatch).toHaveBeenCalledWith(governance.treasury, 1n);
+  });
+
+  it("submits the DAO confirm_original rescue from a connected council account", async () => {
+    const blocked = {
+      ...governance,
+      relayActiveOperation: governance.operations[0]!.opId,
+      operations: [{ ...governance.operations[0]!, state: "Vetoed" }],
+    };
+    mocks.api.mockImplementation(async (path: string) => path.endsWith("/unblock-proposal")
+      ? {
+          receiverId: "dao.testnet",
+          args: { proposal: { description: "Release terminal relay operation" } },
+          deposit: "100000000000000000000000",
+        }
+      : blocked);
+    mocks.signDaoProposal.mockResolvedValue({ transactionHash: "near-unblock-hash", proposalId: 8 });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByText("Relay blocked by this terminal operation.")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("your NEAR account"), { target: { value: "alice.testnet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose relay unblock" }));
+    await waitFor(() => expect(mocks.signDaoProposal).toHaveBeenCalledWith(
+      "alice.testnet",
+      expect.objectContaining({ receiverId: "dao.testnet" }),
+    ));
   });
 });

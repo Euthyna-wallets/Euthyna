@@ -1,5 +1,5 @@
 import {
-  canonicalMultiSendAddress,
+  canonicalMultiSendCallOnlyAddress,
   encodeMultiSendTransactions,
   rolesAbi,
 } from "@mandateos/deployer";
@@ -28,6 +28,7 @@ import {
   type GovernanceTreasuryRecord,
 } from "./governance-worker.js";
 import type { GovernanceOperation, MpcSignature } from "./types.js";
+const entryHash = `0x${"99".repeat(32)}` as Hex;
 
 const roles = getAddress("0x1111111111111111111111111111111111111111");
 const delay = getAddress("0x2222222222222222222222222222222222222222");
@@ -63,7 +64,7 @@ function operation(): GovernanceOperation {
   return {
     op_id: Array(32).fill(1) as number[],
     proposer: "dao.testnet",
-    target: Array.from(hexToBytes(canonicalMultiSendAddress(84532))),
+    target: Array.from(hexToBytes(canonicalMultiSendCallOnlyAddress(84532))),
     value: "0",
     data: Array.from(hexToBytes(data)),
     operation: 1,
@@ -99,9 +100,10 @@ function job(overrides: Partial<GovernanceJobRecord> = {}): GovernanceJobRecord 
     opId: `0x${"01".repeat(32)}`,
     clientId: "acme",
     state: "Queued",
+    finalStatus: null,
     nearExecutionTxHash: "near-vote",
     nearExecutionSignerId: "alice.testnet",
-    target: canonicalMultiSendAddress(84532),
+    target: canonicalMultiSendCallOnlyAddress(84532),
     value: "0",
     data: `0x${Buffer.from(current.data).toString("hex")}`,
     operation: 1,
@@ -116,6 +118,7 @@ function job(overrides: Partial<GovernanceJobRecord> = {}): GovernanceJobRecord 
     executeTxHash: null,
     executeReceiptBlock: null,
     attempts: 0,
+    lastError: null,
     ...overrides,
   };
 }
@@ -162,11 +165,13 @@ class FakeBase implements GovernanceBaseGateway {
     queueNonce: 1n,
     cooldown: 300n,
     expiration: 604_800n,
+    entryHash,
     createdAt: 100n,
     currentTimestamp: 401n,
   };
   prepared = 0;
   broadcasts = 0;
+  rolesEnabled = true;
   rawTransactionHash(): Hex { return queueHash; }
   broadcastRaw(): Promise<Hex> { this.broadcasts += 1; return Promise.resolve(queueHash); }
   receipt(hash: Hex): Promise<GovernanceReceipt | null> {
@@ -174,13 +179,17 @@ class FakeBase implements GovernanceBaseGateway {
   }
   blockNumber(): Promise<bigint> { return Promise.resolve(this.currentBlock); }
   delayState(): Promise<DelayState> { return Promise.resolve(this.delay); }
+  vetoed = false;
+  expectedHash = entryHash;
+  expectedDelayHash(): Hex { return this.expectedHash; }
+  wasVetoed(): Promise<boolean> { return Promise.resolve(this.vetoed); }
   prepareExecuteNextTx(): Promise<PreparedDelayExecution> {
     this.prepared += 1;
     return Promise.resolve({ hash: executeHash, rawTransaction: "0x1234" });
   }
   verifyRoles(): Promise<RolesVerification> {
     return Promise.resolve({
-      memberEnabled: true,
+      memberEnabled: this.rolesEnabled,
       allowance: {
         refill: 6_000_000n,
         maxRefill: 6_000_000n,
@@ -200,11 +209,17 @@ function harness(overrides: Partial<GovernanceJobRecord> = {}) {
   const near = new FakeNear();
   const base = new FakeBase();
   const guard = {
-    relayStatusReport: vi.fn(async () => ({
+    relayStatusReport: vi.fn(async (
+      _clientId: string,
+      _operation: GovernanceOperation,
+      _hash: Hex,
+      _blockNumber: bigint,
+      finalStatus: "Executed" | "Vetoed" | "Expired" | "Failed",
+    ) => ({
       report: {
         client_id: "acme",
         op_id: Array(32).fill(1) as number[],
-        kind: "Confirmed" as const,
+        final_status: finalStatus,
         tx_hash: Array(32).fill(7) as number[],
         report_nonce: 9,
         block_number: 10,
@@ -250,6 +265,7 @@ describe("GovernanceWorker", () => {
   it("resumes after a crash following the on-chain relay report", async () => {
     const test = harness({
       state: "Reporting",
+      finalStatus: "Executed",
       executeRawTransaction: "0x1234",
       executeTxHash: executeHash,
     });
@@ -267,12 +283,39 @@ describe("GovernanceWorker", () => {
     expect(test.store.current.state).toBe("Queued");
   });
 
-  it("marks an entry vetoed when Delay txNonce passes its queue entry", async () => {
+  it("reports a verified veto and releases the relay operation", async () => {
     const test = harness();
     test.base.delay.txNonce = 1n;
+    test.base.vetoed = true;
+    test.base.rolesEnabled = false;
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Vetoed");
     await test.worker().tick();
     expect(test.store.current.state).toBe("Vetoed");
+    expect(test.near.reports).toBe(1);
     expect(test.base.prepared).toBe(0);
+  });
+
+  it("classifies third-party Zodiac execution from expected Roles state before a later veto event", async () => {
+    const test = harness();
+    test.base.delay.txNonce = 1n;
+    test.base.vetoed = true;
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Executed");
+    expect(test.store.updates.at(-1)?.rolesVerification).toMatchObject({ mode: "zodiac" });
+  });
+
+  it("reports an expired Delay entry and releases the relay", async () => {
+    const test = harness();
+    test.base.delay.currentTimestamp = 605_201n;
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Expired");
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Expired");
+    expect(test.near.reports).toBe(1);
   });
 
   it("waits for queue confirmations before reading or executing Delay", async () => {
@@ -284,7 +327,15 @@ describe("GovernanceWorker", () => {
     expect(test.near.reports).toBe(0);
   });
 
-  it("marks a reverted execute failed and never retries it", async () => {
+  it("refuses a Delay queue entry whose stored txHash differs from the governed call", async () => {
+    const test = harness();
+    test.base.delay.entryHash = `0x${"10".repeat(32)}`;
+    await test.worker().tick();
+    expect(test.store.current.lastError).toContain("Delay entry hash");
+    expect(test.base.prepared).toBe(0);
+  });
+
+  it("reports a reverted execute as Failed and never retries it", async () => {
     const test = harness({
       state: "Executing",
       executeRawTransaction: "0x1234",
@@ -292,9 +343,31 @@ describe("GovernanceWorker", () => {
     });
     test.base.executeReceipt = { status: "reverted", blockNumber: 15n, logs: [] };
     await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Failed");
+    await test.worker().tick();
     expect(test.store.current.state).toBe("Failed");
     expect(test.store.current.nextAttemptAt).toBeNull();
     await expect(test.worker().tick()).resolves.toBe(0);
     expect(test.base.broadcasts).toBe(0);
+  });
+
+  it("classifies a generic third-party execution without requiring a Zodiac batch", async () => {
+    const test = harness({
+      target: "0x5555555555555555555555555555555555555555",
+      data: "0x1234",
+      operation: 0,
+    });
+    test.base.delay.txNonce = 1n;
+    test.base.vetoed = false;
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Executed");
+    expect(test.store.updates.at(-1)?.rolesVerification).toEqual({
+      mode: "receipt-only",
+      delayEntryHashVerified: true,
+    });
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Executed");
   });
 });

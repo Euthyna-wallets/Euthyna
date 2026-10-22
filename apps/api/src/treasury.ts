@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { buildBaseTreasuryPlan, canonicalMultiSendAddress, type BaseTreasuryPlan } from "@mandateos/deployer";
+import { buildBaseTreasuryPlan, canonicalMultiSendCallOnlyAddress, type BaseTreasuryPlan } from "@mandateos/deployer";
 import type { PrismaClient } from "@mandateos/db";
 import bs58 from "bs58";
 import { createPublicClient, getAddress, http, keccak256, type Address, type Hex } from "viem";
@@ -361,9 +361,9 @@ export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
       owners: input.owners,
       threshold: input.threshold,
     };
-    const canonicalMultiSend = canonicalMultiSendAddress(this.chainId);
+    const canonicalMultiSend = canonicalMultiSendCallOnlyAddress(this.chainId);
     if (multiSend !== canonicalMultiSend) {
-      throw new TreasuryError(422, "multisend_address_mismatch", "MultiSend is not the canonical Safe 1.4.1 deployment");
+      throw new TreasuryError(422, "multisend_address_mismatch", "MultiSend is not the canonical Safe 1.4.1 CallOnly deployment");
     }
     for (const address of [safe, roles, delay, multiSend]) {
       const code = await this.client.getBytecode({ address });
@@ -509,7 +509,7 @@ export class TreasuryService {
       mpc_path: this.config.mpcPath,
       evm_chain_id: environment.baseChainId,
       delay_address: Buffer.from(base.delayAddress.slice(2), "hex").toString("base64"),
-      multisend_address: Buffer.from(base.multiSendAddress.slice(2), "hex").toString("base64"),
+      multisend_address: Buffer.from(base.multiSendCallOnlyAddress.slice(2), "hex").toString("base64"),
       guard_public_key: guardPublicKey,
       max_gas_limit: "300000",
       max_fee_per_gas: "100000000000",
@@ -769,7 +769,7 @@ export class TreasuryService {
       rolesAddress: roles,
       delayAddress: delay,
       govAddress: nearDeployment.expectedGov,
-      multiSendAddress: canonicalMultiSendAddress(environment.baseChainId),
+      multiSendAddress: canonicalMultiSendCallOnlyAddress(environment.baseChainId),
       delayCooldownSeconds: environment.delayCooldownSeconds,
       delayExpirationSeconds: environment.delayExpirationSeconds,
     });
@@ -845,7 +845,7 @@ export class TreasuryService {
       }
     }
 
-    const expectedMultiSend = canonicalMultiSendAddress(environment.baseChainId);
+    const expectedMultiSend = canonicalMultiSendCallOnlyAddress(environment.baseChainId);
     const expectedMultiSendBase64 = Buffer.from(expectedMultiSend.slice(2), "hex").toString("base64");
     const expectedClientId = input.daoAccountId.split(".")[0] ?? "";
     const relayParameters: Array<[string, unknown, unknown, string]> = [
@@ -886,7 +886,7 @@ export class TreasuryService {
       reservationTtlBlocks: this.config.vaultTtlBlocks,
       govAddress: expectedGov,
       delayAddress: expectedDelay,
-      multiSendAddress: expectedMultiSend,
+      multiSendCallOnlyAddress: expectedMultiSend,
     })).digest("hex");
     return {
       digest,

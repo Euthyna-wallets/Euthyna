@@ -178,6 +178,7 @@
   },
   "pr_c_uat": {
     "observed_at": "2026-10-22",
+    "status": "superseded-relay-uses-regular-multisend",
     "dao_account_id": "pr-c-uat-1.factory-v2.mandateos.testnet",
     "vault_account_id": "pr-c-uat-v.mandateos.testnet",
     "relay_account_id": "pr-c-uat-r.mandateos.testnet",
@@ -189,6 +190,7 @@
     "relay_client_id": "pr-c-uat-1",
     "relay_delay_address": "0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff",
     "relay_multisend_address": "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526",
+    "required_multisend_call_only_address": "0x9641d764fc13c8B624c04430C7356C1C7C8102e2",
     "relay_evm_address": "0x3961FA54D0ebDf4DbDe073466f580D48Daac7928",
     "setup_proposals": {
       "derive_relay": {

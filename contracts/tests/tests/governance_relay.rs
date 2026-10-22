@@ -20,19 +20,25 @@ const MPC_SECRET: [u8; 32] = [0x42; 32];
 const MPC_PUBLIC_KEY: &str = "secp256k1:jCrfJ5wjMBroDh6Mefb1bohaBtzE9me5MaKEhmfmFqK5CudvdSWviXXxfowdtttqh9KWN3zNK9QQu5kq8FfXBK8";
 const DELAY: [u8; 20] = [0x44; 20];
 const TARGET: [u8; 20] = [0x66; 20];
-const MULTISEND: [u8; 20] = [0x77; 20];
+const MULTISEND: [u8; 20] = [
+    0x96, 0x41, 0xd7, 0x64, 0xfc, 0x13, 0xc8, 0xb6, 0x24, 0xc0, 0x44, 0x30, 0xc7, 0x35, 0x6c, 0x1c,
+    0x7c, 0x81, 0x02, 0xe2,
+];
 const GUARD_SECRET: [u8; 32] = [9u8; 32];
 
-#[derive(BorshSerialize, Serialize)]
-enum ReportKind {
-    Confirmed,
+#[derive(BorshSerialize, Serialize, Clone, Copy)]
+enum FinalStatusForSigning {
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
 }
 
 #[derive(BorshSerialize, Serialize)]
 struct StatusReportForSigning {
     client_id: String,
     op_id: [u8; 32],
-    kind: ReportKind,
+    final_status: FinalStatusForSigning,
     tx_hash: [u8; 32],
     report_nonce: u64,
     block_number: u64,
@@ -197,18 +203,33 @@ fn assert_failure_contains(
 }
 
 fn signed_status_report(operation: &Value, report_nonce: u64) -> Value {
-    signed_status_report_for_hash(
+    signed_status_report_with_status(
         operation,
         report_nonce,
+        FinalStatusForSigning::Executed,
         signed_transaction_hash(operation, false),
     )
 }
 
 fn signed_status_report_for_hash(operation: &Value, report_nonce: u64, tx_hash: [u8; 32]) -> Value {
+    signed_status_report_with_status(
+        operation,
+        report_nonce,
+        FinalStatusForSigning::Executed,
+        tx_hash,
+    )
+}
+
+fn signed_status_report_with_status(
+    operation: &Value,
+    report_nonce: u64,
+    final_status: FinalStatusForSigning,
+    tx_hash: [u8; 32],
+) -> Value {
     let report = StatusReportForSigning {
         client_id: "acme".to_string(),
         op_id: digest(&operation["op_id"]),
-        kind: ReportKind::Confirmed,
+        final_status,
         tx_hash,
         report_nonce,
         block_number: 42,
@@ -392,7 +413,7 @@ async fn guard_report_confirms_exact_signed_transaction_and_blocks_replay() -> R
         .await?
         .json::<Option<Value>>()?
         .context("confirmed operation")?;
-    assert_eq!(confirmed["state"], "Confirmed");
+    assert_eq!(confirmed["state"], "Executed");
 
     let second = propose(&fixture).await?;
     let replay = fixture
@@ -416,6 +437,81 @@ async fn guard_report_confirms_exact_signed_transaction_and_blocks_replay() -> R
         .transact()
         .await?;
     assert_failure_contains(&wrong_hash, "ERR_REPORT_TX_HASH");
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &second,
+                9,
+                FinalStatusForSigning::Vetoed,
+                signed_transaction_hash(&second, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let vetoed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": second["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("vetoed operation")?;
+    assert_eq!(vetoed["state"], "Vetoed");
+    let third = propose(&fixture).await?;
+    assert_eq!(third["evm_nonce"], 2);
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &third,
+                10,
+                FinalStatusForSigning::Expired,
+                signed_transaction_hash(&third, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let expired: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": third["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("expired operation")?;
+    assert_eq!(expired["state"], "Expired");
+
+    let fourth = propose(&fixture).await?;
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &fourth,
+                11,
+                FinalStatusForSigning::Failed,
+                signed_transaction_hash(&fourth, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let failed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": fourth["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("failed operation")?;
+    assert_eq!(failed["state"], "Failed");
+    assert_eq!(propose(&fixture).await?["evm_nonce"], 4);
+
     Ok(())
 }
 

@@ -111,10 +111,10 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 3. **Preview mandate** : vérifier le diff, les trois artefacts et le statut
    agent.
 4. Exécuter strictement `set_role → register_agent → financement → Zodiac`.
-   Zodiac doit être une seule proposition vers le MultiSend canonique, avec
-   quatre appels internes visibles dans la preview. Pour chaque ligne, proposer
-   puis faire voter deux membres. La ligne suivante reste désactivée jusqu'à
-   **Executed**.
+   Zodiac doit être une seule proposition vers le MultiSendCallOnly canonique
+   `0x9641d764fc13c8B624c04430C7356C1C7C8102e2`, avec quatre appels `Call`
+   internes visibles dans la preview. Pour chaque ligne, proposer puis faire
+   voter deux membres. La ligne suivante reste désactivée jusqu'à **Executed**.
 5. Ouvrir **Governance**. Vérifier la frise, le hash 0xGOV diffusé, le
    `queueNonce` et le compte à rebours lu sur Delay. Ne lancer aucune commande :
    le worker exécute `executeNextTx` après le cooldown.
@@ -129,8 +129,9 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
    wallet**. Le bouton d'exécution reste désactivé avant le seuil Safe 2/3.
 3. Exécuter le veto ; la transaction Safe appelle
    `Delay.setTxNonce(queueNonce)`.
-4. Vérifier que le worker affiche **Vetoed** et ne diffuse jamais
-   `executeNextTx` pour cette entrée.
+4. Vérifier que le worker affiche **Vetoed**, ne diffuse jamais
+   `executeNextTx` pour cette entrée, transmet le rapport terminal au relay, et
+   qu'une nouvelle proposition relay est ensuite acceptée.
 
 ## 7. Paiement
 

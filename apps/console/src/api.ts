@@ -61,6 +61,7 @@ export type TreasuryPlan = {
     rolesAddress: string;
     delayAddress: string;
     multiSendAddress: string;
+    multiSendCallOnlyAddress: string;
     safeDeployment: { to: string; value: string; data: string };
     rolesDeployment: { to: string; value: string; data: string };
     delayDeployment: { to: string; value: string; data: string };

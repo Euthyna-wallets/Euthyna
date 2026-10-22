@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@mandateos/db";
-import { createPublicClient, getAddress, http, erc20Abi } from "viem";
+import { bytesToHex, createPublicClient, getAddress, http, erc20Abi } from "viem";
 import { base, baseSepolia } from "viem/chains";
 
 import { onChainAgentEvmAddress } from "./agent-chain.js";
@@ -218,11 +218,12 @@ export class ConsoleDataService {
         chain: treasury.baseChainId === 8453 ? base : baseSepolia,
         transport: http(this.baseRpcUrl),
       });
-      const [proposals, txNonce, queueNonce, cooldown, expiration, safeThreshold, block] = await Promise.all([
+      const [proposals, activeRelayOperation, txNonce, queueNonce, cooldown, expiration, safeThreshold, block] = await Promise.all([
         this.near.viewFunction<unknown[]>(treasury.daoAccountId, "get_proposals", {
           from_index: 0,
           limit: 50,
         }),
+        this.near.viewFunction<number[] | null>(treasury.relayAccountId, "active_operation"),
         client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "txNonce" }),
         client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "queueNonce" }),
         client.readContract({ address: getAddress(treasury.delayAddress), abi: delayAbi, functionName: "txCooldown" }),
@@ -240,7 +241,7 @@ export class ConsoleDataService {
               args: [operation.queueNonce],
             });
         const cooldownEndsAt = createdAt === null ? null : createdAt + cooldown;
-        const expiresAt = createdAt === null ? null : createdAt + expiration;
+        const expiresAt = createdAt === null || expiration === 0n ? null : createdAt + cooldown + expiration;
         return {
           ...operation,
           cooldownEndsAt,
@@ -255,6 +256,9 @@ export class ConsoleDataService {
         treasury,
         proposals: proposals.reverse(),
         operations: timeline,
+        relayActiveOperation: activeRelayOperation === null
+          ? null
+          : bytesToHex(Uint8Array.from(activeRelayOperation)),
         delay: {
           address: treasury.delayAddress,
           txNonce,
@@ -271,6 +275,7 @@ export class ConsoleDataService {
         treasury: plain(treasury),
         proposals: [],
         operations: plain(operations),
+        relayActiveOperation: null,
         delay: null,
         error: error instanceof Error ? error.message : String(error),
       };

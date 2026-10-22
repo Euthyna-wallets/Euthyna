@@ -48,6 +48,16 @@ function fixture(proposalStatus = "Approved") {
         stored = create;
         return create;
       },
+      findUnique: async () => ({
+        organizationId: "org-1",
+        opId: `0x${"01".repeat(32)}`,
+        state: "Vetoed",
+        relayAccountId: "relay.testnet",
+        txHash: `0x${"07".repeat(32)}`,
+        treasury: {
+          daoAccountId: "dao.testnet",
+        },
+      }),
     },
   } as unknown as PrismaClient;
   const near = {
@@ -88,5 +98,23 @@ describe("GovernanceService", () => {
       nearTransactionHash: "near-final-vote-hash",
       signerAccountId: "alice.testnet",
     })).rejects.toMatchObject({ code: "proposal_not_executed" });
+  });
+
+  it("builds a DAO confirm_original proposal only for the active terminal relay operation", async () => {
+    const proposal = await fixture().service.unblockProposal("org-1", `0x${"01".repeat(32)}`);
+    expect(proposal).toMatchObject({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: expect.stringContaining("Release terminal relay operation"),
+      deposit: "100000000000000000000000",
+    });
+    const action = (proposal.args.proposal as {
+      kind: { FunctionCall: { actions: { args: string }[] } };
+    }).kind.FunctionCall.actions[0]!;
+    expect(JSON.parse(Buffer.from(action.args, "base64").toString("utf8"))).toMatchObject({
+      op_id: Array(32).fill(1),
+      tx_hash: Array(32).fill(7),
+      mpc_signature: null,
+    });
   });
 });

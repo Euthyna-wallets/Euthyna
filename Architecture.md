@@ -101,13 +101,14 @@ Aucune adresse MandateOS n'est inventée dans cette spécification. Les adresses
 | Zodiac Delay | 1.1.1 | FIFO, cooldown UAT `300 s`, production `86 400 s`, expiration `604 800 s`, veto par `setTxNonce` | [référence Delay 1.1.1][zodiac-delay-reference], [source Solidity épinglée][zodiac-delay-1.1.1-source] |
 | ModuleProxyFactory | 1.2.0 | Déploiement des modules Zodiac | [dépôt Zodiac][zodiac] |
 | SafeL2 / SafeProxyFactory | 1.4.1 | Safe Base et factory de proxy | [registre SafeL2][safe-l2-deployment], [registre SafeProxyFactory][safe-proxy-factory] |
+| Safe MultiSendCallOnly | 1.4.1, Base Sepolia `0x9641…02e2` | DelegateCall batch limité à des appels enfants `Call`; cible immutable du relay | [registre Safe deployments][safe-deployments], [`treasury-plan.ts`](./packages/deployer/src/treasury-plan.ts) |
 | USDC UAT Base Sepolia | `TestUSDC (token de test)`, `0x418A…9474` | ERC-20 de test à 6 décimales, 20 unités frappées au deployer ; aucune valeur réelle | [`packages/deployer/contracts/TestUSDC.sol`](./packages/deployer/contracts/TestUSDC.sol) |
 
 Le déploiement UAT observé est : Safe `0x19C…199cD`, Roles `0x7178…ed40`, Delay `0xDd86…9533`, TestUSDC (token de test) `0x418A…9474`, `0xAAA` `0x10Ed…37Af` et `0xGOV` `0xC963…FDBb`. Les adresses complètes, owners, modules, hashes de bytecode et transactions sont dans [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
 
 Les allowances Roles sont indexées par une clé globale `bytes32` dans le stockage du contrat ; partager cette clé entre plusieurs rôles permet un plafond commun. L'opérateur `EqualTo` fixe une valeur de paramètre dynamique, par exemple le destinataire de `USDC.transfer` ([contrats Roles][zodiac-roles-contracts]).
 
-Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format des signatures Safe][safe-signatures]). `0xGOV` n'est pas owner : il signe une transaction EIP-1559 qui appelle le module Delay, directement ou à travers un Roles administratif intermédiaire. Le `setup` du Safe peut déléguer un batch à `MultiSend` pour activer Roles et Delay dans la même transaction ; `MultiSend` revert l'ensemble si un appel échoue ([Safe][safe], [MultiSend][safe-multisend]).
+Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format des signatures Safe][safe-signatures]). `0xGOV` n'est pas owner : il signe une transaction EIP-1559 qui appelle le module Delay. Le setup humain du Safe utilise le MultiSend général pour activer les modules ; la proposition 0xGOV utilise exclusivement **MultiSendCallOnly**. Le relay n'autorise `operation = DelegateCall` que vers son adresse MultiSendCallOnly immutable et attestée, tandis que les quatre enfants Roles restent des `Call` ([Safe][safe], [MultiSend][safe-multisend], [`governance-relay`](./contracts/governance-relay/src/lib.rs)).
 
 `omni-transaction` 0.3 est retenu pour la Phase 1, mais son dépôt ne publie pas de rapport d'audit. Cette dépendance reste un risque explicite avant tout usage de production ([dépôt `omni-transaction`][omni-transaction]).
 
@@ -135,7 +136,7 @@ L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path.
 
 | Clé serveur | Périmètre autorisé | Incapacité structurelle |
 |---|---|---|
-| Guard ed25519 | Signer les visas et rapports sur des objets déjà engagés par le Vault | Ne peut ni appeler le Safe, ni choisir une transaction, ni dépasser Vault/Zodiac |
+| Guard ed25519 | Signer les visas et les rapports terminaux `Executed` / `Vetoed` / `Expired` / `Failed` sur le hash exact de transactions déjà engagées | Ne peut ni appeler le Safe, ni choisir une transaction, ni dépasser Vault/Zodiac ; sur le relay, son pire effet est de libérer ou bloquer la file, sans mouvement de fonds ni changement de policy |
 | Relayer NEAR | Déployer les comptes sponsorisés, financer leur réserve gas, soumettre `report_status` et les récupérations `submit_signature` | N'obtient aucune clé sur Vault/relay/agent ; l'unique clé agent créée est celle fournie par le client et reste FunctionCall-only |
 | Gas wallet EVM | Signe uniquement l'appel permissionless `Delay.executeNextTx` préparé et checkpointé par le worker ; la diffusion des transactions brutes déjà signées utilise `eth_sendRawTransaction` sans cette clé | N'est ni owner Safe, ni module, ni membre Roles ; ne peut choisir ni cible, ni calldata, ni politique ([`apps/api/src/governance-base.ts`](./apps/api/src/governance-base.ts)) |
 
@@ -203,7 +204,7 @@ Le seed et le script de déploiement mono-client exécutent et vérifient les é
 7. dériver les adresses `0xAAA`, puis les préfinancer avec un petit montant d'ETH par action gouvernée ;
 8. déployer le Safe Base Sepolia avec trois owners de test distincts et un seuil 2/3 ;
 9. déployer Roles v2 et Delay 1.1.1 avec `owner = avatar = target = Safe`, `cooldown = 300` secondes sur Base Sepolia (`86 400` en production) et `expiration = 604 800` secondes ;
-10. activer Roles et Delay comme modules du Safe, assigner `0xAAA` au rôle opérationnel et autoriser le vrai `0xGOV` dérivé par le relais dans Delay ;
+10. activer Roles et Delay comme modules du Safe, autoriser le vrai `0xGOV` dérivé dans Delay, puis configurer chaque mandat par un unique batch MultiSendCallOnly (`assignRoles`, `scopeTarget`, `scopeFunction`, `setAllowance`) ;
 11. créer les comptes agents et ajouter leurs function-call keys générées localement ;
 12. enregistrer adresses, versions, hashes de bytecode et transactions dans la table `deployments`, puis publier les liens explorateurs dans le README.
 

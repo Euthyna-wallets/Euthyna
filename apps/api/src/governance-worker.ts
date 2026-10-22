@@ -7,7 +7,7 @@ import {
   type Hex,
 } from "viem";
 import {
-  canonicalMultiSendAddress,
+  canonicalMultiSendCallOnlyAddress,
   decodeMultiSendTransactions,
   rolesAbi,
 } from "@mandateos/deployer";
@@ -39,6 +39,7 @@ export interface GovernanceJobRecord extends GovernanceTreasuryRecord {
   opId: string;
   clientId: string;
   state: string;
+  finalStatus: "Executed" | "Vetoed" | "Expired" | "Failed" | null;
   nearExecutionTxHash: string | null;
   nearExecutionSignerId: string | null;
   target: string;
@@ -56,10 +57,12 @@ export interface GovernanceJobRecord extends GovernanceTreasuryRecord {
   executeTxHash: string | null;
   executeReceiptBlock: bigint | null;
   attempts: number;
+  lastError: string | null;
 }
 
 export interface GovernanceJobUpdate {
   state?: string;
+  finalStatus?: "Executed" | "Vetoed" | "Expired" | "Failed" | null;
   txHash?: string | null;
   receiptBlock?: bigint | null;
   queueNonce?: bigint | null;
@@ -106,6 +109,12 @@ function retryAt(config: GovernanceWorkerConfig, attempts: number, now: Date): D
   const delay = Math.min(config.retryBaseMs * (2 ** Math.min(attempts, 8)), config.retryMaxMs);
   return new Date(now.getTime() + delay);
 }
+function storedFinalStatus(value: string | null): GovernanceJobRecord["finalStatus"] {
+  return value === "Executed" || value === "Vetoed" || value === "Expired" || value === "Failed"
+    ? value
+    : null;
+}
+
 
 function opBytes(opId: string): number[] {
   return Array.from(hexToBytes(opId as Hex));
@@ -185,6 +194,7 @@ export class PrismaGovernanceStore implements GovernanceStore {
       opId: row.opId,
       clientId: row.clientId,
       state: row.state,
+      finalStatus: storedFinalStatus(row.finalStatus),
       nearExecutionTxHash: row.nearExecutionTxHash,
       nearExecutionSignerId: row.nearExecutionSignerId,
       target: row.target,
@@ -197,6 +207,7 @@ export class PrismaGovernanceStore implements GovernanceStore {
       queueNonce: row.queueNonce,
       queueCreatedAt: row.queueCreatedAt,
       cooldownSeconds: row.cooldownSeconds,
+      lastError: row.lastError,
       expirationSeconds: row.expirationSeconds,
       executeRawTransaction: row.executeRawTransaction,
       executeTxHash: row.executeTxHash,
@@ -226,7 +237,7 @@ interface ZodiacBatchExpectation {
 }
 
 function zodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation {
-  const multiSend = canonicalMultiSendAddress(job.baseChainId);
+  const multiSend = canonicalMultiSendCallOnlyAddress(job.baseChainId);
   if (job.operation !== 1 || getAddress(job.target) !== multiSend) {
     throw new Error("relay operation is not a canonical MultiSend delegatecall");
   }
@@ -267,6 +278,7 @@ function zodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectatio
 function assertRolesVerification(
   expectation: ZodiacBatchExpectation,
   verification: Awaited<ReturnType<GovernanceBaseGateway["verifyRoles"]>>,
+  requireEvents: boolean,
 ): void {
   if (!verification.memberEnabled) throw new Error("Roles member assignment missing");
   const expected = expectation.allowance;
@@ -280,9 +292,19 @@ function assertRolesVerification(
   ) {
     throw new Error("Roles allowance state does not match the governed batch");
   }
-  const events = new Set(verification.events);
-  for (const event of ["AssignRoles", "ScopeTarget", "ScopeFunction", "SetAllowance"]) {
-    if (!events.has(event)) throw new Error(`Roles ${event} evidence missing`);
+  if (requireEvents) {
+    const events = new Set(verification.events);
+    for (const event of ["AssignRoles", "ScopeTarget", "ScopeFunction", "SetAllowance"]) {
+      if (!events.has(event)) throw new Error(`Roles ${event} evidence missing`);
+    }
+  }
+}
+
+function maybeZodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation | null {
+  try {
+    return zodiacBatchExpectation(job);
+  } catch {
+    return null;
   }
 }
 
@@ -344,7 +366,7 @@ export class GovernanceWorker {
   private async process(job: GovernanceJobRecord): Promise<void> {
     const id = opBytes(job.opId);
     if (job.state === "Reporting") {
-      await this.reportExecuted(job, id);
+      await this.reportFinal(job, id);
       return;
     }
     let operation: GovernanceOperation | null = null;
@@ -427,23 +449,76 @@ export class GovernanceWorker {
       return;
     }
     if (queueReceipt.status === "reverted") {
-      await this.fail(job, hash, queueReceipt.blockNumber, `governance queue transaction ${hash} reverted`);
+      await this.checkpointFinal(job, "Failed", {
+        txHash: hash,
+        receiptBlock: queueReceipt.blockNumber,
+        lastError: `governance queue transaction ${hash} reverted`,
+      });
       return;
     }
 
     const entryNonce = job.queueNonce;
     if (entryNonce === null) throw new Error("Delay queue nonce was not checkpointed before broadcast");
     const delay = getAddress(job.delayAddress);
+    const operationInput = {
+      to: getAddress(job.target),
+      value: BigInt(job.value),
+      data: job.data as Hex,
+      operation: job.operation === 1 ? 1 as const : 0 as const,
+    };
     const delayState = await this.base.delayState(delay, entryNonce);
     if (delayState.queueNonce <= entryNonce || delayState.createdAt === 0n) {
       await this.schedule(job, "Broadcast", "waiting for Delay queue entry");
       return;
     }
+    const expectedEntryHash = this.base.expectedDelayHash(operationInput);
+    if (delayState.entryHash.toLowerCase() !== expectedEntryHash.toLowerCase()) {
+      throw new Error(`Delay entry hash ${delayState.entryHash} differs from expected ${expectedEntryHash}`);
+    }
     const checkpointedExecuteReceipt = job.executeTxHash
       ? await this.base.receipt(job.executeTxHash as Hex)
       : null;
+    const expirationAt = delayState.createdAt + delayState.cooldown + delayState.expiration;
+    const expired = delayState.expiration !== 0n && delayState.currentTimestamp > expirationAt;
     if (delayState.txNonce > entryNonce && checkpointedExecuteReceipt?.status !== "success") {
-      await this.store.update(job, { state: "Vetoed", nextAttemptAt: null, lastError: null });
+      if (expired) {
+        await this.checkpointFinal(job, "Expired", {
+          txHash: hash,
+          receiptBlock: queueReceipt.blockNumber,
+        });
+        return;
+      }
+      let rolesVerification: Prisma.InputJsonValue | null = null;
+      let rolesVerificationError: unknown = null;
+      if (maybeZodiacBatchExpectation(job)) {
+        try {
+          rolesVerification = await this.verifyExecuted(job, null, false);
+        } catch (error) {
+          rolesVerificationError = error;
+        }
+      }
+      if (rolesVerification !== null) {
+        await this.checkpointFinal(job, "Executed", {
+          txHash: hash,
+          receiptBlock: queueReceipt.blockNumber,
+          rolesVerification,
+          executedAt: this.now(),
+        });
+      } else if (await this.base.wasVetoed(delay, entryNonce, queueReceipt.blockNumber)) {
+        await this.checkpointFinal(job, "Vetoed", {
+          txHash: hash,
+          receiptBlock: queueReceipt.blockNumber,
+        });
+      } else if (rolesVerificationError) {
+        throw rolesVerificationError;
+      } else {
+        await this.checkpointFinal(job, "Executed", {
+          txHash: hash,
+          receiptBlock: queueReceipt.blockNumber,
+          rolesVerification: { mode: "receipt-only", delayEntryHashVerified: true },
+          executedAt: this.now(),
+        });
+      }
       return;
     }
     await this.store.update(job, {
@@ -459,8 +534,11 @@ export class GovernanceWorker {
       lastError: null,
     });
 
-    if (delayState.currentTimestamp > delayState.createdAt + delayState.expiration) {
-      await this.store.update(job, { state: "Expired", nextAttemptAt: null, lastError: null });
+    if (expired) {
+      await this.checkpointFinal(job, "Expired", {
+        txHash: hash,
+        receiptBlock: queueReceipt.blockNumber,
+      });
       return;
     }
     if (delayState.currentTimestamp < delayState.createdAt + delayState.cooldown) {
@@ -475,13 +553,7 @@ export class GovernanceWorker {
     }
 
     if (!job.executeRawTransaction || !job.executeTxHash) {
-      const prepared = await this.base.prepareExecuteNextTx({
-        delay,
-        to: getAddress(job.target),
-        value: BigInt(job.value),
-        data: job.data as Hex,
-        operation: job.operation === 1 ? 1 : 0,
-      });
+      const prepared = await this.base.prepareExecuteNextTx({ delay, ...operationInput });
       await this.store.update(job, {
         state: "Executing",
         executeRawTransaction: prepared.rawTransaction,
@@ -512,65 +584,95 @@ export class GovernanceWorker {
       return;
     }
     if (executeReceipt.status === "reverted") {
-      await this.fail(job, executeHash, executeReceipt.blockNumber, `Delay executeNextTx ${executeHash} reverted`);
+      await this.checkpointFinal(job, "Failed", {
+        executeTxHash: executeHash,
+        executeReceiptBlock: executeReceipt.blockNumber,
+        lastError: `Delay executeNextTx ${executeHash} reverted`,
+      });
       return;
     }
 
-    const expectation = zodiacBatchExpectation(job);
+    const rolesVerification = await this.verifyExecuted(job, executeReceipt, true);
+    await this.checkpointFinal(job, "Executed", {
+      executeReceiptBlock: executeReceipt.blockNumber,
+      rolesVerification,
+      executedAt: this.now(),
+    });
+  }
+
+  private async verifyExecuted(
+    job: GovernanceJobRecord,
+    receipt: GovernanceReceipt | null,
+    requireEvents: boolean,
+  ): Promise<Prisma.InputJsonValue> {
+    const expectation = maybeZodiacBatchExpectation(job);
+    if (!expectation) return { mode: "receipt-only", delayEntryHashVerified: true };
     const verification = await this.base.verifyRoles({
       roles: getAddress(job.rolesAddress),
       member: expectation.member,
       allowanceKey: expectation.allowanceKey,
-      receipt: executeReceipt,
+      receipt,
     });
-    assertRolesVerification(expectation, verification);
+    assertRolesVerification(expectation, verification, requireEvents);
+    return {
+      mode: "zodiac",
+      member: expectation.member,
+      allowanceKey: expectation.allowanceKey,
+      events: verification.events,
+      allowance: {
+        refill: verification.allowance.refill.toString(),
+        maxRefill: verification.allowance.maxRefill.toString(),
+        period: verification.allowance.period.toString(),
+        balance: verification.allowance.balance.toString(),
+        timestamp: verification.allowance.timestamp.toString(),
+      },
+    };
+  }
+
+  private async checkpointFinal(
+    job: GovernanceJobRecord,
+    finalStatus: NonNullable<GovernanceJobRecord["finalStatus"]>,
+    update: GovernanceJobUpdate = {},
+  ): Promise<void> {
     await this.store.update(job, {
       state: "Reporting",
-      executeReceiptBlock: executeReceipt.blockNumber,
-      rolesVerification: {
-        member: expectation.member,
-        allowanceKey: expectation.allowanceKey,
-        events: verification.events,
-        allowance: {
-          refill: verification.allowance.refill.toString(),
-          maxRefill: verification.allowance.maxRefill.toString(),
-          period: verification.allowance.period.toString(),
-          balance: verification.allowance.balance.toString(),
-          timestamp: verification.allowance.timestamp.toString(),
-        },
-      },
-      executedAt: this.now(),
+      finalStatus,
+      ...update,
       lastAttemptAt: this.now(),
       nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-      lastError: null,
     });
   }
 
-  private async reportExecuted(job: GovernanceJobRecord, opId: number[]): Promise<void> {
+  private async reportFinal(job: GovernanceJobRecord, opId: number[]): Promise<void> {
+    if (!job.finalStatus) throw new Error("relay final status missing");
     if (!job.txHash || job.receiptBlock === null) throw new Error("queue receipt checkpoint missing");
     const operation = await this.near.viewFunction<GovernanceOperation | null>(
       job.relayAccountId,
       "get_operation",
       { op_id: opId },
     );
-    if (!operation) throw new Error("relay operation missing after Delay execution");
+    if (!operation) throw new Error("relay operation missing after finalization");
+    const alreadyFinal =
+      operation.state === job.finalStatus ||
+      operation.state === "Confirmed";
     let reportNonce: bigint | null = null;
-    if (operation.state !== "Confirmed") {
+    if (!alreadyFinal) {
       const signedReport = await this.guard.relayStatusReport(
         job.clientId,
         operation,
         job.txHash as Hex,
         job.receiptBlock,
+        job.finalStatus,
       );
       await this.near.reportStatus(job.relayAccountId, signedReport);
       reportNonce = BigInt(signedReport.report?.report_nonce ?? 0);
     }
     await this.store.update(job, {
-      state: "Executed",
+      state: job.finalStatus,
       reportNonce,
       lastAttemptAt: this.now(),
       nextAttemptAt: null,
-      lastError: null,
+      lastError: job.finalStatus === "Failed" ? job.lastError : null,
     });
   }
 
@@ -599,15 +701,4 @@ export class GovernanceWorker {
     });
   }
 
-  private async fail(job: GovernanceJobRecord, hash: Hex, blockNumber: bigint, message: string): Promise<void> {
-    await this.store.update(job, {
-      state: "Failed",
-      executeTxHash: job.state === "Executing" ? hash : job.executeTxHash,
-      receiptBlock: job.state === "Executing" ? job.receiptBlock : blockNumber,
-      executeReceiptBlock: job.state === "Executing" ? blockNumber : job.executeReceiptBlock,
-      lastAttemptAt: this.now(),
-      nextAttemptAt: null,
-      lastError: message,
-    });
-  }
 }

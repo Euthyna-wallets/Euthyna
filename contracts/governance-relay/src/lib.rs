@@ -10,8 +10,8 @@ use near_sdk::{
 };
 
 pub use types::{
-    CancellationAttempt, Eip1559Transaction, GovernanceOperation, MpcSignature, OperationState,
-    SignedStatusReport, StatusKind, StatusReport,
+    CancellationAttempt, Eip1559Transaction, FinalStatus, GovernanceOperation, MpcSignature,
+    OperationState, SignedStatusReport, StatusReport,
 };
 use types::{EvmAddress, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId};
 
@@ -455,7 +455,12 @@ impl GovernanceRelay {
             env::ed25519_verify(&signature, &message, &self.guard_public_key),
             "ERR_REPORT_SIGNATURE"
         );
-        require!(report.kind == StatusKind::Confirmed, "ERR_REPORT_KIND");
+        let final_state = match report.final_status {
+            FinalStatus::Executed => OperationState::Executed,
+            FinalStatus::Vetoed => OperationState::Vetoed,
+            FinalStatus::Expired => OperationState::Expired,
+            FinalStatus::Failed => OperationState::Failed,
+        };
         if let Some(signature) = mpc_signature {
             if operation.signed_transaction.is_none() {
                 self.submit_signature(report.op_id, signature);
@@ -474,7 +479,7 @@ impl GovernanceRelay {
         self.operations
             .get_mut(&report.op_id)
             .expect("ERR_OPERATION_NOT_FOUND")
-            .state = OperationState::Confirmed;
+            .state = final_state;
         self.active_operation = None;
     }
 

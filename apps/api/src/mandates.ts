@@ -2,13 +2,14 @@ import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@mandateos/db";
 import {
-  canonicalMultiSendAddress,
+  canonicalMultiSendCallOnlyAddress,
   compilePaymentPermission,
   encodeMultiSendTransactions,
   rolesAbi,
   type FlatCondition,
 } from "@mandateos/deployer";
-import { encodeFunctionData, getAddress, type Address, type Hex } from "viem";
+import { createPublicClient, encodeFunctionData, getAddress, http, type Address, type Hex } from "viem";
+import { base, baseSepolia } from "viem/chains";
 
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
@@ -68,6 +69,14 @@ export interface BudgetTokenPlan {
   status: BudgetTokenStatus;
   actions: BudgetTokenAction[];
 }
+interface AllowanceState {
+  refill: bigint;
+  maxRefill: bigint;
+  period: bigint;
+  balance: bigint;
+  timestamp: bigint;
+}
+
 
 
 export interface MandatePreview {
@@ -94,6 +103,7 @@ export interface MandatePreview {
 
 export interface MandateGateway {
   preview(organizationId: string, input: MandateInput): Promise<MandatePreview>;
+  zodiacProposal(organizationId: string, input: MandateInput): Promise<MandateProposal>;
   budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus>;
   budgetTokenPlan(organizationId: string, amount: string): Promise<BudgetTokenPlan>;
 }
@@ -134,10 +144,28 @@ export class MandateService implements MandateGateway {
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
     private readonly budgetTokenAccountId = "test-ft.testnet",
+    private readonly baseRpcUrl = "https://sepolia.base.org",
     private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
+    private readonly allowanceReader?: (chainId: number, roles: Address, key: Hex) => Promise<AllowanceState>,
   ) {}
 
-  async preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
+  preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
+    return this.buildPreview(organizationId, input, 0n);
+  }
+
+  async zodiacProposal(organizationId: string, input: MandateInput): Promise<MandateProposal> {
+    const preview = await this.buildPreview(organizationId, input, this.nowSeconds());
+    if (!preview.proposals.zodiacRelay) {
+      throw new TreasuryError(409, "agent_address_missing", "derive the agent EVM address before Zodiac configuration");
+    }
+    return preview.proposals.zodiacRelay;
+  }
+
+  private async buildPreview(
+    organizationId: string,
+    input: MandateInput,
+    allowanceTimestamp: bigint,
+  ): Promise<MandatePreview> {
     if (!/^[a-z][a-z0-9-]{1,31}$/.test(input.role)) {
       throw new TreasuryError(400, "invalid_role", "role must be a lowercase slug");
     }
@@ -216,6 +244,9 @@ export class MandateService implements MandateGateway {
     ]
       .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after))
       .map(([field, before, after]) => ({ field: String(field), current: before ?? null, next: after }));
+    const currentAllowance = await this.readAllowance(treasury.baseChainId, rolesModifier, compiled.allowanceKey);
+    const allowanceExists = Object.values(currentAllowance).some((value) => value !== 0n);
+    const allowanceBalance = allowanceExists ? currentAllowance.balance : BigInt(input.budget);
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
     if (resolvedAgentAddress) {
@@ -251,14 +282,14 @@ export class MandateService implements MandateGateway {
           functionName: "setAllowance",
           args: [
             compiled.allowanceKey,
-            BigInt(input.budget),
+            allowanceBalance,
             BigInt(input.budget),
             BigInt(input.budget),
             BigInt(input.periodDays) * 86_400n,
-            this.nowSeconds(),
+            allowanceTimestamp,
           ],
         }),
-        description: `Set periodic allowance ${input.budget} every ${input.periodDays} days for ${input.role}`,
+        description: `Set periodic allowance ${input.budget} every ${input.periodDays} days for ${input.role} without replenishing current balance`,
       },
     );
     const stepDigest = (value: unknown) => createHash("sha256")
@@ -335,7 +366,7 @@ export class MandateService implements MandateGateway {
       : resolvedAgentAddress
         ? "ready"
         : "needs_agent_address";
-    const multiSendAddress = canonicalMultiSendAddress(treasury.baseChainId);
+    const multiSendAddress = canonicalMultiSendCallOnlyAddress(treasury.baseChainId);
     const multiSendTransactions = encodeMultiSendTransactions(zodiacCalls.map((call) => ({
       operation: 0,
       to: call.to,
@@ -348,9 +379,15 @@ export class MandateService implements MandateGateway {
       args: [multiSendTransactions],
     });
     const zodiacDigest = stepDigest({
+      role: input.role,
+      agent: input.agent?.nearAccountId ?? null,
+      agentAddress: resolvedAgentAddress,
+      rolesModifier,
       multiSendAddress,
-      multiSendData,
-      operation: 1,
+      token,
+      recipients: input.recipients,
+      budget: input.budget,
+      periodDays: input.periodDays,
     });
     const zodiacRelay: MandateProposal | null = resolvedAgentAddress
       ? {
@@ -441,6 +478,27 @@ export class MandateService implements MandateGateway {
       ],
     };
   }
+  private async readAllowance(chainId: number, roles: Address, key: Hex): Promise<AllowanceState> {
+    if (this.allowanceReader) return this.allowanceReader(chainId, roles, key);
+    const client = createPublicClient({
+      chain: chainId === 8453 ? base : baseSepolia,
+      transport: http(this.baseRpcUrl),
+    });
+    const allowance = await client.readContract({
+      address: roles,
+      abi: rolesAbi,
+      functionName: "allowances",
+      args: [key],
+    });
+    return {
+      refill: allowance[0],
+      maxRefill: allowance[1],
+      period: allowance[2],
+      balance: allowance[3],
+      timestamp: allowance[4],
+    };
+  }
+
   async budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus> {
     const treasury = await this.prisma.treasury.findUnique({
       where: { organizationId_environment: { organizationId, environment: "uat" } },

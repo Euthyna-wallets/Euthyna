@@ -456,12 +456,16 @@ the previous status is `Approved` (displayed as **Executed**). `Expired`,
 ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
-Zodiac configuration is one relay proposal, not four: the payload calls
-canonical Safe MultiSend 1.4.1 with `operation = 1`; its four packed children
-are `Call` operations to the single Roles instance in this order:
-`assignRoles`, `scopeTarget`, `scopeFunction`, `setAllowance`. The relay rejects
-any DelegateCall whose target is not its immutable, attested MultiSend address
-([`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+Zodiac configuration is one relay proposal, not four: the payload calls the
+canonical Safe **MultiSendCallOnly 1.4.1**
+[`0x9641…02e2`](https://sepolia.basescan.org/address/0x9641d764fc13c8B624c04430C7356C1C7C8102e2)
+with `operation = 1`; its four packed children are `Call` operations to the
+single Roles instance in this order: `assignRoles`, `scopeTarget`,
+`scopeFunction`, `setAllowance`. The relay rejects any DelegateCall whose target
+is not its immutable, attested MultiSendCallOnly address. This removes the
+non-Call variants exposed by the general MultiSend runtime
+([Safe 1.4.1 deployment registry used by `treasury-plan.ts`](../packages/deployer/src/treasury-plan.ts),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
 
 The deployed Roles 2.1.1 mastercopy at
@@ -473,11 +477,11 @@ does not call this file `core/Setup.sol`. Its ABI order, verified again by
 | Position | Parameter | MandateOS value |
 |---:|---|---|
 | 1 | `key` | compiled allowance key |
-| 2 | `balance` | period budget |
+| 2 | `balance` | period budget on first creation; current on-chain balance on an update |
 | 3 | `maxRefill` | period budget |
 | 4 | `refill` | period budget |
 | 5 | `period` | `periodDays × 86,400` |
-| 6 | `timestamp` | preview timestamp |
+| 6 | `timestamp` | server time when `POST /v1/console/mandates/zodiac-proposal` creates the proposal |
 
 ### `POST /v1/console/governance/relay-operation`
 
@@ -491,14 +495,25 @@ corresponding active operation; it never receives a private key
 The governance job shares the payment worker lease. It recovers a missing MPC
 signature from that NEAR transaction, broadcasts the immutable 0xGOV
 transaction, waits `WORKER_CONFIRMATIONS`, and checkpoints the Delay entry.
-`txCooldown`, `txExpiration`, `txCreatedAt`, `txNonce`, and `queueNonce` are
-read on-chain. The gas wallet signs only the exact `executeNextTx` call; its raw
-transaction is persisted before broadcast. Reverted execution becomes
-terminal `Failed`, a skipped queue entry becomes `Vetoed`, and an expired entry
-becomes `Expired`. Successful execution must also prove Roles membership,
-allowance values, and the four configuration events before the relay Guard
-report (`mandateos:relay-status:v1`)
-([`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts),
+`txCooldown`, `txExpiration`, `txCreatedAt`, `txNonce`, `queueNonce`, and
+`txHash(entryNonce)` are read on-chain; the worker rejects a queue hash that
+does not match `keccak256(abi.encodePacked(to,value,data,operation))`. The gas
+wallet signs only the exact `executeNextTx` call; its raw transaction is
+persisted before broadcast.
+
+Delay 1.1.1 does not emit a `TransactionExecuted` event. When `txNonce` has
+advanced outside this worker, a Zodiac operation is `Executed` if the expected
+Roles member and allowance state are present; otherwise `TxNonceSet` is the
+veto evidence. A generic non-Zodiac operation uses the successful transaction
+receipt when available and otherwise records receipt-only execution evidence.
+Expiry is `txCreatedAt + txCooldown + txExpiration`. Reverted queue or
+`executeNextTx` transactions become `Failed`. Guard signs the exact 0xGOV
+transaction hash, Base block number, and final status under
+`mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`
+reports all release the relay's active operation. The DAO-only
+`confirm_original` remains the recovery path
+([Delay 1.1.1 source](https://github.com/gnosisguild/zodiac-modifier-delay/blob/v1.1.1/contracts/Delay.sol),
+[`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts),
 [`apps/api/src/governance-base.ts`](../apps/api/src/governance-base.ts),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
 
@@ -516,6 +531,17 @@ Safe; MandateOS never signs for the council
 [`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx),
 [`apps/console/src/safe.ts`](../apps/console/src/safe.ts)).
 
+### `POST /v1/console/governance/unblock-proposal`
+
+For a terminal operation that still occupies an older relay's
+`active_operation`, returns an unsigned DAO `add_proposal` for
+`confirm_original`. A connected council member proposes it and council members
+approve it from the Governance page; the server receives no council key
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx)).
+
+![Council relay rescue proposal](./console/governance-relay-rescue.webp)
+
 ![Governance worker timeline and veto](./console/governance-worker-timeline.webp)
 
 Fresh PR C UAT treasury (no migration):
@@ -529,13 +555,16 @@ Fresh PR C UAT treasury (no migration):
 | Roles | `0xE2d84feE72C88ee7572e8F7D010334Da0179c84f` |
 | Delay | `0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff` |
 | 0xGOV | `0x3961FA54D0ebDf4DbDe073466f580D48Daac7928` |
-| Canonical MultiSend | `0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526` |
+| Relay-attested MultiSend (initial UAT, superseded) | `0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526` |
 
-Both NEAR contracts have zero keys and match the local hashes. The relay views
-return the DAO owner, `client_id = pr-c-uat-1`, the Delay, Guard key and
-canonical MultiSend. Base reads confirm three owners, threshold 2, Roles +
-Delay enabled on the Safe, 0xGOV enabled on Delay, cooldown 300 and expiration
-604,800 ([NEAR manifest](../deployments/near-testnet.json),
+This initial UAT predates the MultiSendCallOnly correction and remains recorded
+as historical evidence; its immutable relay still attests regular MultiSend.
+The corrected code and browser attestation require canonical
+MultiSendCallOnly `0x9641d764fc13c8B624c04430C7356C1C7C8102e2`. Both NEAR
+contracts have zero keys and match the hashes recorded for that run. Base reads
+confirm three owners, threshold 2, Roles + Delay enabled on the Safe, 0xGOV
+enabled on Delay, cooldown 300 and expiration 604,800
+([NEAR manifest](../deployments/near-testnet.json),
 [Base manifest](../deployments/base-sepolia.json)).
 
 | Real UAT transition | Transaction |

@@ -127,6 +127,7 @@ const vaultAccountId = "acme-vault.alice.testnet";
 const relayAccountId = "acme-relay.alice.testnet";
 const guardKeyBase64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
 const multiSendAddress = getAddress("0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526");
+const multiSendCallOnlyAddress = getAddress("0x9641d764fc13c8B624c04430C7356C1C7C8102e2");
 
 function councilPolicy() {
   return {
@@ -160,7 +161,7 @@ function fakeNear(overrides?: NearOverrides): NearClient {
       if (method === "owner_id") return overrides?.vaultOwner ?? daoAccountId;
       if (method === "delay_address") return overrides?.relay?.delay ?? Buffer.from(basePlan.delayAddress.slice(2), "hex").toString("base64");
       if (method === "client_id") return overrides?.relay?.client ?? "acme";
-      if (method === "multisend_address") return overrides?.relay?.multisend ?? Buffer.from(multiSendAddress.slice(2), "hex").toString("base64");
+      if (method === "multisend_address") return overrides?.relay?.multisend ?? Buffer.from(multiSendCallOnlyAddress.slice(2), "hex").toString("base64");
       if (method === "mpc_contract_id") {
         return isVault ? (overrides?.vault?.mpc ?? config.mpcContractId) : (overrides?.relay?.mpc ?? config.mpcContractId);
       }
@@ -187,6 +188,7 @@ const basePlan = {
   rolesAddress: getAddress("0x5555555555555555555555555555555555555555"),
   delayAddress: getAddress("0x6666666666666666666666666666666666666666"),
   multiSendAddress,
+  multiSendCallOnlyAddress,
   safeDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "safe" },
   rolesDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "roles" },
   delayDeployment: { to: getAddress("0x7777777777777777777777777777777777777777"), value: "0", data: "0x" as const, chainId: 84532, description: "delay" },
@@ -216,7 +218,7 @@ describe("TreasuryService.plan", () => {
     expect(plan.vault.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.owner_id).toBe(plan.daoAccountId);
     expect(plan.relay.initArgs.delay_address).toBe(Buffer.from(basePlan.delayAddress.slice(2), "hex").toString("base64"));
-    expect(plan.relay.initArgs.multisend_address).toBe(Buffer.from(multiSendAddress.slice(2), "hex").toString("base64"));
+    expect(plan.relay.initArgs.multisend_address).toBe(Buffer.from(multiSendCallOnlyAddress.slice(2), "hex").toString("base64"));
     expect(plan.relay.initArgs.guard_public_key).toBe(guardKeyBase64);
     expect(plan.base.safeAddress).toBe(basePlan.safeAddress);
     expect(plan.vault.actions.map((action) => action.type)).toEqual([

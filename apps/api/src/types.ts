@@ -69,7 +69,7 @@ export interface GovernanceOperation {
   transaction: VaultTransaction;
   tx_digest: Bytes32;
   possibly_signed_at_block: number;
-  state: "PossiblySigned" | "Confirmed" | "Cancelled";
+  state: "PossiblySigned" | "Confirmed" | "Cancelled" | "Executed" | "Vetoed" | "Expired" | "Failed";
   signature: MpcSignature | null;
   signed_transaction: number[] | null;
   cancellation: CancellationAttempt | null;
@@ -97,6 +97,17 @@ export interface StatusReport {
   report_nonce: number;
   block_number: number;
 }
+export type RelayFinalStatus = "Executed" | "Vetoed" | "Expired" | "Failed";
+
+export interface RelayStatusReport {
+  client_id: string;
+  op_id: Bytes32;
+  final_status: RelayFinalStatus;
+  tx_hash: Bytes32;
+  report_nonce: number;
+  block_number: number;
+}
+
 
 export interface SignedPayload<T> {
   report?: T;

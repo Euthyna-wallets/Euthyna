@@ -1,7 +1,7 @@
 import { getPublicKeyAsync, verifyAsync } from "@noble/ed25519";
 import { describe, expect, it } from "vitest";
 import { bytesToHex, concatHex, hexToBytes, keccak256, stringToHex } from "viem";
-import { serializeStatusReport, serializeVisa } from "./canonical.js";
+import { serializeRelayStatusReport, serializeStatusReport, serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { Guard } from "./guard.js";
 import { EnvKmsSigner } from "./kms.js";
@@ -135,11 +135,11 @@ describe("Guard exact rules", () => {
     };
     if (!operation.signed_transaction) throw new Error("signed transaction missing");
     const txHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
-    const signed = await guard.relayStatusReport("acme", operation, txHash, 42n);
+    const signed = await guard.relayStatusReport("acme", operation, txHash, 42n, "Vetoed");
     if (!signed.report) throw new Error("relay report missing");
     const message = concatHex([
       stringToHex("mandateos:relay-status:v1"),
-      bytesToHex(serializeStatusReport(signed.report)),
+      bytesToHex(serializeRelayStatusReport(signed.report)),
     ]);
     expect(
       await verifyAsync(
@@ -148,6 +148,7 @@ describe("Guard exact rules", () => {
         await getPublicKeyAsync(privateKey),
       ),
     ).toBe(true);
+    expect(signed.report.final_status).toBe("Vetoed");
   });
 
 });

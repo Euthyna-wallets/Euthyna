@@ -469,6 +469,7 @@ model GovernanceOperation {
   nearExecutionTxHash   String?
   nearExecutionSignerId String?
   state                 String
+  finalStatus           String?
   target                String
   value                 String
   data                  String

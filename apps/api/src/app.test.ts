@@ -287,6 +287,13 @@ function testApp(options?: {
       mandateCalls.push({ organizationId, role: input.role });
       return {} as MandatePreview;
     },
+    zodiacProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Zodiac",
+      args: {},
+      deposit: "0",
+    }),
     budgetTokenStatus: async () => ({
       environment: "uat",
       tokenAccountId: "test-ft.testnet",
@@ -383,6 +390,13 @@ function testApp(options?: {
   } as unknown as AgentProvisioningService;
   const governance: GovernanceGateway = {
     recordRelayExecution: async () => ({ opId: `0x${"01".repeat(32)}`, state: "PossiblySigned" }),
+    unblockProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Unblock relay",
+      args: {},
+      deposit: "0",
+    }),
   };
   const app = createApp({
     near,

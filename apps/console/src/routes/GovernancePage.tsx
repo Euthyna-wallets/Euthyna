@@ -10,7 +10,7 @@ import {
   type SafeBatch,
   type SafeBatchSignature,
 } from "../safe.js";
-import { nearAccounts, signDaoVote } from "../wallets.js";
+import { nearAccounts, signDaoProposal, signDaoVote } from "../wallets.js";
 
 interface GovernanceOperation {
   opId: string;
@@ -29,6 +29,7 @@ interface Governance {
   proposals: Array<{ id: number; description?: string; kind?: unknown; status?: string; votes?: Record<string, string> }>;
   operations: GovernanceOperation[];
   daoAccountId: string | null;
+  relayActiveOperation: string | null;
   treasury: TreasuryView | null;
   delay: {
     address: string;
@@ -118,6 +119,29 @@ export function GovernancePage() {
     }
   }
 
+  async function proposeRelayUnblock(operation: GovernanceOperation) {
+    if (!signer) throw new Error("Connect a council NEAR account first");
+    setBusy(operation.opId);
+    setError(null);
+    try {
+      const proposal = await api<{
+        receiverId: string;
+        args: Record<string, unknown>;
+        deposit: string;
+      }>("/v1/console/governance/unblock-proposal", {
+        method: "POST",
+        body: JSON.stringify({ opId: operation.opId }),
+      });
+      const submitted = await signDaoProposal(signer, proposal);
+      setHashes((existing) => [...existing, submitted.transactionHash]);
+      await client.invalidateQueries({ queryKey: ["governance"] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="page">
       <header className="page-head">
@@ -140,6 +164,12 @@ export function GovernancePage() {
           </table>
         ) : <div className="state">No Delay information.</div>}
       </Card>
+          <div className="row">
+            <input placeholder="your NEAR account" value={signer} onChange={(event) => setSigner(event.target.value)} />
+            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSigner(accounts[0] ?? ""))}>
+              Use connected NEAR account
+            </button>
+          </div>
       <Card title="Governance operations">
         <PageState loading={query.isLoading} error={query.error} empty={query.data?.operations.length === 0}>
           <div className="stack">
@@ -180,6 +210,20 @@ export function GovernancePage() {
                       </button>
                     </div>
                   ) : null}
+                  {query.data?.relayActiveOperation?.toLowerCase() === operation.opId.toLowerCase()
+                    && ["Vetoed", "Expired", "Failed", "Executed"].includes(operation.state) ? (
+                    <div className="alert warning">
+                      <strong>Relay blocked by this terminal operation.</strong>
+                      <div>DAO fallback: propose <span className="mono">confirm_original</span>, then approve it with the council below.</div>
+                      <button
+                        className="ghost"
+                        disabled={!signer || busy === operation.opId}
+                        onClick={() => void proposeRelayUnblock(operation)}
+                      >
+                        Propose relay unblock
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -188,12 +232,6 @@ export function GovernancePage() {
       </Card>
       <Card title="DAO proposals">
         <PageState loading={query.isLoading} error={query.error} empty={query.data?.proposals.length === 0}>
-          <div className="row">
-            <input placeholder="your NEAR account" value={signer} onChange={(event) => setSigner(event.target.value)} />
-            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSigner(accounts[0] ?? ""))}>
-              Use connected NEAR account
-            </button>
-          </div>
           <table>
             <thead><tr><th>ID</th><th>Description</th><th>Status</th><th>Votes</th><th /></tr></thead>
             <tbody>

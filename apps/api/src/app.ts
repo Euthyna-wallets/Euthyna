@@ -164,6 +164,10 @@ const governanceExecutionSchema = z.object({
   nearTransactionHash: z.string().min(32).max(64),
   signerAccountId: nearAccountSchema,
 });
+const governanceUnblockSchema = z.object({
+  opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+});
+
 
 
 
@@ -544,6 +548,12 @@ export function createApp({
     const input = await parseJson(context, governanceExecutionSchema);
     return context.json(await governance.recordRelayExecution(consoleIdentity.organizationId, input));
   });
+  app.post("/v1/console/governance/unblock-proposal", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceUnblockSchema);
+    return context.json(await governance.unblockProposal(consoleIdentity.organizationId, input.opId));
+  });
+
 
   app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
@@ -663,6 +673,12 @@ export function createApp({
     });
     return context.json(preview);
   });
+  app.post("/v1/console/mandates/zodiac-proposal", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, mandateSchema);
+    return context.json(await mandates.zodiacProposal(consoleIdentity.organizationId, input));
+  });
+
   app.get("/v1/console/treasury/budget-token", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json(await mandates.budgetTokenStatus(consoleIdentity.organizationId));

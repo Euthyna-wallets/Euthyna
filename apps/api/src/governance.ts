@@ -19,6 +19,13 @@ export interface GovernanceGateway {
     organizationId: string,
     input: { proposalId: number; nearTransactionHash: string; signerAccountId: string },
   ): Promise<{ opId: string; state: string }>;
+  unblockProposal(organizationId: string, opId: string): Promise<{
+    receiverId: string;
+    methodName: string;
+    description: string;
+    args: Record<string, unknown>;
+    deposit: string;
+  }>;
 }
 
 export class GovernanceService implements GovernanceGateway {
@@ -91,5 +98,53 @@ export class GovernanceService implements GovernanceGateway {
       },
     });
     return { opId: stored.opId, state: stored.state };
+  }
+
+  async unblockProposal(organizationId: string, opId: string) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(opId)) {
+      throw new GovernanceError(400, "invalid_operation_id", "operation id must contain 32 bytes");
+    }
+    const operation = await this.prisma.governanceOperation.findUnique({
+      where: { organizationId_opId: { organizationId, opId } },
+      include: { treasury: true },
+    });
+    if (!operation) throw new GovernanceError(404, "governance_operation_missing", "governance operation not found");
+    if (!["Vetoed", "Expired", "Failed", "Executed"].includes(operation.state)) {
+      throw new GovernanceError(409, "operation_not_terminal", "governance operation is not terminal");
+    }
+    if (!operation.txHash) throw new GovernanceError(409, "queue_hash_missing", "queue transaction hash missing");
+    const active = await this.near.viewFunction<number[] | null>(
+      operation.relayAccountId,
+      "active_operation",
+    );
+    if (!active || Buffer.from(active).toString("hex") !== opId.slice(2).toLowerCase()) {
+      throw new GovernanceError(409, "relay_not_blocked", "relay is not blocked by this operation");
+    }
+    const opIdBytes = Array.from(Buffer.from(opId.slice(2), "hex"));
+    const proposal = {
+      description: `Release terminal relay operation ${opId}`,
+      kind: {
+        FunctionCall: {
+          receiver_id: operation.relayAccountId,
+          actions: [{
+            method_name: "confirm_original",
+            args: Buffer.from(JSON.stringify({
+              op_id: opIdBytes,
+              tx_hash: Array.from(Buffer.from(operation.txHash.slice(2), "hex")),
+              mpc_signature: null,
+            })).toString("base64"),
+            deposit: "0",
+            gas: "50000000000000",
+          }],
+        },
+      },
+    };
+    return {
+      receiverId: operation.treasury.daoAccountId,
+      methodName: "add_proposal",
+      description: proposal.description,
+      args: { proposal },
+      deposit: "100000000000000000000000",
+    };
   }
 }
