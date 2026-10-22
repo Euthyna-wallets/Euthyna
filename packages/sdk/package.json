@@ -1,0 +1,27 @@
+{
+  "name": "@mandateos/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepare": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "near-api-js": "^5.1.1",
+    "viem": "^2.30.6"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.3"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

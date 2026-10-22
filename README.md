@@ -82,6 +82,9 @@ The current repository contains:
 - `apps/api` agent payments: `POST /v1/operations/pay` issues a visa/escalation/refusal, then the leased `worker.ts` recovers missed MPC callbacks, broadcasts exact raw transactions, follows receipts, sends `report_status`, requests governed same-nonce cancellation and releases references only after terminal Vault state;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
 - `apps/console`: normal signing through NEAR Wallet Selector and MetaMask/Rabby; explicit UAT demo mode may generate test-only keys in localStorage and displays a warning banner;
+- `packages/sdk`: client-side agent key storage and `prepare → visa → authorize`, automatic authorization-hash registration, status polling and agent-authorized `cancel_nonce`;
+- `packages/mcp`: stdio MCP server exposing `pay`, `status` and `cancel` over the SDK;
+- `apps/demo-agent`: OpenAI-compatible LLM adapter wired to MCP, with nominal, changed-details, prompt-injection and direct-bypass scenarios;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
 - `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
 - [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
@@ -181,7 +184,8 @@ Current monorepo layout:
 MandateOS/
 ├── apps/
 │   ├── api/                   # Hono API plus leased crash-recoverable Base/NEAR worker
-│   └── console/               # React/Vite console: overview, agents, payments, escalations, onboarding
+│   ├── console/               # React/Vite console
+│   └── demo-agent/            # OpenAI-compatible LLM agent wired to MCP
 ├── config/
 │   └── clients/acme/          # Exact hackathon vendor registry
 ├── contracts/
@@ -193,7 +197,9 @@ MandateOS/
 │   └── res/
 ├── packages/
 │   ├── db/                    # Prisma schema and shared client
-│   └── deployer/              # viem Safe/Roles/Delay deployment
+│   ├── deployer/              # viem Safe/Roles/Delay deployment
+│   ├── sdk/                   # agent NEAR key, pay/status/cancel lifecycle
+│   └── mcp/                   # stdio pay/status/cancel tools
 ├── docs/
 │   ├── api.md
 │   ├── console/               # console screenshots
@@ -207,7 +213,7 @@ MandateOS/
 └── README.md
 ```
 
-Still-targeted packages are `agent-wallet`, `protocol`, `policy`, `sdk` and `cli`; the console remains roadmap work. Authentication lives in `apps/api` (Better Auth with Prisma). The API uses [Hono][hono]. [Prisma][prisma] defines the future PostgreSQL source of truth. MandateOS is independent and does not import or copy JOIN code.
+Additional protocol/policy packages remain roadmap work. Authentication lives in `apps/api` (Better Auth with Prisma). The API uses [Hono][hono], and [Prisma][prisma] is the PostgreSQL source of truth. MandateOS is independent and does not import or copy JOIN code.
 
 ## Getting started
 
@@ -258,6 +264,27 @@ The Base Sepolia script performs no transaction unless every required variable i
 ```bash
 pnpm --filter @mandateos/deployer deploy:base-sepolia
 ```
+
+The MCP server can be used by any MCP client:
+
+```bash
+pnpm --filter @mandateos/mcp start
+```
+
+The demo agent starts that stdio server as a child by default:
+
+```bash
+DEMO_SCENARIO=payment-ok pnpm --filter @mandateos/demo-agent start
+```
+
+`DEMO_SCENARIO` also accepts `bank-change`, `injection` and `bypass`. The bypass
+scenario calls Vault `authorize` directly with the supplied forged/old approval
+and succeeds only when the contract reverts.
+
+The AI-security segment runs four deterministic outcomes before the explorer
+walkthrough: approved payment, changed payment details → escalation, prompt
+injection → `prompt_injection_detected` with no visa, and direct/old-visa bypass
+→ Vault revert.
 
 ## Demo acceptance scenario
 
