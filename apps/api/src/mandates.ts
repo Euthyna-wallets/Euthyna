@@ -96,6 +96,7 @@ export interface MandatePreview {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
     funding: MandateProposal | null;
+    relayDerive: MandateProposal;
     zodiacRelay: MandateProposal | null;
   };
   warnings: string[];
@@ -306,6 +307,10 @@ export class MandateService implements MandateGateway {
       amount: input.budget,
       tokenId: this.budgetTokenAccountId,
     });
+    const relayDeriveDigest = stepDigest({
+      relayAccountId: treasury.relayAccountId,
+      method: "request_derived_public_key",
+    });
 
 
     const vaultSetRole: MandateProposal = {
@@ -392,6 +397,29 @@ export class MandateService implements MandateGateway {
       budget: input.budget,
       periodDays: input.periodDays,
     });
+    const relayDerive: MandateProposal = {
+      receiverId: treasury.daoAccountId,
+      methodName: "add_proposal",
+      description: `DAO proposal: derive relay 0xGOV [mandate:${relayDeriveDigest}:derive-relay]`,
+      args: {
+        proposal: {
+          description: `Derive relay 0xGOV [mandate:${relayDeriveDigest}:derive-relay]`,
+          kind: {
+            FunctionCall: {
+              receiver_id: treasury.relayAccountId,
+              actions: [{
+                method_name: "request_derived_public_key",
+                args: functionCallArgs({}),
+                gas: "60000000000000",
+                deposit: "0",
+              }],
+            },
+          },
+        },
+      },
+      deposit: "100000000000000000000000",
+    };
+
     const zodiacRelay: MandateProposal | null = resolvedAgentAddress
       ? {
           receiverId: treasury.daoAccountId,
@@ -449,6 +477,7 @@ export class MandateService implements MandateGateway {
       proposals: {
         vaultSetRole,
         vaultRegisterAgent,
+        relayDerive,
         funding:
           input.agent === undefined
             ? null

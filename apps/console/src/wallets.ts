@@ -8,7 +8,7 @@ import { baseSepolia, sepolia } from "viem/chains";
 
 import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
 import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet, selectDemoWalletScopeForAccounts } from "./lib/wallet-store.js";
-export const DAO_VOTE_GAS = "450000000000000";
+export const DAO_VOTE_GAS = "120000000000000";
 
 
 interface WalletAction {
@@ -386,6 +386,7 @@ export type DaoProposalRpc = {
   description: string;
   state: DaoProposalRpcState;
   rawStatus: string;
+  kind: unknown;
 };
 
 function proposalState(status: string): DaoProposalRpcState {
@@ -396,7 +397,7 @@ function proposalState(status: string): DaoProposalRpcState {
 }
 
 export async function readDaoProposalRpc(daoAccountId: string, proposalId: number): Promise<DaoProposalRpc> {
-  const proposal = await nearView<{ id: number; description: string; status: string }>(
+  const proposal = await nearView<{ id: number; description: string; status: string; kind: unknown }>(
     daoAccountId,
     "get_proposal",
     { id: proposalId },
@@ -406,6 +407,7 @@ export async function readDaoProposalRpc(daoAccountId: string, proposalId: numbe
     description: proposal.description,
     state: proposalState(proposal.status),
     rawStatus: proposal.status,
+    kind: proposal.kind,
   };
 }
 
@@ -414,7 +416,7 @@ export async function findDaoProposalsRpc(
   descriptions: string[],
 ): Promise<Record<string, DaoProposalRpc>> {
   const lastProposalId = await nearView<number>(daoAccountId, "get_last_proposal_id");
-  const proposals = await nearView<Array<{ id: number; description: string; status: string }>>(
+  const proposals = await nearView<Array<{ id: number; description: string; status: string; kind: unknown }>>(
     daoAccountId,
     "get_proposals",
     { from_index: Math.max(0, lastProposalId - 100), limit: 100 },
@@ -428,6 +430,7 @@ export async function findDaoProposalsRpc(
       description: proposal.description,
       state: proposalState(proposal.status),
       rawStatus: proposal.status,
+      kind: proposal.kind,
     };
   }
   return matches;

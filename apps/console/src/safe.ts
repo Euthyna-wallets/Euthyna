@@ -39,10 +39,12 @@ export interface SafeBatch {
   gasPrice: bigint;
   gasToken: Address;
   refundReceiver: Address;
+  owners?: Address[];
   safeTxHash: Hex;
 }
 
 const safeAbi = [
+  { type: "function", name: "getOwners", stateMutability: "view", inputs: [], outputs: [{ type: "address[]" }] },
   { type: "function", name: "nonce", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   {
     type: "function",
@@ -132,7 +134,10 @@ export function encodeMultiSendCall(calls: SafeBatchCall[]): Hex {
 
 async function buildSafeCalls(safe: Address, calls: SafeBatchCall[]): Promise<SafeBatch> {
   const client = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
-  const nonce = await client.readContract({ address: safe, abi: safeAbi, functionName: "nonce" });
+  const [nonce, owners] = await Promise.all([
+    client.readContract({ address: safe, abi: safeAbi, functionName: "nonce" }),
+    client.readContract({ address: safe, abi: safeAbi, functionName: "getOwners" }),
+  ]);
   const multiSend = canonicalMultiSendAddress(BASE_SEPOLIA_CHAIN_ID);
   const data = encodeMultiSendCall(calls);
   const fields = {
@@ -163,7 +168,7 @@ async function buildSafeCalls(safe: Address, calls: SafeBatchCall[]): Promise<Sa
       nonce,
     ],
   });
-  return { safe, multiSend, nonce, ...fields, safeTxHash };
+  return { safe, multiSend, nonce, owners: [...owners], ...fields, safeTxHash };
 }
 
 export async function buildSafeBatch(plan: TreasuryPlan): Promise<SafeBatch> {

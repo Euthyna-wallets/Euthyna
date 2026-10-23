@@ -28,6 +28,9 @@ vi.mock("../wallets.js", () => ({
   signDaoProposal: mocks.signDaoProposal,
   signDaoVote: mocks.signDaoVote,
 }));
+vi.mock("../lib/wallet-store.js", () => ({
+  demoWalletsEnabled: () => false,
+}));
 
 import { GovernancePage } from "./GovernancePage.js";
 

@@ -11,6 +11,7 @@ import {
   type SafeBatchSignature,
 } from "../safe.js";
 import { nearAccounts, signDaoProposal, signDaoVote } from "../wallets.js";
+import { demoWalletsEnabled } from "../lib/wallet-store.js";
 
 interface GovernanceOperation {
   opId: string;
@@ -79,12 +80,12 @@ export function GovernancePage() {
     return state;
   }
 
-  async function signVeto(operation: GovernanceOperation) {
+  async function signVeto(operation: GovernanceOperation, preferredOwner?: string) {
     setBusy(operation.opId);
     setError(null);
     try {
       const current = vetoes[operation.opId] ?? await prepareVeto(operation);
-      const signature = await signSafeBatch(current.batch);
+      const signature = await signSafeBatch(current.batch, preferredOwner);
       setVetoes((all) => ({
         ...all,
         [operation.opId]: {
@@ -109,7 +110,11 @@ export function GovernancePage() {
     setBusy(operation.opId);
     setError(null);
     try {
-      const hash = await executeSafeBatch(current.batch, current.signatures);
+      const hash = await executeSafeBatch(
+        current.batch,
+        current.signatures,
+        demoWalletsEnabled() ? current.batch.owners?.[0] : undefined,
+      );
       setHashes((existing) => [...existing, hash]);
       await client.invalidateQueries({ queryKey: ["governance"] });
     } catch (cause) {
@@ -197,9 +202,30 @@ export function GovernancePage() {
                   {operation.lastError ? <div className="alert error">{operation.lastError}</div> : null}
                   {vetoable ? (
                     <div className="row wrap">
-                      <button className="ghost" disabled={busy === operation.opId} onClick={() => void signVeto(operation)}>
-                        Veto — sign with council wallet
-                      </button>
+                      {demoWalletsEnabled() && !veto ? (
+                        <button
+                          className="ghost"
+                          disabled={busy === operation.opId}
+                          onClick={() => void prepareVeto(operation)}
+                        >
+                          Prepare veto signatures
+                        </button>
+                      ) : !demoWalletsEnabled() ? (
+                        <button className="ghost" disabled={busy === operation.opId} onClick={() => void signVeto(operation)}>
+                          Veto — sign with council wallet
+                        </button>
+                      ) : veto?.batch.owners?.filter((owner) =>
+                        !veto.signatures.some((signature) => signature.owner.toLowerCase() === owner.toLowerCase())
+                      ).map((owner) => (
+                        <button
+                          key={owner}
+                          className="ghost"
+                          disabled={busy === operation.opId}
+                          onClick={() => void signVeto(operation, owner)}
+                        >
+                          Sign veto as {short(owner)}
+                        </button>
+                      ))}
                       <span>{veto?.signatures.length ?? 0}/{threshold} Safe signatures</span>
                       <button
                         className="primary"

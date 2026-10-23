@@ -621,13 +621,27 @@ allowed `mandateos agent init` command):
 | Roles deployment | `0xd324ff1a8fc0482adad37d0f92da39bb49ede09510bf74477ae068a3d59b441c` |
 | Delay deployment | `0x423969f45ea93d1a69273676172a73ea24abec5f78ff41a0752c4e2a45ef3e0f` |
 | Safe 2/2 module batch | `0x5a3956eb7ca7f17fd81e8969dc084a80d61aa8a00adc4fef79ff0f0d5a858020` |
+| First Zodiac DAO final vote | [`EvN2mi…`](https://testnet.nearblocks.io/txns/EvN2miZPj7prNpmMg79uVvRxUcjMiuHZZTbsg9Nzc9FN) |
+| First 0xGOV Delay queue | `0x8e2108ecb7ee2d7ced53076083b71f58dcd1437a67b7f092977c8e9ef9df5a1c` |
+| First Delay execution | `0x5ce72b873d15b4e00664d6d67b212e26c340468c8537061f31ee9f5e41f7a2bf` |
+| Veto-test DAO final vote | [`3eQWu2…`](https://testnet.nearblocks.io/txns/3eQWu2cP1Vu5xxMuKcgHUAHNaDieBLM6kJscWdFaFiF7) |
+| Veto-test 0xGOV Delay queue | `0xc31b1dd1216591adcdffb94bffbdbb8e16465fab6044892ed7c77475efa3afdb` |
 
 Both members confirmed the direct Vault/relay RPC attestation. On-chain reads
 confirmed Roles and Delay enabled on the Safe and 0xGOV enabled on Delay. The
-treasury registration completed. The mandate execution/veto phase remains
-unfinished: the official NEAR testnet RPC throttled and then stalled the first
-browser-signed `set_role` proposal before broadcast. No alternate endpoint or
-IP rotation was used, and no transaction hash is claimed for that proposal.
+treasury registration completed. With the user's authorization, the UAT moved
+to the public FastNear testnet endpoint listed by NEAR's provider documentation.
+The first Zodiac operation reached `Executed`; the worker verified
+`AssignRoles`, `ScopeTarget`, `ScopeFunction`, `SetAllowance`, balance
+`6,000,000`, and period `2,592,000`.
+
+The second operation reached Delay queue nonce `1` and the worker was paused
+before execution. The 2/2 veto could not be completed: the browser's legacy
+anonymous-key migration had overwritten the private key corresponding to Safe
+owner `0x35150E…a0dA1e`. The migration now refuses to overwrite an existing
+profile scope, with regression coverage, but an EVM private key cannot be
+recovered from its public address or old signatures. No veto hash or successful
+post-veto proposal is claimed for this treasury.
 
 | Real UAT transition | Transaction |
 |---|---|
@@ -657,7 +671,9 @@ Measured execution gas:
 
 The relay action receives `60 Tgas`: above measured burn and enough to reserve
 its `15 Tgas` MPC receipt plus `20 Tgas` callback. Every browser
-`act_proposal` attaches `450 Tgas`, below testnet protocol version 88's
+`act_proposal` attaches `120 Tgas`: more than six times the measured 19.662
+Tgas worst case while avoiding an unnecessary 0.45 NEAR prepaid-balance
+requirement. It remains below testnet protocol version 88's
 `max_total_prepaid_gas = 1,000 Tgas`
 ([nearcore gas architecture](https://github.com/near/nearcore/blob/master/docs/architecture/how/gas.md),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs),

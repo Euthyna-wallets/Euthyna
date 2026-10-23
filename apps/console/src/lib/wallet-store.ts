@@ -18,7 +18,7 @@ export function setDemoWalletScope(scope: string | null): void {
     const scoped = scopedKey(base);
     const anonymousKey = `${base}.anonymous`;
     const anonymous = localStorage.getItem(anonymousKey);
-    if (anonymous !== null) {
+    if (anonymous !== null && localStorage.getItem(scoped) === null) {
       localStorage.setItem(scoped, anonymous);
       localStorage.removeItem(anonymousKey);
       continue;
@@ -65,6 +65,23 @@ export function selectDemoWalletScopeForEvmAddress(evmAddress: string): boolean 
   }
   return false;
 }
+export function demoWalletProfiles(): Array<{ scope: string; evmAddress: string; nearAccountId: string | null }> {
+  const profiles: Array<{ scope: string; evmAddress: string; nearAccountId: string | null }> = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(`${EVM_KEY}.`)) continue;
+    const evmKey = localStorage.getItem(key) as Hex | null;
+    if (!evmKey) continue;
+    const scope = key.slice(EVM_KEY.length + 1);
+    profiles.push({
+      scope,
+      evmAddress: privateKeyToAccount(evmKey).address,
+      nearAccountId: localStorage.getItem(`${NEAR_ACCOUNT}.${scope}`),
+    });
+  }
+  return profiles;
+}
+
 
 
 function requireDemoWallets(): void {

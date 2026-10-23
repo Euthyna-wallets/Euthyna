@@ -52,6 +52,10 @@ describe("browser-generated wallet gate", () => {
     setDemoWalletScope("user-two");
     expect(localStorage.getItem("mandateos.dev.near.secretKey.user-two")).toBe("signup-near-key");
     expect(localStorage.getItem("mandateos.dev.near.secretKey.anonymous")).toBeNull();
+    localStorage.setItem("mandateos.dev.near.secretKey.anonymous", "unclaimed-third-profile");
+    setDemoWalletScope("user-two");
+    expect(localStorage.getItem("mandateos.dev.near.secretKey.user-two")).toBe("signup-near-key");
+    expect(localStorage.getItem("mandateos.dev.near.secretKey.anonymous")).toBe("unclaimed-third-profile");
   });
 
   it("selects the scoped demo keypair matching declared public accounts", () => {

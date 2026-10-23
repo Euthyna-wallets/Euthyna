@@ -43,7 +43,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
     }]);
     const getTransaction = vi.fn(async () => ({ to: delay, input: calldata }));
     const getTransactionReceipt = vi.fn(async () => ({ status: "success", blockNumber: 20n, logs: [] }));
-    const base = gateway({ getLogs, getTransaction, getTransactionReceipt });
+    const base = gateway({ getBlockNumber: async () => 20n, getLogs, getTransaction, getTransactionReceipt });
 
     await expect(base.findExecution({
       safe,
@@ -78,7 +78,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
       blockNumber: 20n,
     }]);
     const readContract = vi.fn(async () => 0n);
-    const base = gateway({ getLogs, readContract });
+    const base = gateway({ getBlockNumber: async () => 20n, getLogs, readContract });
 
     await expect(base.findVeto(delay, 0n, 10n)).resolves.toEqual({
       transactionHash: vetoHash,

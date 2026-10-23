@@ -136,6 +136,7 @@ export type MandatePreview = {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
     funding: MandateProposal | null;
+    relayDerive: MandateProposal;
     zodiacRelay: MandateProposal | null;
   };
   warnings: string[];

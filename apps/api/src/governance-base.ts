@@ -205,68 +205,78 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     operation: 0 | 1;
     fromBlock: bigint;
   }): Promise<DelayExecutionEvidence | null> {
-    const events = await this.publicClient.getLogs({
-      address: input.safe,
-      event: executionFromModuleSuccessEvent,
-      args: { module: input.delay },
-      fromBlock: input.fromBlock,
-      toBlock: "latest",
-    });
-    for (const event of events) {
-      if (event.transactionHash === null || event.blockNumber === null) continue;
-      const transaction = await this.publicClient.getTransaction({ hash: event.transactionHash });
-      if (transaction.to === null || getAddress(transaction.to) !== input.delay) continue;
-      try {
-        const decoded = decodeFunctionData({ abi: delayAbi, data: transaction.input });
-        if (
-          decoded.functionName !== "executeNextTx" ||
-          getAddress(decoded.args[0]) !== input.to ||
-          decoded.args[1] !== input.value ||
-          decoded.args[2].toLowerCase() !== input.data.toLowerCase() ||
-          decoded.args[3] !== input.operation
-        ) {
+    const latest = await this.publicClient.getBlockNumber();
+    for (let fromBlock = input.fromBlock; fromBlock <= latest;) {
+      const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
+      const events = await this.publicClient.getLogs({
+        address: input.safe,
+        event: executionFromModuleSuccessEvent,
+        args: { module: input.delay },
+        fromBlock,
+        toBlock,
+      });
+      for (const event of events) {
+        if (event.transactionHash === null || event.blockNumber === null) continue;
+        const transaction = await this.publicClient.getTransaction({ hash: event.transactionHash });
+        if (transaction.to === null || getAddress(transaction.to) !== input.delay) continue;
+        try {
+          const decoded = decodeFunctionData({ abi: delayAbi, data: transaction.input });
+          if (
+            decoded.functionName !== "executeNextTx" ||
+            getAddress(decoded.args[0]) !== input.to ||
+            decoded.args[1] !== input.value ||
+            decoded.args[2].toLowerCase() !== input.data.toLowerCase() ||
+            decoded.args[3] !== input.operation
+          ) {
+            continue;
+          }
+        } catch {
           continue;
         }
-      } catch {
-        continue;
+        const receipt = await this.receipt(event.transactionHash);
+        if (receipt?.status === "success") {
+          return { transactionHash: event.transactionHash, blockNumber: event.blockNumber, receipt };
+        }
       }
-      const receipt = await this.receipt(event.transactionHash);
-      if (receipt?.status === "success") {
-        return { transactionHash: event.transactionHash, blockNumber: event.blockNumber, receipt };
-      }
+      fromBlock = toBlock + 1n;
     }
     return null;
   }
 
-  async findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<DelayVetoEvidence | null> {
-    const events = await this.publicClient.getLogs({
-      address: delay,
-      event: txNonceSetEvent,
-      fromBlock,
-      toBlock: "latest",
-    });
-    for (const event of events) {
-      if (
-        event.args.nonce === undefined ||
-        event.args.nonce <= entryNonce ||
-        event.transactionHash === null ||
-        event.blockNumber === null ||
-        event.blockNumber === 0n
-      ) {
-        continue;
-      }
-      const priorNonce = await this.publicClient.readContract({
+  async findVeto(delay: Address, entryNonce: bigint, initialBlock: bigint): Promise<DelayVetoEvidence | null> {
+    const latest = await this.publicClient.getBlockNumber();
+    for (let fromBlock = initialBlock; fromBlock <= latest;) {
+      const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
+      const events = await this.publicClient.getLogs({
         address: delay,
-        abi: delayAbi,
-        functionName: "txNonce",
-        blockNumber: event.blockNumber - 1n,
+        event: txNonceSetEvent,
+        fromBlock,
+        toBlock,
       });
-      if (priorNonce <= entryNonce) {
-        return {
-          transactionHash: event.transactionHash,
-          blockNumber: event.blockNumber,
-        };
+      for (const event of events) {
+        if (
+          event.args.nonce === undefined ||
+          event.args.nonce <= entryNonce ||
+          event.transactionHash === null ||
+          event.blockNumber === null ||
+          event.blockNumber === 0n
+        ) {
+          continue;
+        }
+        const priorNonce = await this.publicClient.readContract({
+          address: delay,
+          abi: delayAbi,
+          functionName: "txNonce",
+          blockNumber: event.blockNumber - 1n,
+        });
+        if (priorNonce <= entryNonce) {
+          return {
+            transactionHash: event.transactionHash,
+            blockNumber: event.blockNumber,
+          };
+        }
       }
+      fromBlock = toBlock + 1n;
     }
     return null;
   }

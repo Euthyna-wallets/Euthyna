@@ -96,10 +96,15 @@ describe("DAO proposal tracking", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(rpcResult(42))
       .mockResolvedValueOnce(rpcResult([
-        { id: 11, description: "step", status: "Approved" },
-        { id: 41, description: "step", status: "Expired" },
+        { id: 11, description: "step", status: "Approved", kind: { Vote: null } },
+        { id: 41, description: "step", status: "Expired", kind: { Vote: null } },
       ]))
-      .mockResolvedValueOnce(rpcResult({ id: 43, description: "failed", status: "Rejected" }));
+      .mockResolvedValueOnce(rpcResult({
+        id: 43,
+        description: "failed",
+        status: "Rejected",
+        kind: { Vote: null },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(findDaoProposalRpc("dao.testnet", "step")).resolves.toEqual({
@@ -107,9 +112,10 @@ describe("DAO proposal tracking", () => {
       description: "step",
       state: "Expired",
       rawStatus: "Expired",
+      kind: { Vote: null },
     });
     await expect(readDaoProposalRpc("dao.testnet", 43)).resolves.toMatchObject({ state: "Failed" });
-    expect(DAO_VOTE_GAS).toBe("450000000000000");
+    expect(DAO_VOTE_GAS).toBe("120000000000000");
   });
 });
 

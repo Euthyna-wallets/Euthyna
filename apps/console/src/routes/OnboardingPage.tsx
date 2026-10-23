@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
-import { demoWalletsEnabled, generatedNearPublicKey, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { demoWalletsEnabled, generatedNearPublicKey, selectDemoWalletScopeForAccounts, selectDemoWalletScopeForEvmAddress, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import { formatToken } from "../lib/format.js";
 import {
   buildSafeBatch,
@@ -329,6 +329,34 @@ export function OnboardingPage() {
         ) : null}
 
         {treasury ? <Summary treasury={treasury} /> : null}
+        {treasury && demoWalletsEnabled() ? (
+          <section className="card">
+            <h2>Base governance gas (UAT)</h2>
+            <button
+              className="ghost"
+              disabled={Boolean(busy)}
+              onClick={() => void run("fund-gov", async () => {
+                const founder = members.find((member) => member.role === "owner" && member.evmAddress);
+                if (
+                  !founder?.evmAddress ||
+                  !selectDemoWalletScopeForEvmAddress(founder.evmAddress)
+                ) {
+                  throw new Error("Founding council demo wallet is unavailable");
+                }
+                const hash = await sendEvmTransaction({
+                  to: treasury.govAddress,
+                  value: "2000000000000000",
+                  data: "0x",
+                });
+                await waitForEvmTransaction(hash);
+                setNotice(`0xGOV funded: ${hash}`);
+              })}
+            >
+              Fund 0xGOV with 0.002 ETH
+            </button>
+          </section>
+        ) : null}
+
 
         {treasury ? (
           <section id="agents" className="card">
@@ -765,6 +793,39 @@ function MemberWallets(props: {
   onError: (message: string) => void;
 }) {
   const self = props.members.find((member) => member.userId === props.currentUserId);
+  const [provisioningCouncil, setProvisioningCouncil] = useState(false);
+
+  async function provisionDemoCouncilAccounts() {
+    setProvisioningCouncil(true);
+    try {
+      for (const member of props.members) {
+        if (
+          member.userId === props.currentUserId ||
+          !member.walletProofVerifiedAt ||
+          !member.nearAccountId ||
+          !member.evmAddress
+        ) {
+          continue;
+        }
+        if (!selectDemoWalletScopeForAccounts(member.nearAccountId, member.evmAddress)) {
+          throw new Error(`No generated demo wallet matches ${member.name ?? member.id}`);
+        }
+        await api("/v1/console/treasury/sponsor-founder-wallet", {
+          method: "POST",
+          body: JSON.stringify({
+            nearAccountId: member.nearAccountId,
+            nearPublicKey: generatedNearPublicKey(),
+          }),
+        });
+      }
+    } catch (cause) {
+      props.onError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDemoWalletScope(props.currentUserId);
+      setProvisioningCouncil(false);
+    }
+  }
+
 
   return (
     <div className="stack">
@@ -788,6 +849,15 @@ function MemberWallets(props: {
           ))}
         </tbody>
       </table>
+      {demoWalletsEnabled() ? (
+        <button
+          className="ghost"
+          disabled={provisioningCouncil}
+          onClick={() => void provisionDemoCouncilAccounts()}
+        >
+          {provisioningCouncil ? "Provisioning council accounts…" : "Provision generated council NEAR accounts (UAT)"}
+        </button>
+      ) : null}
       {self ? (
         <>
           <h3>{self.walletProofVerifiedAt ? "Replace my wallet proof" : "Prove my wallets"}</h3>
@@ -1208,6 +1278,27 @@ function TreasuryWizard(props: {
               Bridge 0.02 ETH Sepolia → Base Sepolia
             </button>
             <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("fund-gov", async () => {
+                if (
+                  demoWalletsEnabled() &&
+                  !selectDemoWalletScopeForEvmAddress(props.plan.council[0]!.evmAddress)
+                ) {
+                  throw new Error("Founding council demo wallet is unavailable");
+                }
+                const hash = await sendEvmTransaction({
+                  to: props.plan.govAddress,
+                  value: "2000000000000000",
+                  data: "0x",
+                });
+                await waitForEvmTransaction(hash);
+                setTransactionHashes((current) => [...current, hash]);
+              })}
+            >
+              Fund 0xGOV with 0.002 ETH
+            </button>
+            <button
               className="primary"
               disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
               onClick={() => props.run("base-deploy", deployBase)}
@@ -1371,6 +1462,7 @@ function orderedMandateProposals(preview: MandatePreview): MandateProposal[] {
     preview.proposals.vaultSetRole,
     preview.proposals.vaultRegisterAgent,
     preview.proposals.funding,
+    preview.proposals.relayDerive,
     preview.proposals.zodiacRelay,
   ].filter((proposal): proposal is MandateProposal => proposal !== null);
 }
@@ -1657,7 +1749,7 @@ export function MandatePanel(props: {
                                 signerId,
                                 props.treasury.daoAccountId,
                                 run.id,
-                                onChainProposalKind(proposal),
+                                run.kind,
                               );
                               const refreshed = await readDaoProposalRpc(props.treasury.daoAccountId, run.id);
                               if (
@@ -1719,6 +1811,41 @@ export function MandatePanel(props: {
                       }}
                     >
                       {action}
+                    </button>
+                  ) : null}
+                  {state === "Executed" &&
+                  demoWalletsEnabled() &&
+                  props.preview?.proposals.zodiacRelay === proposal ? (
+                    <button
+                      className="ghost"
+                      disabled={!signerId || busy}
+                      onClick={() => {
+                        void (async () => {
+                          setBusy(true);
+                          try {
+                            const vetoProposal = await api<MandateProposal>("/v1/console/mandates/zodiac-proposal", {
+                              method: "POST",
+                              body: JSON.stringify(mandateInput()),
+                            });
+                            const submitted = await signDaoProposal(signerId, vetoProposal);
+                            const refreshed = await readDaoProposalRpc(
+                              props.treasury.daoAccountId,
+                              submitted.proposalId,
+                            );
+                            setProposalRuns((current) => ({
+                              ...current,
+                              [description]: { ...refreshed, transactionHash: submitted.transactionHash },
+                            }));
+                            setProposalHashes((current) => [...current, submitted.transactionHash]);
+                          } catch (cause) {
+                            props.onError(cause instanceof Error ? cause.message : String(cause));
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Propose again for veto test (UAT)
                     </button>
                   ) : null}
                 </div>
