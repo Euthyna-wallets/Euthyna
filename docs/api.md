@@ -11,11 +11,13 @@ agent's NEAR function-call private key: the console registers only its public ke
 | Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/operations/*` |
 
 Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
-15 minutes and 3 requests per normalized email per hour. Agent API keys allow
-60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
-requests/minute per organization. Registration counters are in-memory per API
-instance; wallet and agent-account sponsorship share one durable PostgreSQL
-daily cap.
+15 minutes and 3 requests per normalized email per hour by default. The explicit
+hackathon setting `UAT_DEMO_WALLETS_ENABLED=1` disables only these in-memory
+registration limits so interrupted local WebAuthn ceremonies can be retried;
+sponsorship limits remain enforced. Agent API keys allow 60 requests/minute; the
+HTTP layer adds 120 requests/minute per agent and 600 requests/minute per
+organization. Registration counters are in-memory per API instance; wallet and
+agent-account sponsorship share one durable PostgreSQL daily cap.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console

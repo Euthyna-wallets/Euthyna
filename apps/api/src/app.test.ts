@@ -222,6 +222,7 @@ function testApp(options?: {
   consoleRole?: "admin" | "member";
   treasuryStatus?: string;
   sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
+  registrationRateLimitEnabled?: boolean;
 }) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
@@ -415,6 +416,7 @@ function testApp(options?: {
     nearParentAccount: "mandateos.testnet",
     nearSponsorDailyWalletLimit: 2,
     nearSponsorWalletAmountYocto: "500000000000000000000000",
+    registrationRateLimitEnabled: options?.registrationRateLimitEnabled ?? true,
   });
   return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
 }
@@ -667,6 +669,20 @@ describe("passwordless registration", () => {
     expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
   });
 
+
+  it("disables registration throttling only for explicit UAT demo mode", async () => {
+    const { app } = testApp({ registrationRateLimitEnabled: false });
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.20" }),
+        body: JSON.stringify({ email: "uat-demo@example.test", name: "UAT User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200]);
+  });
   it("returns 404 for password sign-up and sign-in routes", async () => {
     const { app } = testApp();
     for (const path of ["/api/auth/sign-up/email", "/api/auth/sign-in/email"]) {
@@ -813,14 +829,14 @@ describe("treasury onboarding", () => {
       method: "POST",
       headers: consoleHeaders({ cookie: "session-member" }),
       body: JSON.stringify({
-        memberId: member.memberId,
+        memberId: "better-auth-member-id",
         nearAccountId: "alice.testnet",
         evmAddress: "0x1111111111111111111111111111111111111111",
       }),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      memberId: member.memberId,
+      memberId: "better-auth-member-id",
       nearAccountId: "alice.testnet",
       evmAddress: "0x1111111111111111111111111111111111111111",
       message: "proof",

@@ -189,10 +189,11 @@ export class WalletProofService implements WalletProofGateway {
       const accessKeys = await this.near.getAccessKeys(challenge.nearAccountId);
       nearKeyAuthorized = hasFullAccessKey(accessKeys.keys, input.nearPublicKey);
     } catch {
+      // A missing deterministic UAT account may be reported as an RPC error.
+    }
+    if (!nearKeyAuthorized && this.allowDeterministicUnfundedWallets) {
       const suffix = createHash("sha256").update(input.nearPublicKey).digest("hex").slice(0, 12);
-      nearKeyAuthorized =
-        this.allowDeterministicUnfundedWallets &&
-        challenge.nearAccountId === `w-${suffix}.${this.recipient}`;
+      nearKeyAuthorized = challenge.nearAccountId === `w-${suffix}.${this.recipient}`;
     }
     if (!nearKeyAuthorized) {
       throw new WalletProofError(

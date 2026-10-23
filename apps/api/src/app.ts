@@ -172,7 +172,7 @@ const governanceUnblockSchema = z.object({
 
 
 const walletProofChallengeSchema = z.object({
-  memberId: z.string().uuid(),
+  memberId: z.string().min(1).max(128),
   nearAccountId: nearAccountSchema,
   evmAddress: evmAddressSchema,
 });
@@ -226,6 +226,7 @@ export interface AppDependencies {
   nearParentAccount: string;
   nearSponsorDailyWalletLimit: number;
   nearSponsorWalletAmountYocto: string;
+  registrationRateLimitEnabled: boolean;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -342,6 +343,7 @@ export function createApp({
   nearParentAccount,
   nearSponsorDailyWalletLimit,
   nearSponsorWalletAmountYocto,
+  registrationRateLimitEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -381,8 +383,11 @@ export function createApp({
     }));
     const ip = registrationIp(context);
     if (
-      !registrationIpLimiter.allow(`register:ip:${ip}`) ||
-      !registrationEmailLimiter.allow(`register:email:${input.email}`)
+      registrationRateLimitEnabled &&
+      (
+        !registrationIpLimiter.allow(`register:ip:${ip}`) ||
+        !registrationEmailLimiter.allow(`register:email:${input.email}`)
+      )
     ) {
       return context.json({ error: "registration_rate_limited" }, 429);
     }

@@ -101,6 +101,7 @@ const app = createApp({
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
   nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
+  registrationRateLimitEnabled: !env.UAT_DEMO_WALLETS_ENABLED,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
