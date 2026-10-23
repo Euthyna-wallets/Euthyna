@@ -167,6 +167,13 @@ const governanceExecutionSchema = z.object({
 const governanceUnblockSchema = z.object({
   opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
 });
+const nearRpcProxySchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number(), z.null()]),
+  method: z.enum(["query", "block", "send_tx", "broadcast_tx_commit", "tx", "EXPERIMENTAL_tx_status"]),
+  params: z.unknown(),
+});
+
 
 
 
@@ -374,6 +381,23 @@ export function createApp({
     }
     return auth.handler(context.req.raw);
   });
+  app.post("/v1/console/near-rpc", requireConsole(auth, consoleLimiter), async (context) => {
+    const input = await parseJson(context, nearRpcProxySchema);
+    try {
+      const result = await near.proxyRpc(input.method, input.params);
+      return context.json({ jsonrpc: "2.0" as const, id: input.id, result });
+    } catch (error) {
+      return context.json({
+        jsonrpc: "2.0" as const,
+        id: input.id,
+        error: {
+          code: -32_000,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  });
+
 
   app.post("/api/register/passkey-start", async (context) => {
     const input = await parseJsonPublic(context, z.object({

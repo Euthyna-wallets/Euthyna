@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
-import { demoWalletsEnabled, generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { demoWalletsEnabled, generatedNearPublicKey, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import { formatToken } from "../lib/format.js";
 import {
   buildSafeBatch,
@@ -12,6 +12,7 @@ import {
 } from "../safe.js";
 import { authClient } from "../auth.js";
 import {
+  bridgeSepoliaEthToBase,
   createDao,
   connectNearWallet,
   disableFactoryAutoUpdate,
@@ -22,6 +23,7 @@ import {
   readAgentAccessKeyRpc,
   readDaoPolicyRpc,
   readDaoProposalRpc,
+  readBaseDeploymentRpc,
   readNearDeploymentRpc,
   sendEvmTransaction,
   signDaoProposal,
@@ -107,6 +109,10 @@ export function OnboardingPage() {
   }
 
   useEffect(() => {
+    setDemoWalletScope(session.data?.user.id ?? null);
+  }, [session.data?.user.id]);
+
+  useEffect(() => {
     if (!signedIn) {
       setPasskeyReady(null);
       return;
@@ -165,7 +171,7 @@ export function OnboardingPage() {
       />
     );
   }
-  if (claimMemberId && !activeOrganization) {
+  if (claimMemberId) {
     return (
       <WalletProofPanel
         memberId={claimMemberId}
@@ -195,7 +201,9 @@ export function OnboardingPage() {
           className="ghost"
           disabled={Boolean(busy)}
           onClick={() => void run("passkey", async () => {
-            const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+            const result = await authClient.passkey.addPasskey({
+              name: `MandateOS ${session.data?.user.email ?? "console"}`,
+            });
             if (result.error) throw new Error(result.error.message ?? "Could not add passkey");
             setNotice("Passkey added.");
           })}
@@ -388,7 +396,7 @@ function PasskeyEnrollment(props: { email: string; onComplete: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+      const result = await authClient.passkey.addPasskey({ name: `MandateOS ${props.email}` });
       if (result.error) throw new Error(result.error.message ?? "Could not create passkey");
       props.onComplete();
     } catch (cause) {
@@ -461,7 +469,7 @@ export function SignIn() {
       if (!payload.context) throw new Error("Registration context missing");
       if (demoWalletsEnabled() && payload.nearAccountId) setGeneratedNearAccountId(payload.nearAccountId);
       const passkey = await authClient.passkey.addPasskey({
-        name: "MandateOS console",
+        name: `${name} — ${email}`,
         context: payload.context,
         createSession: true,
       });
@@ -813,6 +821,7 @@ function TreasuryWizard(props: {
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
   const [baseDeploymentHashes, setBaseDeploymentHashes] = useState<string[]>([]);
+  const [baseDeploymentObserved, setBaseDeploymentObserved] = useState(false);
   const [nearAttestation, setNearAttestation] = useState<NearDeploymentRpcAttestation | null>(null);
   const [deploymentConfirmations, setDeploymentConfirmations] = useState<{
     digest: string;
@@ -885,6 +894,10 @@ function TreasuryWizard(props: {
     setNearAttestation(null);
     setDeploymentConfirmations(null);
     setBaseDeploymentHashes([]);
+    setBaseDeploymentObserved(false);
+    void readBaseDeploymentRpc(props.plan)
+      .then(setBaseDeploymentObserved)
+      .catch((cause: unknown) => props.onError(String(cause)));
   }, [props.plan.daoAccountId]);
 
   async function deployBase() {
@@ -900,10 +913,10 @@ function TreasuryWizard(props: {
     }
   }
 
-  async function collectSafeSignature() {
+  async function collectSafeSignature(owner?: string) {
     const batch = safeBatch ?? (await buildSafeBatch(props.plan));
     setSafeBatch(batch);
-    const signature = await signSafeBatch(batch);
+    const signature = await signSafeBatch(batch, owner);
     setSignatures((current) => {
       if (current.some((item) => item.owner.toLowerCase() === signature.owner.toLowerCase())) {
         throw new Error(`${signature.owner} already signed`);
@@ -914,12 +927,16 @@ function TreasuryWizard(props: {
 
   async function executeBatch() {
     if (!safeBatch) throw new Error("Prepare the Safe batch first");
-    const hash = await executeSafeBatch(safeBatch, signatures);
+    const hash = await executeSafeBatch(
+      safeBatch,
+      signatures,
+      demoWalletsEnabled() ? props.plan.council[0]!.evmAddress : undefined,
+    );
     await waitForEvmTransaction(hash);
     setTransactionHashes((current) => [...current, hash]);
   }
 
-  const baseDeployed = baseDeploymentHashes.length >= 3;
+  const baseDeployed = baseDeploymentObserved || baseDeploymentHashes.length >= 3;
   const daoDeposit = BigInt(props.plan.daoCreate.depositYocto);
   const vaultDeposit = transferDeposit(props.plan.vault.actions);
   const relayDeposit = transferDeposit(props.plan.relay.actions);
@@ -1181,6 +1198,16 @@ function TreasuryWizard(props: {
           </p>
           <div className="row wrap">
             <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("base-bridge", async () => {
+                const hash = await bridgeSepoliaEthToBase(20_000_000_000_000_000n);
+                setTransactionHashes((current) => [...current, hash]);
+              })}
+            >
+              Bridge 0.02 ETH Sepolia → Base Sepolia
+            </button>
+            <button
               className="primary"
               disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
               onClick={() => props.run("base-deploy", deployBase)}
@@ -1190,17 +1217,31 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy) || !baseDeployed}
-              onClick={() => props.run("safe-prepare", async () => { setSafeBatch(await buildSafeBatch(props.plan)); })}
+              onClick={() => props.run("safe-prepare", async () => {
+                setSafeBatch(await buildSafeBatch(props.plan));
+                setSignatures([]);
+              })}
             >
               Prepare Safe batch
             </button>
-            <button
-              className="ghost"
-              disabled={Boolean(props.busy) || !baseDeployed}
-              onClick={() => props.run("safe-sign", collectSafeSignature)}
-            >
-              Sign as owner ({signatures.length}/{props.plan.threshold})
-            </button>
+            {demoWalletsEnabled() ? props.plan.council.map((member) => (
+              <button
+                key={member.evmAddress}
+                className="ghost"
+                disabled={Boolean(props.busy) || !baseDeployed}
+                onClick={() => props.run(`safe-sign-${member.memberId}`, () => collectSafeSignature(member.evmAddress))}
+              >
+                Sign as {short(member.evmAddress)} ({signatures.length}/{props.plan.threshold})
+              </button>
+            )) : (
+              <button
+                className="ghost"
+                disabled={Boolean(props.busy) || !baseDeployed}
+                onClick={() => props.run("safe-sign", () => collectSafeSignature())}
+              >
+                Sign as owner ({signatures.length}/{props.plan.threshold})
+              </button>
+            )}
             <button
               className="ghost"
               disabled={Boolean(props.busy) || signatures.length < props.plan.threshold}
@@ -1379,9 +1420,6 @@ export function MandatePanel(props: {
   }
 
   useEffect(() => {
-    void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)));
-  }, [props.treasury.daoAccountId]);
-  useEffect(() => {
     if (!props.preview) {
       setProposalRuns({});
       return undefined;
@@ -1483,7 +1521,11 @@ export function MandatePanel(props: {
               <tr><td>DAO balance</td><td>{formatToken(budgetTokenStatus.daoBalance, budgetTokenStatus.decimals, budgetTokenStatus.symbol)}</td></tr>
             </tbody>
           </table>
-        ) : <div className="state">Reading test-token state…</div>}
+        ) : (
+          <button className="ghost" disabled={busy} onClick={() => void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)))}>
+            Read test-token state
+          </button>
+        )}
         <button
           className="primary"
           disabled={!signerId || busy || budgetTokenStatus?.decimals !== 6}

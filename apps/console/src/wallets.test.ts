@@ -41,6 +41,22 @@ describe("readDaoPolicyRpc", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+
+  it("retries a transient browser RPC network failure without changing endpoints", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(rpcResult({
+        roles: [{ name: "council", kind: { Group: ["alice.testnet", "bob.testnet"] } }],
+        default_vote_policy: { threshold: "2" },
+      }))
+      .mockResolvedValueOnce(rpcResult({ factory_id: "factory-v2.mandateos.testnet", auto_update: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(readDaoPolicyRpc("acme.factory-v2.mandateos.testnet")).resolves.toMatchObject({
+      council: ["alice.testnet", "bob.testnet"],
+      threshold: "2",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
   it("rejects a response without an exact council group", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(rpcResult({ roles: [], default_vote_policy: { threshold: "2" } })));
     await expect(readDaoPolicyRpc("bad.factory-v2.mandateos.testnet")).rejects.toThrow(

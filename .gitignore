@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.mandateos/
 .env.*
 contracts/target/
 packages/deployer/out/

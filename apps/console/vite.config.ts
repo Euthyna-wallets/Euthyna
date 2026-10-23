@@ -4,5 +4,16 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), nodePolyfills({ globals: { Buffer: true, global: true, process: true } })],
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: {
+      "/near-rpc": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        timeout: 600_000,
+        proxyTimeout: 600_000,
+        rewrite: () => "/v1/console/near-rpc",
+      },
+    },
+  },
 });

@@ -3,11 +3,11 @@ import { KeyPair, Near, keyStores, transactions } from "near-api-js";
 import { serializeNep413, setupWalletSelector, type SignedMessage, type WalletSelector } from "@near-wallet-selector/core";
 import { setupModal, type WalletSelectorModal } from "@near-wallet-selector/modal-ui";
 import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
-import { createPublicClient, createWalletClient, custom, getAddress, http, type Address, type EIP1193Provider, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
+import { createPublicClient, createWalletClient, custom, encodeFunctionData, getAddress, http, type Address, type EIP1193Provider, type Hex } from "viem";
+import { baseSepolia, sepolia } from "viem/chains";
 
 import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
-import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
+import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet, selectDemoWalletScopeForAccounts } from "./lib/wallet-store.js";
 export const DAO_VOTE_GAS = "450000000000000";
 
 
@@ -48,7 +48,11 @@ async function generatedNear(): Promise<E2eNearWallet> {
   const wallet = generatedNearWallet();
   const keyStore = new keyStores.InMemoryKeyStore();
   await keyStore.setKey("testnet", wallet.accountId, KeyPair.fromString(wallet.secretKey as `ed25519:${string}`));
-  const near = new Near({ networkId: "testnet", nodeUrl: "https://rpc.testnet.near.org", keyStore });
+  const near = new Near({
+    networkId: "testnet",
+    nodeUrl: `${window.location.origin}/near-rpc`,
+    keyStore,
+  });
   const account = await near.account(wallet.accountId);
   const map = (actions: WalletAction[]) => actions.map((action) => {
     const params = action.params ?? {};
@@ -154,6 +158,12 @@ export async function signWalletProofChallenge(challenge: WalletProofChallenge):
   evmAddress: string;
   evmSignature: Hex;
 }> {
+  if (
+    demoWalletsEnabled() &&
+    !selectDemoWalletScopeForAccounts(challenge.nearAccountId, challenge.evmAddress)
+  ) {
+    throw new Error("No generated demo wallet matches the declared member accounts");
+  }
   const nonce = Buffer.from(challenge.nonceBase64, "base64");
   const params = { message: challenge.message, recipient: challenge.recipient, nonce };
   const injected = e2eNear();
@@ -173,7 +183,7 @@ export async function signWalletProofChallenge(challenge: WalletProofChallenge):
     throw new Error(`EVM signer ${evmAddress} does not match ${challenge.evmAddress}`);
   }
   const evmSignature = await evmWalletClient().signMessage({
-    account: window.ethereum ? evmAddress : generatedEvmAccount(),
+    account: demoWalletsEnabled() ? generatedEvmAccount() : evmAddress,
     message: challenge.message,
   });
   return {
@@ -305,17 +315,48 @@ export type DaoPolicyRpc = {
   factoryId: string | null;
 };
 
+const nearRpcPacingMs = import.meta.env.MODE === "test" ? 0 : 500;
+const nearRpcRetryBaseMs = import.meta.env.MODE === "test" ? 0 : 1_000;
+let nearRpcQueue: Promise<void> = Promise.resolve();
+let nextNearRpcAt = 0;
+
 async function nearRpcMethod<T>(method: string, params: unknown): Promise<T> {
-  const response = await fetch(import.meta.env.VITE_NEAR_RPC_URL ?? "https://rpc.testnet.near.org", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos-browser", method, params }),
+  const previous = nearRpcQueue;
+  let release!: () => void;
+  nearRpcQueue = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
-  const payload = await response.json() as { result?: T; error?: { message?: string } };
-  if (payload.error) throw new Error(payload.error.message ?? `NEAR RPC ${method} failed`);
-  if (payload.result === undefined) throw new Error("NEAR RPC result missing");
-  return payload.result;
+  await previous;
+  try {
+    const pacingDelay = Math.max(0, nextNearRpcAt - Date.now());
+    if (pacingDelay > 0) await new Promise((resolve) => setTimeout(resolve, pacingDelay));
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const response = await fetch(import.meta.env.VITE_NEAR_RPC_URL ?? "https://rpc.testnet.near.org", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos-browser", method, params }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (response.status === 429 && attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, nearRpcRetryBaseMs * (2 ** attempt)));
+          continue;
+        }
+        if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+        const payload = await response.json() as { result?: T; error?: { message?: string } };
+        if (payload.error) throw new Error(payload.error.message ?? `NEAR RPC ${method} failed`);
+        if (payload.result === undefined) throw new Error("NEAR RPC result missing");
+        return payload.result;
+      } catch (error) {
+        if (attempt >= 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, nearRpcRetryBaseMs * (2 ** attempt)));
+      }
+    }
+    throw new Error("NEAR RPC retry budget exhausted");
+  } finally {
+    nextNearRpcAt = Date.now() + nearRpcPacingMs;
+    release();
+  }
 }
 
 async function nearRpc<T>(params: Record<string, unknown>): Promise<T> {
@@ -622,30 +663,29 @@ export async function disableFactoryAutoUpdate(
 }
 
 export function evmWalletClient() {
-  if (window.ethereum) {
-    return createWalletClient({ chain: baseSepolia, transport: custom(window.ethereum) });
+  if (demoWalletsEnabled()) {
+    return createWalletClient({
+      account: generatedEvmAccount(),
+      chain: baseSepolia,
+      transport: http("https://sepolia.base.org"),
+    });
   }
-  if (!demoWalletsEnabled()) {
+  if (!window.ethereum) {
     throw new Error("Install or unlock MetaMask/Rabby to sign Base Sepolia transactions");
   }
-  return createWalletClient({
-    account: generatedEvmAccount(),
-    chain: baseSepolia,
-    transport: http("https://sepolia.base.org"),
-  });
+  return createWalletClient({ chain: baseSepolia, transport: custom(window.ethereum) });
 }
 
 export async function evmAccounts(): Promise<Address[]> {
-  if (window.ethereum) {
-    return (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
-  }
-  if (!demoWalletsEnabled()) {
+  if (demoWalletsEnabled()) return [generatedEvmAccount().address];
+  if (!window.ethereum) {
     throw new Error("Install or unlock MetaMask/Rabby to connect an EVM wallet");
   }
-  return [generatedEvmAccount().address];
+  return (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
 }
 
 export async function switchToBaseSepolia(): Promise<void> {
+  if (demoWalletsEnabled()) return;
   if (window.ethereum) {
     try {
       await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x14a34" }] });
@@ -661,11 +701,9 @@ export async function switchToBaseSepolia(): Promise<void> {
 export async function sendEvmTransaction(transaction: { to: string; value: string; data: string }): Promise<Hex> {
   await switchToBaseSepolia();
   const wallet = evmWalletClient();
-  const account = window.ethereum
-    ? (await evmAccounts())[0]
-    : demoWalletsEnabled()
-      ? generatedEvmAccount()
-      : undefined;
+  const account = demoWalletsEnabled()
+    ? generatedEvmAccount()
+    : (await evmAccounts())[0];
   if (!account) throw new Error("No EVM account");
   return wallet.sendTransaction({
     account,
@@ -673,6 +711,47 @@ export async function sendEvmTransaction(transaction: { to: string; value: strin
     value: BigInt(transaction.value ?? "0"),
     data: transaction.data as Hex,
   });
+}
+
+const l1StandardBridgeAbi = [{
+  type: "function",
+  name: "depositETH",
+  stateMutability: "payable",
+  inputs: [
+    { name: "_minGasLimit", type: "uint32" },
+    { name: "_extraData", type: "bytes" },
+  ],
+  outputs: [],
+}] as const;
+const BASE_SEPOLIA_L1_STANDARD_BRIDGE = getAddress("0xfd0Bf71F60660E2f608ed56e1659C450eB113120");
+
+export async function bridgeSepoliaEthToBase(amountWei: bigint): Promise<Hex> {
+  if (!demoWalletsEnabled()) throw new Error("UAT demo wallet mode is required for the built-in testnet bridge");
+  const account = generatedEvmAccount();
+  const transport = http("https://ethereum-sepolia-rpc.publicnode.com");
+  const wallet = createWalletClient({ account, chain: sepolia, transport });
+  const hash = await wallet.sendTransaction({
+    account,
+    to: BASE_SEPOLIA_L1_STANDARD_BRIDGE,
+    value: amountWei,
+    data: encodeFunctionData({
+      abi: l1StandardBridgeAbi,
+      functionName: "depositETH",
+      args: [200_000, "0x"],
+    }),
+  });
+  await createPublicClient({ chain: sepolia, transport }).waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+export async function readBaseDeploymentRpc(plan: TreasuryPlan): Promise<boolean> {
+  const client = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
+  const codes = await Promise.all([
+    plan.base.safeAddress,
+    plan.base.rolesAddress,
+    plan.base.delayAddress,
+  ].map((address) => client.getBytecode({ address: getAddress(address) })));
+  return codes.every((code) => code !== undefined && code !== "0x");
 }
 
 export async function waitForEvmTransaction(hash: Hex): Promise<void> {

@@ -274,7 +274,7 @@ const safeAbi = [
 ] as const;
 
 const delayAbi = [
-  { type: "function", name: "modules", stateMutability: "view", inputs: [{ name: "module", type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "isModuleEnabled", stateMutability: "view", inputs: [{ name: "module", type: "address" }], outputs: [{ type: "bool" }] },
   { type: "function", name: "txCooldown", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "txExpiration", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
 ] as const;
@@ -380,7 +380,7 @@ export class RpcBaseTreasuryVerifier implements BaseTreasuryVerifier {
     const rolesEnabled = await this.client.readContract({ address: safe, abi: safeAbi, functionName: "isModuleEnabled", args: [roles] });
     const delayEnabled = await this.client.readContract({ address: safe, abi: safeAbi, functionName: "isModuleEnabled", args: [delay] });
     if (!rolesEnabled || !delayEnabled) throw new TreasuryError(422, "modules_disabled", "Roles and Delay must be enabled");
-    const govEnabled = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "modules", args: [gov] });
+    const govEnabled = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "isModuleEnabled", args: [gov] });
     if (!govEnabled) throw new TreasuryError(422, "gov_not_enabled", "0xGOV is not enabled on Delay");
     const cooldown = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "txCooldown" });
     const expiration = await this.client.readContract({ address: delay, abi: delayAbi, functionName: "txExpiration" });

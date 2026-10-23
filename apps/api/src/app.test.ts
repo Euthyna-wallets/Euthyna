@@ -247,6 +247,7 @@ function testApp(options?: {
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
       method === "get_agent" ? { role: "researcher", active: true, evm_address: Array(20).fill(1) } : 3,
+    proxyRpc: async (method: string) => ({ proxiedMethod: method }),
   } as unknown as NearClient;
   const guard = {
     approve: async () => {
@@ -704,6 +705,24 @@ describe("passwordless registration", () => {
     });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "wallet_proof_required" });
+  });
+});
+
+
+describe("console NEAR RPC proxy", () => {
+  it("forwards only allowlisted methods for an authenticated console session", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/near-rpc", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "query", params: { finality: "final" } }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      result: { proxiedMethod: "query" },
+    });
   });
 });
 

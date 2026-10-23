@@ -597,6 +597,38 @@ The corrected relay artifact was built reproducibly from commit
 [`contracts/res/governance_relay.wasm`](../contracts/res/governance_relay.wasm)).
 This artifact is not claimed as deployed on the superseded UAT relay above.
 
+Corrected clean 2/2 UAT treasury (created entirely from the console, except the
+allowed `mandateos agent init` command):
+
+| Component | Address/account |
+|---|---|
+| DAO | `mandateos-callonly-2of2.factory-v2.mandateos.testnet` |
+| Vault | `mandateo-v.mandateos.testnet` |
+| Relay | `mandateo-r.mandateos.testnet` |
+| Safe | `0x62C30e9e22A4Ad79AA473BA09861F10c3A55E8E0` |
+| Roles | `0x167b82E08333319539c1dfB717765173b090DA98` |
+| Delay | `0xac0AF75134D5afc5884Edd7F7B9454Fdd51347dD` |
+| 0xGOV | `0x73c6889E9a9e4f729409f8251a9c4EE4Fee4024D` |
+| Relay MultiSendCallOnly | `0x9641d764fc13c8B624c04430C7356C1C7C8102e2` |
+
+| Clean 2/2 UAT transition | Transaction |
+|---|---|
+| DAO creation | [`29pzvQ…`](https://testnet.nearblocks.io/txns/29pzvQ3TrQLXurMUQqeKwM5of4LbBjuR2g1CfX7Hyp1X) |
+| Vault deployment | [`22euyL…`](https://testnet.nearblocks.io/txns/22euyLBoEzrRkhuUxvVD5tFajyjSbMBVAfesTZMfRaHm) |
+| CallOnly relay deployment | [`A3g9cS…`](https://testnet.nearblocks.io/txns/A3g9cSAE6h6aTwaLcqTGiyivqaSAfNKMJsJkfzn8qwwF) |
+| Ethereum Sepolia → Base Sepolia deposit | `0x3a3ce142f9fb4897266bf68cb634270ad1e53b474ac29755718d6a06202e7e27` |
+| Safe deployment | `0x7047a241da8edaf6b92c8058d4795fd09926bdbf39c53d89d00dfb6fad51376d` |
+| Roles deployment | `0xd324ff1a8fc0482adad37d0f92da39bb49ede09510bf74477ae068a3d59b441c` |
+| Delay deployment | `0x423969f45ea93d1a69273676172a73ea24abec5f78ff41a0752c4e2a45ef3e0f` |
+| Safe 2/2 module batch | `0x5a3956eb7ca7f17fd81e8969dc084a80d61aa8a00adc4fef79ff0f0d5a858020` |
+
+Both members confirmed the direct Vault/relay RPC attestation. On-chain reads
+confirmed Roles and Delay enabled on the Safe and 0xGOV enabled on Delay. The
+treasury registration completed. The mandate execution/veto phase remains
+unfinished: the official NEAR testnet RPC throttled and then stalled the first
+browser-signed `set_role` proposal before broadcast. No alternate endpoint or
+IP rotation was used, and no transaction hash is claimed for that proposal.
+
 | Real UAT transition | Transaction |
 |---|---|
 | DAO final vote, single Zodiac batch | [`FMpoLG…`](https://testnet.nearblocks.io/txns/FMpoLG8EKR1zEGiiqRZNMFV7LAuHhaGVArXVe4dNvjTW) |

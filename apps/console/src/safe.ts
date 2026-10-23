@@ -14,6 +14,7 @@ import { baseSepolia } from "viem/chains";
 
 import type { TreasuryPlan, TreasuryView } from "./api.js";
 import { evmAccounts, evmWalletClient, switchToBaseSepolia } from "./wallets.js";
+import { demoWalletsEnabled, generatedEvmAccount, selectDemoWalletScopeForEvmAddress } from "./lib/wallet-store.js";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 
@@ -102,6 +103,13 @@ const delayVetoAbi = [{
   inputs: [{ name: "_nonce", type: "uint256" }],
   outputs: [],
 }] as const;
+const multiSendAbi = [{
+  type: "function",
+  name: "multiSend",
+  stateMutability: "payable",
+  inputs: [{ name: "transactions", type: "bytes" }],
+  outputs: [],
+}] as const;
 
 
 
@@ -113,12 +121,20 @@ export function encodeMultiSend(calls: SafeBatchCall[]): Hex {
     data: call.data,
   })));
 }
+export function encodeMultiSendCall(calls: SafeBatchCall[]): Hex {
+  return encodeFunctionData({
+    abi: multiSendAbi,
+    functionName: "multiSend",
+    args: [encodeMultiSend(calls)],
+  });
+}
+
 
 async function buildSafeCalls(safe: Address, calls: SafeBatchCall[]): Promise<SafeBatch> {
   const client = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
   const nonce = await client.readContract({ address: safe, abi: safeAbi, functionName: "nonce" });
   const multiSend = canonicalMultiSendAddress(BASE_SEPOLIA_CHAIN_ID);
-  const data = encodeMultiSend(calls);
+  const data = encodeMultiSendCall(calls);
   const fields = {
     to: multiSend,
     value: 0n,
@@ -173,13 +189,21 @@ export async function buildDelayVetoBatch(treasury: TreasuryView, queueNonce: bi
   }]);
 }
 
-export async function signSafeBatch(batch: SafeBatch): Promise<SafeBatchSignature> {
+export async function signSafeBatch(batch: SafeBatch, preferredOwner?: string): Promise<SafeBatchSignature> {
+  if (
+    preferredOwner &&
+    demoWalletsEnabled() &&
+    !selectDemoWalletScopeForEvmAddress(preferredOwner)
+  ) {
+    throw new Error(`No generated demo wallet matches Safe owner ${preferredOwner}`);
+  }
   await switchToBaseSepolia();
-  const [owner] = await evmAccounts();
-  if (!owner) throw new Error("No EVM account selected");
   const wallet = evmWalletClient();
+  const account = demoWalletsEnabled() ? generatedEvmAccount() : (await evmAccounts())[0];
+  if (!account) throw new Error("No EVM account selected");
+  const owner = getAddress(typeof account === "string" ? account : account.address);
   const signature = await wallet.signTypedData({
-    account: owner,
+    account,
     domain: { chainId: BASE_SEPOLIA_CHAIN_ID, verifyingContract: batch.safe },
     types: SAFE_TX_TYPES,
     primaryType: "SafeTx",
@@ -207,11 +231,22 @@ export function packSignatures(signatures: SafeBatchSignature[]): Hex {
   );
 }
 
-export async function executeSafeBatch(batch: SafeBatch, signatures: SafeBatchSignature[]): Promise<Hex> {
+export async function executeSafeBatch(
+  batch: SafeBatch,
+  signatures: SafeBatchSignature[],
+  preferredExecutor?: string,
+): Promise<Hex> {
+  if (
+    preferredExecutor &&
+    demoWalletsEnabled() &&
+    !selectDemoWalletScopeForEvmAddress(preferredExecutor)
+  ) {
+    throw new Error(`No generated demo wallet matches Safe executor ${preferredExecutor}`);
+  }
   await switchToBaseSepolia();
-  const [account] = await evmAccounts();
-  if (!account) throw new Error("No EVM account selected");
   const wallet = evmWalletClient();
+  const account = demoWalletsEnabled() ? generatedEvmAccount() : (await evmAccounts())[0];
+  if (!account) throw new Error("No EVM account selected");
   return wallet.writeContract({
     account,
     address: batch.safe,
