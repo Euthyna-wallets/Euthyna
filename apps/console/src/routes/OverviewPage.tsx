@@ -1,135 +1,83 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
-import { api, explorerBase, explorerNear, type OperationRow, type TreasuryView } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
-import { formatToken } from "../lib/format.js";
-
-interface Overview {
-  treasury: TreasuryView | null;
-  registryVersion: number;
-  agents: { total: number; active: number };
-  pendingEscalations: number;
-  safeBalance: string | null;
-  roleBudgets: Array<{ role: string; funded?: string; reserved?: string; spent?: string; available?: string }>;
-  operations: OperationRow[];
-}
-interface OverviewMember {
-  id: string;
-  name: string | null;
-  email: string | null;
-  role: string;
-  walletProofVerifiedAt: string | null;
-  walletProofApprovedAt: string | null;
-}
-
+import { useWallets } from "../lib/wallet-context.js";
+import { omni } from "../omniroles-api.js";
+import { TreasuryChecks } from "./TreasurySetup.js";
 
 export function OverviewPage() {
-  const query = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/v1/console/overview"), refetchInterval: 10_000 });
-  const members = useQuery({
-    queryKey: ["members", "overview"],
-    queryFn: () => api<{ members: OverviewMember[] }>("/v1/console/members"),
-    refetchInterval: 10_000,
-  });
-  const nextStep = !query.data?.treasury
-    ? { title: "Create your Treasury", detail: "Continue the guided setup with your council.", action: "Finish setup", href: "/onboarding" }
-    : query.data.agents.total === 0
-      ? { title: "Register your AI agent", detail: "Create its account and one-time API key.", action: "Finish setup", href: "/onboarding" }
-      : query.data.roleBudgets.length === 0
-        ? { title: "Create a spending permission", detail: "Choose its USDC budget and approved suppliers.", action: "Finish setup", href: "/onboarding" }
-        : query.data.operations.length === 0
-          ? { title: "Pay the first invoice", detail: "Connect the agent to the MCP or SDK.", action: "Open agents", href: "/agents" }
-          : { title: "Review recent activity", detail: "Check completed payments and escalations.", action: "View operations", href: "/operations" };
+  const wallets = useWallets();
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, refetchInterval: 15_000 });
+  const roles = useQuery({ queryKey: ["omni-roles"], queryFn: omni.roles, enabled: Boolean(status.data?.treasury), refetchInterval: 15_000 });
+  const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, enabled: Boolean(status.data?.treasury), refetchInterval: 15_000 });
+  const activity = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, enabled: Boolean(status.data?.treasury), refetchInterval: 15_000 });
+  const me = wallets.nearAccountId;
+  const myVotes = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress" && !(me in proposal.votes)).length;
+  const pendingRules = (governance.data?.rules ?? []).filter((rule) => rule.state === "Queued").length;
+  const refused = (activity.data?.items ?? []).filter((item) => item.kind === "refusal").length;
+  const executed = (activity.data?.items ?? []).filter((item) => item.kind === "operation").length;
+
+  const loading = Boolean(status.data?.treasury) && (roles.isLoading || governance.isLoading || activity.isLoading);
+  const count = (value: number) => (loading ? "…" : value);
+  const next = loading
+    ? { title: "Reading the vault…", detail: "Roles, decisions and activity are read from NEAR.", action: "Open roles", to: "/roles" }
+    : !status.data?.treasury
+    ? { title: "Finish the company setup", detail: "Members, treasury and wallet.", action: "Continue setup", to: "/onboarding" }
+    : !status.data.wallet
+      ? { title: "Create the company wallet", detail: "Members vote on the DAO's first decision.", action: "Continue setup", to: "/onboarding" }
+      : myVotes > 0
+        ? { title: `${myVotes} decision${myVotes > 1 ? "s" : ""} waiting for your vote`, detail: "Read what changes, then approve or reject.", action: "Open decisions", to: "/governance" }
+        : (roles.data?.roles.length ?? 0) === 0
+          ? { title: "Create the first role", detail: "Say what agents may do, with which budget.", action: "New role", to: "/roles" }
+          : { title: "Watch agents work", detail: "Every operation, and every refusal with its reason.", action: "Open activity", to: "/activity" };
+
   return (
     <div className="page">
-      <header className="page-head"><div><h1>Overview</h1><p className="muted">Treasury, spending permissions and recent activity.</p></div></header>
-      <PageState loading={query.isLoading} error={query.error} empty={!query.data}>
-        {query.data ? (
+      <header className="page-head">
+        <div>
+          <h1>Overview</h1>
+          <p className="muted">Humans set the constraints. Agents operate inside them.</p>
+        </div>
+      </header>
+      <PageState loading={status.isLoading} error={status.error}>
+        <Card title="Next step">
+          <div className="next-step">
+            <div><strong>{next.title}</strong><p className="muted">{next.detail}</p></div>
+            <Link className="button primary" to={next.to}>{next.action}</Link>
+          </div>
+        </Card>
+        {status.data?.treasury ? (
           <>
-            <Card title="Next step">
-              <div className="next-step">
-                <div><strong>{nextStep.title}</strong><p className="muted">{nextStep.detail}</p></div>
-                <a className="button primary" href={nextStep.href}>{nextStep.action}</a>
-              </div>
-            </Card>
             <div className="metrics">
-              <div className="metric"><span>Treasury TestUSDC</span><strong>{query.data.safeBalance ?? "—"}</strong></div>
-              <div className="metric"><span>Active agents</span><strong>{query.data.agents.active}/{query.data.agents.total}</strong></div>
-              <div className="metric"><span>Needs review</span><strong>{query.data.pendingEscalations}</strong></div>
-              <div className="metric"><span>Supplier list version</span><strong>{query.data.registryVersion}</strong></div>
+              <div className="metric"><span>Company wallet</span><strong className="mono">{status.data.wallet ? short(status.data.wallet.address, 6) : "not created"}</strong></div>
+              <div className="metric"><span>Balance</span><strong>{status.data.wallet ? status.data.wallet.tokens.filter((token) => Number(token.amount) > 0).map((token) => `${Number(token.amount).toLocaleString()} ${token.symbol}`).join(" · ") || "empty" : "—"}</strong></div>
+              <div className="metric"><span>Roles</span><strong>{count(roles.data?.roles.length ?? 0)}</strong></div>
+              <div className="metric"><span>Rules in veto window</span><strong>{count(pendingRules)}</strong></div>
+              <div className="metric"><span>Operations / refused</span><strong>{loading ? "…" : `${executed} / ${refused}`}</strong></div>
             </div>
-            <Card title="Treasury">
-              {query.data.treasury ? (
+            <Card title="Budgets">
+              {roles.isLoading ? <div className="state">Loading…</div> : (roles.data?.roles ?? []).flatMap((role) => role.budgets).length === 0 ? <div className="state">No budget yet.</div> : (
                 <table>
+                  <thead><tr><th>Budget</th><th>Left this period</th><th>Refill</th></tr></thead>
                   <tbody>
-                    <tr><td>Treasury account</td><td><a href={explorerNear(query.data.treasury.daoAccountId)} target="_blank" rel="noreferrer">{query.data.treasury.daoAccountId}</a></td></tr>
-                    <tr><td>Base account</td><td><a href={explorerBase(query.data.treasury.safeAddress)} target="_blank" rel="noreferrer">{query.data.treasury.safeAddress}</a></td></tr>
-                    <tr><td>Status</td><td><Status value={query.data.treasury.status} /></td></tr>
-                    <tr><td colSpan={2}><details><summary>Advanced</summary>
-                      <div>Vault: <a href={explorerNear(query.data.treasury.vaultAccountId)} target="_blank" rel="noreferrer">{query.data.treasury.vaultAccountId}</a></div>
-                      <div>Waiting-period contract: <a href={explorerBase(query.data.treasury.delayAddress)} target="_blank" rel="noreferrer">{query.data.treasury.delayAddress}</a></div>
-                    </details></td></tr>
-                  </tbody>
-                </table>
-              ) : <div className="state">No Treasury yet. <a href="/onboarding">Start setup</a>.</div>}
-            </Card>
-            <Card title="Members">
-              {(members.data?.members.length ?? 0) === 0 ? (
-                <div className="state">No members yet. <a href="/onboarding">Invite members</a>.</div>
-              ) : (
-                <table>
-                  <thead><tr><th>Member</th><th>Role</th><th>Wallet status</th></tr></thead>
-                  <tbody>
-                    {members.data?.members.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.name ?? item.email ?? item.id}</td>
-                        <td>{item.role}</td>
-                        <td>
-                          {item.walletProofApprovedAt
-                            ? "Approved"
-                            : item.walletProofVerifiedAt
-                              ? "Waiting for admin review"
-                              : "Waiting for wallet verification"}
-                        </td>
+                    {(roles.data?.roles ?? []).flatMap((role) => role.budgets.map((budget) => (
+                      <tr key={`${role.name}-${budget.key}`}>
+                        <td>{budget.label}</td>
+                        <td>{Number(budget.available ?? 0).toLocaleString()} / {Number(budget.max ?? 0).toLocaleString()} {budget.token ?? ""}</td>
+                        <td className="small muted">every {budget.periodDays} days</td>
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                 </table>
               )}
             </Card>
-            <Card title="Spending permissions">
-              {query.data.roleBudgets.length === 0 ? <div className="state">No spending permission yet. <a href="/onboarding">Create one</a>.</div> : (
-                <table>
-                  <thead><tr><th>Role</th><th>Funded</th><th>Reserved</th><th>Spent</th><th>Available</th></tr></thead>
-                  <tbody>
-                    {query.data.roleBudgets.map((budget) => (
-                      <tr key={budget.role}>
-                        <td>{budget.role}</td>
-                        <td className="mono">{formatToken(budget.funded)}</td>
-                        <td className="mono">{formatToken(budget.reserved)}</td>
-                        <td className="mono">{formatToken(budget.spent)}</td>
-                        <td className="mono">{formatToken(budget.available)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Card>
-            <Card title="Recent operations">
-              {query.data.operations.length === 0 ? <div className="state">No operations yet. <a href="/agents">Connect an agent</a>.</div> : (
-                <table>
-                  <thead><tr><th>Reference</th><th>Amount</th><th>Status</th><th>Op</th></tr></thead>
-                  <tbody>
-                    {query.data.operations.map((operation) => (
-                      <tr key={operation.opId}>
-                        <td>{operation.reference}</td>
-                        <td className="mono">{formatToken(operation.amount)}</td>
-                        <td><Status value={operation.state} /></td>
-                        <td className="mono small">{short(operation.opId)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+            <Card title="Treasury" action={<Status value={status.data.treasury.status === "active" ? "active" : "pending"} />}>
+              <div className="explain">
+                <div><span className="eyebrow">DAO</span><strong className="mono small">{status.data.treasury.daoAccountId}</strong></div>
+                <div><span className="eyebrow">Vault</span><strong className="mono small">{status.data.treasury.vaultAccountId}</strong></div>
+              </div>
+              <TreasuryChecks status={status.data} />
             </Card>
           </>
         ) : null}

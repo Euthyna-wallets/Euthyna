@@ -319,6 +319,25 @@ export class NearClient {
     );
   }
 
+  /** Function call signed by the relayer (MandateOS pays gas and deposits). */
+  async callFunction(
+    contractId: string,
+    methodName: string,
+    args: Record<string, unknown>,
+    gas: string,
+    depositYocto: string,
+  ): Promise<string> {
+    const account = await this.accountPromise;
+    const outcome = await account.functionCall({
+      contractId,
+      methodName,
+      args,
+      gas: BigInt(gas),
+      attachedDeposit: BigInt(depositYocto),
+    });
+    return outcome.transaction.hash;
+  }
+
   private async functionCall(
     contractId: string,
     methodName: string,

@@ -44,6 +44,9 @@ const schema = z.object({
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
   GOVERNANCE_MAX_FEE_FLOOR_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
+  OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
+  OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("7000000000000000000000000"),
+  OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
 });
 
 type ParsedEnv = z.infer<typeof schema>;

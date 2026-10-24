@@ -14,9 +14,9 @@ use conditions::{EvaluationContext, ReservedAllowances};
 use omniroles_conditions::Consumption;
 pub use types::{
     Allowance, AllowanceConsumption, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa,
-    Membership, MembershipKind, MpcSignature, Operation, OperationRequest, OperationState,
-    Permission, QueuedRuleChange, RoleConfig, RoleView, RuleChange, RuleChangeState,
-    SignedStatusReport, StatusKind, StatusReport, VelocityConfig, VelocityState,
+    Membership, MembershipKind, MpcSignature, Operation, OperationCheck, OperationRequest,
+    OperationState, Permission, QueuedRuleChange, RoleConfig, RoleView, RuleChange,
+    RuleChangeState, SignedStatusReport, StatusKind, StatusReport, VelocityConfig, VelocityState,
 };
 use types::{
     AllowanceKey, MembershipKey, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId,
@@ -78,6 +78,8 @@ pub struct Vault {
     operations: LookupMap<OperationId, Operation>,
     references: LookupMap<ReferenceKey, OperationId>,
     rule_changes: LookupMap<QueueId, QueuedRuleChange>,
+    /// Queue id of every rule change, by sequence number (1-based), for listings.
+    rule_queue_ids: LookupMap<u64, QueueId>,
     used_visa_nonces: LookupSet<u64>,
     used_report_nonces: LookupSet<u64>,
 }
@@ -136,6 +138,7 @@ impl Vault {
             references: LookupMap::new(b"f".to_vec()),
             role_reservations: LookupMap::new(b"z".to_vec()),
             rule_changes: LookupMap::new(b"c".to_vec()),
+            rule_queue_ids: LookupMap::new(b"s".to_vec()),
             used_visa_nonces: LookupSet::new(b"v".to_vec()),
             used_report_nonces: LookupSet::new(b"q".to_vec()),
         }
@@ -201,6 +204,29 @@ impl Vault {
         self.operations.get(&op_id).cloned()
     }
 
+    /// Number of rule changes ever queued.
+    pub fn rule_sequence(&self) -> u64 {
+        self.rule_sequence
+    }
+
+    /// Rule changes by sequence number, newest first, `limit` at most 50.
+    pub fn list_rule_changes(
+        &self,
+        before: Option<u64>,
+        limit: Option<u64>,
+    ) -> Vec<QueuedRuleChange> {
+        let start = before
+            .unwrap_or(self.rule_sequence.saturating_add(1))
+            .min(self.rule_sequence.saturating_add(1));
+        let limit = limit.unwrap_or(20).min(50);
+        (1..start)
+            .rev()
+            .take(limit as usize)
+            .filter_map(|sequence| self.rule_queue_ids.get(&sequence))
+            .filter_map(|queue_id| self.rule_changes.get(queue_id).cloned())
+            .collect()
+    }
+
     pub fn get_rule_change(&self, queue_id: QueueId) -> Option<QueuedRuleChange> {
         self.rule_changes.get(&queue_id).cloned()
     }
@@ -213,6 +239,93 @@ impl Vault {
 
     /// Derives the single ACME wallet for an EVM chain. The path belongs to the
     /// vault, not to a member, so every role shares one nonce stream and queue.
+    /// Dry run of `prepare` for `member`: same checks, no state change. Lets the
+    /// console and agents explain a refusal before submitting anything.
+    pub fn check_operation(
+        &self,
+        role: String,
+        member: AccountId,
+        request: OperationRequest,
+    ) -> OperationCheck {
+        let now = env::block_timestamp();
+        let refuse = |reason: &str| OperationCheck::refused(reason);
+        if self.paused {
+            return refuse("ERR_PAUSED");
+        }
+        if request.reference.is_empty() {
+            return refuse("ERR_EMPTY_REFERENCE");
+        }
+        let Some(role_state) = self.roles.get(&role) else {
+            return refuse("ERR_ROLE_NOT_FOUND");
+        };
+        if !role_state.config.enabled {
+            return refuse("ERR_ROLE_DISABLED");
+        }
+        let Some(wallet) = self.wallets.get(&request.chain_id) else {
+            return refuse("ERR_WALLET_NOT_FOUND");
+        };
+        let Some(wallet_address) = wallet.address else {
+            return refuse("ERR_WALLET_NOT_DERIVED");
+        };
+        let Some(membership) = self.memberships.get(&MembershipKey {
+            role: role.clone(),
+            member: member.clone(),
+        }) else {
+            return refuse("ERR_MEMBERSHIP_NOT_FOUND");
+        };
+        if let Some(reason) = Self::membership_unavailable(membership, now) {
+            return refuse(reason);
+        }
+        if self.references.contains_key(&ReferenceKey {
+            role: role.clone(),
+            reference: request.reference.clone(),
+        }) {
+            return refuse("ERR_REFERENCE_ALREADY_USED");
+        }
+        let mut refusal = String::from("NoPermission");
+        for (index, permission) in role_state.config.permissions.iter().enumerate() {
+            match self.check_permission(permission, &request, &member, &role, wallet_address, now) {
+                Ok(consumptions) => {
+                    let consumptions: Vec<AllowanceConsumption> = consumptions
+                        .iter()
+                        .map(|consumption| AllowanceConsumption {
+                            key: consumption.key.as_slice().try_into().unwrap_or([0; 32]),
+                            amount: U128(consumption.consumed),
+                            calls_only: consumption.calls_only,
+                        })
+                        .collect();
+                    let declared: u128 = consumptions
+                        .iter()
+                        .filter(|consumption| !consumption.calls_only)
+                        .map(|consumption| consumption.amount.0)
+                        .sum();
+                    if declared != request.allowance_amount.0 {
+                        return refuse("ERR_ALLOWANCE_AMOUNT_MISMATCH");
+                    }
+                    let measured_value = Self::measured_value(&request, &consumptions);
+                    let threshold_value = Self::threshold_value(measured_value);
+                    let config = &role_state.config;
+                    return OperationCheck {
+                        allowed: true,
+                        reason: None,
+                        permission_index: Some(index as u32),
+                        consumptions,
+                        measured_value: measured_value.map(U128),
+                        requires_delay: config
+                            .operation_delay_threshold
+                            .is_some_and(|threshold| threshold_value > threshold.0),
+                        requires_cosign: config
+                            .co_sign_threshold
+                            .is_some_and(|threshold| threshold_value > threshold.0),
+                        wallet_busy: wallet.active_operation.is_some(),
+                    };
+                }
+                Err(reason) => refusal = Self::closer_refusal(refusal, reason),
+            }
+        }
+        refuse(&format!("ERR_PERMISSION_DENIED:{refusal}"))
+    }
+
     pub fn request_wallet(&mut self, chain_id: u64) -> Promise {
         self.assert_owner();
         require!(chain_id > 0, "ERR_ZERO_CHAIN_ID");
@@ -288,6 +401,7 @@ impl Vault {
             vetoed_by: None,
         };
         self.rule_changes.insert(queue_id, entry.clone());
+        self.rule_queue_ids.insert(self.rule_sequence, queue_id);
         env::log_str(&format!("OMNIROLES_RULE_QUEUED:{}", hex::encode(queue_id)));
         entry
     }
@@ -413,7 +527,7 @@ impl Vault {
                     matched = Some((index, consumptions));
                     break;
                 }
-                Err(reason) => refusal = reason,
+                Err(reason) => refusal = Self::closer_refusal(refusal, reason),
             }
         }
         let (permission_index, consumptions) =
@@ -1440,6 +1554,45 @@ impl Vault {
             | RuleChange::RevokeMembership { .. }
             | RuleChange::SetVersions { .. } => {}
         }
+    }
+
+    /// Keep the refusal of the permission that came closest to matching: a
+    /// condition failure on the right contract and function explains more than
+    /// "target not allowed" from an unrelated permission.
+    fn closer_refusal(current: String, candidate: String) -> String {
+        let rank = |reason: &str| match reason {
+            "NoPermission" => 0,
+            "TargetNotAllowed" => 1,
+            "FunctionNotAllowed" => 2,
+            "SendNotAllowed" => 3,
+            _ => 4,
+        };
+        if rank(&candidate) >= rank(&current) {
+            candidate
+        } else {
+            current
+        }
+    }
+
+    fn membership_unavailable(membership: &Membership, now: u64) -> Option<&'static str> {
+        if !membership.active {
+            return Some("ERR_MEMBERSHIP_REVOKED");
+        }
+        if now < membership.starts_at_ns.0 {
+            return Some("ERR_MEMBERSHIP_NOT_STARTED");
+        }
+        if membership.ends_at_ns.is_some_and(|end| now > end.0) {
+            return Some("ERR_MEMBERSHIP_EXPIRED");
+        }
+        if membership.max_uses.is_some_and(|max_uses| {
+            membership
+                .used_uses
+                .saturating_add(membership.reserved_uses)
+                >= max_uses
+        }) {
+            return Some("ERR_MEMBERSHIP_USES_EXHAUSTED");
+        }
+        None
     }
 
     fn assert_membership_available(membership: &Membership, now: u64) {

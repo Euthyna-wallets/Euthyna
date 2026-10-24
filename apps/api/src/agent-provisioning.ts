@@ -74,6 +74,7 @@ export class AgentProvisioningService {
     private readonly parentAccountId: string,
     private readonly dailyLimit: number,
     private readonly reserveYocto: string,
+    private readonly attestationRetryMs = 1_500,
   ) {}
 
   async provision(organizationId: string, agentId: string): Promise<{
@@ -113,7 +114,12 @@ export class AgentProvisioningService {
         throw error;
       }
     }
-    const attestation = await this.attestation(expectation);
+    // The new key is read with finality "final": wait a few blocks before failing.
+    let attestation = await this.attestation(expectation);
+    for (let attempt = 0; !attestation.valid && attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, this.attestationRetryMs));
+      attestation = await this.attestation(expectation);
+    }
     if (!attestation.valid) {
       await this.complete(agent.id, false, transactionHash);
       throw new AgentProvisioningError(422, "agent_key_attestation_failed", "provisioned account key does not match the restricted policy");

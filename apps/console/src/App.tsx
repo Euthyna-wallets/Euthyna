@@ -9,11 +9,11 @@ import { AgentDetailPage } from "./routes/AgentDetailPage.js";
 import { AgentsPage } from "./routes/AgentsPage.js";
 import { EscalationsPage } from "./routes/EscalationsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
-import { MandatePage } from "./routes/MandatePage.js";
 import { OnboardingPage, SignIn } from "./routes/OnboardingPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
 import { PaymentDetailPage } from "./routes/PaymentDetailPage.js";
-import { PaymentsPage } from "./routes/PaymentsPage.js";
+import { ActivityPage } from "./routes/ActivityPage.js";
+import { RolesPage } from "./routes/RolesPage.js";
 import { SuppliersPage } from "./routes/SuppliersPage.js";
 import { SettingsPage } from "./routes/SettingsPage.js";
 
@@ -45,14 +45,18 @@ export function App() {
               <Route path="/" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/agents/:id" element={<AgentDetailPage />} />
-              <Route path="/mandate" element={<MandatePage />} />
-              <Route path="/payments" element={<PaymentsPage />} />
+              <Route path="/roles" element={<RolesPage />} />
+              <Route path="/activity" element={<ActivityPage />} />
+              <Route path="/mandate" element={<Navigate to="/roles" replace />} />
+              <Route path="/payments" element={<Navigate to="/activity" replace />} />
               <Route path="/payments/:opId" element={<PaymentDetailPage />} />
               <Route path="/governance" element={<GovernancePage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/escalations" element={<EscalationsPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/decisions" element={<Navigate to="/governance" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Route>
         </Routes>
