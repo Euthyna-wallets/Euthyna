@@ -173,6 +173,17 @@ Console-admin fallback for one operation. Normal operation uses the separate
 
 ## Agent payments and escalations
 
+### `POST /v1/operations/gas-quote`
+
+Agent credential. Before `prepare`, the SDK asks the API to encode the actual
+`Roles.execTransactionWithRole(token.transfer(recipient, amount))` call from
+the agent's derived `0xAAA`. The API requires `eth_estimateGas` to succeed,
+adds a 30% gas margin, reads p50 priority rewards from `eth_feeHistory`, and
+sets `maxFeePerGas = 3 × baseFee + priority`. It also includes the OP Stack L1
+data fee and returns a warning when the agent balance is below
+`gasLimit × maxFeePerGas + l1Fee`. The SDK refuses `prepare` while that warning
+is present. Role gas fields are governance caps, not transaction defaults.
+
 ### `POST /v1/operations/pay`
 
 Agent credential (`x-api-key`). The agent has already called `prepare` on the
@@ -530,6 +541,29 @@ corresponding active operation; it never receives a private key
 ([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
+Classification never trusts the proposal description. The API decodes the
+on-chain DAO `FunctionCall`, requires one `propose` call to the registered
+relay, compares its target/value/data/operation byte-for-byte with the active
+relay operation, then accepts only the canonical Zodiac batch or a `Call` to
+the registered Safe whose selector is `swapOwner` or
+`addOwnerWithThreshold`. Descriptions remain display-only
+([`apps/api/src/governance-calldata.ts`](../apps/api/src/governance-calldata.ts),
+[`apps/api/src/governance.ts`](../apps/api/src/governance.ts)).
+
+Before returning any relay proposal, the API estimates the exact
+`0xGOV → Delay.execTransactionFromModule(...)` call. `gasLimit` is
+`ceil(eth_estimateGas × 1.30)`, priority fee is the median of the p50 rewards
+returned by `eth_feeHistory`, and `maxFeePerGas = 3 × baseFee + priority`.
+Estimation failure rejects the proposal before voting. The quote includes the
+OP Stack L1 data fee and checks that `0xGOV` covers
+`gasLimit × maxFeePerGas + l1Fee`; insufficient funding is returned as a
+blocking console warning.
+
+Environment values are ceilings only:
+`BASE_TX_GAS_LIMIT_CAP`, `BASE_TX_MAX_FEE_PER_GAS_CAP_WEI`, and
+`BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI`. Startup rejects a priority cap
+above the max-fee cap.
+
 The governance job shares the payment worker lease. It recovers a missing MPC
 signature from that NEAR transaction, broadcasts the immutable 0xGOV
 transaction, waits `WORKER_CONFIRMATIONS`, and checkpoints the Delay entry.
@@ -554,6 +588,24 @@ was still `<= entryNonce`. Without either proof, an elapsed
 A generic non-Zodiac operation uses the same Safe/calldata execution proof and
 records receipt-only post-verification. Reverted queue or `executeNextTx`
 transactions become `Failed`.
+
+Execution and veto log scans persist separate
+`executionScannedThroughBlock` / `vetoScannedThroughBlock` cursors on the
+governance job. They advance only through
+`latest - WORKER_CONFIRMATIONS`, leaving a reorg/indexing window. A poll starts
+at the next confirmed unscanned block instead of replaying from the queue
+receipt. An execution or veto initially hidden in the last N blocks is therefore
+picked up after it crosses the confirmation boundary; the job cannot become
+`Expired` merely because that recent evidence is not indexed yet
+([`packages/db/prisma/schema.prisma`](../packages/db/prisma/schema.prisma),
+[`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts)).
+
+The console labels an active operation **Underpriced** when the current Base
+base fee exceeds its signed `maxFeePerGas`. A council member can propose the
+relay's DAO-only `cancel_nonce` with a fresh dynamic quote. The worker
+broadcasts the signed same-nonce cancellation; after confirmations it reports
+the original operation `Failed`, releases the relay, and links back to Mandates
+for deterministic re-proposal.
 
 Guard signs the exact 0xGOV transaction hash, Base block number, and final status
 under `mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`

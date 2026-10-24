@@ -1,30 +1,29 @@
 import type { Prisma, PrismaClient } from "@mandateos/db";
 import {
-  decodeFunctionData,
   getAddress,
   hexToBytes,
   type Address,
   type Hex,
 } from "viem";
-import {
-  canonicalMultiSendCallOnlyAddress,
-  decodeMultiSendTransactions,
-  rolesAbi,
-} from "@mandateos/deployer";
 
 import type { GovernanceBaseGateway, GovernanceReceipt } from "./governance-base.js";
+import {
+  decodeZodiacBatchExpectation,
+  type ZodiacBatchExpectation,
+} from "./governance-calldata.js";
 import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
 import type { GovernanceOperation, MpcSignature } from "./types.js";
 
-const ACTIVE_STATES = ["PossiblySigned", "Broadcast", "Queued", "Executing", "Reporting"];
-const multiSendAbi = [{
-  type: "function",
-  name: "multiSend",
-  stateMutability: "payable",
-  inputs: [{ name: "transactions", type: "bytes" }],
-  outputs: [],
-}] as const;
+const ACTIVE_STATES = [
+  "PossiblySigned",
+  "Broadcast",
+  "Queued",
+  "Executing",
+  "CancellationRequested",
+  "CancellationBroadcast",
+  "Reporting",
+];
 
 export interface GovernanceTreasuryRecord {
   id: string;
@@ -43,20 +42,29 @@ export interface GovernanceJobRecord extends GovernanceTreasuryRecord {
   finalStatus: "Executed" | "Vetoed" | "Expired" | "Failed" | null;
   nearExecutionTxHash: string | null;
   nearExecutionSignerId: string | null;
+  nearCancellationTxHash: string | null;
+  nearCancellationSignerId: string | null;
   target: string;
   value: string;
   data: string;
   operation: number;
+  gasLimit: string | null;
+  maxFeePerGas: string | null;
+  maxPriorityFeePerGas: string | null;
   txHash: string | null;
   receiptBlock: bigint | null;
   queueNonce: bigint | null;
   queueCreatedAt: bigint | null;
+  executionScannedThroughBlock: bigint | null;
+  vetoScannedThroughBlock: bigint | null;
   cooldownSeconds: bigint | null;
   expirationSeconds: bigint | null;
   executeRawTransaction: string | null;
   nextAttemptAt: Date | null;
   executeTxHash: string | null;
   executeReceiptBlock: bigint | null;
+  cancellationTxHash: string | null;
+  cancellationReceiptBlock: bigint | null;
   attempts: number;
   lastError: string | null;
 }
@@ -70,9 +78,13 @@ export interface GovernanceJobUpdate {
   queueCreatedAt?: bigint | null;
   cooldownSeconds?: bigint | null;
   expirationSeconds?: bigint | null;
+  executionScannedThroughBlock?: bigint | null;
+  vetoScannedThroughBlock?: bigint | null;
   executeRawTransaction?: string | null;
   executeTxHash?: string | null;
   executeReceiptBlock?: bigint | null;
+  cancellationTxHash?: string | null;
+  cancellationReceiptBlock?: bigint | null;
   rolesVerification?: Prisma.InputJsonValue;
   reportNonce?: bigint | null;
   broadcastAt?: Date | null;
@@ -164,6 +176,9 @@ export class PrismaGovernanceStore implements GovernanceStore {
         value: operation.value,
         data: `0x${Buffer.from(operation.data).toString("hex")}`,
         operation: operation.operation,
+        gasLimit: operation.transaction.gas_limit,
+        maxFeePerGas: operation.transaction.max_fee_per_gas,
+        maxPriorityFeePerGas: operation.transaction.max_priority_fee_per_gas,
         nextAttemptAt: new Date(),
       },
       update: {
@@ -172,6 +187,9 @@ export class PrismaGovernanceStore implements GovernanceStore {
         value: operation.value,
         data: `0x${Buffer.from(operation.data).toString("hex")}`,
         operation: operation.operation,
+        gasLimit: operation.transaction.gas_limit,
+        maxFeePerGas: operation.transaction.max_fee_per_gas,
+        maxPriorityFeePerGas: operation.transaction.max_priority_fee_per_gas,
       },
     });
   }
@@ -200,21 +218,30 @@ export class PrismaGovernanceStore implements GovernanceStore {
       finalStatus: storedFinalStatus(row.finalStatus),
       nearExecutionTxHash: row.nearExecutionTxHash,
       nearExecutionSignerId: row.nearExecutionSignerId,
+      nearCancellationTxHash: row.nearCancellationTxHash,
+      nearCancellationSignerId: row.nearCancellationSignerId,
       target: row.target,
       value: row.value,
       data: row.data,
       operation: row.operation,
+      gasLimit: row.gasLimit,
+      maxFeePerGas: row.maxFeePerGas,
+      maxPriorityFeePerGas: row.maxPriorityFeePerGas,
       nextAttemptAt: row.nextAttemptAt,
       txHash: row.txHash,
       receiptBlock: row.receiptBlock,
       queueNonce: row.queueNonce,
       queueCreatedAt: row.queueCreatedAt,
       cooldownSeconds: row.cooldownSeconds,
+      executionScannedThroughBlock: row.executionScannedThroughBlock,
+      vetoScannedThroughBlock: row.vetoScannedThroughBlock,
       lastError: row.lastError,
       expirationSeconds: row.expirationSeconds,
       executeRawTransaction: row.executeRawTransaction,
       executeTxHash: row.executeTxHash,
       executeReceiptBlock: row.executeReceiptBlock,
+      cancellationTxHash: row.cancellationTxHash,
+      cancellationReceiptBlock: row.cancellationReceiptBlock,
       attempts: row.attempts,
     }));
   }
@@ -227,56 +254,6 @@ export class PrismaGovernanceStore implements GovernanceStore {
   }
 }
 
-interface ZodiacBatchExpectation {
-  member: Address;
-  allowanceKey: Hex;
-  allowance: {
-    balance: bigint;
-    maxRefill: bigint;
-    refill: bigint;
-    period: bigint;
-    timestamp: bigint;
-  };
-}
-
-function zodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation {
-  const multiSend = canonicalMultiSendCallOnlyAddress(job.baseChainId);
-  if (job.operation !== 1 || getAddress(job.target) !== multiSend) {
-    throw new Error("relay operation is not a canonical MultiSend delegatecall");
-  }
-  const decoded = decodeFunctionData({ abi: multiSendAbi, data: job.data as Hex });
-  if (decoded.functionName !== "multiSend") throw new Error("relay calldata is not multiSend(bytes)");
-  const calls = decodeMultiSendTransactions(decoded.args[0]);
-  if (calls.length !== 4) throw new Error(`expected four Zodiac calls, got ${calls.length}`);
-  const roles = getAddress(job.rolesAddress);
-  if (calls.some((call) => call.operation !== 0 || call.to !== roles || call.value !== 0n)) {
-    throw new Error("Zodiac batch contains a non-Call or a non-Roles target");
-  }
-  const decodedCalls = calls.map((call) => decodeFunctionData({ abi: rolesAbi, data: call.data }));
-  const names = decodedCalls.map((call) => call.functionName);
-  if (JSON.stringify(names) !== JSON.stringify(["assignRoles", "scopeTarget", "scopeFunction", "setAllowance"])) {
-    throw new Error(`unexpected Zodiac call order ${names.join(",")}`);
-  }
-  const assign = decodedCalls[0];
-  const allowance = decodedCalls[3];
-  if (assign?.functionName !== "assignRoles" || allowance?.functionName !== "setAllowance") {
-    throw new Error("Zodiac batch decode failed");
-  }
-  const member = getAddress(assign.args[0]);
-  const enabled = assign.args[2];
-  if (enabled.length !== 1 || enabled[0] !== true) throw new Error("Zodiac member assignment is not enabled");
-  return {
-    member,
-    allowanceKey: allowance.args[0],
-    allowance: {
-      balance: allowance.args[1],
-      maxRefill: allowance.args[2],
-      refill: allowance.args[3],
-      period: allowance.args[4],
-      timestamp: allowance.args[5],
-    },
-  };
-}
 
 function assertRolesVerification(
   expectation: ZodiacBatchExpectation,
@@ -305,7 +282,13 @@ function assertRolesVerification(
 
 function maybeZodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation | null {
   try {
-    return zodiacBatchExpectation(job);
+    return decodeZodiacBatchExpectation({
+      chainId: job.baseChainId,
+      rolesAddress: job.rolesAddress,
+      target: job.target,
+      data: job.data as Hex,
+      operation: job.operation,
+    });
   } catch {
     return null;
   }
@@ -374,7 +357,7 @@ export class GovernanceWorker {
     }
     let operation: GovernanceOperation | null = null;
     let hash: Hex;
-    if (job.state === "PossiblySigned" || job.state === "Broadcast") {
+    if (["PossiblySigned", "Broadcast", "CancellationRequested", "CancellationBroadcast"].includes(job.state)) {
       operation = await this.near.viewFunction<GovernanceOperation | null>(
         job.relayAccountId,
         "get_operation",
@@ -391,7 +374,12 @@ export class GovernanceWorker {
         return;
       }
       if (operation.state === "Cancelled") {
-        await this.store.update(job, { state: "Vetoed", nextAttemptAt: null });
+        await this.store.update(job, {
+          state: "Failed",
+          finalStatus: "Failed",
+          nextAttemptAt: null,
+          lastError: "underpriced governance operation was cancelled on Base",
+        });
         return;
       }
       if (!operation.signed_transaction) {
@@ -399,7 +387,12 @@ export class GovernanceWorker {
           await this.schedule(job, "PossiblySigned", "awaiting final DAO vote transaction hash");
           return;
         }
-        await this.recoverSignature(job, id);
+        await this.recoverSignature(
+          job,
+          id,
+          job.nearExecutionTxHash,
+          job.nearExecutionSignerId,
+        );
         operation = await this.near.viewFunction<GovernanceOperation | null>(
           job.relayAccountId,
           "get_operation",
@@ -409,6 +402,31 @@ export class GovernanceWorker {
           await this.schedule(job, "PossiblySigned", "MPC signature is not available yet");
           return;
         }
+      }
+      if (operation.cancellation) {
+        if (!operation.cancellation.signed_transaction) {
+          if (!job.nearCancellationTxHash || !job.nearCancellationSignerId) {
+            await this.schedule(job, "CancellationRequested", "awaiting cancellation DAO vote transaction hash");
+            return;
+          }
+          await this.recoverSignature(
+            job,
+            id,
+            job.nearCancellationTxHash,
+            job.nearCancellationSignerId,
+          );
+          operation = await this.near.viewFunction<GovernanceOperation | null>(
+            job.relayAccountId,
+            "get_operation",
+            { op_id: id },
+          );
+          if (!operation?.cancellation?.signed_transaction) {
+            await this.schedule(job, "CancellationRequested", "cancellation MPC signature is not available yet");
+            return;
+          }
+        }
+        await this.processCancellation(job, operation);
+        return;
       }
       hash = this.base.rawTransactionHash(operation.signed_transaction);
       if (job.txHash && job.txHash.toLowerCase() !== hash.toLowerCase()) {
@@ -439,6 +457,10 @@ export class GovernanceWorker {
       return;
     }
     const currentBlock = await this.base.blockNumber();
+    const confirmationWindow = BigInt(this.config.confirmations);
+    const confirmedScanHead = currentBlock > confirmationWindow
+      ? currentBlock - confirmationWindow
+      : 0n;
     const queueDepth = currentBlock >= queueReceipt.blockNumber ? currentBlock - queueReceipt.blockNumber + 1n : 0n;
     if (queueDepth < BigInt(this.config.confirmations)) {
       await this.store.update(job, {
@@ -481,14 +503,22 @@ export class GovernanceWorker {
     const checkpointedExecuteReceipt = job.executeTxHash
       ? await this.base.receipt(job.executeTxHash as Hex)
       : null;
-    const execution = await this.base.findExecution({
+    const executionFromBlock = checkpointedExecuteReceipt?.status === "success"
+      ? checkpointedExecuteReceipt.blockNumber
+      : job.executionScannedThroughBlock === null
+        ? queueReceipt.blockNumber
+        : job.executionScannedThroughBlock + 1n;
+    const executionScan = await this.base.findExecution({
       safe: getAddress(job.safeAddress),
       delay,
       ...operationInput,
-      fromBlock: checkpointedExecuteReceipt?.status === "success"
-        ? checkpointedExecuteReceipt.blockNumber
-        : queueReceipt.blockNumber,
+      fromBlock: executionFromBlock,
+      toBlock: confirmedScanHead,
     });
+    const execution = executionScan.evidence;
+    const executionScannedThroughBlock = executionScan.scannedThroughBlock >= executionFromBlock
+      ? executionScan.scannedThroughBlock
+      : job.executionScannedThroughBlock;
     if (execution) {
       const executionDepth = currentBlock >= execution.blockNumber
         ? currentBlock - execution.blockNumber + 1n
@@ -498,6 +528,7 @@ export class GovernanceWorker {
           state: job.executeRawTransaction ? "Executing" : "Queued",
           executeTxHash: execution.transactionHash,
           executeReceiptBlock: execution.blockNumber,
+          executionScannedThroughBlock,
           lastAttemptAt: this.now(),
           nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
           lastError: `waiting for execute confirmations ${executionDepth}/${this.config.confirmations}`,
@@ -519,12 +550,21 @@ export class GovernanceWorker {
     const expirationAt = delayState.createdAt + delayState.cooldown + delayState.expiration;
     const expired = delayState.expiration !== 0n && delayState.currentTimestamp > expirationAt;
     if (delayState.txNonce > entryNonce) {
-      const veto = await this.base.findVeto(delay, entryNonce, queueReceipt.blockNumber);
+      const vetoFromBlock = job.vetoScannedThroughBlock === null
+        ? queueReceipt.blockNumber
+        : job.vetoScannedThroughBlock + 1n;
+      const vetoScan = await this.base.findVeto(delay, entryNonce, vetoFromBlock, confirmedScanHead);
+      const veto = vetoScan.evidence;
+      const vetoScannedThroughBlock = vetoScan.scannedThroughBlock >= vetoFromBlock
+        ? vetoScan.scannedThroughBlock
+        : job.vetoScannedThroughBlock;
       if (veto) {
         const vetoDepth = currentBlock >= veto.blockNumber ? currentBlock - veto.blockNumber + 1n : 0n;
         if (vetoDepth < BigInt(this.config.confirmations)) {
           await this.store.update(job, {
             state: "Queued",
+            executionScannedThroughBlock,
+            vetoScannedThroughBlock,
             lastAttemptAt: this.now(),
             nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
             lastError: `waiting for veto confirmations ${vetoDepth}/${this.config.confirmations}`,
@@ -537,13 +577,10 @@ export class GovernanceWorker {
         });
         return;
       }
-      if (expired) {
-        await this.checkpointFinal(job, "Expired", {
-          txHash: hash,
-          receiptBlock: queueReceipt.blockNumber,
-        });
-        return;
-      }
+      await this.store.update(job, {
+        executionScannedThroughBlock,
+        vetoScannedThroughBlock,
+      });
       throw new Error("Delay nonce advanced without matching execution or veto evidence");
     }
 
@@ -554,6 +591,7 @@ export class GovernanceWorker {
       queueCreatedAt: delayState.createdAt,
       cooldownSeconds: delayState.cooldown,
       expirationSeconds: delayState.expiration,
+      executionScannedThroughBlock,
       ...(job.queueCreatedAt === null ? { queuedAt: this.now() } : {}),
       lastAttemptAt: this.now(),
       nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
@@ -622,6 +660,62 @@ export class GovernanceWorker {
     throw new Error(
       `successful executeNextTx receipt ${executeHash} lacks matching Safe ExecutionFromModuleSuccess evidence`,
     );
+  }
+
+  private async processCancellation(
+    job: GovernanceJobRecord,
+    operation: GovernanceOperation,
+  ): Promise<void> {
+    const signedCancellation = operation.cancellation?.signed_transaction;
+    if (!signedCancellation) throw new Error("relay cancellation signature is unavailable");
+    const cancellationHash = this.base.rawTransactionHash(signedCancellation);
+    if (job.cancellationTxHash && job.cancellationTxHash.toLowerCase() !== cancellationHash.toLowerCase()) {
+      throw new Error("stored cancellation hash differs from relay signed cancellation");
+    }
+    const receipt = await this.base.receipt(cancellationHash);
+    if (!receipt) {
+      await this.base.broadcastRaw(signedCancellation);
+      await this.store.update(job, {
+        state: "CancellationBroadcast",
+        cancellationTxHash: cancellationHash,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: null,
+      });
+      return;
+    }
+    const currentBlock = await this.base.blockNumber();
+    const depth = currentBlock >= receipt.blockNumber ? currentBlock - receipt.blockNumber + 1n : 0n;
+    if (depth < BigInt(this.config.confirmations)) {
+      await this.store.update(job, {
+        state: "CancellationBroadcast",
+        cancellationTxHash: cancellationHash,
+        cancellationReceiptBlock: receipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+        lastError: `waiting for cancellation confirmations ${depth}/${this.config.confirmations}`,
+      });
+      return;
+    }
+    if (receipt.status === "reverted") {
+      await this.store.update(job, {
+        state: "CancellationReverted",
+        cancellationTxHash: cancellationHash,
+        cancellationReceiptBlock: receipt.blockNumber,
+        lastAttemptAt: this.now(),
+        nextAttemptAt: null,
+        lastError: `governance cancellation ${cancellationHash} reverted; re-propose with fresh fees`,
+      });
+      return;
+    }
+    const originalHash = this.base.rawTransactionHash(operation.signed_transaction);
+    await this.checkpointFinal(job, "Failed", {
+      txHash: originalHash,
+      receiptBlock: receipt.blockNumber,
+      cancellationTxHash: cancellationHash,
+      cancellationReceiptBlock: receipt.blockNumber,
+      lastError: `underpriced governance transaction replaced by cancellation ${cancellationHash}`,
+    });
   }
 
   private async verifyExecuted(
@@ -700,10 +794,15 @@ export class GovernanceWorker {
     });
   }
 
-  private async recoverSignature(job: GovernanceJobRecord, opId: number[]): Promise<void> {
-    const status = await this.near.transactionStatus(job.nearExecutionTxHash!, job.nearExecutionSignerId!);
+  private async recoverSignature(
+    job: GovernanceJobRecord,
+    opId: number[],
+    nearTransactionHash: string,
+    nearSignerId: string,
+  ): Promise<void> {
+    const status = await this.near.transactionStatus(nearTransactionHash, nearSignerId);
     const signatures = extractMpcSignatures(status);
-    if (signatures.length === 0) throw new Error(`no secp256k1 MPC response in ${job.nearExecutionTxHash}`);
+    if (signatures.length === 0) throw new Error(`no secp256k1 MPC response in ${nearTransactionHash}`);
     let lastError: unknown;
     for (const signature of signatures) {
       try {

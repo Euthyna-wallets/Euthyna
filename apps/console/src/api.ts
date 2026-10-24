@@ -116,12 +116,25 @@ export type BudgetTokenPlan = {
   }>;
 };
 
+export type BaseGasQuote = {
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
+  baseFeePerGas: string;
+  l1Fee: string;
+  senderBalance: string;
+  requiredBalance: string;
+  sufficientBalance: boolean;
+};
+
 export type MandateProposal = {
   receiverId: string;
   methodName: string;
   description: string;
   args: Record<string, unknown>;
   deposit: string;
+  gasQuote?: BaseGasQuote;
+  warnings?: string[];
 };
 
 export type MandatePreview = {

@@ -78,14 +78,19 @@ const governance = {
     expirationSeconds: "604800",
     safeThreshold: "2",
     currentTimestamp: "120",
+    baseFeePerGas: "1000000000",
   },
   operations: [{
     opId: `0x${"aa".repeat(32)}`,
     proposalId: 7,
     state: "Queued",
+    displayState: "Queued",
+    underpriced: false,
+    maxFeePerGas: "20000000000",
     txHash: `0x${"bb".repeat(32)}`,
     queueNonce: "0",
     executeTxHash: null,
+    cancellationTxHash: null,
     countdownSeconds: "280",
     cooldownEndsAt: "400",
     expiresAt: "604900",
@@ -125,6 +130,38 @@ describe("GovernancePage", () => {
     fireEvent.click(execute);
     await waitFor(() => expect(mocks.executeSafeBatch).toHaveBeenCalledOnce());
     expect(mocks.buildDelayVetoBatch).toHaveBeenCalledWith(governance.treasury, 1n);
+  });
+
+  it("shows Underpriced and prepares a DAO cancellation proposal", async () => {
+    const underpriced = {
+      ...governance,
+      operations: [{
+        ...governance.operations[0]!,
+        displayState: "Underpriced",
+        underpriced: true,
+        maxFeePerGas: "100",
+      }],
+      delay: { ...governance.delay, baseFeePerGas: "101" },
+    };
+    mocks.api.mockImplementation(async (path: string) => path.endsWith("/cancel-underpriced-proposal")
+      ? {
+          receiverId: "dao.testnet",
+          args: { proposal: { description: "Cancel underpriced governance operation" } },
+          deposit: "100000000000000000000000",
+          warnings: [],
+        }
+      : underpriced);
+    mocks.signDaoProposal.mockResolvedValue({ transactionHash: "near-cancel-proposal", proposalId: 8 });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByText("Underpriced", { selector: "strong" })).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("your NEAR account"), { target: { value: "alice.testnet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose cancellation" }));
+    await waitFor(() => expect(mocks.signDaoProposal).toHaveBeenCalledWith(
+      "alice.testnet",
+      expect.objectContaining({ receiverId: "dao.testnet" }),
+    ));
   });
 
   it("submits the DAO confirm_original rescue from a connected council account", async () => {

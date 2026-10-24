@@ -468,21 +468,30 @@ model GovernanceOperation {
   proposalId            Int?
   nearExecutionTxHash   String?
   nearExecutionSignerId String?
+  nearCancellationTxHash   String?
+  nearCancellationSignerId String?
   state                 String
   finalStatus           String?
   target                String
   value                 String
   data                  String
   operation             Int
+  gasLimit              String?
+  maxFeePerGas          String?
+  maxPriorityFeePerGas  String?
   txHash                String?
   receiptBlock          BigInt?
   queueNonce            BigInt?
   queueCreatedAt        BigInt?
+  executionScannedThroughBlock BigInt?
+  vetoScannedThroughBlock      BigInt?
   cooldownSeconds       BigInt?
   expirationSeconds     BigInt?
   executeRawTransaction String?
   executeTxHash         String?
   executeReceiptBlock   BigInt?
+  cancellationTxHash        String?
+  cancellationReceiptBlock  BigInt?
   rolesVerification     Json?
   reportNonce           BigInt?
   broadcastAt           DateTime?

@@ -335,6 +335,19 @@ function testApp(options?: {
     }),
   } as unknown as RegistryService;
   const payments = {
+    gasQuote: async () => ({
+      gas: {
+        gasLimit: "100000",
+        maxFeePerGas: "20000000000",
+        maxPriorityFeePerGas: "1000000000",
+        baseFeePerGas: "6333333333",
+        l1Fee: "1000",
+        senderBalance: "1000000000000000000",
+        requiredBalance: "2000000000001000",
+        sufficientBalance: true,
+      },
+      warnings: [],
+    }),
     pay: async () => ({ status: 200, body: {} }),
     getOperation: async () => ({}),
     recordAuthorization: async (
@@ -402,6 +415,19 @@ function testApp(options?: {
       attestation: { valid: true },
     }),
   } as unknown as AgentProvisioningService;
+  const governanceGas = {
+    gasQuote: {
+      gasLimit: "200000",
+      maxFeePerGas: "20000000000",
+      maxPriorityFeePerGas: "1000000000",
+      baseFeePerGas: "6333333333",
+      l1Fee: "1000",
+      senderBalance: "1000000000000000000",
+      requiredBalance: "4000000000001000",
+      sufficientBalance: true,
+    },
+    warnings: [],
+  };
   const governance: GovernanceGateway = {
     recordRelayExecution: async () => ({ opId: `0x${"01".repeat(32)}`, state: "PossiblySigned" }),
     unblockProposal: async () => ({
@@ -411,12 +437,21 @@ function testApp(options?: {
       args: {},
       deposit: "0",
     }),
+    cancelUnderpricedProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Cancel underpriced operation",
+      args: {},
+      deposit: "0",
+      ...governanceGas,
+    }),
     swapOwnerProposal: async () => ({
       receiverId: "dao.testnet",
       methodName: "add_proposal",
       description: "Swap Safe owner",
       args: {},
       deposit: "0",
+      ...governanceGas,
     }),
     addOwnerProposal: async () => ({
       receiverId: "dao.testnet",
@@ -424,6 +459,7 @@ function testApp(options?: {
       description: "Add Safe owner",
       args: {},
       deposit: "0",
+      ...governanceGas,
     }),
   };
   const app = createApp({

@@ -131,7 +131,19 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     const near = {
       getOperation: async () => currentOperation,
     } as unknown as NearClient;
-    service = new PaymentService(prisma, near, guard, registry);
+    service = new PaymentService(prisma, near, guard, registry, {
+      quote: async () => ({
+        gasLimit: 100_000n,
+        maxFeePerGas: 20_000_000_000n,
+        maxPriorityFeePerGas: 1_000_000_000n,
+        baseFeePerGas: 6_333_333_333n,
+        l1Fee: 1_000n,
+        senderBalance: 10n ** 18n,
+        requiredBalance: 2_000_000_000_001_000n,
+        sufficientBalance: true,
+      }),
+      currentBaseFee: async () => 6_333_333_333n,
+    });
   });
 
   afterAll(async () => {

@@ -5,7 +5,7 @@ import {
   evmAddressBytes,
   MandateAgentClient,
   type CancellationFees,
-  type PaymentIntent,
+  type PaymentRequest,
 } from "@mandateos/sdk";
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
@@ -20,20 +20,20 @@ export class MandateMcpTools {
     recipient: string;
     amount: string;
     reference: string;
-    gasLimit: string;
-    maxFeePerGas: string;
-    maxPriorityFeePerGas: string;
+    gasLimit?: string | undefined;
+    maxFeePerGas?: string | undefined;
+    maxPriorityFeePerGas?: string | undefined;
     invoiceText?: string | undefined;
     claimedRecipient?: string | undefined;
   }) {
-    const intent: PaymentIntent = {
+    const intent: PaymentRequest = {
       token: evmAddressBytes(input.token as `0x${string}`),
       recipient: evmAddressBytes(input.recipient as `0x${string}`),
       amount: input.amount,
       reference: input.reference,
-      gas_limit: input.gasLimit,
-      max_fee_per_gas: input.maxFeePerGas,
-      max_priority_fee_per_gas: input.maxPriorityFeePerGas,
+      ...(input.gasLimit ? { gas_limit: input.gasLimit } : {}),
+      ...(input.maxFeePerGas ? { max_fee_per_gas: input.maxFeePerGas } : {}),
+      ...(input.maxPriorityFeePerGas ? { max_priority_fee_per_gas: input.maxPriorityFeePerGas } : {}),
     };
     return this.client.pay(intent, {
       ...(input.invoiceText ? { text: input.invoiceText } : {}),
@@ -66,9 +66,9 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       recipient: address,
       amount: uint,
       reference: z.string().min(1).max(120),
-      gasLimit: uint,
-      maxFeePerGas: uint,
-      maxPriorityFeePerGas: uint,
+      gasLimit: uint.optional(),
+      maxFeePerGas: uint.optional(),
+      maxPriorityFeePerGas: uint.optional(),
       invoiceText: z.string().max(10_000).optional(),
       claimedRecipient: address.optional(),
     },

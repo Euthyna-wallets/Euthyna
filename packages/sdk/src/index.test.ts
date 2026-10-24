@@ -50,6 +50,19 @@ function fixture(apiStatus = 200) {
     },
   };
   const api: AgentApiGateway = {
+    // Gas is quoted only when callers omit EIP-1559 fields.
+    gasQuote: async () => {
+      calls.push("gas_quote");
+      return {
+        gas: {
+          gasLimit: "200000",
+          maxFeePerGas: "20000000000",
+          maxPriorityFeePerGas: "1000000000",
+          sufficientBalance: true,
+        },
+        warnings: [],
+      };
+    },
     requestVisa: async () => {
       calls.push("visa");
       if (apiStatus === 200) return { status: 200, body: { visa: { op_id: opId }, signature: "signature" } };
@@ -84,6 +97,23 @@ describe("MandateAgentClient", () => {
     ]);
   });
 
+
+  it("quotes Base gas before prepare when the caller omits EIP-1559 fields", async () => {
+    const { client, calls } = fixture();
+    await client.pay({
+      token: intent.token,
+      recipient: intent.recipient,
+      amount: intent.amount,
+      reference: intent.reference,
+    });
+    expect(calls).toEqual([
+      "gas_quote",
+      "prepare",
+      "visa",
+      "authorize",
+      "record_authorization:near-authorize-hash",
+    ]);
+  });
   it("does not authorize an escalation or refusal", async () => {
     const escalated = fixture(202);
     await expect(escalated.client.pay(intent)).resolves.toMatchObject({ outcome: "escalated" });
