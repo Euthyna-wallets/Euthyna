@@ -131,9 +131,14 @@ impl Tree {
         }
         for node in &nodes {
             // EqualTo on a tuple hashes its inline encoding: static tuples only.
+            // On an array, it hashes `length || elements`: static elements only.
+            let dynamic_content = match &node.layout {
+                Layout::Array(element) => element.is_dynamic(),
+                layout => layout.is_dynamic(),
+            };
             if node.operator == Operator::EqualTo
-                && node.encoding == Encoding::Tuple
-                && node.layout.is_dynamic()
+                && matches!(node.encoding, Encoding::Tuple | Encoding::Array)
+                && dynamic_content
             {
                 return Err(IntegrityError::Unsupported {
                     node: node.index,
@@ -231,9 +236,9 @@ fn check_node(nodes: &[Node], index: usize) -> Result<(), IntegrityError> {
             no_children()
         }
         Operator::EqualTo => {
-            encoding_in(&[E::Static, E::Dynamic, E::Tuple, E::EtherValue])?;
+            encoding_in(&[E::Static, E::Dynamic, E::Tuple, E::Array, E::EtherValue])?;
             comp_32()?;
-            if node.encoding == E::Tuple {
+            if matches!(node.encoding, E::Tuple | E::Array) {
                 structure_children(nodes, node)
             } else {
                 no_children()

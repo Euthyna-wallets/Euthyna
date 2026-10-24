@@ -30,6 +30,7 @@ pub mod encode;
 pub mod evaluate;
 pub mod monerium;
 pub mod permission;
+pub mod presets;
 pub mod signature;
 pub mod tree;
 pub mod types;
