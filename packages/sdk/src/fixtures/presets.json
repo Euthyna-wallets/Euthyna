@@ -1,0 +1,368 @@
+{
+  "approve": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 2,
+        "paramType": 0,
+        "parent": 0
+      },
+      {
+        "compValue": "0x00000000000000000000000000000000000000000000000000000002540be401",
+        "operator": 18,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000009494949494949494949494949494949494949494",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x0000000000000000000000001616161616161616161616161616161616161616",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      }
+    ],
+    "selector": "0x095ea7b3",
+    "target": "0x4141414141414141414141414141414141414141"
+  },
+  "approveSingle": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000009494949494949494949494949494949494949494",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "operator": 18,
+        "paramType": 1,
+        "parent": 0
+      }
+    ],
+    "selector": "0x095ea7b3",
+    "target": "0x4141414141414141414141414141414141414141"
+  },
+  "transfer": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x000000000000000000000000a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 0
+      }
+    ],
+    "selector": "0xa9059cbb",
+    "target": "0x4141414141414141414141414141414141414141"
+  },
+  "transferMany": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 2,
+        "paramType": 0,
+        "parent": 0
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x000000000000000000000000a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      }
+    ],
+    "selector": "0xa9059cbb",
+    "target": "0x4141414141414141414141414141414141414141"
+  },
+  "uniswapV2": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "operator": 17,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 2,
+        "paramType": 0,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 15,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x6ec3f3297cf4a62214dd8713a2910190288404804deb44653565359de10c861f",
+        "operator": 16,
+        "paramType": 4,
+        "parent": 3
+      },
+      {
+        "compValue": "0x7db63802d8028fbd870c444b5b57ebf2dab3c791c6cd8a36da200505bf375171",
+        "operator": 16,
+        "paramType": 4,
+        "parent": 3
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 6
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 7
+      }
+    ],
+    "selector": "0x38ed1739",
+    "target": "0x1616161616161616161616161616161616161616"
+  },
+  "uniswapV2Single": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "operator": 17,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x6ec3f3297cf4a62214dd8713a2910190288404804deb44653565359de10c861f",
+        "operator": 16,
+        "paramType": 4,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 15,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 3
+      }
+    ],
+    "selector": "0x38ed1739",
+    "target": "0x1616161616161616161616161616161616161616"
+  },
+  "uniswapV3": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 3,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000004141414141414141414141414141414141414141",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 2,
+        "paramType": 0,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 15,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "operator": 17,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 3
+      },
+      {
+        "compValue": "0x000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 3
+      }
+    ],
+    "selector": "0x04e45aaf",
+    "target": "0x9494949494949494949494949494949494949494"
+  },
+  "uniswapV3Single": {
+    "conditions": [
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 5,
+        "parent": 0
+      },
+      {
+        "compValue": "0x",
+        "operator": 5,
+        "paramType": 3,
+        "parent": 0
+      },
+      {
+        "compValue": "0x0000000000000000000000004141414141414141414141414141414141414141",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operator": 16,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 15,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "operator": 28,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "operator": 17,
+        "paramType": 1,
+        "parent": 1
+      },
+      {
+        "compValue": "0x",
+        "operator": 0,
+        "paramType": 1,
+        "parent": 1
+      }
+    ],
+    "selector": "0x04e45aaf",
+    "target": "0x9494949494949494949494949494949494949494"
+  }
+}
