@@ -16,6 +16,7 @@ import type {
   DelayState,
   DelayExecutionEvidence,
   DelayVetoEvidence,
+  EvidenceScanResult,
   GovernanceBaseGateway,
   GovernanceReceipt,
   PreparedDelayExecution,
@@ -115,6 +116,8 @@ function job(overrides: Partial<GovernanceJobRecord> = {}): GovernanceJobRecord 
     receiptBlock: 10n,
     queueNonce: 0n,
     queueCreatedAt: 100n,
+    executionScannedThroughBlock: null,
+    vetoScannedThroughBlock: null,
     cooldownSeconds: 300n,
     nextAttemptAt: null,
     expirationSeconds: 604_800n,
@@ -178,6 +181,8 @@ class FakeBase implements GovernanceBaseGateway {
   rolesEnabled = true;
   execution: DelayExecutionEvidence | null = null;
   veto: DelayVetoEvidence | null = null;
+  executionFromBlocks: bigint[] = [];
+  vetoFromBlocks: bigint[] = [];
   rawTransactionHash(): Hex { return queueHash; }
   broadcastRaw(): Promise<Hex> { this.broadcasts += 1; return Promise.resolve(queueHash); }
   receipt(hash: Hex): Promise<GovernanceReceipt | null> {
@@ -187,8 +192,14 @@ class FakeBase implements GovernanceBaseGateway {
   delayState(): Promise<DelayState> { return Promise.resolve(this.delay); }
   expectedHash = entryHash;
   expectedDelayHash(): Hex { return this.expectedHash; }
-  findExecution(): Promise<DelayExecutionEvidence | null> { return Promise.resolve(this.execution); }
-  findVeto(): Promise<DelayVetoEvidence | null> { return Promise.resolve(this.veto); }
+  findExecution(input: { fromBlock: bigint }): Promise<EvidenceScanResult<DelayExecutionEvidence>> {
+    this.executionFromBlocks.push(input.fromBlock);
+    return Promise.resolve({ evidence: this.execution, scannedThroughBlock: this.currentBlock });
+  }
+  findVeto(_delay: Address, _entryNonce: bigint, fromBlock: bigint): Promise<EvidenceScanResult<DelayVetoEvidence>> {
+    this.vetoFromBlocks.push(fromBlock);
+    return Promise.resolve({ evidence: this.veto, scannedThroughBlock: this.currentBlock });
+  }
   prepareExecuteNextTx(): Promise<PreparedDelayExecution> {
     this.prepared += 1;
     return Promise.resolve({ hash: executeHash, rawTransaction: "0x1234" });
@@ -287,13 +298,18 @@ describe("GovernanceWorker", () => {
     expect(test.near.reports).toBe(0);
   });
 
-  it("does nothing before the on-chain cooldown elapses", async () => {
+  it("polls during cooldown without rescanning already checked Base blocks", async () => {
     const test = harness();
     test.base.delay.currentTimestamp = 399n;
     await test.worker().tick();
     expect(test.base.prepared).toBe(0);
     expect(test.store.current.state).toBe("Queued");
+    expect(test.store.current.executionScannedThroughBlock).toBe(20n);
     expect(test.store.current.nextAttemptAt).toEqual(new Date(now.getTime() + 1_000));
+    test.base.currentBlock = 21n;
+    await test.worker().tick();
+    expect(test.base.executionFromBlocks).toEqual([10n, 21n]);
+    expect(test.store.current.executionScannedThroughBlock).toBe(21n);
   });
 
   it("reports a veto even when Roles already matches the proposed state", async () => {

@@ -1,30 +1,21 @@
 import type { Prisma, PrismaClient } from "@mandateos/db";
 import {
-  decodeFunctionData,
   getAddress,
   hexToBytes,
   type Address,
   type Hex,
 } from "viem";
-import {
-  canonicalMultiSendCallOnlyAddress,
-  decodeMultiSendTransactions,
-  rolesAbi,
-} from "@mandateos/deployer";
 
 import type { GovernanceBaseGateway, GovernanceReceipt } from "./governance-base.js";
+import {
+  decodeZodiacBatchExpectation,
+  type ZodiacBatchExpectation,
+} from "./governance-calldata.js";
 import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
 import type { GovernanceOperation, MpcSignature } from "./types.js";
 
 const ACTIVE_STATES = ["PossiblySigned", "Broadcast", "Queued", "Executing", "Reporting"];
-const multiSendAbi = [{
-  type: "function",
-  name: "multiSend",
-  stateMutability: "payable",
-  inputs: [{ name: "transactions", type: "bytes" }],
-  outputs: [],
-}] as const;
 
 export interface GovernanceTreasuryRecord {
   id: string;
@@ -51,6 +42,8 @@ export interface GovernanceJobRecord extends GovernanceTreasuryRecord {
   receiptBlock: bigint | null;
   queueNonce: bigint | null;
   queueCreatedAt: bigint | null;
+  executionScannedThroughBlock: bigint | null;
+  vetoScannedThroughBlock: bigint | null;
   cooldownSeconds: bigint | null;
   expirationSeconds: bigint | null;
   executeRawTransaction: string | null;
@@ -70,6 +63,8 @@ export interface GovernanceJobUpdate {
   queueCreatedAt?: bigint | null;
   cooldownSeconds?: bigint | null;
   expirationSeconds?: bigint | null;
+  executionScannedThroughBlock?: bigint | null;
+  vetoScannedThroughBlock?: bigint | null;
   executeRawTransaction?: string | null;
   executeTxHash?: string | null;
   executeReceiptBlock?: bigint | null;
@@ -210,6 +205,8 @@ export class PrismaGovernanceStore implements GovernanceStore {
       queueNonce: row.queueNonce,
       queueCreatedAt: row.queueCreatedAt,
       cooldownSeconds: row.cooldownSeconds,
+      executionScannedThroughBlock: row.executionScannedThroughBlock,
+      vetoScannedThroughBlock: row.vetoScannedThroughBlock,
       lastError: row.lastError,
       expirationSeconds: row.expirationSeconds,
       executeRawTransaction: row.executeRawTransaction,
@@ -227,56 +224,6 @@ export class PrismaGovernanceStore implements GovernanceStore {
   }
 }
 
-interface ZodiacBatchExpectation {
-  member: Address;
-  allowanceKey: Hex;
-  allowance: {
-    balance: bigint;
-    maxRefill: bigint;
-    refill: bigint;
-    period: bigint;
-    timestamp: bigint;
-  };
-}
-
-function zodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation {
-  const multiSend = canonicalMultiSendCallOnlyAddress(job.baseChainId);
-  if (job.operation !== 1 || getAddress(job.target) !== multiSend) {
-    throw new Error("relay operation is not a canonical MultiSend delegatecall");
-  }
-  const decoded = decodeFunctionData({ abi: multiSendAbi, data: job.data as Hex });
-  if (decoded.functionName !== "multiSend") throw new Error("relay calldata is not multiSend(bytes)");
-  const calls = decodeMultiSendTransactions(decoded.args[0]);
-  if (calls.length !== 4) throw new Error(`expected four Zodiac calls, got ${calls.length}`);
-  const roles = getAddress(job.rolesAddress);
-  if (calls.some((call) => call.operation !== 0 || call.to !== roles || call.value !== 0n)) {
-    throw new Error("Zodiac batch contains a non-Call or a non-Roles target");
-  }
-  const decodedCalls = calls.map((call) => decodeFunctionData({ abi: rolesAbi, data: call.data }));
-  const names = decodedCalls.map((call) => call.functionName);
-  if (JSON.stringify(names) !== JSON.stringify(["assignRoles", "scopeTarget", "scopeFunction", "setAllowance"])) {
-    throw new Error(`unexpected Zodiac call order ${names.join(",")}`);
-  }
-  const assign = decodedCalls[0];
-  const allowance = decodedCalls[3];
-  if (assign?.functionName !== "assignRoles" || allowance?.functionName !== "setAllowance") {
-    throw new Error("Zodiac batch decode failed");
-  }
-  const member = getAddress(assign.args[0]);
-  const enabled = assign.args[2];
-  if (enabled.length !== 1 || enabled[0] !== true) throw new Error("Zodiac member assignment is not enabled");
-  return {
-    member,
-    allowanceKey: allowance.args[0],
-    allowance: {
-      balance: allowance.args[1],
-      maxRefill: allowance.args[2],
-      refill: allowance.args[3],
-      period: allowance.args[4],
-      timestamp: allowance.args[5],
-    },
-  };
-}
 
 function assertRolesVerification(
   expectation: ZodiacBatchExpectation,
@@ -305,7 +252,13 @@ function assertRolesVerification(
 
 function maybeZodiacBatchExpectation(job: GovernanceJobRecord): ZodiacBatchExpectation | null {
   try {
-    return zodiacBatchExpectation(job);
+    return decodeZodiacBatchExpectation({
+      chainId: job.baseChainId,
+      rolesAddress: job.rolesAddress,
+      target: job.target,
+      data: job.data as Hex,
+      operation: job.operation,
+    });
   } catch {
     return null;
   }
@@ -481,14 +434,21 @@ export class GovernanceWorker {
     const checkpointedExecuteReceipt = job.executeTxHash
       ? await this.base.receipt(job.executeTxHash as Hex)
       : null;
-    const execution = await this.base.findExecution({
+    const executionFromBlock = checkpointedExecuteReceipt?.status === "success"
+      ? checkpointedExecuteReceipt.blockNumber
+      : job.executionScannedThroughBlock === null
+        ? queueReceipt.blockNumber
+        : job.executionScannedThroughBlock + 1n;
+    const executionScan = await this.base.findExecution({
       safe: getAddress(job.safeAddress),
       delay,
       ...operationInput,
-      fromBlock: checkpointedExecuteReceipt?.status === "success"
-        ? checkpointedExecuteReceipt.blockNumber
-        : queueReceipt.blockNumber,
+      fromBlock: executionFromBlock,
     });
+    const execution = executionScan.evidence;
+    const executionScannedThroughBlock = executionScan.scannedThroughBlock >= executionFromBlock
+      ? executionScan.scannedThroughBlock
+      : job.executionScannedThroughBlock;
     if (execution) {
       const executionDepth = currentBlock >= execution.blockNumber
         ? currentBlock - execution.blockNumber + 1n
@@ -498,6 +458,7 @@ export class GovernanceWorker {
           state: job.executeRawTransaction ? "Executing" : "Queued",
           executeTxHash: execution.transactionHash,
           executeReceiptBlock: execution.blockNumber,
+          executionScannedThroughBlock,
           lastAttemptAt: this.now(),
           nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
           lastError: `waiting for execute confirmations ${executionDepth}/${this.config.confirmations}`,
@@ -519,12 +480,21 @@ export class GovernanceWorker {
     const expirationAt = delayState.createdAt + delayState.cooldown + delayState.expiration;
     const expired = delayState.expiration !== 0n && delayState.currentTimestamp > expirationAt;
     if (delayState.txNonce > entryNonce) {
-      const veto = await this.base.findVeto(delay, entryNonce, queueReceipt.blockNumber);
+      const vetoFromBlock = job.vetoScannedThroughBlock === null
+        ? queueReceipt.blockNumber
+        : job.vetoScannedThroughBlock + 1n;
+      const vetoScan = await this.base.findVeto(delay, entryNonce, vetoFromBlock);
+      const veto = vetoScan.evidence;
+      const vetoScannedThroughBlock = vetoScan.scannedThroughBlock >= vetoFromBlock
+        ? vetoScan.scannedThroughBlock
+        : job.vetoScannedThroughBlock;
       if (veto) {
         const vetoDepth = currentBlock >= veto.blockNumber ? currentBlock - veto.blockNumber + 1n : 0n;
         if (vetoDepth < BigInt(this.config.confirmations)) {
           await this.store.update(job, {
             state: "Queued",
+            executionScannedThroughBlock,
+            vetoScannedThroughBlock,
             lastAttemptAt: this.now(),
             nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
             lastError: `waiting for veto confirmations ${vetoDepth}/${this.config.confirmations}`,
@@ -537,6 +507,10 @@ export class GovernanceWorker {
         });
         return;
       }
+      await this.store.update(job, {
+        executionScannedThroughBlock,
+        vetoScannedThroughBlock,
+      });
       if (expired) {
         await this.checkpointFinal(job, "Expired", {
           txHash: hash,
@@ -554,6 +528,7 @@ export class GovernanceWorker {
       queueCreatedAt: delayState.createdAt,
       cooldownSeconds: delayState.cooldown,
       expirationSeconds: delayState.expiration,
+      executionScannedThroughBlock,
       ...(job.queueCreatedAt === null ? { queuedAt: this.now() } : {}),
       lastAttemptAt: this.now(),
       nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),

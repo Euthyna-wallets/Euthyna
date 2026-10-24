@@ -74,8 +74,20 @@ const mandates = new MandateService(
   near,
   env.BUDGET_TOKEN_ACCOUNT_ID,
   env.BASE_SEPOLIA_RPC_URL,
+  {
+    gasLimit: env.GOVERNANCE_PROPOSAL_GAS_LIMIT,
+    maxFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI,
+    maxPriorityFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI,
+  },
 );
-const governance = new GovernanceService(prisma, near, env.BASE_SEPOLIA_RPC_URL);
+const governance = new GovernanceService(prisma, near, {
+  baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
+  proposalGas: {
+    gasLimit: env.GOVERNANCE_PROPOSAL_GAS_LIMIT,
+    maxFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI,
+    maxPriorityFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI,
+  },
+});
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
 const consoleData = new ConsoleDataService(

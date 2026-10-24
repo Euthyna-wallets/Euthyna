@@ -81,6 +81,11 @@ export interface DelayVetoEvidence {
   blockNumber: bigint;
 }
 
+export interface EvidenceScanResult<T> {
+  evidence: T | null;
+  scannedThroughBlock: bigint;
+}
+
 
 export interface RolesVerification {
   memberEnabled: boolean;
@@ -109,8 +114,8 @@ export interface GovernanceBaseGateway {
     data: Hex;
     operation: 0 | 1;
     fromBlock: bigint;
-  }): Promise<DelayExecutionEvidence | null>;
-  findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<DelayVetoEvidence | null>;
+  }): Promise<EvidenceScanResult<DelayExecutionEvidence>>;
+  findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<EvidenceScanResult<DelayVetoEvidence>>;
   prepareExecuteNextTx(input: {
     delay: Address;
     to: Address;
@@ -204,7 +209,7 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     data: Hex;
     operation: 0 | 1;
     fromBlock: bigint;
-  }): Promise<DelayExecutionEvidence | null> {
+  }): Promise<EvidenceScanResult<DelayExecutionEvidence>> {
     const latest = await this.publicClient.getBlockNumber();
     for (let fromBlock = input.fromBlock; fromBlock <= latest;) {
       const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
@@ -235,15 +240,22 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
         }
         const receipt = await this.receipt(event.transactionHash);
         if (receipt?.status === "success") {
-          return { transactionHash: event.transactionHash, blockNumber: event.blockNumber, receipt };
+          return {
+            evidence: { transactionHash: event.transactionHash, blockNumber: event.blockNumber, receipt },
+            scannedThroughBlock: event.blockNumber,
+          };
         }
       }
       fromBlock = toBlock + 1n;
     }
-    return null;
+    return { evidence: null, scannedThroughBlock: latest };
   }
 
-  async findVeto(delay: Address, entryNonce: bigint, initialBlock: bigint): Promise<DelayVetoEvidence | null> {
+  async findVeto(
+    delay: Address,
+    entryNonce: bigint,
+    initialBlock: bigint,
+  ): Promise<EvidenceScanResult<DelayVetoEvidence>> {
     const latest = await this.publicClient.getBlockNumber();
     for (let fromBlock = initialBlock; fromBlock <= latest;) {
       const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
@@ -271,14 +283,17 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
         });
         if (priorNonce <= entryNonce) {
           return {
-            transactionHash: event.transactionHash,
-            blockNumber: event.blockNumber,
+            evidence: {
+              transactionHash: event.transactionHash,
+              blockNumber: event.blockNumber,
+            },
+            scannedThroughBlock: event.blockNumber,
           };
         }
       }
       fromBlock = toBlock + 1n;
     }
-    return null;
+    return { evidence: null, scannedThroughBlock: latest };
   }
 
   async prepareExecuteNextTx(input: {

@@ -86,6 +86,8 @@ describe.skipIf(!databaseUrl)("PrismaGovernanceStore against PostgreSQL", () => 
       state: "Executing",
       executeRawTransaction: "0x1234",
       executeTxHash: `0x${"33".repeat(32)}`,
+      executionScannedThroughBlock: 1234n,
+      vetoScannedThroughBlock: 1200n,
       nextAttemptAt: new Date(0),
     });
 
@@ -95,6 +97,8 @@ describe.skipIf(!databaseUrl)("PrismaGovernanceStore against PostgreSQL", () => 
       state: "Executing",
       executeRawTransaction: "0x1234",
       executeTxHash: `0x${"33".repeat(32)}`,
+      executionScannedThroughBlock: 1234n,
+      vetoScannedThroughBlock: 1200n,
     });
     await second.update(recovered!, { state: "Failed", nextAttemptAt: null, lastError: "execute reverted" });
     await expect(second.listReady(new Date())).resolves.toEqual([]);

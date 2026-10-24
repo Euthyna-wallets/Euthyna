@@ -118,6 +118,11 @@ function service(
       near,
       "test-ft.testnet",
       "http://127.0.0.1:8545",
+      {
+        gasLimit: "345678",
+        maxFeePerGas: "987654321",
+        maxPriorityFeePerGas: "123456789",
+      },
       () => 1_700_000_000n,
       async () => currentAllowance,
     ),
@@ -197,6 +202,9 @@ describe("MandateService.preview", () => {
       target: z.string(),
       data: z.string(),
       operation: z.literal(1),
+      gas_limit: z.string(),
+      max_fee_per_gas: z.string(),
+      max_priority_fee_per_gas: z.string(),
     }).parse(JSON.parse(Buffer.from(
       relayProposal.kind.FunctionCall.actions[0]!.args,
       "base64",
@@ -204,6 +212,11 @@ describe("MandateService.preview", () => {
     expect(bytesToHex(Buffer.from(relayArgs.target, "base64"))).toBe(
       "0x9641d764fc13c8b624c04430c7356c1c7c8102e2",
     );
+    expect(relayArgs).toMatchObject({
+      gas_limit: "345678",
+      max_fee_per_gas: "987654321",
+      max_priority_fee_per_gas: "123456789",
+    });
     const decodedMultiSend = decodeFunctionData({
       abi: multiSendAbi,
       data: bytesToHex(Buffer.from(relayArgs.data, "base64")),

@@ -144,8 +144,13 @@ export class MandateService implements MandateGateway {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
-    private readonly budgetTokenAccountId = "test-ft.testnet",
-    private readonly baseRpcUrl = "https://sepolia.base.org",
+    private readonly budgetTokenAccountId: string,
+    private readonly baseRpcUrl: string,
+    private readonly proposalGas: {
+      gasLimit: string;
+      maxFeePerGas: string;
+      maxPriorityFeePerGas: string;
+    },
     private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
     private readonly allowanceReader?: (chainId: number, roles: Address, key: Hex) => Promise<AllowanceState>,
   ) {}
@@ -438,9 +443,9 @@ export class MandateService implements MandateGateway {
                       value: "0",
                       data: b64(multiSendData),
                       operation: 1,
-                      gas_limit: input.gas.gasLimit,
-                      max_fee_per_gas: input.gas.maxFeePerGas,
-                      max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
+                      gas_limit: this.proposalGas.gasLimit,
+                      max_fee_per_gas: this.proposalGas.maxFeePerGas,
+                      max_priority_fee_per_gas: this.proposalGas.maxPriorityFeePerGas,
                     }),
                     gas: "60000000000000",
                     deposit: "0",

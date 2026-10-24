@@ -478,6 +478,8 @@ model GovernanceOperation {
   receiptBlock          BigInt?
   queueNonce            BigInt?
   queueCreatedAt        BigInt?
+  executionScannedThroughBlock BigInt?
+  vetoScannedThroughBlock      BigInt?
   cooldownSeconds       BigInt?
   expirationSeconds     BigInt?
   executeRawTransaction String?

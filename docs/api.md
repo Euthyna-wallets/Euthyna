@@ -530,6 +530,22 @@ corresponding active operation; it never receives a private key
 ([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
+Classification never trusts the proposal description. The API decodes the
+on-chain DAO `FunctionCall`, requires one `propose` call to the registered
+relay, compares its target/value/data/operation byte-for-byte with the active
+relay operation, then accepts only the canonical Zodiac batch or a `Call` to
+the registered Safe whose selector is `swapOwner` or
+`addOwnerWithThreshold`. Descriptions remain display-only
+([`apps/api/src/governance-calldata.ts`](../apps/api/src/governance-calldata.ts),
+[`apps/api/src/governance.ts`](../apps/api/src/governance.ts)).
+
+The Base gas fields embedded in every relay proposal, including Zodiac batches
+and Safe-owner recovery, come from `GOVERNANCE_PROPOSAL_GAS_LIMIT`,
+`GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI`, and
+`GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI`; the defaults are
+`200000`, `20000000000`, and `1000000000`. Agent payment gas limits remain a
+separate governed mandate setting.
+
 The governance job shares the payment worker lease. It recovers a missing MPC
 signature from that NEAR transaction, broadcasts the immutable 0xGOV
 transaction, waits `WORKER_CONFIRMATIONS`, and checkpoints the Delay entry.
@@ -554,6 +570,14 @@ was still `<= entryNonce`. Without either proof, an elapsed
 A generic non-Zodiac operation uses the same Safe/calldata execution proof and
 records receipt-only post-verification. Reverted queue or `executeNextTx`
 transactions become `Failed`.
+
+Execution and veto log scans persist separate
+`executionScannedThroughBlock` / `vetoScannedThroughBlock` cursors on the
+governance job. A poll starts at the next unscanned block instead of replaying
+the full range from the queue receipt; an observed but insufficiently confirmed
+event remains checkpointed by its transaction hash and block
+([`packages/db/prisma/schema.prisma`](../packages/db/prisma/schema.prisma),
+[`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts)).
 
 Guard signs the exact 0xGOV transaction hash, Base block number, and final status
 under `mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`

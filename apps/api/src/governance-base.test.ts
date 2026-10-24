@@ -53,7 +53,10 @@ describe("BaseGovernanceGateway execution evidence", () => {
       data: "0x1234",
       operation: 1,
       fromBlock: 10n,
-    })).resolves.toMatchObject({ transactionHash: executionHash, blockNumber: 20n });
+    })).resolves.toMatchObject({
+      evidence: { transactionHash: executionHash, blockNumber: 20n },
+      scannedThroughBlock: 20n,
+    });
     expect(getLogs).toHaveBeenCalledWith(expect.objectContaining({
       address: safe,
       args: { module: delay },
@@ -68,7 +71,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
       data: "0xabcd",
       operation: 1,
       fromBlock: 10n,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({ evidence: null, scannedThroughBlock: 20n });
   });
 
   it("accepts TxNonceSet as a veto only when the prior-block nonce had not passed the entry", async () => {
@@ -81,12 +84,18 @@ describe("BaseGovernanceGateway execution evidence", () => {
     const base = gateway({ getBlockNumber: async () => 20n, getLogs, readContract });
 
     await expect(base.findVeto(delay, 0n, 10n)).resolves.toEqual({
-      transactionHash: vetoHash,
-      blockNumber: 20n,
+      evidence: {
+        transactionHash: vetoHash,
+        blockNumber: 20n,
+      },
+      scannedThroughBlock: 20n,
     });
     expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ blockNumber: 19n }));
 
     readContract.mockResolvedValueOnce(1n);
-    await expect(base.findVeto(delay, 0n, 10n)).resolves.toBeNull();
+    await expect(base.findVeto(delay, 0n, 10n)).resolves.toEqual({
+      evidence: null,
+      scannedThroughBlock: 20n,
+    });
   });
 });

@@ -1,19 +1,42 @@
 import type { PrismaClient } from "@mandateos/db";
 import { describe, expect, it } from "vitest";
-import { bytesToHex, decodeFunctionData, getAddress, type Address } from "viem";
+import { bytesToHex, decodeFunctionData, encodeFunctionData, getAddress, hexToBytes, type Address } from "viem";
 import { z } from "zod";
 
 import { GovernanceService } from "./governance.js";
 import type { NearClient } from "./near.js";
 import type { GovernanceOperation } from "./types.js";
 
+const safeAddress = getAddress("0x3333333333333333333333333333333333333333");
+const rolesAddress = getAddress("0x5555555555555555555555555555555555555555");
+const recoveryAbi = [{
+  type: "function",
+  name: "swapOwner",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "prevOwner", type: "address" },
+    { name: "oldOwner", type: "address" },
+    { name: "newOwner", type: "address" },
+  ],
+  outputs: [],
+}] as const;
+const recoveryData = encodeFunctionData({
+  abi: recoveryAbi,
+  functionName: "swapOwner",
+  args: [
+    getAddress("0x1111111111111111111111111111111111111111"),
+    getAddress("0x2222222222222222222222222222222222222222"),
+    getAddress("0x4444444444444444444444444444444444444444"),
+  ],
+});
+
 const operation: GovernanceOperation = {
   op_id: Array(32).fill(1) as number[],
   proposer: "dao.testnet",
-  target: Array(20).fill(2) as number[],
+  target: Array.from(hexToBytes(safeAddress)),
   value: "0",
-  data: [3, 4],
-  operation: 1,
+  data: Array.from(hexToBytes(recoveryData)),
+  operation: 0,
   evm_nonce: 0,
   transaction: {
     chain_id: 84532,
@@ -44,7 +67,35 @@ const relayArgsSchema = z.object({
   target: z.string(),
   data: z.string(),
   operation: z.number(),
+  gas_limit: z.string(),
+  max_fee_per_gas: z.string(),
+  max_priority_fee_per_gas: z.string(),
 });
+
+function daoProposal(
+  relayOperation: GovernanceOperation,
+  status: string,
+  description = "Harmless description that must not be trusted",
+) {
+  return {
+    status,
+    description,
+    kind: {
+      FunctionCall: {
+        receiver_id: "relay.testnet",
+        actions: [{
+          method_name: "propose",
+          args: Buffer.from(JSON.stringify({
+            target: Buffer.from(relayOperation.target).toString("base64"),
+            value: relayOperation.value,
+            data: Buffer.from(relayOperation.data).toString("base64"),
+            operation: relayOperation.operation,
+          })).toString("base64"),
+        }],
+      },
+    },
+  };
+}
 
 
 function fixture(
@@ -54,6 +105,8 @@ function fixture(
     getAddress("0x1111111111111111111111111111111111111111"),
     getAddress("0x2222222222222222222222222222222222222222"),
   ],
+  relayOperation: GovernanceOperation = operation,
+  proposalValue: unknown = daoProposal(relayOperation, proposalStatus),
 ) {
   let stored: Record<string, unknown> | null = null;
   const prisma = {
@@ -63,7 +116,9 @@ function fixture(
         organizationId: "org-1",
         daoAccountId: "dao.testnet",
         relayAccountId: "relay.testnet",
-        safeAddress: "0x3333333333333333333333333333333333333333",
+        safeAddress,
+        rolesAddress,
+        baseChainId: 84532,
       }),
     },
     member: { findFirst: async () => ({ id: "member-1" }) },
@@ -86,23 +141,29 @@ function fixture(
   } as unknown as PrismaClient;
   const near = {
     viewFunction: async (_account: string, method: string) => {
-      if (method === "get_proposal") {
-        return { status: proposalStatus, description: "Batch Zodiac configuration [mandate:abc:zodiac]" };
-      }
+      if (method === "get_proposal") return proposalValue;
       if (method === "active_operation") return activeOperation;
-      if (method === "get_operation") return operation;
+      if (method === "get_operation") return relayOperation;
       if (method === "client_id") return "acme";
       throw new Error(`unexpected view ${method}`);
     },
   } as unknown as NearClient;
   return {
-    service: new GovernanceService(prisma, near, "https://sepolia.base.org", async () => owners),
+    service: new GovernanceService(prisma, near, {
+      baseRpcUrl: "https://sepolia.base.org",
+      proposalGas: {
+        gasLimit: "345678",
+        maxFeePerGas: "987654321",
+        maxPriorityFeePerGas: "123456789",
+      },
+      safeOwnersReader: async () => owners,
+    }),
     stored: () => stored,
   };
 }
 
 describe("GovernanceService", () => {
-  it("records the public final-vote hash against the active relay operation", async () => {
+  it("classifies the executed proposal from relay calldata rather than its description", async () => {
     const test = fixture();
     await expect(test.service.recordRelayExecution("org-1", {
       proposalId: 7,
@@ -115,10 +176,54 @@ describe("GovernanceService", () => {
       nearExecutionTxHash: "near-final-vote-hash",
       nearExecutionSignerId: "alice.testnet",
       relayAccountId: "relay.testnet",
-      operation: 1,
+      operation: 0,
     });
   });
 
+
+  it("rejects a DAO proposal whose relay calldata differs from the active operation", async () => {
+    const mismatched = {
+      ...operation,
+      data: Array.from(hexToBytes(encodeFunctionData({
+        abi: recoveryAbi,
+        functionName: "swapOwner",
+        args: [
+          getAddress("0x1111111111111111111111111111111111111111"),
+          getAddress("0x2222222222222222222222222222222222222222"),
+          getAddress("0x6666666666666666666666666666666666666666"),
+        ],
+      }))),
+    };
+    await expect(fixture(
+      "Approved",
+      operation.op_id,
+      undefined,
+      operation,
+      daoProposal(mismatched, "Approved", "Recover Safe owner"),
+    ).service.recordRelayExecution("org-1", {
+      proposalId: 7,
+      nearTransactionHash: "near-final-vote-hash",
+      signerAccountId: "alice.testnet",
+    })).rejects.toMatchObject({ code: "proposal_operation_mismatch" });
+  });
+
+  it("rejects unsupported selectors and Safe owner calls sent to another target", async () => {
+    const unsupported = { ...operation, data: Array.from(hexToBytes("0x12345678")) };
+    await expect(fixture("Approved", operation.op_id, undefined, unsupported)
+      .service.recordRelayExecution("org-1", {
+        proposalId: 7,
+        nearTransactionHash: "near-final-vote-hash",
+        signerAccountId: "alice.testnet",
+      })).rejects.toMatchObject({ code: "proposal_not_governance" });
+
+    const wrongTarget = { ...operation, target: Array.from(hexToBytes(rolesAddress)) };
+    await expect(fixture("Approved", operation.op_id, undefined, wrongTarget)
+      .service.recordRelayExecution("org-1", {
+        proposalId: 7,
+        nearTransactionHash: "near-final-vote-hash",
+        signerAccountId: "alice.testnet",
+      })).rejects.toMatchObject({ code: "proposal_not_governance" });
+  });
   it("refuses to register a relay job before the DAO proposal executes", async () => {
     await expect(fixture("InProgress").service.recordRelayExecution("org-1", {
       proposalId: 7,
@@ -179,6 +284,11 @@ describe("GovernanceService", () => {
       newOwner,
     ]);
     expect(relayArgs.operation).toBe(0);
+    expect(relayArgs).toMatchObject({
+      gas_limit: "345678",
+      max_fee_per_gas: "987654321",
+      max_priority_fee_per_gas: "123456789",
+    });
   });
 
   it("builds a relay proposal that adds a third Safe owner with threshold two", async () => {
@@ -204,5 +314,10 @@ describe("GovernanceService", () => {
     });
     expect(decoded.args).toEqual([newOwner, 2n]);
     expect(relayArgs.operation).toBe(0);
+    expect(relayArgs).toMatchObject({
+      gas_limit: "345678",
+      max_fee_per_gas: "987654321",
+      max_priority_fee_per_gas: "123456789",
+    });
   });
 });
