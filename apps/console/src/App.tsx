@@ -55,6 +55,8 @@ export function App() {
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/escalations" element={<EscalationsPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/decisions" element={<Navigate to="/governance" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Route>
         </Routes>

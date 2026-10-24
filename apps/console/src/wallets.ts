@@ -6,7 +6,7 @@ import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
 import { createPublicClient, createWalletClient, custom, encodeFunctionData, getAddress, http, type Address, type EIP1193Provider, type Hex } from "viem";
 import { baseSepolia, sepolia } from "viem/chains";
 
-import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
+import { api, type BudgetTokenPlan, type NearAction, type TreasuryPlan } from "./api.js";
 import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet, selectDemoWalletScopeForAccounts } from "./lib/wallet-store.js";
 export const DAO_VOTE_GAS = "200000000000000";
 
@@ -849,6 +849,7 @@ export async function signDaoProposal(
   const proposalId =
     decodeProposalId(outcome.status?.SuccessValue) ??
     await proposalIdFromTransaction(transactionHash, signerId);
+  await refreshOmniReads();
   return { transactionHash, proposalId };
 }
 
@@ -906,6 +907,7 @@ export async function signDaoAction(
       },
     }],
   });
+  await refreshOmniReads();
   return outcome.transaction_outcome.id;
 }
 
@@ -925,5 +927,11 @@ export async function signVaultCall(
       params: { methodName, args, gas: "50000000000000", deposit: "0" },
     }],
   });
+  await refreshOmniReads();
   return outcome.transaction_outcome.id;
+}
+
+/** The API caches NEAR reads; drop them after a member's own transaction so the page shows it at once. */
+async function refreshOmniReads(): Promise<void> {
+  await api("/v1/console/omniroles/refresh", { method: "POST", body: "{}" }).catch(() => undefined);
 }

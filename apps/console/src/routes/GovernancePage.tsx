@@ -78,6 +78,11 @@ export function GovernancePage() {
   const open = (data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress");
   const closed = (data?.proposals ?? []).filter((proposal) => proposal.status !== "InProgress");
   const waiting = (data?.rules ?? []).filter((rule) => rule.state === "Queued");
+  // Rules queued by the same proposal share their queue time: show and veto them together.
+  const groups = Object.values(waiting.reduce<Record<string, GovernanceRule[]>>((result, rule) => {
+    (result[rule.queuedAt] ??= []).push(rule);
+    return result;
+  }, {})).map((rules) => rules.slice().reverse());
   const settled = (data?.rules ?? []).filter((rule) => rule.state !== "Queued");
 
   return (
@@ -137,19 +142,21 @@ export function GovernancePage() {
           )}
         </Card>
 
-        <Card title={`Approved — veto window (${waiting.length})`}>
-          {waiting.length === 0 ? <div className="state">No approved rule is waiting.</div> : (
+        <Card title={`Approved — veto window (${groups.length})`}>
+          {groups.length === 0 ? <div className="state">No approved decision is waiting.</div> : (
             <div className="stack">
-              {waiting.map((rule) => (
+              {groups.map((rules) => (
                 <RuleCard
-                  key={rule.queueId}
-                  rule={rule}
+                  key={rules[0]!.queueId}
+                  rules={rules}
                   now={now}
                   canVeto={isMember}
                   busy={busy}
-                  onVeto={() => run(`veto-${rule.queueId}`, async () => {
-                    await signVaultCall(me, data!.vaultAccountId, "veto_rule_change", { queue_id: hexToBytes(rule.queueId) });
-                    return "Rule vetoed: it will not apply.";
+                  onVeto={() => run(`veto-${rules[0]!.queueId}`, async () => {
+                    for (const rule of rules) {
+                      await signVaultCall(me, data!.vaultAccountId, "veto_rule_change", { queue_id: hexToBytes(rule.queueId) });
+                    }
+                    return "Decision vetoed: none of its changes will apply.";
                   })}
                   onActivate={() => run("activate", async () => {
                     const result = await omni.activate();
@@ -249,31 +256,32 @@ function ProposalCard(props: {
 }
 
 function RuleCard(props: {
-  rule: GovernanceRule;
+  rules: GovernanceRule[];
   now: number;
   canVeto: boolean;
   busy: string | null;
   onVeto: () => void;
   onActivate: () => void;
 }) {
-  const { rule } = props;
+  const first = props.rules[0]!;
+  const ready = props.rules.every((rule) => rule.readyToActivate);
   return (
     <article className="decision">
       <header>
         <div>
-          <span className="eyebrow">Approved · {rule.readyToActivate ? "veto window over" : `applies ${relativeTime(rule.activatesAt, props.now)}`}</span>
-          <h3>{rule.title}</h3>
+          <span className="eyebrow">Approved · {ready ? "veto window over" : `applies ${relativeTime(first.activatesAt, props.now)}`}</span>
+          <h3>{props.rules.length === 1 ? first.title : `${props.rules.length} changes approved together`}</h3>
         </div>
       </header>
-      {rule.details.length ? <SentenceList items={[{ title: "Details", details: rule.details }]} /> : null}
+      <SentenceList items={props.rules.map((rule) => ({ title: rule.title, details: rule.details }))} />
       <footer className="row wrap">
-        <span className="small muted">Applies at {new Date(rule.activatesAt).toLocaleTimeString()} unless a council member vetoes it.</span>
+        <span className="small muted">Applies at {new Date(first.activatesAt).toLocaleTimeString()} unless a council member vetoes it.</span>
         <div className="spacer" />
-        {rule.readyToActivate ? (
+        {ready ? (
           <button className="primary" disabled={Boolean(props.busy)} onClick={props.onActivate}>Apply now</button>
         ) : (
           <button className="danger" disabled={!props.canVeto || Boolean(props.busy)} onClick={props.onVeto}>
-            {props.busy === `veto-${rule.queueId}` ? "Signing…" : "Veto"}
+            {props.busy === `veto-${first.queueId}` ? "Signing…" : "Veto"}
           </button>
         )}
       </footer>

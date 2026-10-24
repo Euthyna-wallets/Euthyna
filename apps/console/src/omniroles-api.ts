@@ -84,6 +84,7 @@ export type ActivityItem = {
   txHash: string | null;
   opId: string | null;
   reason: string | null;
+  summary: string | null;
 };
 
 export const omni = {

@@ -297,3 +297,12 @@ tr.refused td { background: #fff8f7; }
 .status-disabled, .status-vetoed, .status-expired, .status-failed { background: #fdeceb; color: #b42318; }
 .status-inprogress, .status-queued { background: #fff4e5; color: #92400e; }
 @media (max-width: 900px) { .role-grid { grid-template-columns: 1fr; } }
+
+.page-head > .primary, .page-head > .button { white-space: nowrap; flex-shrink: 0; margin-left: 24px; }
+.role-rules { padding-left: 0; list-style: none; }
+.role-rules li.permission { font-weight: 600; margin-top: 8px; color: #111827; }
+.role-rules li.permission:first-child { margin-top: 0; }
+.role-rules { gap: 3px; }
+.role-rules li.rule { list-style: none; color: #5b6472; font-size: 13px; padding-left: 14px; }
+.role-rules li.rule::before { content: "· "; }
+.page-head > .pill { white-space: nowrap; flex-shrink: 0; margin-left: 24px; }

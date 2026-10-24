@@ -114,7 +114,7 @@ describe("descriptions", () => {
     expect(text).toContain("token bought must be WETH");
     expect(text).toContain("recipient must be the company wallet");
     expect(text).toContain("minimum received must be set (not zero)");
-    expect(text).toContain("route must be an approved route");
+    expect(text).toContain("route must be TestUSDC → WETH");
   });
 
   it("describes members", () => {
@@ -136,5 +136,17 @@ describe("DAO proposals", () => {
     expect(decoded).toEqual(calls);
     expect(decodeVaultCalls(args.proposal.kind, "other.testnet")).toBeNull();
     expect(describeVaultCall(decoded![0]!, { profile: BASE_SEPOLIA }).title).toBe("Create the company wallet on Base Sepolia");
+  });
+});
+
+describe("describeCall", async () => {
+  const { describeCall } = await import("./roles.js");
+  const { encodeFunctionData, erc20Abi } = await import("viem");
+  const context = { profile: BASE_SEPOLIA, labels: { [SUPPLIER]: "Studio Pixel" } };
+  it("reads transfers and approvals", () => {
+    const transfer = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [SUPPLIER, 250_000_000n] });
+    expect(describeCall(TEST_USDC, transfer, 0n, context)).toBe("transfer 250 TestUSDC to Studio Pixel");
+    const drain = encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: ["0x000000000000000000000000000000000000dEaD", 2n ** 256n - 1n] });
+    expect(describeCall(TEST_USDC, drain, 0n, context)).toBe("approve 0x0000…dEaD (not a registered supplier) to spend an unlimited amount of TestUSDC");
   });
 });

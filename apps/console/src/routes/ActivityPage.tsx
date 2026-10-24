@@ -30,7 +30,7 @@ export function ActivityPage() {
                   <td><Status value={item.kind === "refusal" ? "rejected" : item.state} /></td>
                   <td className="small">
                     {item.kind === "refusal"
-                      ? <span>Refused: {item.reason}</span>
+                      ? <span>{item.summary ? <><strong>{item.summary}</strong><br /></> : null}Refused: {item.reason}</span>
                       : (
                         <span className="row wrap">
                           {item.txHash ? <a href={`https://sepolia.basescan.org/tx/${item.txHash}`} target="_blank" rel="noreferrer">Base tx {short(item.txHash)}</a> : <span className="muted">Not broadcast yet</span>}

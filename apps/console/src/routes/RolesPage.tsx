@@ -78,7 +78,13 @@ function RoleCard({ role }: { role: RoleView }) {
         </div>
         <div>
           <h3>Allowed</h3>
-          {role.description ? <SentenceList items={[{ title: role.description.title, details: role.description.details }]} /> : null}
+          {role.description ? (
+            <ul className="sentences role-rules">
+              {role.description.details.map((detail, index) => (
+                <li key={index} className={detail.startsWith("  · ") ? "rule" : "permission"}>{detail.replace(/^ {2}· /, "")}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </Card>

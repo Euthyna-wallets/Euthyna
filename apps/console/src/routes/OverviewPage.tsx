@@ -18,7 +18,11 @@ export function OverviewPage() {
   const refused = (activity.data?.items ?? []).filter((item) => item.kind === "refusal").length;
   const executed = (activity.data?.items ?? []).filter((item) => item.kind === "operation").length;
 
-  const next = !status.data?.treasury
+  const loading = Boolean(status.data?.treasury) && (roles.isLoading || governance.isLoading || activity.isLoading);
+  const count = (value: number) => (loading ? "…" : value);
+  const next = loading
+    ? { title: "Reading the vault…", detail: "Roles, decisions and activity are read from NEAR.", action: "Open roles", to: "/roles" }
+    : !status.data?.treasury
     ? { title: "Finish the company setup", detail: "Members, treasury and wallet.", action: "Continue setup", to: "/onboarding" }
     : !status.data.wallet
       ? { title: "Create the company wallet", detail: "Members vote on the DAO's first decision.", action: "Continue setup", to: "/onboarding" }
@@ -48,12 +52,12 @@ export function OverviewPage() {
             <div className="metrics">
               <div className="metric"><span>Company wallet</span><strong className="mono">{status.data.wallet ? short(status.data.wallet.address, 6) : "not created"}</strong></div>
               <div className="metric"><span>Balance</span><strong>{status.data.wallet ? status.data.wallet.tokens.filter((token) => Number(token.amount) > 0).map((token) => `${Number(token.amount).toLocaleString()} ${token.symbol}`).join(" · ") || "empty" : "—"}</strong></div>
-              <div className="metric"><span>Roles</span><strong>{roles.data?.roles.length ?? 0}</strong></div>
-              <div className="metric"><span>Rules in veto window</span><strong>{pendingRules}</strong></div>
-              <div className="metric"><span>Operations / refused</span><strong>{executed} / {refused}</strong></div>
+              <div className="metric"><span>Roles</span><strong>{count(roles.data?.roles.length ?? 0)}</strong></div>
+              <div className="metric"><span>Rules in veto window</span><strong>{count(pendingRules)}</strong></div>
+              <div className="metric"><span>Operations / refused</span><strong>{loading ? "…" : `${executed} / ${refused}`}</strong></div>
             </div>
             <Card title="Budgets">
-              {(roles.data?.roles ?? []).flatMap((role) => role.budgets).length === 0 ? <div className="state">No budget yet.</div> : (
+              {roles.isLoading ? <div className="state">Loading…</div> : (roles.data?.roles ?? []).flatMap((role) => role.budgets).length === 0 ? <div className="state">No budget yet.</div> : (
                 <table>
                   <thead><tr><th>Budget</th><th>Left this period</th><th>Refill</th></tr></thead>
                   <tbody>

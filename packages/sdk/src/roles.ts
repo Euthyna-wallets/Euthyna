@@ -9,7 +9,7 @@
  *
  * Browser-safe: depends on viem only.
  */
-import { encodeAbiParameters, formatUnits, getAddress, keccak256, parseUnits, toBytes, toHex, type Hex } from "viem";
+import { decodeFunctionData, encodeAbiParameters, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
 
 // ---------------------------------------------------------------------------
 // Vault JSON types (contracts/vault/src/types.rs)
@@ -440,6 +440,18 @@ export type DescribeContext = {
   budgets?: Record<string, BudgetInfo>;
 };
 
+/** Name a V2 route by matching its hash against two-hop routes between known tokens. */
+function routeName(hash: Hex, context: DescribeContext): string | null {
+  const tokens = context.profile.tokens;
+  for (const from of tokens) {
+    for (const to of tokens) {
+      if (from === to) continue;
+      if (routeHash([from.address, to.address]).toLowerCase() === hash.toLowerCase()) return `${from.symbol} → ${to.symbol}`;
+    }
+  }
+  return null;
+}
+
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -460,7 +472,7 @@ export function labelAddress(address: Hex, context: DescribeContext): string {
   if (token) return token.symbol;
   const protocol = Object.values(context.profile.protocols).find((item) => item.router.toLowerCase() === key);
   if (protocol) return `${protocol.name} router`;
-  return short(getAddress(address));
+  return `${short(getAddress(address))} (not a registered supplier)`;
 }
 
 function wordToAddress(value: Hex): Hex {
@@ -571,7 +583,7 @@ export function describePermission(permission: Permission, context: DescribeCont
         return;
       case Operator.EqualTo:
         if (item.paramType === Encoding.Array) {
-          rules.push(`${name} must be an approved route`);
+          rules.push(`${name} must be ${routeName(item.compValue, context) ?? "an approved route"}`);
         } else if (item.paramType === Encoding.Static && /^0x0{24}/i.test(item.compValue)) {
           rules.push(`${name} must be ${labelAddress(wordToAddress(item.compValue), context)}`);
         } else {
@@ -582,7 +594,7 @@ export function describePermission(permission: Permission, context: DescribeCont
         const options = children(index).map(({ item: option }) =>
           option.paramType === Encoding.Static && option.operator === Operator.EqualTo
             ? labelAddress(wordToAddress(option.compValue), context)
-            : option.paramType === Encoding.Array ? "an approved route" : "an allowed value");
+            : option.paramType === Encoding.Array ? routeName(option.compValue, context) ?? "an approved route" : "an allowed value");
         rules.push(`${name} must be one of: ${[...new Set(options)].join(", ")}`);
         return;
       }
@@ -653,4 +665,41 @@ export function describeVaultCall(call: VaultCall, context: DescribeContext): { 
   if (call.method === "unpause") return { title: "Resume operations", details: [] };
   if (call.method === "queue_rule_change") return describeChange(call.change, context);
   return { title: "Unknown vault call", details: [] };
+}
+
+const ROUTER_ABI = parseAbi([
+  "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params)",
+  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)",
+]);
+
+/** One sentence for a call an agent asked for (activity feed). */
+export function describeCall(target: Hex, calldata: Hex, value: bigint, context: DescribeContext): string {
+  const token = context.profile.tokens.find((item) => item.address.toLowerCase() === target.toLowerCase());
+  const label = (address: Hex) => labelAddress(address, context);
+  try {
+    if (calldata === "0x") return `send ${formatUnits(value, 18)} ETH to ${label(target)}`;
+    const selector = calldata.slice(0, 10);
+    if (selector === SELECTORS.transfer || selector === SELECTORS.approve) {
+      const decoded = decodeFunctionData({ abi: erc20Abi, data: calldata });
+      const [who, amount] = decoded.args as readonly [Hex, bigint];
+      const amountLabel = amount >= 2n ** 255n ? "an unlimited amount of" : amountText(amount, token);
+      return decoded.functionName === "transfer"
+        ? `transfer ${amountText(amount, token)} to ${label(who)}`
+        : `approve ${label(who)} to spend ${amountLabel}${amount >= 2n ** 255n && token ? ` ${token.symbol}` : ""}`;
+    }
+    if (selector === SELECTORS.exactInputSingle || selector === SELECTORS.swapExactTokensForTokens) {
+      const decoded = decodeFunctionData({ abi: ROUTER_ABI, data: calldata });
+      if (decoded.functionName === "exactInputSingle") {
+        const params = decoded.args[0];
+        const tokenIn = context.profile.tokens.find((item) => item.address.toLowerCase() === params.tokenIn.toLowerCase());
+        return `swap ${amountText(params.amountIn, tokenIn)} for ${label(params.tokenOut)} on ${label(target)}, sent to ${label(params.recipient)}`;
+      }
+      const [amountIn, , path, to] = decoded.args;
+      const tokenIn = context.profile.tokens.find((item) => item.address.toLowerCase() === path[0]?.toLowerCase());
+      return `swap ${amountText(amountIn, tokenIn)} along ${path.map((hop) => label(hop)).join(" → ")} on ${label(target)}, sent to ${label(to)}`;
+    }
+  } catch {
+    // fall through
+  }
+  return `call ${calldata.slice(0, 10)} on ${label(target)}`;
 }

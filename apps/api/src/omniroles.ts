@@ -18,6 +18,7 @@ import {
   budgetsOf,
   compileRole,
   decodeVaultCalls,
+  describeCall,
   describeVaultCall,
   proposalArgs,
   PROPOSAL_MARKER,
@@ -264,16 +265,16 @@ export class OmniRolesService {
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };
     const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const [daoPolicy, daoKeys, vaultAccount, vaultKeys, owner, council, visa, status, wallet, paused] = await Promise.all([
-      this.near.viewFunction<{ roles: Array<{ name: string; kind: unknown }>; default_vote_policy: { threshold: unknown } }>(treasury.daoAccountId, "get_policy").catch(() => null),
-      this.near.getAccessKeys(treasury.daoAccountId).catch(() => null),
-      this.near.getAccount(treasury.vaultAccountId).catch(() => null),
-      this.near.getAccessKeys(treasury.vaultAccountId).catch(() => null),
-      this.near.viewFunction<string>(treasury.vaultAccountId, "owner_id").catch(() => null),
-      this.near.viewFunction<string[]>(treasury.vaultAccountId, "council").catch(() => null),
-      this.near.viewFunction<string>(treasury.vaultAccountId, "visa_public_key").catch(() => null),
-      this.near.viewFunction<string>(treasury.vaultAccountId, "status_public_key").catch(() => null),
-      this.near.viewFunction<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null),
-      this.near.viewFunction<boolean>(treasury.vaultAccountId, "is_paused").catch(() => false),
+      this.view<{ roles: Array<{ name: string; kind: unknown }>; default_vote_policy: { threshold: unknown } }>(treasury.daoAccountId, "get_policy").catch(() => null),
+      this.cached("keys", treasury.daoAccountId).catch(() => null),
+      this.cached("account", treasury.vaultAccountId).catch(() => null),
+      this.cached("keys", treasury.vaultAccountId).catch(() => null),
+      this.view<string>(treasury.vaultAccountId, "owner_id").catch(() => null),
+      this.view<string[]>(treasury.vaultAccountId, "council").catch(() => null),
+      this.view<string>(treasury.vaultAccountId, "visa_public_key").catch(() => null),
+      this.view<string>(treasury.vaultAccountId, "status_public_key").catch(() => null),
+      this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null),
+      this.view<boolean>(treasury.vaultAccountId, "is_paused").catch(() => false),
     ]);
     const daoMembers = (daoPolicy?.roles ?? [])
       .flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []))
@@ -385,14 +386,14 @@ export class OmniRolesService {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
     const [lastId, policy, rules, paused] = await Promise.all([
-      this.near.viewFunction<number>(treasury.daoAccountId, "get_last_proposal_id"),
-      this.near.viewFunction<{ default_vote_policy: { threshold: unknown }; roles: Array<{ kind: unknown }>; proposal_period: string }>(treasury.daoAccountId, "get_policy"),
-      this.near.viewFunction<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 }),
-      this.near.viewFunction<boolean>(treasury.vaultAccountId, "is_paused"),
+      this.view<number>(treasury.daoAccountId, "get_last_proposal_id"),
+      this.view<{ default_vote_policy: { threshold: unknown }; roles: Array<{ kind: unknown }>; proposal_period: string }>(treasury.daoAccountId, "get_policy"),
+      this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 }),
+      this.view<boolean>(treasury.vaultAccountId, "is_paused"),
     ]);
     const proposals = lastId === 0
       ? []
-      : await this.near.viewFunction<DaoProposal[]>(treasury.daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 50), limit: 50 });
+      : await this.view<DaoProposal[]>(treasury.daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 50), limit: 50 });
     const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
     // Budgets are named from every role ever proposed, so older budgets keep their names.
     const allChanges = [
@@ -446,7 +447,7 @@ export class OmniRolesService {
   /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
     const treasury = await this.requireTreasury(organizationId);
-    const rules = await this.near.viewFunction<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
     const now = nowNs();
     const ready = rules
       .filter((rule) => rule.state === "Queued" && BigInt(rule.execute_after_ns) <= now && now <= BigInt(rule.expires_at_ns))
@@ -456,6 +457,7 @@ export class OmniRolesService {
     for (const rule of ready) {
       hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, "100000000000000", "0"));
     }
+    if (hashes.length) this.forget(treasury.vaultAccountId);
     return hashes;
   }
 
@@ -475,7 +477,7 @@ export class OmniRolesService {
   async roles(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
-    const rules = await this.near.viewFunction<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
     const executed = rules.filter((rule) => rule.state === "Executed").reverse().map((rule) => rule.change);
     const budgets = budgetsOf(executed, PROFILE);
     const context = { profile: PROFILE, labels, budgets };
@@ -495,7 +497,7 @@ export class OmniRolesService {
       }
     }
     const roles = await Promise.all([...roleNames].map(async (name) => {
-      const view = await this.near.viewFunction<{ config: { enabled: boolean } } | null>(treasury.vaultAccountId, "get_role", { role: name });
+      const view = await this.view<{ config: { enabled: boolean } } | null>(treasury.vaultAccountId, "get_role", { role: name });
       const setRole = [...executed].reverse().find((change) => "SetRole" in change && change.SetRole.role === name) as Extract<RuleChange, { SetRole: unknown }> | undefined;
       const description = setRole ? describeVaultCall({ method: "queue_rule_change", change: setRole }, context) : null;
       const keys = new Set<string>();
@@ -505,7 +507,7 @@ export class OmniRolesService {
         }
       }
       const budgetsView = await Promise.all([...keys].map(async (key) => {
-        const allowance = await this.near.viewFunction<{ balance: string; reserved: string; max_refill: string; period_ns: number } | null>(
+        const allowance = await this.view<{ balance: string; reserved: string; max_refill: string; period_ns: number } | null>(
           treasury.vaultAccountId,
           "get_allowance",
           { key: Array.from(Buffer.from(key.slice(2), "hex")) },
@@ -538,6 +540,7 @@ export class OmniRolesService {
     request: Record<string, unknown>,
   ) {
     const treasury = await this.requireTreasury(organizationId);
+    // Never cached: an agent must see the vault's current budgets and rules.
     const result = await this.near.viewFunction<{ allowed: boolean; reason: string | null; requires_delay: boolean; requires_cosign: boolean }>(
       treasury.vaultAccountId,
       "check_operation",
@@ -557,7 +560,7 @@ export class OmniRolesService {
             role: agent.role,
             target: Array.isArray(request.target) ? getAddress(hexOf(request.target as number[])) : null,
             value: String(request.value ?? "0"),
-            calldata: Array.isArray(request.calldata) ? hexOf(request.calldata as number[]).slice(0, 10 + 64 * 4) : null,
+            calldata: Array.isArray(request.calldata) ? hexOf((request.calldata as number[]).slice(0, 2048)) : null,
           } as Prisma.InputJsonValue,
         },
       });
@@ -571,6 +574,15 @@ export class OmniRolesService {
       this.prisma.auditLog.findMany({ where: { organizationId, action: "operation.refused" }, orderBy: { createdAt: "desc" }, take: 50 }),
     ]);
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
+    const labels = await this.labels(organizationId);
+    const describe = (metadata: Record<string, unknown>): string | null => {
+      if (typeof metadata.target !== "string" || typeof metadata.calldata !== "string") return null;
+      try {
+        return describeCall(metadata.target as Hex, metadata.calldata as Hex, BigInt(String(metadata.value ?? "0")), { profile: PROFILE, labels });
+      } catch {
+        return null;
+      }
+    };
     const agentName = (id: string) => agents.find((agent) => agent.id === id)?.name ?? id;
     const items = [
       ...operations.map((operation) => ({
@@ -583,6 +595,7 @@ export class OmniRolesService {
         txHash: operation.txHash,
         opId: operation.opId,
         reason: null as string | null,
+        summary: null as string | null,
       })),
       ...refusals.map((refusal) => {
         const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
@@ -596,6 +609,7 @@ export class OmniRolesService {
           txHash: null as string | null,
           opId: null as string | null,
           reason: explainRefusal(String(metadata.reason ?? "")),
+          summary: describe(metadata),
         };
       }),
     ].sort((left, right) => right.at.localeCompare(left.at));
@@ -604,9 +618,65 @@ export class OmniRolesService {
 
   // -------------------------------------------------------------------------
 
+  // NEAR RPC reads are paced (rate limits): cache them briefly and share
+  // in-flight requests so a console page does not queue dozens of calls.
+  // Past the TTL, a settled value is still served for up to STALE_MS while one
+  // refresh runs in the background; writes call forget() to drop it at once.
+  private readonly cache = new Map<string, { at: number; value: Promise<unknown>; settled: boolean; refreshing?: boolean }>();
+  private static readonly STALE_MS = 90_000;
+
+  private memo<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+    const hit = this.cache.get(key);
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (hit && age < ttlMs) return hit.value as Promise<T>;
+    if (hit && hit.settled && age < OmniRolesService.STALE_MS) {
+      if (!hit.refreshing) {
+        hit.refreshing = true;
+        load().then(
+          (fresh) => { if (this.cache.get(key) === hit) this.cache.set(key, { at: Date.now(), value: Promise.resolve(fresh), settled: true }); },
+          () => { hit.refreshing = false; },
+        );
+      }
+      return hit.value as Promise<T>;
+    }
+    const value = load();
+    const entry = { at: Date.now(), value: value as Promise<unknown>, settled: false };
+    this.cache.set(key, entry);
+    value.then(() => { entry.settled = true; }, () => { if (this.cache.get(key) === entry) this.cache.delete(key); });
+    return value;
+  }
+
+  private view<T>(accountId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
+    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, 6_000, () => this.near.viewFunction<T>(accountId, method, args));
+  }
+
+  private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
+  private cached(kind: "account", accountId: string): Promise<{ code_hash: string }>;
+  private cached(kind: "keys" | "account", accountId: string): Promise<unknown> {
+    return this.memo<unknown>(`${kind}:${accountId}`, 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
+  }
+
+  /** Drop cached reads of this organization's DAO and vault (after a member's transaction). */
+  async refresh(organizationId: string): Promise<void> {
+    const treasury = await this.treasury(organizationId);
+    if (!treasury) return;
+    this.forget(treasury.vaultAccountId);
+    this.forget(treasury.daoAccountId);
+  }
+
+  private forget(accountId: string): void {
+    for (const key of this.cache.keys()) if (key.includes(accountId)) this.cache.delete(key);
+  }
+
   private async labels(organizationId: string): Promise<Record<string, string>> {
     const wallets = await this.prisma.supplierWallet.findMany({ where: { organizationId, active: true }, include: { supplier: true } }).catch(() => []);
-    return Object.fromEntries(wallets.map((wallet) => [wallet.address, wallet.supplier.name]));
+    const labels: Record<string, string> = Object.fromEntries(wallets.map((wallet) => [wallet.address, wallet.supplier.name]));
+    const treasury = await this.treasury(organizationId);
+    if (treasury) {
+      const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null);
+      if (wallet?.address) labels[getAddress(hexOf(wallet.address))] = "company wallet";
+    }
+    return labels;
   }
 
   private async treasury(organizationId: string) {

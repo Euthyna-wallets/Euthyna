@@ -1259,6 +1259,10 @@ export function createApp({
       const input = await parseJson(context, z.object({ pause: z.boolean() }));
       return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
     });
+    app.post("/v1/console/omniroles/refresh", requireConsole(auth, consoleLimiter), async (context) => {
+      await omniroles.refresh(orgOf(context));
+      return context.json({ ok: true });
+    });
     app.get("/v1/console/omniroles/governance", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.governance(orgOf(context))));
     app.post("/v1/console/omniroles/rules/activate", requireConsole(auth, consoleLimiter), async (context) =>

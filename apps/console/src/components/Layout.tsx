@@ -34,7 +34,7 @@ export function Layout() {
     queryFn: omni.roles,
     enabled: Boolean(status.data?.treasury),
   });
-  const setupRequired = !status.data?.wallet || (roles.data?.roles.length ?? 0) === 0;
+  const setupRequired = Boolean(status.data) && (!status.data?.wallet || (roles.isSuccess && roles.data.roles.length === 0));
   const paused = status.data?.paused ?? false;
 
   useEffect(() => {
