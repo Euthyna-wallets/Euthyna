@@ -131,13 +131,50 @@ impl From<Operator> for u8 {
 /// The root is at index 0 and is its own parent (`parent == 0`). Every other
 /// node points to an earlier node, and parents are non-decreasing.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[cfg_attr(feature = "abi", derive(schemars::JsonSchema, borsh::BorshSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ConditionFlat {
     pub parent: u16,
     pub param_type: Encoding,
     pub operator: Operator,
     #[serde(with = "hex_bytes", default)]
+    #[cfg_attr(feature = "abi", schemars(with = "String"))]
     pub comp_value: Vec<u8>,
+}
+
+/// Schemas for ABI generation: both enums are serialized as their numeric value.
+#[cfg(feature = "abi")]
+mod abi_schema {
+    use super::{Encoding, Operator};
+    use borsh::schema::{Declaration, Definition};
+    use std::collections::BTreeMap;
+
+    macro_rules! numeric_schema {
+        ($ty:ty, $name:literal) => {
+            impl schemars::JsonSchema for $ty {
+                fn schema_name() -> String {
+                    $name.to_string()
+                }
+                fn json_schema(
+                    generator: &mut schemars::r#gen::SchemaGenerator,
+                ) -> schemars::schema::Schema {
+                    <u8 as schemars::JsonSchema>::json_schema(generator)
+                }
+            }
+            impl borsh::BorshSchema for $ty {
+                fn add_definitions_recursively(
+                    definitions: &mut BTreeMap<Declaration, Definition>,
+                ) {
+                    <u8 as borsh::BorshSchema>::add_definitions_recursively(definitions);
+                }
+                fn declaration() -> Declaration {
+                    <u8 as borsh::BorshSchema>::declaration()
+                }
+            }
+        };
+    }
+    numeric_schema!(Encoding, "Encoding");
+    numeric_schema!(Operator, "Operator");
 }
 
 /// Which kinds of execution a permission allows.
@@ -241,6 +278,10 @@ pub struct Consumption {
     pub timestamp: u64,
     #[serde(with = "u128_string")]
     pub consumed: u128,
+    /// Only `CallWithinAllowance` charged this key: `consumed` counts calls,
+    /// not an amount of value.
+    #[serde(default)]
+    pub calls_only: bool,
 }
 
 impl Consumption {

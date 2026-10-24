@@ -58,7 +58,10 @@ export interface VaultOperation {
   role: string;
   request: OperationRequest;
   permission_index: number;
-  allowance_key: Bytes32 | null;
+  /** Allowances charged by the matched permission's conditions (amounts measured by the vault). */
+  consumptions: Array<{ key: Bytes32; amount: string; calls_only: boolean }>;
+  /** Largest value the vault measured; null when nothing measures it (thresholds then apply). */
+  measured_value: string | null;
   policy_version: number;
   registry_version: number;
   evm_nonce: number;

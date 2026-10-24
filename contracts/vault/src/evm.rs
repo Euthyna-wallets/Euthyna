@@ -6,8 +6,6 @@ use crate::types::{
     Digest, Eip1559Transaction, EvmAddress, MpcSignature, OperationRequest, RoleConfig,
 };
 
-const ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
-
 pub(crate) fn build_transaction(
     role: &RoleConfig,
     nonce: u64,
@@ -76,22 +74,6 @@ pub(crate) fn signed_transaction(
         r: signature.big_r[1..].to_vec(),
         s: signature.s.to_vec(),
     })
-}
-
-/// Returns `(recipient, amount)` for canonical ERC-20 `transfer(address,uint256)`
-/// calldata when the amount fits OmniRoles' u128 accounting domain.
-pub(crate) fn decode_erc20_transfer(calldata: &[u8]) -> Option<(EvmAddress, u128)> {
-    if calldata.len() != 68 || calldata[..4] != ERC20_TRANSFER_SELECTOR {
-        return None;
-    }
-    if calldata[4..16].iter().any(|byte| *byte != 0)
-        || calldata[36..52].iter().any(|byte| *byte != 0)
-    {
-        return None;
-    }
-    let recipient = calldata[16..36].try_into().ok()?;
-    let amount = u128::from_be_bytes(calldata[52..68].try_into().ok()?);
-    Some((recipient, amount))
 }
 
 fn validate_gas(

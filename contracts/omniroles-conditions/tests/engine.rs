@@ -116,6 +116,7 @@ fn transfer_within_allowance_passes_and_reports_consumption() {
     assert_eq!(consumptions.len(), 1);
     assert_eq!(consumptions[0].consumed, 60);
     assert_eq!(consumptions[0].balance_after(), 40);
+    assert!(!consumptions[0].calls_only);
 }
 
 #[test]
@@ -503,6 +504,7 @@ fn call_within_allowance_counts_calls() {
     let mut store = allowances(2);
     let first = run(&conditions, &transfer(BOB, 1), 0, &store).unwrap();
     assert_eq!(first[0].consumed, 1);
+    assert!(first[0].calls_only, "call counter, not an amount");
     store.get_mut(&KEY).unwrap().balance = first[0].balance_after() - 1;
     assert!(matches!(
         run(&conditions, &transfer(BOB, 1), 0, &store),

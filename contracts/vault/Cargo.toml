@@ -22,5 +22,10 @@ hex.workspace = true
 near-contract-standards.workspace = true
 near-sdk.workspace = true
 omni-transaction.workspace = true
+omniroles-conditions = { path = "../omniroles-conditions" }
 schemars.workspace = true
 serde.workspace = true
+
+# ABI generation (host builds) needs JSON / Borsh schemas for condition nodes.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+omniroles-conditions = { path = "../omniroles-conditions", features = ["abi"] }

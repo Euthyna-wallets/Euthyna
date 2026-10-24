@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use serial_test::serial;
 use vault_common::{
     ALLOWANCE_BALANCE, ALLOWANCE_KEY, CHAIN_ID, MAX_PER_OPERATION, RECIPIENT, ROLE, TOKEN,
-    apply_rule_change, approval, assert_failure_contains, authorize, get_operation, op_id, prepare,
-    request, role_config, setup, status_report,
+    apply_rule_change, approval, assert_failure_contains, authorize, erc20_transfer, get_operation,
+    op_id, prepare, request, role_config, setup, status_report,
 };
 
 async fn visa_expiry(fixture: &vault_common::Fixture) -> Result<u64> {
@@ -83,7 +83,7 @@ async fn executes_arbitrary_contract_calls_without_safe_or_zodiac() -> Result<()
         "target": target,
         "selector": null,
         "conditions": [],
-        "allowance_key": null
+        "allow_value": true
     }]);
     config["co_sign_threshold"] = Value::Null;
     config["co_signer_role"] = Value::Null;
@@ -520,10 +520,100 @@ async fn enforces_velocity_and_one_operation_queue_per_wallet() -> Result<()> {
 
 #[tokio::test]
 #[serial]
-async fn fails_closed_for_conditions_until_the_parallel_engine_is_wired() -> Result<()> {
+async fn evaluates_roles_conditions_on_the_exact_calldata() -> Result<()> {
+    let fixture = setup().await?;
+
+    // Recipient outside the condition tree: refused with the engine's reason.
+    let mut other = request("CONDITION-RECIPIENT", 100);
+    other["calldata"] = json!(erc20_transfer([0x99; 20], 100));
+    let refused = fixture
+        .agent
+        .call(fixture.vault.id(), "prepare")
+        .args_json(json!({"role": ROLE, "request": other}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&refused, "ERR_PERMISSION_DENIED");
+    assert_failure_contains(&refused, "parameterNotAllowed");
+
+    // The amount charged comes from the calldata, not from the caller.
+    let mut understated = request("CONDITION-AMOUNT", 400);
+    understated["allowance_amount"] = json!("1");
+    let mismatch = fixture
+        .agent
+        .call(fixture.vault.id(), "prepare")
+        .args_json(json!({"role": ROLE, "request": understated}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&mismatch, "ERR_ALLOWANCE_AMOUNT_MISMATCH");
+
+    // Above the remaining allowance: refused by the engine.
+    let excessive = fixture
+        .agent
+        .call(fixture.vault.id(), "prepare")
+        .args_json(
+            json!({"role": ROLE, "request": request("CONDITION-EXCESS", ALLOWANCE_BALANCE + 1)}),
+        )
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&excessive, "allowanceExceeded");
+
+    // Native value needs `allow_value`.
+    let mut with_value = request("CONDITION-VALUE", 100);
+    with_value["value"] = json!("1");
+    let send = fixture
+        .agent
+        .call(fixture.vault.id(), "prepare")
+        .args_json(json!({"role": ROLE, "request": with_value}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&send, "SendNotAllowed");
+
+    let accepted = prepare(&fixture, "CONDITION-OK", 100).await?;
+    assert_eq!(accepted["consumptions"][0]["amount"], "100");
+    assert_eq!(accepted["measured_value"], "100");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn rejects_invalid_condition_trees_when_queued() -> Result<()> {
     let fixture = setup().await?;
     let mut config = role_config();
-    config["permissions"][0]["conditions"] = json!([1, 2, 3]);
+    // WithinRatio is not implemented: refused, never ignored.
+    config["permissions"][0]["conditions"] = json!([
+        {"parent": 0, "paramType": 5, "operator": 5, "compValue": "0x"},
+        {"parent": 0, "paramType": 1, "operator": 23, "compValue": format!("0x{}", "00".repeat(32))}
+    ]);
+    let queued = fixture
+        .owner
+        .call(fixture.vault.id(), "queue_rule_change")
+        .args_json(json!({"change": {"SetRole": {"role": ROLE, "config": config}}}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&queued, "ERR_INVALID_CONDITIONS");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn unmeasured_operations_hit_delay_and_cosign_thresholds() -> Result<()> {
+    let fixture = setup().await?;
+    let target = [0x77u8; 20];
+    let mut config = role_config();
+    // No condition measures this call: the vault cannot know what it moves.
+    config["permissions"] = json!([{
+        "chain_id": CHAIN_ID,
+        "target": target,
+        "selector": null,
+        "conditions": [],
+        "allow_value": false
+    }]);
+    config["velocity"] = Value::Null;
     apply_rule_change(
         &fixture.owner,
         &fixture.outsider,
@@ -532,13 +622,36 @@ async fn fails_closed_for_conditions_until_the_parallel_engine_is_wired() -> Res
         json!({"SetRole": {"role": ROLE, "config": config}}),
     )
     .await?;
-    let outcome = fixture
+    let call = json!({
+        "chain_id": CHAIN_ID,
+        "target": target,
+        "value": "0",
+        "calldata": [0x09, 0x5e, 0xa7, 0xb3, 1, 2, 3],
+        "allowance_amount": "0",
+        "reference": "UNMEASURED-1",
+        "gas_limit": "120000",
+        "max_fee_per_gas": "20000000000",
+        "max_priority_fee_per_gas": "1000000000"
+    });
+    let operation: Value = fixture
         .agent
         .call(fixture.vault.id(), "prepare")
-        .args_json(json!({"role": ROLE, "request": request("CONDITION", 100)}))
+        .args_json(json!({"role": ROLE, "request": call}))
+        .gas(Gas::from_tgas(100))
         .transact()
-        .await?;
-    assert_failure_contains(&outcome, "ERR_CONDITION_ENGINE_UNAVAILABLE");
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(operation["measured_value"], Value::Null);
+    assert!(!operation["execute_after_ns"].is_null(), "delay applies");
+    let expiry = visa_expiry(&fixture).await?;
+    let without_cosign = authorize(
+        &fixture,
+        &operation,
+        approval(&fixture, &operation, 77, expiry, None),
+    )
+    .await?;
+    assert_failure_contains(&without_cosign, "ERR_COSIGN_REQUIRED");
     Ok(())
 }
 

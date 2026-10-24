@@ -15,6 +15,11 @@ serde.workspace = true
 sha3.workspace = true
 hex.workspace = true
 serde_json.workspace = true
+schemars = { workspace = true, optional = true }
+
+[features]
+# JSON / Borsh schemas for NEAR ABI generation (host builds only).
+abi = ["dep:schemars", "borsh/unstable__schema"]
 
 [dev-dependencies]
 alloy-sol-types = "0.8"

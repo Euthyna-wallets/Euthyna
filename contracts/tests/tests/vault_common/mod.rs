@@ -226,6 +226,15 @@ pub async fn setup() -> Result<Fixture> {
     })
 }
 
+/// Roles-format conditions for `transfer(to == recipient, amount within key)`.
+pub fn transfer_conditions(recipient: [u8; 20], key: [u8; 32]) -> Value {
+    json!([
+        {"parent": 0, "paramType": 5, "operator": 5, "compValue": "0x"},
+        {"parent": 0, "paramType": 1, "operator": 16, "compValue": format!("0x{}{}", "00".repeat(12), hex::encode(recipient))},
+        {"parent": 0, "paramType": 1, "operator": 28, "compValue": format!("0x{}", hex::encode(key))}
+    ])
+}
+
 pub fn role_config() -> Value {
     json!({
         "enabled": true,
@@ -233,8 +242,8 @@ pub fn role_config() -> Value {
             "chain_id": CHAIN_ID,
             "target": TOKEN,
             "selector": [0xa9, 0x05, 0x9c, 0xbb],
-            "conditions": [],
-            "allowance_key": ALLOWANCE_KEY
+            "conditions": transfer_conditions(RECIPIENT, ALLOWANCE_KEY),
+            "allow_value": false
         }],
         "operation_delay_threshold": MAX_PER_OPERATION.to_string(),
         "operation_delay_ns": 5_000_000_000u64,

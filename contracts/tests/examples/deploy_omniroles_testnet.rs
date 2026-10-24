@@ -216,8 +216,13 @@ async fn main() -> Result<()> {
             "chain_id": CHAIN_ID,
             "target": token,
             "selector": [0xa9, 0x05, 0x9c, 0xbb],
-            "conditions": [],
-            "allowance_key": ALLOWANCE_KEY
+            // transfer(to == recipient, amount within ALLOWANCE_KEY)
+            "conditions": [
+                {"parent": 0, "paramType": 5, "operator": 5, "compValue": "0x"},
+                {"parent": 0, "paramType": 1, "operator": 16, "compValue": format!("0x{}{}", "00".repeat(12), hex::encode(recipient))},
+                {"parent": 0, "paramType": 1, "operator": 28, "compValue": format!("0x{}", hex::encode(ALLOWANCE_KEY))}
+            ],
+            "allow_value": false
         }],
         "operation_delay_threshold": null,
         "operation_delay_ns": 0,

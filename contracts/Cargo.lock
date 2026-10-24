@@ -3113,6 +3113,7 @@ dependencies = [
  "alloy-sol-types",
  "borsh",
  "hex",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sha3",
@@ -4954,6 +4955,7 @@ dependencies = [
  "near-contract-standards",
  "near-sdk",
  "omni-transaction",
+ "omniroles-conditions",
  "schemars 0.8.22",
  "serde",
 ]
