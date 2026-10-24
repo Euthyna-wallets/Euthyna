@@ -52,6 +52,17 @@ function hardRuleFailure(operation: VaultOperation, registry: Registry): string 
   return null;
 }
 
+function containsPromptInjection(text: string | undefined): boolean {
+  if (!text) return false;
+  const normalized = text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+  return [
+    /ignore (all |your |the )?(previous |prior )?(rules|instructions)/,
+    /override (the )?(system|policy|guard)/,
+    /reveal (the )?(system prompt|secret|credentials)/,
+    /pay (the )?attacker/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 export class PaymentService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -64,6 +75,7 @@ export class PaymentService {
     organizationId: string,
     agent: { agentId: string; nearAccountId: string; vaultAccountId: string; role: string },
     opId: number[],
+    invoice?: { text?: string | undefined; claimedRecipient?: string | undefined },
   ): Promise<PayResult> {
     const operation = await this.near.getOperation(agent.vaultAccountId, opId);
     if (operation.agent !== agent.nearAccountId) {
@@ -101,6 +113,9 @@ export class PaymentService {
     }
     const refusal = hardRuleFailure(operation, registry);
     if (refusal) throw new PaymentError(422, refusal, refusal.replaceAll("_", " "));
+    if (containsPromptInjection(invoice?.text)) {
+      throw new PaymentError(422, "prompt_injection_detected", "invoice contains instruction-like text");
+    }
     if (await this.registry.isConsumed(organizationId, operation.intent.reference)) {
       throw new PaymentError(422, "reference_consumed", "this reference is already consumed");
     }
@@ -110,7 +125,11 @@ export class PaymentService {
       orderBy: { createdAt: "desc" },
     });
     if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this organization");
-    const result = await this.guard.approve(operation, registry);
+    const claimedRecipient = invoice?.claimedRecipient?.toLowerCase();
+    const operationRecipient = bytesToHex(Uint8Array.from(operation.intent.recipient)).toLowerCase();
+    const result: GuardResult = claimedRecipient && claimedRecipient !== operationRecipient
+      ? { decision: "escalate", reasons: ["invoice payment details differ from the prepared registry recipient"] }
+      : await this.guard.approve(operation, registry);
     await this.upsertOperation(organizationId, agent.agentId, operation);
     if (result.decision === "approve") {
       const stored = await this.storeVisa(
@@ -130,7 +149,7 @@ export class PaymentService {
         agentId: agent.agentId,
         environment: treasury.environment,
         reasons: result.reasons,
-        invoice: operation.intent as unknown as object,
+        invoice: (invoice ?? operation.intent) as unknown as object,
         registrySnapshot: registry as unknown as object,
         status: "pending",
       },
@@ -223,6 +242,47 @@ export class PaymentService {
     return {
       opId: hex,
       nearTransactionHash: updated.nearAuthorizationTxHash,
+      state: updated.state,
+    };
+  }
+
+  async recordCancellation(
+    organizationId: string,
+    agent: { agentId: string; nearAccountId: string; vaultAccountId: string },
+    opId: number[],
+    nearTransactionHash: string,
+  ): Promise<Record<string, unknown>> {
+    const hex = opHex(opId);
+    const stored = await this.prisma.operation.findUnique({
+      where: { organizationId_opId: { organizationId, opId: hex } },
+    });
+    if (!stored) throw new PaymentError(404, "operation_not_found", "operation must be registered before cancellation");
+    if (stored.agentId !== agent.agentId) {
+      throw new PaymentError(403, "agent_mismatch", "operation belongs to another agent");
+    }
+    if (stored.nearCancellationTxHash && stored.nearCancellationTxHash !== nearTransactionHash) {
+      throw new PaymentError(409, "cancellation_tx_conflict", "a different cancellation transaction is already registered");
+    }
+    const operation = await this.near.getOperation(agent.vaultAccountId, opId);
+    if (operation.agent !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "Vault operation belongs to another agent");
+    }
+    if (operation.state !== "PossiblySigned" || !operation.cancellation) {
+      throw new PaymentError(422, "cancellation_not_final", "Vault has no finalized cancellation request");
+    }
+    const updated = await this.prisma.operation.update({
+      where: { organizationId_opId: { organizationId, opId: hex } },
+      data: {
+        nearCancellationTxHash: nearTransactionHash,
+        state: "CancellationRequested",
+        cancellationRequestedAt: new Date(),
+        nextAttemptAt: new Date(),
+        lastError: null,
+      },
+    });
+    return {
+      opId: hex,
+      nearTransactionHash: updated.nearCancellationTxHash,
       state: updated.state,
     };
   }

@@ -175,8 +175,25 @@ Console-admin fallback for one operation. Normal operation uses the separate
 
 ### `POST /v1/operations/pay`
 
-Agent credential (`x-api-key`), body `{ "opId": [..32 bytes..] }`. The agent has
-already called `prepare` on the Vault with its client-held function-call key.
+Agent credential (`x-api-key`). The agent has already called `prepare` on the
+Vault with its client-held function-call key. Body:
+
+```json
+{
+  "opId": [0, 1],
+  "invoice": {
+    "text": "untrusted invoice text",
+    "claimedRecipient": "0x..."
+  }
+}
+```
+
+`invoice.claimedRecipient` is compared with the registry-approved recipient
+already committed by the Vault. A mismatch produces an escalation and no visa.
+Invoice text is stored as evidence and never executed as instructions.
+Instruction-like text (`ignore previous rules`, policy override, secret
+exfiltration or attacker-payment directives) is deterministically rejected as
+`422 prompt_injection_detected`; no visa is created.
 
 - `200 {visa, signature}`: Guard approved and the visa is stored (also returned by
   `GET /v1/operations/:opId`).
@@ -193,6 +210,13 @@ that the Vault operation belongs to that agent and is `PossiblySigned` or
 `Confirmed`. The worker uses this hash to recover a published MPC response and
 call permissionless `submit_signature` when the callback missed it. A different
 hash for the same operation is rejected with `409 authorization_tx_conflict`.
+
+### `POST /v1/operations/:opId/cancellation`
+
+Agent credential. After SDK `cancel()` calls the agent-authorized Vault
+`cancel_nonce`, this route stores the finalized NEAR transaction hash. The
+worker can then recover a missed cancellation callback through
+`submit_signature`. Conflicting hashes are rejected.
 
 ### `GET /v1/operations/:opId`
 

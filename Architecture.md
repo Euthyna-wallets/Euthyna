@@ -77,6 +77,9 @@ NEAR Chain Signatures produit des signatures secp256k1 à partir du compte NEAR 
 | API TypeScript | 1 | Backend HTTP Hono : Guard, authentification, clients, agents, policies, fournisseurs, opérations et relayer. | [Hono][hono] |
 | Relayer NEAR sponsor | 1 | Reçoit un `SignedDelegateAction`, applique l'allowlist MandateOS et paie le gas NEAR depuis un compte relayer financé. | [Meta-transactions NEAR][near-meta-transactions], [guide relayer][near-relayer-guide] |
 | Identité agent | 1 | Client credentials Better Auth pour Guard ; compte NEAR avec une function-call key générée côté client pour le Vault. | [Better Auth OAuth provider][better-auth-oauth], [access keys NEAR][near-access-keys] |
+| SDK agent | 1 | Stocke la function-call key côté client, exécute `prepare → visa → authorize`, transmet automatiquement le hash NEAR au worker et expose `cancel_nonce` à l'agent. | `packages/sdk` |
+| Serveur MCP | 1 | Outils `pay`, `status`, `cancel` strictement au-dessus du SDK ; aucune méthode de signature arbitraire. | `packages/mcp` |
+| Agent LLM démo | 1 | Adaptateur OpenAI-compatible ; le texte de facture reste une donnée non fiable et toutes les actions passent par MCP puis les trois verrous. | `apps/demo-agent` |
 | PostgreSQL + Prisma | 1 | Source de vérité off-chain ; Prisma porte le schéma, les migrations, les transactions et l'accès typé aux données. | [Prisma ORM][prisma], section [Policy et registre](#policy-et-registre) |
 | Compilateur de policy | 1 | Valide et normalise un snapshot, puis produit les artefacts Guard, Vault et Zodiac. | `packages/policy`, section [Compilation](#compilation) |
 | Guard | 1 | Règles métier exactes, escalades, visas ed25519, confirmations Base. | Spécification MandateOS, section [Visa Guard](#visa-guard) |
