@@ -58,6 +58,23 @@ export interface VaultOperation {
   signed_transaction: number[] | null;
   cancellation: CancellationAttempt | null;
 }
+export interface GovernanceOperation {
+  op_id: Bytes32;
+  proposer: string;
+  target: Bytes20;
+  value: string;
+  data: number[];
+  operation: 0 | 1;
+  evm_nonce: number;
+  transaction: VaultTransaction;
+  tx_digest: Bytes32;
+  possibly_signed_at_block: number;
+  state: "PossiblySigned" | "Confirmed" | "Cancelled" | "Executed" | "Vetoed" | "Expired" | "Failed";
+  signature: MpcSignature | null;
+  signed_transaction: number[] | null;
+  cancellation: CancellationAttempt | null;
+}
+
 
 export interface GuardVisa {
   client_id: string;
@@ -80,6 +97,17 @@ export interface StatusReport {
   report_nonce: number;
   block_number: number;
 }
+export type RelayFinalStatus = "Executed" | "Vetoed" | "Expired" | "Failed";
+
+export interface RelayStatusReport {
+  client_id: string;
+  op_id: Bytes32;
+  final_status: RelayFinalStatus;
+  tx_hash: Bytes32;
+  report_nonce: number;
+  block_number: number;
+}
+
 
 export interface SignedPayload<T> {
   report?: T;

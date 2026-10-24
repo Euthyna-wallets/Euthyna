@@ -25,20 +25,31 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
 
 ## 1. Organisation
 
-1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1` et l'API avec
+1. Pour une répétition développeur uniquement, la console peut être démarrée
+   avec `VITE_UAT_DEMO_MODE=1` et l'API avec
    `UAT_DEMO_WALLETS_ENABLED=1`. Les deux flags restent désactivés par défaut.
-2. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
-3. Créer l'entreprise.
-4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
+   **Cette répétition ne constitue jamais la preuve UAT finale.**
+2. Pour l'UAT finale, laisser ces flags désactivés : trois personnes distinctes
+   utilisent trois passkeys, trois comptes NEAR via Wallet Selector et trois
+   adresses EVM via MetaMask/Rabby. Aucune clé privée ne doit apparaître dans
+   `localStorage`.
+3. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
+4. Créer l'entreprise.
+5. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
    `pending` et ne comptent pas encore dans le council.
-5. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
+6. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
    passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
    EVM (EIP-191).
-6. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
+7. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
    créé ou financé.
 
-En mode normal, utiliser NEAR Wallet Selector et MetaMask/Rabby. Vérifier
-qu'aucune clé privée n'apparaît dans localStorage.
+Les commandes opérateur utilisent uniquement des signers chargés depuis le
+keychain. Ne jamais passer une clé privée en argument de CLI, afficher un
+fichier de clé ou imprimer une variable d'environnement secrète. `mandateos
+agent init` constitue l'exception fonctionnelle prévue : il écrit directement
+la clé agent dans `AGENT_KEY_PATH` avec le mode `0600` et n'affiche que la clé
+publique
+([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts)).
 
 Attendu : 3 membres prouvés, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour
 le fondateur. Ajouter une quatrième déclaration sans signer : elle doit rester
@@ -111,14 +122,29 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 3. **Preview mandate** : vérifier le diff, les trois artefacts et le statut
    agent.
 4. Exécuter strictement `set_role → register_agent → financement → Zodiac`.
-   Pour chaque ligne, proposer puis faire voter deux membres. La ligne suivante
-   reste désactivée jusqu'à ce que `get_proposal` affiche **Executed**.
-5. Vérifier qu'une proposition `Failed` ou `Expired` affiche **Re-propose** et
-   ne débloque pas l'étape suivante.
-6. Attendre le cooldown Delay (**300 s** sur Sepolia).
-7. Exécuter la file Delay (n’importe qui) et vérifier la permission Zodiac.
+   Zodiac doit être une seule proposition vers le MultiSendCallOnly canonique
+   `0x9641d764fc13c8B624c04430C7356C1C7C8102e2`, avec quatre appels `Call`
+   internes visibles dans la preview. Pour chaque ligne, proposer puis faire
+   voter deux membres. La ligne suivante reste désactivée jusqu'à **Executed**.
+5. Ouvrir **Governance**. Vérifier la frise, le hash 0xGOV diffusé, le
+   `queueNonce` et le compte à rebours lu sur Delay. Ne lancer aucune commande :
+   le worker exécute `executeNextTx` après le cooldown.
+6. Vérifier ensuite **Executed**, les événements Roles et le rapport relay
+   confirmé. Une proposition `Failed` ou `Expired` doit afficher **Re-propose**
+   sans débloquer l'étape suivante.
 
-## 6. Paiement
+## 6. Veto de gouvernance
+
+1. Mettre en file une seconde proposition UAT destinée à être rejetée.
+2. Dans **Governance**, chaque owner MetaMask signe **Veto — sign with council
+   wallet**. Le bouton d'exécution reste désactivé avant le seuil Safe 2/3.
+3. Exécuter le veto ; la transaction Safe appelle
+   `Delay.setTxNonce(queueNonce)`.
+4. Vérifier que le worker affiche **Vetoed**, ne diffuse jamais
+   `executeNextTx` pour cette entrée, transmet le rapport terminal au relay, et
+   qu'une nouvelle proposition relay est ensuite acceptée.
+
+## 7. Paiement
 
 1. Financer le budget du Vault en Test FT (`ft_transfer_call` via le DAO).
 2. Déposer 3 TestUSDC sur le Safe et laisser l’allowance Zodiac.
@@ -129,12 +155,11 @@ Ce vote est de la défense en profondeur ; il ne bloque plus la Treasury.
 5. Vérifier 1 TestUSDC reçu par le fournisseur, l’état `Confirmed` et la fiche
    agent mise à jour.
 
-> Cette étape dépend de #6 (`POST /v1/operations/pay`, worker relayer). Tant
-> qu’elle n’est pas livrée, le paiement se fait avec le script existant.
 
 ## Blocages connus
 
 - La console headless n’a ni Meteor ni MetaMask : utiliser un vrai navigateur.
 - Les clés du council UAT ne doivent pas être réutilisées hors testnet.
-- Le plan actuel demande 10 NEAR par contrat ; réduire seulement après mesure
-  réelle du stockage.
+- Le plan UAT réserve 5 NEAR pour le Vault et 3,5 NEAR pour le relay afin de
+  couvrir le stockage WASM et le gas ; utiliser un compte sponsor financé une
+  seule fois, sans rotation de faucet.

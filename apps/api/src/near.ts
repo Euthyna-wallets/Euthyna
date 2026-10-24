@@ -6,6 +6,8 @@ interface RpcResponse<T> {
   result?: T;
   error?: { message: string; data?: unknown };
 }
+class NearRpcApplicationError extends Error {}
+
 
 type NearOutcome = {
   outcome?: { status?: { SuccessValue?: string; Failure?: unknown } };
@@ -53,6 +55,8 @@ export function extractMpcSignatures(status: NearTransactionStatus): MpcSignatur
 
 export class NearClient {
   private readonly accountPromise: Promise<Account>;
+  private rpcQueue: Promise<void> = Promise.resolve();
+  private nextRpcAt = 0;
 
   constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY">) {
     this.accountPromise = this.createRelayerAccount();
@@ -73,18 +77,62 @@ export class NearClient {
     return near.account(this.env.NEAR_RELAYER_ACCOUNT_ID);
   }
 
-  private async rpc<T>(method: string, params: unknown): Promise<T> {
-    const response = await fetch(this.env.NEAR_RPC_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos", method, params }),
-    });
-    if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
-    const payload = (await response.json()) as RpcResponse<T>;
-    if (payload.error) throw new Error(`NEAR RPC ${payload.error.message}`);
-    if (payload.result === undefined) throw new Error("NEAR RPC response missing result");
-    return payload.result;
+  private async requestRpc<T>(method: string, params: unknown): Promise<T> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const response = await fetch(this.env.NEAR_RPC_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos", method, params }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (response.status === 429 && attempt < 4) {
+          const retryAfter = Number(response.headers.get("retry-after"));
+          const delayMs = Number.isFinite(retryAfter) && retryAfter >= 0
+            ? retryAfter * 1_000
+            : 1_000 * (2 ** attempt);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+        const payload = (await response.json()) as RpcResponse<T>;
+        if (payload.error) {
+          throw new NearRpcApplicationError(
+            `NEAR RPC ${payload.error.message}: ${JSON.stringify(payload.error.data ?? null)}`,
+          );
+        }
+        if (payload.result === undefined) throw new Error("NEAR RPC response missing result");
+        return payload.result;
+      } catch (error) {
+        if (error instanceof NearRpcApplicationError) throw error;
+        if (attempt >= 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1_000 * (2 ** attempt)));
+      }
+    }
+    throw new Error("NEAR RPC retry budget exhausted");
   }
+
+  private async rpc<T>(method: string, params: unknown): Promise<T> {
+    const previous = this.rpcQueue;
+    let release!: () => void;
+    this.rpcQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      const pacingDelay = Math.max(0, this.nextRpcAt - Date.now());
+      if (pacingDelay > 0) await new Promise((resolve) => setTimeout(resolve, pacingDelay));
+      return await this.requestRpc<T>(method, params);
+    } finally {
+      this.nextRpcAt = Date.now() + 500;
+      release();
+    }
+  }
+
+  async proxyRpc<T>(method: string, params: unknown): Promise<T> {
+    return this.requestRpc<T>(method, params);
+  }
+
 
   private async callView<T>(accountId: string, methodName: string, args: Record<string, unknown>): Promise<T> {
     const result = await this.rpc<{ result: number[] }>("query", {

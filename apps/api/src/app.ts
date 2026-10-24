@@ -11,6 +11,7 @@ import { AgentProvisioningError, type AgentProvisioningService } from "./agent-p
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity, PasskeyIdentity } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
+import { GovernanceError, type GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { TreasuryError, type TreasuryGateway } from "./treasury.js";
@@ -153,6 +154,7 @@ const nearDeploymentAttestationSchema = treasuryRegisterSchema.pick({
   daoAccountId: true,
   vaultAccountId: true,
   relayAccountId: true,
+  delayAddress: true,
   govAddress: true,
 });
 
@@ -163,10 +165,34 @@ const nearSponsorshipSchema = z.object({
 const budgetTokenPlanSchema = z.object({
   amount: z.string().regex(/^[1-9]\d*$/),
 });
+const governanceExecutionSchema = z.object({
+  proposalId: z.number().int().nonnegative(),
+  nearTransactionHash: z.string().min(32).max(64),
+  signerAccountId: nearAccountSchema,
+});
+const governanceUnblockSchema = z.object({
+  opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+});
+const governanceSwapOwnerSchema = z.object({
+  oldOwner: evmAddressSchema,
+  newOwner: evmAddressSchema,
+});
+const governanceAddOwnerSchema = z.object({
+  newOwner: evmAddressSchema,
+});
+const nearRpcProxySchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number(), z.null()]),
+  method: z.enum(["query", "block", "send_tx", "broadcast_tx_commit", "tx", "EXPERIMENTAL_tx_status"]),
+  params: z.unknown(),
+});
+
+
+
 
 
 const walletProofChallengeSchema = z.object({
-  memberId: z.string().uuid(),
+  memberId: z.string().min(1).max(128),
   nearAccountId: nearAccountSchema,
   evmAddress: evmAddressSchema,
 });
@@ -211,6 +237,7 @@ export interface AppDependencies {
   walletProof: WalletProofGateway;
   agentProvisioning: AgentProvisioningService;
   treasury: TreasuryGateway;
+  governance: GovernanceGateway;
   mandates: MandateGateway;
   registry: RegistryService;
   payments: PaymentService;
@@ -219,6 +246,7 @@ export interface AppDependencies {
   nearParentAccount: string;
   nearSponsorDailyWalletLimit: number;
   nearSponsorWalletAmountYocto: string;
+  registrationRateLimitEnabled: boolean;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -326,6 +354,7 @@ export function createApp({
   walletProof,
   agentProvisioning,
   treasury,
+  governance,
   mandates,
   registry: registryService,
   payments,
@@ -334,6 +363,7 @@ export function createApp({
   nearParentAccount,
   nearSponsorDailyWalletLimit,
   nearSponsorWalletAmountYocto,
+  registrationRateLimitEnabled,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -364,6 +394,23 @@ export function createApp({
     }
     return auth.handler(context.req.raw);
   });
+  app.post("/v1/console/near-rpc", requireConsole(auth, consoleLimiter), async (context) => {
+    const input = await parseJson(context, nearRpcProxySchema);
+    try {
+      const result = await near.proxyRpc(input.method, input.params);
+      return context.json({ jsonrpc: "2.0" as const, id: input.id, result });
+    } catch (error) {
+      return context.json({
+        jsonrpc: "2.0" as const,
+        id: input.id,
+        error: {
+          code: -32_000,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  });
+
 
   app.post("/api/register/passkey-start", async (context) => {
     const input = await parseJsonPublic(context, z.object({
@@ -373,8 +420,11 @@ export function createApp({
     }));
     const ip = registrationIp(context);
     if (
-      !registrationIpLimiter.allow(`register:ip:${ip}`) ||
-      !registrationEmailLimiter.allow(`register:email:${input.email}`)
+      registrationRateLimitEnabled &&
+      (
+        !registrationIpLimiter.allow(`register:ip:${ip}`) ||
+        !registrationEmailLimiter.allow(`register:email:${input.email}`)
+      )
     ) {
       return context.json({ error: "registration_rate_limited" }, 429);
     }
@@ -549,6 +599,28 @@ export function createApp({
     return context.json(await consoleData.governance(consoleIdentity.organizationId));
   });
 
+  app.post("/v1/console/governance/relay-operation", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceExecutionSchema);
+    return context.json(await governance.recordRelayExecution(consoleIdentity.organizationId, input));
+  });
+  app.post("/v1/console/governance/unblock-proposal", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceUnblockSchema);
+    return context.json(await governance.unblockProposal(consoleIdentity.organizationId, input.opId));
+  });
+  app.post("/v1/console/governance/swap-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceSwapOwnerSchema);
+    return context.json(await governance.swapOwnerProposal(consoleIdentity.organizationId, input));
+  });
+  app.post("/v1/console/governance/add-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceAddOwnerSchema);
+    return context.json(await governance.addOwnerProposal(consoleIdentity.organizationId, input));
+  });
+
+
   app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json(await registryService.list(consoleIdentity.organizationId));
@@ -667,6 +739,12 @@ export function createApp({
     });
     return context.json(preview);
   });
+  app.post("/v1/console/mandates/zodiac-proposal", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, mandateSchema);
+    return context.json(await mandates.zodiacProposal(consoleIdentity.organizationId, input));
+  });
+
   app.get("/v1/console/treasury/budget-token", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json(await mandates.budgetTokenStatus(consoleIdentity.organizationId));
@@ -1039,6 +1117,9 @@ export function createApp({
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof TreasuryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof GovernanceError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof WalletProofError) {

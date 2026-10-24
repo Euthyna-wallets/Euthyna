@@ -285,7 +285,6 @@ export class BetterAuthGateway implements AuthGateway {
     const member = await this.prisma.member.findFirst({
       where: {
         organizationId: input.organizationId,
-        userId: input.userId,
         nearAccountId: input.nearAccountId,
         walletProofVerifiedAt: { not: null },
       },
@@ -307,7 +306,7 @@ export class BetterAuthGateway implements AuthGateway {
           if (existing) {
             if (
               existing.organizationId !== input.organizationId ||
-              existing.userId !== input.userId ||
+              existing.userId !== member.userId ||
               existing.nearAccountId !== input.nearAccountId ||
               existing.publicKey !== input.publicKey
             ) {
@@ -342,7 +341,7 @@ export class BetterAuthGateway implements AuthGateway {
           await transaction.nearWalletSponsorship.create({
             data: {
               organizationId: input.organizationId,
-              userId: input.userId,
+              userId: member.userId,
               nearAccountId: input.nearAccountId,
               publicKey: input.publicKey,
             },

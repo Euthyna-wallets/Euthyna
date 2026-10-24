@@ -11,11 +11,13 @@ agent's NEAR function-call private key: the console registers only its public ke
 | Agent | Better Auth API key bound to the agent user | `x-api-key` | `/v1/operations/*` |
 
 Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
-15 minutes and 3 requests per normalized email per hour. Agent API keys allow
-60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
-requests/minute per organization. Registration counters are in-memory per API
-instance; wallet and agent-account sponsorship share one durable PostgreSQL
-daily cap.
+15 minutes and 3 requests per normalized email per hour by default. The explicit
+hackathon setting `UAT_DEMO_WALLETS_ENABLED=1` disables only these in-memory
+registration limits so interrupted local WebAuthn ceremonies can be retried;
+sponsorship limits remain enforced. Agent API keys allow 60 requests/minute; the
+HTTP layer adds 120 requests/minute per agent and 600 requests/minute per
+organization. Registration counters are in-memory per API instance; wallet and
+agent-account sponsorship share one durable PostgreSQL daily cap.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console
@@ -338,6 +340,10 @@ Available to every organization member so each signer can independently inspect
 the deterministic plan. Only members with a stored NEP-413 and EIP-191 proof
 appear in the DAO council and Safe owners. It never signs and never receives a
 private key.
+The plan is rejected unless at least three proven members remain and the
+absolute threshold is strictly lower than the council size. Registration
+rechecks both liveness invariants against the direct `get_policy` result
+([`apps/api/src/treasury.ts`](../apps/api/src/treasury.ts)).
 
 ```json
 { "environment": "uat", "daoName": "acme", "founderNearAccountId": "alice.testnet" }
@@ -480,6 +486,242 @@ the previous status is `Approved` (displayed as **Executed**). `Expired`,
 ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
+Zodiac configuration is one relay proposal, not four: the payload calls the
+canonical Safe **MultiSendCallOnly 1.4.1**
+[`0x9641…02e2`](https://sepolia.basescan.org/address/0x9641d764fc13c8B624c04430C7356C1C7C8102e2)
+with `operation = 1`; its four packed children are `Call` operations to the
+single Roles instance in this order: `assignRoles`, `scopeTarget`,
+`scopeFunction`, `setAllowance`. The relay rejects any DelegateCall whose target
+is not its immutable, attested MultiSendCallOnly address. This removes the
+non-Call variants exposed by the general MultiSend runtime
+([Safe 1.4.1 deployment registry used by `treasury-plan.ts`](../packages/deployer/src/treasury-plan.ts),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
+
+The deployed Roles 2.1.1 mastercopy at
+[`0xF296…3D5`](https://base-sepolia.blockscout.com/address/0xF2964CE6161ce0e75964Fe7927cE114cb0B283D5?tab=contract)
+defines `setAllowance` in `contracts/PermissionBuilder.sol`—the deployed source
+does not call this file `core/Setup.sol`. Its ABI order, verified again by
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts), is:
+
+| Position | Parameter | MandateOS value |
+|---:|---|---|
+| 1 | `key` | compiled allowance key |
+| 2 | `balance` | period budget on first creation; `min(current on-chain balance, new budget)` on an update |
+| 3 | `maxRefill` | period budget |
+| 4 | `refill` | period budget |
+| 5 | `period` | `periodDays × 86,400` |
+| 6 | `timestamp` | server time when `POST /v1/console/mandates/zodiac-proposal` creates the proposal |
+
+The update balance is a proposal-time snapshot. Zodiac may refill the allowance
+between proposal creation and execution; executing `setAllowance` then writes
+the encoded snapshot and can reduce that newly refilled balance. It never raises
+the balance above the new budget. Re-propose when a fresh execution-time balance
+is required
+([`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts)).
+
+### `POST /v1/console/governance/relay-operation`
+
+After a Zodiac proposal reaches `Approved`, the browser records the public final
+vote hash and signer account. The server verifies that the signer is a proven
+member, the proposal is the deterministic Zodiac batch, and the relay has the
+corresponding active operation; it never receives a private key
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+The governance job shares the payment worker lease. It recovers a missing MPC
+signature from that NEAR transaction, broadcasts the immutable 0xGOV
+transaction, waits `WORKER_CONFIRMATIONS`, and checkpoints the Delay entry.
+`txCooldown`, `txExpiration`, `txCreatedAt`, `txNonce`, `queueNonce`, and
+`txHash(entryNonce)` are read on-chain; the worker rejects a queue hash that
+does not match `keccak256(abi.encodePacked(to,value,data,operation))`. The gas
+wallet signs only the exact `executeNextTx` call; its raw transaction is
+persisted before broadcast.
+
+Delay 1.1.1 does not emit a `TransactionExecuted` event. Execution evidence is
+therefore the Safe's `ExecutionFromModuleSuccess(module = Delay)` event plus the
+event transaction decoded as the exact
+`Delay.executeNextTx(to,value,data,operation)` queue entry. This evidence is
+checked first, including when the worker observes it after the expiry time.
+Roles state and events are post-execution verification only; they never classify
+an operation as executed.
+
+Without execution evidence, `TxNonceSet(newNonce > entryNonce)` proves a veto
+only when a historical `txNonce` read at the block immediately before that event
+was still `<= entryNonce`. Without either proof, an elapsed
+`txCreatedAt + txCooldown + txExpiration` classifies the entry as `Expired`.
+A generic non-Zodiac operation uses the same Safe/calldata execution proof and
+records receipt-only post-verification. Reverted queue or `executeNextTx`
+transactions become `Failed`.
+
+Guard signs the exact 0xGOV transaction hash, Base block number, and final status
+under `mandateos:relay-status:v1`; `Executed`, `Vetoed`, `Expired`, and `Failed`
+reports all release the relay's active operation. A compromised Guard can submit
+`Failed` before broadcast and release the relay even though the already signed
+0xGOV transaction remains broadcastable. If that transaction is later queued,
+the council's Delay veto remains the safety path. The DAO-only
+`confirm_original` remains the recovery path
+([Safe ModuleManager source](https://github.com/safe-global/safe-smart-account/blob/v1.4.1/contracts/base/ModuleManager.sol),
+[`apps/api/src/governance-worker.ts`](../apps/api/src/governance-worker.ts),
+[`apps/api/src/governance-base.ts`](../apps/api/src/governance-base.ts),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs)).
+
+### `GET /v1/console/governance`
+
+Returns recent DAO proposals, persisted governance jobs, and direct Base reads
+of Delay `txNonce`, `queueNonce`, `txCooldown`, `txExpiration`,
+`txCreatedAt`, current block time, plus the Safe threshold. The Governance page
+renders `DAO vote → signed by 0xGOV → broadcast → Delay queue → terminal state`
+and computes its countdown only from these on-chain timestamps. **Veto** builds
+the exact Safe EIP-712 transaction `Delay.setTxNonce(queueNonce)`, collects the
+on-chain Safe threshold of council signatures, then submits it through the
+Safe; MandateOS never signs for the council
+([`apps/api/src/console-data.ts`](../apps/api/src/console-data.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx),
+[`apps/console/src/safe.ts`](../apps/console/src/safe.ts)).
+
+### `POST /v1/console/governance/unblock-proposal`
+
+For a terminal operation that still occupies an older relay's
+`active_operation`, returns an unsigned DAO `add_proposal` for
+`confirm_original`. A connected council member proposes it and council members
+approve it from the Governance page; the server receives no council key
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx)).
+
+![Council relay rescue proposal](./console/governance-relay-rescue.webp)
+
+### `POST /v1/console/governance/swap-owner-proposal`
+
+Admin only. While the relay is idle, reads the current Safe owners directly
+from Base and returns an unsigned DAO proposal for
+`Safe.swapOwner(prevOwner, oldOwner, newOwner)`. It rejects an absent old owner
+or an existing replacement. Council votes, 0xGOV, Delay and the normal
+governance worker remain on the execution path; no server key is made a Safe
+owner.
+
+### `POST /v1/console/governance/add-owner-proposal`
+
+Admin only, and limited to recovery of a two-owner Safe. Returns an unsigned
+DAO proposal for `Safe.addOwnerWithThreshold(newOwner, 2)`, producing the
+required 2/3 Safe after execution. The console records either recovery proposal
+as a generic governance operation; successful execution is classified from
+the exact Safe `ExecutionFromModuleSuccess` evidence and receipt rather than
+Zodiac state
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx)).
+
+![Governance worker timeline and veto](./console/governance-worker-timeline.webp)
+
+Fresh PR C UAT treasury (no migration):
+
+| Component | Address/account |
+|---|---|
+| DAO | `pr-c-uat-1.factory-v2.mandateos.testnet` |
+| Vault | `pr-c-uat-v.mandateos.testnet` |
+| Relay | `pr-c-uat-r.mandateos.testnet` |
+| Safe | `0xD1bBa371CA1e013df74354e6B85Cb25072c4b8f9` |
+| Roles | `0xE2d84feE72C88ee7572e8F7D010334Da0179c84f` |
+| Delay | `0x8Dc2b027F8cF72519C1C8e908A612b95F5B3b9ff` |
+| 0xGOV | `0x3961FA54D0ebDf4DbDe073466f580D48Daac7928` |
+| Relay-attested MultiSend (initial UAT, superseded) | `0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526` |
+
+This initial UAT predates the MultiSendCallOnly correction and remains recorded
+as historical evidence; its immutable relay still attests regular MultiSend.
+The corrected code and browser attestation require canonical
+MultiSendCallOnly `0x9641d764fc13c8B624c04430C7356C1C7C8102e2`. Both NEAR
+contracts have zero keys and match the hashes recorded for that run. Base reads
+confirm three owners, threshold 2, Roles + Delay enabled on the Safe, 0xGOV
+enabled on Delay, cooldown 300 and expiration 604,800
+([NEAR manifest](../deployments/near-testnet.json),
+[Base manifest](../deployments/base-sepolia.json)).
+
+The corrected relay artifact was built reproducibly from commit
+`7dbee92054dd32dd2cc624fe50a13c64136992bb` with
+`sourcescan/cargo-near:0.20.3-rust-1.86.0@sha256:a84b…adf`. Its SHA-256 is
+`a03b744e59d2738d8e6b6e11cc2945aab076d85ec8fcaff512eedac6c352fdcc`
+([`contracts/governance-relay`](../contracts/governance-relay),
+[`contracts/res/governance_relay.wasm`](../contracts/res/governance_relay.wasm)).
+This artifact is not claimed as deployed on the superseded UAT relay above.
+
+Corrected CallOnly UAT treasury, initially created as 2/2 entirely from the
+console (except the allowed `mandateos agent init` command), then recovered to
+2/3 through the same DAO → relay → Delay path:
+
+| Component | Address/account |
+|---|---|
+| DAO | `mandateos-callonly-2of2.factory-v2.mandateos.testnet` |
+| Vault | `mandateo-v.mandateos.testnet` |
+| Relay | `mandateo-r.mandateos.testnet` |
+| Safe | `0x62C30e9e22A4Ad79AA473BA09861F10c3A55E8E0` |
+| Roles | `0x167b82E08333319539c1dfB717765173b090DA98` |
+| Delay | `0xac0AF75134D5afc5884Edd7F7B9454Fdd51347dD` |
+| 0xGOV | `0x73c6889E9a9e4f729409f8251a9c4EE4Fee4024D` |
+| Relay MultiSendCallOnly | `0x9641d764fc13c8B624c04430C7356C1C7C8102e2` |
+
+| Clean 2/2 UAT transition | Transaction |
+|---|---|
+| DAO creation | [`29pzvQ…`](https://testnet.nearblocks.io/txns/29pzvQ3TrQLXurMUQqeKwM5of4LbBjuR2g1CfX7Hyp1X) |
+| Vault deployment | [`22euyL…`](https://testnet.nearblocks.io/txns/22euyLBoEzrRkhuUxvVD5tFajyjSbMBVAfesTZMfRaHm) |
+| CallOnly relay deployment | [`A3g9cS…`](https://testnet.nearblocks.io/txns/A3g9cSAE6h6aTwaLcqTGiyivqaSAfNKMJsJkfzn8qwwF) |
+| Ethereum Sepolia → Base Sepolia deposit | `0x3a3ce142f9fb4897266bf68cb634270ad1e53b474ac29755718d6a06202e7e27` |
+| Safe deployment | `0x7047a241da8edaf6b92c8058d4795fd09926bdbf39c53d89d00dfb6fad51376d` |
+| Roles deployment | `0xd324ff1a8fc0482adad37d0f92da39bb49ede09510bf74477ae068a3d59b441c` |
+| Delay deployment | `0x423969f45ea93d1a69273676172a73ea24abec5f78ff41a0752c4e2a45ef3e0f` |
+| Safe 2/2 module batch | `0x5a3956eb7ca7f17fd81e8969dc084a80d61aa8a00adc4fef79ff0f0d5a858020` |
+| First Zodiac DAO final vote | [`EvN2mi…`](https://testnet.nearblocks.io/txns/EvN2miZPj7prNpmMg79uVvRxUcjMiuHZZTbsg9Nzc9FN) |
+| First 0xGOV Delay queue | `0x8e2108ecb7ee2d7ced53076083b71f58dcd1437a67b7f092977c8e9ef9df5a1c` |
+| First Delay execution | `0x5ce72b873d15b4e00664d6d67b212e26c340468c8537061f31ee9f5e41f7a2bf` |
+| Veto-test DAO final vote | [`3eQWu2…`](https://testnet.nearblocks.io/txns/3eQWu2cP1Vu5xxMuKcgHUAHNaDieBLM6kJscWdFaFiF7) |
+| Veto-test 0xGOV Delay queue | `0xc31b1dd1216591adcdffb94bffbdbb8e16465fab6044892ed7c77475efa3afdb` |
+| Second Delay execution to release relay | `0xb5a9e80af1759867795b579ac7655575535f391a34afe07ee0026fcb44c90de6` |
+| `swapOwner` DAO final vote | [`7BtAvU…`](https://testnet.nearblocks.io/txns/7BtAvUqHJiZWcsgM5g3HkjzU73a6qzxjBc3NKC5jyJP7) |
+| `swapOwner` 0xGOV Delay queue | [`0xd463…`](https://sepolia.basescan.org/tx/0xd4639328917af0cf3a55cbfb7e7c2a5b64c19a722964b42f801e9b4e566c6178) |
+| `swapOwner` Delay execution | [`0x669a…`](https://sepolia.basescan.org/tx/0x669adaf7edb644d294ca482adb8b2f721981fc7ce56ee0e8f901d425a44c9a18) |
+| `addOwnerWithThreshold(…, 2)` DAO final vote | [`EvpHAY…`](https://testnet.nearblocks.io/txns/EvpHAYe6qbEBhxALteWmebLBHiaBwyFM6QzcHXnh6VMj) |
+| Add third owner 0xGOV Delay queue | [`0x3a2c…`](https://sepolia.basescan.org/tx/0x3a2c61b0eeb32cd083a4ed7aa2d82c97b29e8c918d52b738561ed08242908641) |
+| Add third owner Delay execution | [`0xcdcf…`](https://sepolia.basescan.org/tx/0xcdcff14aa2569f714a0bc42fba1285be02bb1ee26b1424632b533f7762660f2d) |
+| Veto-target 0xGOV Delay queue | [`0xbfdd…`](https://sepolia.basescan.org/tx/0xbfddaa829d8560b848573ce71eb9bcf7f3965548af5424af8d67296b86e9ba61) |
+| Council 2/3 veto | [`0xa4f0…`](https://sepolia.basescan.org/tx/0xa4f0b072edd1f5648751aa1d11b5ffcf40341c735cb8a3e5fb4a84fdd121890c) |
+
+Both members confirmed the direct Vault/relay RPC attestation. On-chain reads
+confirmed Roles and Delay enabled on the Safe and 0xGOV enabled on Delay. The
+treasury registration completed. With the user's authorization, the UAT moved
+to the public FastNear testnet endpoint listed by NEAR's provider documentation.
+The first Zodiac operation reached `Executed`; the worker verified
+`AssignRoles`, `ScopeTarget`, `ScopeFunction`, `SetAllowance`, balance
+`6,000,000`, and period `2,592,000`.
+
+The second operation was deliberately allowed to execute after the original
+2/2 council lost one browser-generated EVM key; its terminal Guard report
+released the relay. Proposal `7` then replaced owner `0x35150E…a0dA1e` with
+`0x1D693a…9FFceb`. Proposal `8` added
+`0x64f4F6…F501e8` with `addOwnerWithThreshold(..., 2)`. Direct Base reads
+after execution returned exactly three owners and threshold `2`.
+
+Proposal `9` queued a second owner replacement as the veto target. Two current
+Safe owners signed `Delay.setTxNonce(5)` in the console; transaction
+`0xa4f0…1890c` executed, and the worker classified the entry `Vetoed` before
+submitting the terminal Guard report. No `confirm_original` vote was used.
+Acceptance of a subsequent relay proposal is not yet claimed in this revision.
+
+| Real UAT transition | Transaction |
+|---|---|
+| DAO final vote, single Zodiac batch | [`FMpoLG…`](https://testnet.nearblocks.io/txns/FMpoLG8EKR1zEGiiqRZNMFV7LAuHhaGVArXVe4dNvjTW) |
+| 0xGOV broadcasts into Delay | [`0x6dbf…`](https://sepolia.basescan.org/tx/0x6dbf9d2a7b3ef9e52ac575cc008a79caab2a837fb3802b2f4952294b846fa6e3) |
+| Gas wallet executes after cooldown | [`0xa714…`](https://sepolia.basescan.org/tx/0xa71418caa731dbf68cfe2a34a69a768fa4cce32b7cfdda977f6064af5f7c962d) |
+| Second DAO final vote for veto test | [`ErxsZc…`](https://testnet.nearblocks.io/txns/ErxsZceE4Dj5v4zHZzopnsgyCF9pm5fXhU6RzBmwMSyf) |
+| Second 0xGOV queue transaction | [`0x62dd…`](https://sepolia.basescan.org/tx/0x62dd2a87a8a7686a14543a5aa32a4ef3f4522edd1ca970024a60a1df5199440f) |
+| Council 2/3 veto | [`0xcff3…`](https://sepolia.basescan.org/tx/0xcff3a137fed70ce4baa91a011e3bf3162d2d8c8e53ce75ce1b707b2f54bb527b) |
+
+The first operation ended `Executed` with all four Roles events and periodic
+allowance `6,000,000 / 30 days`. The second ended `Vetoed`, with no
+`executeNextTx` hash. During the first run, public NEAR RPC returned transient
+429 responses; persisted `Broadcast`/`Queued` checkpoints survived and the same
+job resumed to `Executed`, exercising the crash/retry path without changing RPC
+or rotating IPs ([`apps/api/src/governance-worker.test.ts`](../apps/api/src/governance-worker.test.ts)).
+
 Measured execution gas:
 
 | Executed action | Environment | Burnt gas |
@@ -492,7 +734,9 @@ Measured execution gas:
 
 The relay action receives `60 Tgas`: above measured burn and enough to reserve
 its `15 Tgas` MPC receipt plus `20 Tgas` callback. Every browser
-`act_proposal` attaches `450 Tgas`, below testnet protocol version 88's
+`act_proposal` attaches `120 Tgas`: more than six times the measured 19.662
+Tgas worst case while avoiding an unnecessary 0.45 NEAR prepaid-balance
+requirement. It remains below testnet protocol version 88's
 `max_total_prepaid_gas = 1,000 Tgas`
 ([nearcore gas architecture](https://github.com/near/nearcore/blob/master/docs/architecture/how/gas.md),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs),

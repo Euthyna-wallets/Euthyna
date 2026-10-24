@@ -34,6 +34,7 @@ const proposal = (description: string): MandateProposal => ({
 const setRole = proposal("Set mandate researcher [mandate:abc:set-role]");
 const registerAgent = proposal("Register agent [mandate:abc:register-agent]");
 const funding = proposal("Fund researcher budget [mandate:abc:funding]");
+const relayDerive = proposal("Derive relay 0xGOV [mandate:abc:derive-relay]");
 const zodiac = proposal("Configure Zodiac [mandate:abc:zodiac-0]");
 const preview: MandatePreview = {
   roleKey: `0x${"11".repeat(32)}`,
@@ -43,7 +44,7 @@ const preview: MandatePreview = {
   guard: {},
   diff: [],
   agentStatus: "ready",
-  proposals: { vaultSetRole: setRole, vaultRegisterAgent: registerAgent, funding, zodiacRelay: [zodiac] },
+  proposals: { vaultSetRole: setRole, vaultRegisterAgent: registerAgent, funding, relayDerive, zodiacRelay: zodiac },
   warnings: [],
 };
 const treasury = {
@@ -82,6 +83,7 @@ describe("MandatePanel ordered DAO execution", () => {
         description: descriptions[0]!,
         state: "In progress",
         rawStatus: "InProgress",
+        kind: "Vote",
       },
     }));
     mocks.nearAccounts.mockResolvedValue(["alice.testnet"]);
@@ -92,9 +94,9 @@ describe("MandatePanel ordered DAO execution", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Vote approve" }) as HTMLButtonElement).disabled).toBe(false));
 
     const proposeButtons = screen.getAllByRole("button", { name: "Propose" }) as HTMLButtonElement[];
-    expect(proposeButtons).toHaveLength(3);
+    expect(proposeButtons).toHaveLength(4);
     expect(proposeButtons.every((button) => button.disabled)).toBe(true);
-    expect(screen.getAllByText("Waiting for the previous proposal to be Executed on-chain.")).toHaveLength(3);
+    expect(screen.getAllByText("Waiting for the previous proposal to be Executed on-chain.")).toHaveLength(4);
   });
   it("offers Re-propose for a failed step without unlocking the next one", async () => {
     mocks.api.mockImplementation(async (path: string) => {
@@ -121,6 +123,7 @@ describe("MandatePanel ordered DAO execution", () => {
         description: descriptions[0]!,
         state: "Failed",
         rawStatus: "Rejected",
+        kind: "Vote",
       },
     }));
     mocks.nearAccounts.mockResolvedValue(["alice.testnet"]);

@@ -150,9 +150,7 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
       },
     });
     const unavailableNear = {
-      getAccessKeys: async () => {
-        throw new Error("account does not exist");
-      },
+      getAccessKeys: async () => ({ keys: [] }),
     } as unknown as NearClient;
     const service = new WalletProofService(prisma, unavailableNear, "mandateos.testnet", 84532, true);
     const challenge = await service.createChallenge(userId, { memberId, nearAccountId, evmAddress: evm.address });

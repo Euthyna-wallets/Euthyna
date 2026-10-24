@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TreasuryPlan } from "./api.js";
-import { DAO_VOTE_GAS, findDaoProposalRpc, readAgentAccessKeyRpc, readDaoPolicyRpc, readDaoProposalRpc, readNearDeploymentRpc } from "./wallets.js";
+import { DAO_VOTE_GAS, daoVoteArgs, findDaoProposalRpc, readAgentAccessKeyRpc, readDaoPolicyRpc, readDaoProposalRpc, readNearDeploymentRpc } from "./wallets.js";
 
 function rpcResult(value: unknown): Response {
   return new Response(JSON.stringify({
@@ -41,6 +41,22 @@ describe("readDaoPolicyRpc", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+
+  it("retries a transient browser RPC network failure without changing endpoints", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(rpcResult({
+        roles: [{ name: "council", kind: { Group: ["alice.testnet", "bob.testnet"] } }],
+        default_vote_policy: { threshold: "2" },
+      }))
+      .mockResolvedValueOnce(rpcResult({ factory_id: "factory-v2.mandateos.testnet", auto_update: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(readDaoPolicyRpc("acme.factory-v2.mandateos.testnet")).resolves.toMatchObject({
+      council: ["alice.testnet", "bob.testnet"],
+      threshold: "2",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
   it("rejects a response without an exact council group", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(rpcResult({ roles: [], default_vote_policy: { threshold: "2" } })));
     await expect(readDaoPolicyRpc("bad.factory-v2.mandateos.testnet")).rejects.toThrow(
@@ -80,10 +96,15 @@ describe("DAO proposal tracking", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(rpcResult(42))
       .mockResolvedValueOnce(rpcResult([
-        { id: 11, description: "step", status: "Approved" },
-        { id: 41, description: "step", status: "Expired" },
+        { id: 11, description: "step", status: "Approved", kind: { Vote: null } },
+        { id: 41, description: "step", status: "Expired", kind: { Vote: null } },
       ]))
-      .mockResolvedValueOnce(rpcResult({ id: 43, description: "failed", status: "Rejected" }));
+      .mockResolvedValueOnce(rpcResult({
+        id: 43,
+        description: "failed",
+        status: "Rejected",
+        kind: { Vote: null },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(findDaoProposalRpc("dao.testnet", "step")).resolves.toEqual({
@@ -91,9 +112,22 @@ describe("DAO proposal tracking", () => {
       description: "step",
       state: "Expired",
       rawStatus: "Expired",
+      kind: { Vote: null },
     });
     await expect(readDaoProposalRpc("dao.testnet", 43)).resolves.toMatchObject({ state: "Failed" });
-    expect(DAO_VOTE_GAS).toBe("450000000000000");
+    expect(DAO_VOTE_GAS).toBe("120000000000000");
+  });
+});
+
+describe("DAO vote arguments", () => {
+  it("includes the original proposal kind required by Sputnik 2.3.1", () => {
+    const kind = { Vote: null };
+    expect(daoVoteArgs(7, kind)).toEqual({
+      id: 7,
+      action: "VoteApprove",
+      proposal: kind,
+      memo: null,
+    });
   });
 });
 
@@ -101,6 +135,7 @@ describe("readNearDeploymentRpc", () => {
   it("checks hashes, zero keys and initialization fields without using the API", async () => {
     const expectedHash = "AqMJR7ftwLs78D9ERv3eVZpAy8DjobFANTWZ6awc1Vnc";
     const delay = Buffer.from("4444444444444444444444444444444444444444", "hex").toString("base64");
+    const multiSend = Buffer.from("7777777777777777777777777777777777777777", "hex").toString("base64");
     const plan = {
       environment: "uat",
       daoAccountId: "acme.factory.mandateos.testnet",
@@ -120,11 +155,14 @@ describe("readNearDeploymentRpc", () => {
         accountId: "acme-r.mandateos.testnet",
         wasmSha256: "921c03c78a759dc11976501f5b8f81a514820dad57d62e3f28c0cf12034767f5",
         initArgs: {
+          client_id: "acme",
           owner_id: "acme.factory.mandateos.testnet",
           mpc_contract_id: "v1.signer-prod.testnet",
           mpc_path: "governance/base-sepolia",
           evm_chain_id: 84532,
           delay_address: delay,
+          multisend_address: multiSend,
+          guard_public_key: "guard",
         },
       },
     } as TreasuryPlan;
@@ -139,17 +177,20 @@ describe("readNearDeploymentRpc", () => {
       .mockResolvedValueOnce(rpcResult(plan.vault.initArgs.token_id))
       .mockResolvedValueOnce(rpcResult(plan.vault.initArgs.guard_public_key))
       .mockResolvedValueOnce(rpcResult(50))
+      .mockResolvedValueOnce(rpcResult(plan.relay.initArgs.client_id))
       .mockResolvedValueOnce(rpcResult(plan.daoAccountId))
       .mockResolvedValueOnce(rpcResult(plan.relay.initArgs.mpc_contract_id))
       .mockResolvedValueOnce(rpcResult(plan.relay.initArgs.mpc_path))
       .mockResolvedValueOnce(rpcResult(84532))
-      .mockResolvedValueOnce(rpcResult(delay));
+      .mockResolvedValueOnce(rpcResult(delay))
+      .mockResolvedValueOnce(rpcResult(multiSend))
+      .mockResolvedValueOnce(rpcResult(plan.relay.initArgs.guard_public_key));
     vi.stubGlobal("fetch", fetchMock);
 
     const attestation = await readNearDeploymentRpc(plan);
     expect(attestation.valid).toBe(true);
-    expect(attestation.checks).toHaveLength(15);
+    expect(attestation.checks).toHaveLength(18);
     expect(attestation.checks.every((check) => check.ok)).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(fetchMock).toHaveBeenCalledTimes(18);
   });
 });

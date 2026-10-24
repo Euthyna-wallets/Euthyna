@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use borsh::BorshSerialize;
+use ed25519_dalek::{Signer, SigningKey};
 use near_workspaces::network::Sandbox;
 use near_workspaces::types::Gas;
 use near_workspaces::{Account, Contract, Worker};
+use serde::Serialize;
 use serde_json::{Value, json};
 use serial_test::serial;
 use sha3::{Digest as _, Keccak256};
@@ -17,6 +20,29 @@ const MPC_SECRET: [u8; 32] = [0x42; 32];
 const MPC_PUBLIC_KEY: &str = "secp256k1:jCrfJ5wjMBroDh6Mefb1bohaBtzE9me5MaKEhmfmFqK5CudvdSWviXXxfowdtttqh9KWN3zNK9QQu5kq8FfXBK8";
 const DELAY: [u8; 20] = [0x44; 20];
 const TARGET: [u8; 20] = [0x66; 20];
+const MULTISEND: [u8; 20] = [
+    0x96, 0x41, 0xd7, 0x64, 0xfc, 0x13, 0xc8, 0xb6, 0x24, 0xc0, 0x44, 0x30, 0xc7, 0x35, 0x6c, 0x1c,
+    0x7c, 0x81, 0x02, 0xe2,
+];
+const GUARD_SECRET: [u8; 32] = [9u8; 32];
+
+#[derive(BorshSerialize, Serialize, Clone, Copy)]
+enum FinalStatusForSigning {
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
+}
+
+#[derive(BorshSerialize, Serialize)]
+struct StatusReportForSigning {
+    client_id: String,
+    op_id: [u8; 32],
+    final_status: FinalStatusForSigning,
+    tx_hash: [u8; 32],
+    report_nonce: u64,
+    block_number: u64,
+}
 
 struct Fixture {
     worker: Worker<Sandbox>,
@@ -40,11 +66,14 @@ async fn setup() -> Result<Fixture> {
     relay
         .call("new")
         .args_json(json!({
+            "client_id": "acme",
             "owner_id": owner.id(),
             "mpc_contract_id": mpc.id(),
             "mpc_path": "governance/base-sepolia",
             "evm_chain_id": 84532,
             "delay_address": STANDARD.encode(DELAY),
+            "multisend_address": STANDARD.encode(MULTISEND),
+            "guard_public_key": STANDARD.encode(SigningKey::from_bytes(&GUARD_SECRET).verifying_key().to_bytes()),
             "max_gas_limit": "300000",
             "max_fee_per_gas": "100000000000",
             "max_priority_fee_per_gas": "10000000000",
@@ -82,6 +111,7 @@ fn proposal_args() -> Value {
         "target": STANDARD.encode(TARGET),
         "value": "0",
         "data": STANDARD.encode([0x12, 0x34, 0x56, 0x78]),
+        "operation": 0,
         "gas_limit": "200000",
         "max_fee_per_gas": "20000000000",
         "max_priority_fee_per_gas": "1000000000"
@@ -172,6 +202,49 @@ fn assert_failure_contains(
     );
 }
 
+fn signed_status_report(operation: &Value, report_nonce: u64) -> Value {
+    signed_status_report_with_status(
+        operation,
+        report_nonce,
+        FinalStatusForSigning::Executed,
+        signed_transaction_hash(operation, false),
+    )
+}
+
+fn signed_status_report_for_hash(operation: &Value, report_nonce: u64, tx_hash: [u8; 32]) -> Value {
+    signed_status_report_with_status(
+        operation,
+        report_nonce,
+        FinalStatusForSigning::Executed,
+        tx_hash,
+    )
+}
+
+fn signed_status_report_with_status(
+    operation: &Value,
+    report_nonce: u64,
+    final_status: FinalStatusForSigning,
+    tx_hash: [u8; 32],
+) -> Value {
+    let report = StatusReportForSigning {
+        client_id: "acme".to_string(),
+        op_id: digest(&operation["op_id"]),
+        final_status,
+        tx_hash,
+        report_nonce,
+        block_number: 42,
+    };
+    let mut message = b"mandateos:relay-status:v1".to_vec();
+    message.extend_from_slice(&borsh::to_vec(&report).expect("report serialization"));
+    let signature = SigningKey::from_bytes(&GUARD_SECRET)
+        .sign(&message)
+        .to_bytes();
+    json!({
+        "report": report,
+        "signature": STANDARD.encode(signature),
+    })
+}
+
 #[tokio::test]
 #[serial]
 async fn only_dao_owner_can_propose_governance_calls() -> Result<()> {
@@ -202,6 +275,71 @@ async fn propose_mpc_gas_is_measured() -> Result<()> {
     outcome.into_result()?;
     println!("MANDATEOS_RELAY_PROPOSE_GAS={gas_burnt}");
     assert!(gas_burnt > 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn delegatecall_is_limited_to_canonical_multisend() -> Result<()> {
+    let fixture = setup().await?;
+    let arbitrary = fixture
+        .owner
+        .call(fixture.relay.id(), "propose")
+        .args_json(json!({
+            "target": STANDARD.encode(TARGET),
+            "value": "0",
+            "data": STANDARD.encode([0x12, 0x34]),
+            "operation": 1,
+            "gas_limit": "200000",
+            "max_fee_per_gas": "20000000000",
+            "max_priority_fee_per_gas": "1000000000"
+        }))
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?;
+    assert_failure_contains(&arbitrary, "ERR_DELEGATECALL_TARGET");
+
+    let invalid_operation = fixture
+        .owner
+        .call(fixture.relay.id(), "propose")
+        .args_json(json!({
+            "target": STANDARD.encode(MULTISEND),
+            "value": "0",
+            "data": STANDARD.encode([0x12, 0x34]),
+            "operation": 2,
+            "gas_limit": "200000",
+            "max_fee_per_gas": "20000000000",
+            "max_priority_fee_per_gas": "1000000000"
+        }))
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?;
+    assert_failure_contains(&invalid_operation, "ERR_OPERATION");
+
+    fixture
+        .owner
+        .call(fixture.relay.id(), "propose")
+        .args_json(json!({
+            "target": STANDARD.encode(MULTISEND),
+            "value": "0",
+            "data": STANDARD.encode([0x12, 0x34]),
+            "operation": 1,
+            "gas_limit": "200000",
+            "max_fee_per_gas": "20000000000",
+            "max_priority_fee_per_gas": "1000000000"
+        }))
+        .gas(Gas::from_tgas(120))
+        .transact()
+        .await?
+        .into_result()?;
+    let operation = get_active_operation(&fixture).await?;
+    assert_eq!(operation["operation"], 1);
+    assert_eq!(operation["target"], json!(MULTISEND));
+    let input = operation["transaction"]["input"]
+        .as_array()
+        .expect("delay calldata");
+    assert!(input[100..131].iter().all(|byte| byte == 0));
+    assert_eq!(input[131], 1);
     Ok(())
 }
 
@@ -252,6 +390,128 @@ async fn proposal_builds_delay_call_and_confirms_sequential_nonce() -> Result<()
     );
     let second = propose(&fixture).await?;
     assert_eq!(second["evm_nonce"], 1);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn guard_report_confirms_exact_signed_transaction_and_blocks_replay() -> Result<()> {
+    let fixture = setup().await?;
+    let operation = propose(&fixture).await?;
+    let signed_report = signed_status_report(&operation, 7);
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({"signed_report": signed_report, "mpc_signature": null}))
+        .transact()
+        .await?
+        .into_result()?;
+    let confirmed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": operation["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("confirmed operation")?;
+    assert_eq!(confirmed["state"], "Executed");
+
+    let second = propose(&fixture).await?;
+    let replay = fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report(&second, 7),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?;
+    assert_failure_contains(&replay, "ERR_REPORT_NONCE_USED");
+
+    let wrong_hash = fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_for_hash(&second, 8, [0u8; 32]),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?;
+    assert_failure_contains(&wrong_hash, "ERR_REPORT_TX_HASH");
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &second,
+                9,
+                FinalStatusForSigning::Vetoed,
+                signed_transaction_hash(&second, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let vetoed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": second["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("vetoed operation")?;
+    assert_eq!(vetoed["state"], "Vetoed");
+    let third = propose(&fixture).await?;
+    assert_eq!(third["evm_nonce"], 2);
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &third,
+                10,
+                FinalStatusForSigning::Expired,
+                signed_transaction_hash(&third, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let expired: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": third["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("expired operation")?;
+    assert_eq!(expired["state"], "Expired");
+
+    let fourth = propose(&fixture).await?;
+    fixture
+        .outsider
+        .call(fixture.relay.id(), "report_status")
+        .args_json(json!({
+            "signed_report": signed_status_report_with_status(
+                &fourth,
+                11,
+                FinalStatusForSigning::Failed,
+                signed_transaction_hash(&fourth, false)
+            ),
+            "mpc_signature": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    let failed: Value = fixture
+        .relay
+        .view("get_operation")
+        .args_json(json!({"op_id": fourth["op_id"]}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("failed operation")?;
+    assert_eq!(failed["state"], "Failed");
+    assert_eq!(propose(&fixture).await?["evm_nonce"], 4);
+
     Ok(())
 }
 

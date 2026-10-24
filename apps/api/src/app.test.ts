@@ -15,6 +15,7 @@ import type {
   CreatedAgent,
 } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
+import type { GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
 import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
@@ -221,6 +222,7 @@ function testApp(options?: {
   consoleRole?: "admin" | "member";
   treasuryStatus?: string;
   sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
+  registrationRateLimitEnabled?: boolean;
 }) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
@@ -245,6 +247,7 @@ function testApp(options?: {
     cancelNonce: async () => "near-cancel-hash",
     viewFunction: async (_accountId: string, method: string) =>
       method === "get_agent" ? { role: "researcher", active: true, evm_address: Array(20).fill(1) } : 3,
+    proxyRpc: async (method: string) => ({ proxiedMethod: method }),
   } as unknown as NearClient;
   const guard = {
     approve: async () => {
@@ -286,6 +289,13 @@ function testApp(options?: {
       mandateCalls.push({ organizationId, role: input.role });
       return {} as MandatePreview;
     },
+    zodiacProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Zodiac",
+      args: {},
+      deposit: "0",
+    }),
     budgetTokenStatus: async () => ({
       environment: "uat",
       tokenAccountId: "test-ft.testnet",
@@ -392,6 +402,30 @@ function testApp(options?: {
       attestation: { valid: true },
     }),
   } as unknown as AgentProvisioningService;
+  const governance: GovernanceGateway = {
+    recordRelayExecution: async () => ({ opId: `0x${"01".repeat(32)}`, state: "PossiblySigned" }),
+    unblockProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Unblock relay",
+      args: {},
+      deposit: "0",
+    }),
+    swapOwnerProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Swap Safe owner",
+      args: {},
+      deposit: "0",
+    }),
+    addOwnerProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Add Safe owner",
+      args: {},
+      deposit: "0",
+    }),
+  };
   const app = createApp({
     near,
     guard,
@@ -400,6 +434,7 @@ function testApp(options?: {
     walletProof,
     agentProvisioning,
     treasury,
+    governance,
     mandates,
     registry,
     payments,
@@ -408,6 +443,7 @@ function testApp(options?: {
     nearParentAccount: "mandateos.testnet",
     nearSponsorDailyWalletLimit: 2,
     nearSponsorWalletAmountYocto: "500000000000000000000000",
+    registrationRateLimitEnabled: options?.registrationRateLimitEnabled ?? true,
   });
   return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
 }
@@ -677,6 +713,20 @@ describe("passwordless registration", () => {
     expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
   });
 
+
+  it("disables registration throttling only for explicit UAT demo mode", async () => {
+    const { app } = testApp({ registrationRateLimitEnabled: false });
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await app.request("/api/register/passkey-start", {
+        method: "POST",
+        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.20" }),
+        body: JSON.stringify({ email: "uat-demo@example.test", name: "UAT User" }),
+      });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200]);
+  });
   it("returns 404 for password sign-up and sign-in routes", async () => {
     const { app } = testApp();
     for (const path of ["/api/auth/sign-up/email", "/api/auth/sign-in/email"]) {
@@ -698,6 +748,24 @@ describe("passwordless registration", () => {
     });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "wallet_proof_required" });
+  });
+});
+
+
+describe("console NEAR RPC proxy", () => {
+  it("forwards only allowlisted methods for an authenticated console session", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/near-rpc", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "query", params: { finality: "final" } }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      result: { proxiedMethod: "query" },
+    });
   });
 });
 
@@ -823,14 +891,14 @@ describe("treasury onboarding", () => {
       method: "POST",
       headers: consoleHeaders({ cookie: "session-member" }),
       body: JSON.stringify({
-        memberId: member.memberId,
+        memberId: "better-auth-member-id",
         nearAccountId: "alice.testnet",
         evmAddress: "0x1111111111111111111111111111111111111111",
       }),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      memberId: member.memberId,
+      memberId: "better-auth-member-id",
       nearAccountId: "alice.testnet",
       evmAddress: "0x1111111111111111111111111111111111111111",
       message: "proof",

@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { createAuth } from "./auth.js";
 import { BetterAuthGateway } from "./auth-gateway.js";
 import { loadEnv } from "./env.js";
+import { GovernanceService } from "./governance.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { createBaseRelayer } from "./relayer.js";
@@ -68,7 +69,13 @@ const treasury = new TreasuryService(prisma, near, signer, {
   relayDepositYocto: "3500000000000000000000000",
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
 });
-const mandates = new MandateService(prisma, near, env.BUDGET_TOKEN_ACCOUNT_ID);
+const mandates = new MandateService(
+  prisma,
+  near,
+  env.BUDGET_TOKEN_ACCOUNT_ID,
+  env.BASE_SEPOLIA_RPC_URL,
+);
+const governance = new GovernanceService(prisma, near, env.BASE_SEPOLIA_RPC_URL);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
 const consoleData = new ConsoleDataService(
@@ -85,6 +92,7 @@ const app = createApp({
   walletProof,
   treasury,
   agentProvisioning,
+  governance,
   mandates,
   registry: registryService,
   payments,
@@ -93,6 +101,7 @@ const app = createApp({
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
   nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
+  registrationRateLimitEnabled: !env.UAT_DEMO_WALLETS_ENABLED,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

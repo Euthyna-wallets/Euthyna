@@ -126,6 +126,7 @@ model Organization {
   nearSponsorships        NearWalletSponsorship[]
   deploymentConfirmations TreasuryDeploymentConfirmation[]
   agentProvisionings      AgentProvisioning[]
+  governanceOperations    GovernanceOperation[]
 
   @@unique([slug])
   @@map("organization")
@@ -458,25 +459,70 @@ model Operation {
   @@map("operation")
 }
 
+model GovernanceOperation {
+  organizationId        String
+  opId                  String
+  treasuryId            String
+  relayAccountId        String
+  clientId              String
+  proposalId            Int?
+  nearExecutionTxHash   String?
+  nearExecutionSignerId String?
+  state                 String
+  finalStatus           String?
+  target                String
+  value                 String
+  data                  String
+  operation             Int
+  txHash                String?
+  receiptBlock          BigInt?
+  queueNonce            BigInt?
+  queueCreatedAt        BigInt?
+  cooldownSeconds       BigInt?
+  expirationSeconds     BigInt?
+  executeRawTransaction String?
+  executeTxHash         String?
+  executeReceiptBlock   BigInt?
+  rolesVerification     Json?
+  reportNonce           BigInt?
+  broadcastAt           DateTime?
+  queuedAt              DateTime?
+  executedAt            DateTime?
+  lastAttemptAt         DateTime?
+  nextAttemptAt         DateTime?
+  attempts              Int          @default(0)
+  lastError             String?
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  treasury              Treasury     @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@id([organizationId, opId])
+  @@index([state, nextAttemptAt])
+  @@index([treasuryId, updatedAt])
+  @@map("governance_operation")
+}
+
 model Treasury {
-  id              String       @id @default(uuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environment     String       @default("uat")
-  nearNetwork     String
-  baseChainId     Int
-  daoAccountId    String
-  vaultAccountId  String
-  relayAccountId  String
-  safeAddress     String
-  rolesAddress    String
-  delayAddress    String
-  govAddress      String
-  vaultWasmSha256 String
-  relayWasmSha256 String
-  status          String       @default("active")
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id                   String                @id @default(uuid())
+  organizationId       String
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment          String                @default("uat")
+  nearNetwork          String
+  baseChainId          Int
+  daoAccountId         String
+  vaultAccountId       String
+  relayAccountId       String
+  safeAddress          String
+  rolesAddress         String
+  delayAddress         String
+  govAddress           String
+  vaultWasmSha256      String
+  relayWasmSha256      String
+  status               String                @default("active")
+  governanceOperations GovernanceOperation[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   @@unique([organizationId, environment])
   @@index([organizationId])

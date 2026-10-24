@@ -104,13 +104,14 @@ Aucune adresse MandateOS n'est inventée dans cette spécification. Les adresses
 | Zodiac Delay | 1.1.1 | FIFO, cooldown UAT `300 s`, production `86 400 s`, expiration `604 800 s`, veto par `setTxNonce` | [référence Delay 1.1.1][zodiac-delay-reference], [source Solidity épinglée][zodiac-delay-1.1.1-source] |
 | ModuleProxyFactory | 1.2.0 | Déploiement des modules Zodiac | [dépôt Zodiac][zodiac] |
 | SafeL2 / SafeProxyFactory | 1.4.1 | Safe Base et factory de proxy | [registre SafeL2][safe-l2-deployment], [registre SafeProxyFactory][safe-proxy-factory] |
+| Safe MultiSendCallOnly | 1.4.1, Base Sepolia `0x9641…02e2` | DelegateCall batch limité à des appels enfants `Call`; cible immutable du relay | [registre Safe deployments][safe-deployments], [`treasury-plan.ts`](./packages/deployer/src/treasury-plan.ts) |
 | USDC UAT Base Sepolia | `TestUSDC (token de test)`, `0x418A…9474` | ERC-20 de test à 6 décimales, 20 unités frappées au deployer ; aucune valeur réelle | [`packages/deployer/contracts/TestUSDC.sol`](./packages/deployer/contracts/TestUSDC.sol) |
 
 Le déploiement UAT observé est : Safe `0x19C…199cD`, Roles `0x7178…ed40`, Delay `0xDd86…9533`, TestUSDC (token de test) `0x418A…9474`, `0xAAA` `0x10Ed…37Af` et `0xGOV` `0xC963…FDBb`. Les adresses complètes, owners, modules, hashes de bytecode et transactions sont dans [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
 
 Les allowances Roles sont indexées par une clé globale `bytes32` dans le stockage du contrat ; partager cette clé entre plusieurs rôles permet un plafond commun. L'opérateur `EqualTo` fixe une valeur de paramètre dynamique, par exemple le destinataire de `USDC.transfer` ([contrats Roles][zodiac-roles-contracts]).
 
-Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format des signatures Safe][safe-signatures]). `0xGOV` n'est pas owner : il signe une transaction EIP-1559 qui appelle le module Delay, directement ou à travers un Roles administratif intermédiaire. Le `setup` du Safe peut déléguer un batch à `MultiSend` pour activer Roles et Delay dans la même transaction ; `MultiSend` revert l'ensemble si un appel échoue ([Safe][safe], [MultiSend][safe-multisend]).
+Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format des signatures Safe][safe-signatures]). `0xGOV` n'est pas owner : il signe une transaction EIP-1559 qui appelle le module Delay. Le setup humain du Safe utilise le MultiSend général pour activer les modules ; la proposition 0xGOV utilise exclusivement **MultiSendCallOnly**. Le relay n'autorise `operation = DelegateCall` que vers son adresse MultiSendCallOnly immutable et attestée, tandis que les quatre enfants Roles restent des `Call` ([Safe][safe], [MultiSend][safe-multisend], [`governance-relay`](./contracts/governance-relay/src/lib.rs)).
 
 `omni-transaction` 0.3 est retenu pour la Phase 1, mais son dépôt ne publie pas de rapport d'audit. Cette dépendance reste un risque explicite avant tout usage de production ([dépôt `omni-transaction`][omni-transaction]).
 
@@ -138,9 +139,19 @@ L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path.
 
 | Clé serveur | Périmètre autorisé | Incapacité structurelle |
 |---|---|---|
-| Guard ed25519 | Signer les visas et rapports sur des objets déjà engagés par le Vault | Ne peut ni appeler le Safe, ni choisir une transaction, ni dépasser Vault/Zodiac |
+| Guard ed25519 | Signer les visas et les rapports terminaux `Executed` / `Vetoed` / `Expired` / `Failed` sur le hash exact de transactions déjà engagées | Ne peut ni signer ni choisir une transaction EVM. Une clé compromise peut toutefois déclarer `Failed` avant diffusion et libérer le relay alors que la transaction 0xGOV déjà signée reste diffusable ; si elle entre dans Delay, le veto 2/3 du council reste la barrière. Risque résiduel : désordre ou blocage de file, pas transaction arbitraire. |
 | Relayer NEAR | Déployer les comptes sponsorisés, financer leur réserve gas, soumettre `report_status` et les récupérations `submit_signature` | N'obtient aucune clé sur Vault/relay/agent ; l'unique clé agent créée est celle fournie par le client et reste FunctionCall-only |
-| Gas wallet EVM | **Non introduit dans PR A** ; réservé au bloc C pour diffuser une tx déjà signée et appeler `Delay.executeNextTx` permissionless | Ne devra avoir aucun rôle Safe/Zodiac et aucune capacité de modification de policy |
+| Gas wallet EVM | Signe uniquement l'appel permissionless `Delay.executeNextTx` préparé et checkpointé par le worker ; la diffusion des transactions brutes déjà signées utilise `eth_sendRawTransaction` sans cette clé | N'est ni owner Safe, ni module, ni membre Roles ; ne peut choisir ni cible, ni calldata, ni politique ([`apps/api/src/governance-base.ts`](./apps/api/src/governance-base.ts)) |
+
+Pour l'UAT CallOnly, le gas wallet observé est
+`0x37d679d9aE6dC2e14b662C3646aCd0d36B72E90d`. Il a soumis les appels
+permissionless `executeNextTx` des entrées Delay de cette trésorerie et avait
+aussi relayé le veto `0xcff3…527b` de l'UAT précédente. Ce second fait est un
+historique opérationnel, pas une autorité supplémentaire : `setTxNonce` avait
+déjà été autorisé par les signatures 2/3 du Safe, et le wallet n'est ni owner,
+ni module, ni membre Roles
+([`apps/api/src/governance-worker.ts`](./apps/api/src/governance-worker.ts),
+[`docs/api.md`](./docs/api.md)).
 
 Le provisionnement est implémenté par une seule transaction
 `CreateAccount → Transfer → AddKey(FunctionCall)` ; l'API et le navigateur
@@ -206,7 +217,7 @@ Le seed et le script de déploiement mono-client exécutent et vérifient les é
 7. dériver les adresses `0xAAA`, puis les préfinancer avec un petit montant d'ETH par action gouvernée ;
 8. déployer le Safe Base Sepolia avec trois owners de test distincts et un seuil 2/3 ;
 9. déployer Roles v2 et Delay 1.1.1 avec `owner = avatar = target = Safe`, `cooldown = 300` secondes sur Base Sepolia (`86 400` en production) et `expiration = 604 800` secondes ;
-10. activer Roles et Delay comme modules du Safe, assigner `0xAAA` au rôle opérationnel et autoriser le vrai `0xGOV` dérivé par le relais dans Delay ;
+10. activer Roles et Delay comme modules du Safe, autoriser le vrai `0xGOV` dérivé dans Delay, puis configurer chaque mandat par un unique batch MultiSendCallOnly (`assignRoles`, `scopeTarget`, `scopeFunction`, `setAllowance`) ;
 11. créer les comptes agents et ajouter leurs function-call keys générées localement ;
 12. enregistrer adresses, versions, hashes de bytecode et transactions dans la table `deployments`, puis publier les liens explorateurs dans le README.
 
@@ -588,6 +599,17 @@ UTF8("mandateos:status:v1") || BORSH({
 
 Le Vault vérifie la signature ed25519, l'unicité de `report_nonce` et l'égalité de `tx_hash` avec le hash de la transaction brute originale qu'il a stockée. Si le callback MPC a échoué, la transaction brute est d'abord reconstruite par `submit_signature` à partir de la signature publique ; `report_status` refuse alors toujours de confirmer sans cette transaction stockée. Ce rapport permet uniquement `PossiblySigned → Confirmée` ; il ne peut ni annuler, ni recréditer, ni rouvrir une opération. La confirmation d'une annulation est réservée à l'owner DAO via `confirm_cancellation` ([`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs), [RPC Ethereum][ethereum-json-rpc]).
 
+Le relais de gouvernance applique le même modèle avec le domaine séparé
+`mandateos:relay-status:v1`. Le rapport couvre `client_id`, `op_id`, le hash de
+la transaction 0xGOV brute stockée, un nonce unique et le bloc Base. Le
+contrat vérifie la signature et le hash, mais ne prouve pas lui-même le receipt
+Base : le Guard nominal n'émet le rapport qu'après exécution et vérification
+Roles par le worker. `confirm_original` owner-only reste le secours DAO. Une
+clé Guard volée peut libérer prématurément la file du relais et provoquer un
+décalage/DoS de nonce, mais elle ne signe aucune transaction EVM et ne modifie
+ni policy ni fonds ([`contracts/governance-relay/src/lib.rs`](./contracts/governance-relay/src/lib.rs),
+[`apps/api/src/guard.ts`](./apps/api/src/guard.ts)).
+
 ## Gouvernance
 
 ### Pattern UAT : security council, Roles et Delay
@@ -607,47 +629,63 @@ sequenceDiagram
   participant T as DAO Trezu · NEAR testnet
   participant G as Relais gouvernance
   participant M as MPC
+  participant W as Worker MandateOS
   participant X as 0xGOV
-  participant D as Delay 300 s
+  participant D as Delay
   participant S as Safe · Base Sepolia
   participant R as Roles
   participant C as Security council 2/3
 
-  H->>T: proposition + 2 votes
-  T->>G: décision approuvée
+  H->>T: proposition MultiSend + 2 votes
+  T->>G: propose(MultiSend, DelegateCall)
   G->>M: signe l'appel Delay pour 0xGOV
   M-->>G: signature ECDSA
-  G-->>X: transaction EIP-1559 signée
+  W->>X: diffuse la transaction brute
   X->>D: execTransactionFromModule
   D-->>D: mise en file FIFO
-  C-->>S: veto si changement anormal
-  S->>D: setTxNonce après signature 2/3
-  D-->>D: invalide les entrées sautées
-  D->>S: executeNextTx après 300 s
-  S->>R: changement administratif
+  C-->>S: setTxNonce(queueNonce), signatures 2/3
+  W->>D: executeNextTx après cooldown
+  D->>S: exécute MultiSend
+  S->>R: assign + scopes + allowance atomiques
+  W->>G: report_status Guard après vérification
 ```
 
 ### Relais réel et machine à états
 
-Le relais UAT est `gov-relay-v1.mandateos-root-20261021.testnet`, sans access key, owner immuable `mandateos-uat-92543787.sputnikv2.testnet`. Le path MPC `governance/base-sepolia` dérive `0xGOV = 0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`.
+Chaque nouvelle trésorerie reçoit un relais keyless dont l'owner immuable est sa
+DAO. L'initialisation atteste `client_id`, le path MPC, le chain ID, le Delay,
+la clé Guard et l'adresse canonique Safe MultiSend 1.4.1. `propose` accepte
+`operation = Call` vers toute cible, mais `operation = DelegateCall` uniquement
+si `target == multisend_address`; toute autre délégation revert explicitement
+`ERR_DELEGATECALL_TARGET`. Le Delay reçoit et stocke l'opération exacte dans son
+calldata ([`contracts/governance-relay/src/lib.rs`](./contracts/governance-relay/src/lib.rs),
+[`contracts/governance-relay/src/evm.rs`](./contracts/governance-relay/src/evm.rs),
+[`apps/console/src/wallets.ts`](./apps/console/src/wallets.ts)).
 
-`propose(target, value, data, gas...)` vérifie `predecessor_account_id == owner_id`, refuse une seconde opération active, construit une transaction EIP-1559 vers le Delay immuable et encode exactement `Delay.execTransactionFromModule(target, value, data, Call)`. Le nonce EVM est avancé avant `sign`; la transaction passe immédiatement en `PossiblySigned`. Un échec, timeout ou callback tardif du MPC ne libère ni l'opération ni le nonce ; `submit_signature` reconstruit la transaction à partir de la signature publique si `env::ecrecover` retrouve `0xGOV` pour le digest original ou d'annulation ([`contracts/governance-relay/src/lib.rs`](./contracts/governance-relay/src/lib.rs), [`contracts/governance-relay/src/evm.rs`](./contracts/governance-relay/src/evm.rs)).
+Le worker découvre l'opération active, récupère une signature MPC manquante
+depuis le receipt NEAR du vote final, checkpoint le hash et le `queueNonce`
+avant diffusion, puis attend `WORKER_CONFIRMATIONS`. Il lit `txCooldown`,
+`txExpiration` et `txCreatedAt` directement sur Delay. Après cooldown, la clé
+gas signe uniquement `executeNextTx`; la transaction brute et son hash sont
+persistés avant diffusion pour rendre la reprise après crash idempotente. Un
+revert devient `Failed` sans retry ; `txNonce > entryNonce` devient `Vetoed` et
+une entrée trop vieille devient `Expired`. Après succès, le worker vérifie le
+membre Roles, l'allowance et les quatre événements de configuration avant le
+rapport Guard ([`apps/api/src/governance-worker.ts`](./apps/api/src/governance-worker.ts),
+[`apps/api/src/governance-base.ts`](./apps/api/src/governance-base.ts)).
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PossiblySigned: proposition DAO approuvée + sign appelé
-  PossiblySigned --> PossiblySigned: callback MPC / submit_signature / diffusion / timeout
-  PossiblySigned --> PossiblySigned: cancel_nonce au même nonce
-  PossiblySigned --> PossiblySigned: submit_signature sur le digest d'annulation
-  PossiblySigned --> Confirmed: DAO confirme le hash original
-  PossiblySigned --> Cancelled: DAO confirme l'annulation minée
-  Confirmed --> [*]
-  Cancelled --> [*]
+  [*] --> PossiblySigned: vote DAO final
+  PossiblySigned --> Broadcast: signature 0xGOV disponible
+  Broadcast --> Queued: receipt + confirmations
+  Queued --> Executing: cooldown écoulé
+  Queued --> Vetoed: txNonce dépasse l'entrée
+  Queued --> Expired: expiration dépassée
+  Executing --> Executed: receipt + état Roles vérifié
+  Executing --> Failed: executeNextTx revert
+  Executed --> Confirmed: rapport Guard relay
 ```
-
-`cancel_nonce` est owner-only, conserve le nonce de l'opération, signe un transfert nul vers `0xGOV` avec des frais strictement supérieurs et laisse l'état `PossiblySigned` jusqu'à `confirm_cancellation`. Les tests Sandbox couvrent owner-only, séquence des nonces, callback tardif, transaction d'annulation au même nonce, `Confirmed` et `Cancelled` ([`contracts/tests/tests/governance_relay.rs`](./contracts/tests/tests/governance_relay.rs)).
-
-Les contrôles d'intégrité inter-chaînes sont : caller DAO fixe, chain ID `84532` fixe, Delay fixe, un seul message actif, nonce EVM séquentiel, calldata et gas couverts par le digest MPC, et confirmation DAO liée au hash brut stocké. Un payload de gouvernance peut être arbitraire par décision du DAO, mais il ne peut pas viser un autre point d'entrée EVM que le Delay.
 
 ### Wiring et ownership
 
@@ -656,7 +694,7 @@ Les contrôles d'intégrité inter-chaînes sont : caller DAO fixe, chain ID `84
 - **Owner du Delay** : le Safe.
 - **Avatar et target du Delay** : le Safe.
 - **Modules du Safe** : Roles opérationnel et Delay.
-- **Module autorisé du Delay** : `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`, dérivé par le relais NEAR.
+- **Module autorisé du Delay** : `0xGOV` dérivé par le relais NEAR de la trésorerie (`0x3961FA54D0ebDf4DbDe073466f580D48Daac7928` pour la PR C UAT).
 - **Membres des rôles opérationnels** : adresses `0xAAA`.
 
 Delay 1.1.1 stocke un cooldown et une expiration lors de `setUp`; son owner, avatar et target sont configurés séparément ([`Delay.sol:L34-L85`][zodiac-delay-setup-source]). Seuls les modules activés peuvent appeler `execTransactionFromModule`, qui ajoute le hash et l'horodatage à la file puis incrémente `queueNonce` ([`Delay.sol:L121-L168`][zodiac-delay-queue-source]). Après le cooldown, n'importe qui peut exécuter la tête de file ; Delay vérifie le hash, l'expiration et l'ordre FIFO avant de transmettre au Safe ([`Delay.sol:L170-L201`][zodiac-delay-execute-source]).

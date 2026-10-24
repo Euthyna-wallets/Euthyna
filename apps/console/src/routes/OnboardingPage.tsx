@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
-import { demoWalletsEnabled, generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { demoWalletsEnabled, generatedNearPublicKey, selectDemoWalletScopeForAccounts, selectDemoWalletScopeForEvmAddress, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import { formatToken } from "../lib/format.js";
 import {
   buildSafeBatch,
@@ -12,6 +12,7 @@ import {
 } from "../safe.js";
 import { authClient } from "../auth.js";
 import {
+  bridgeSepoliaEthToBase,
   createDao,
   connectNearWallet,
   disableFactoryAutoUpdate,
@@ -22,6 +23,7 @@ import {
   readAgentAccessKeyRpc,
   readDaoPolicyRpc,
   readDaoProposalRpc,
+  readBaseDeploymentRpc,
   readNearDeploymentRpc,
   sendEvmTransaction,
   signDaoProposal,
@@ -107,6 +109,10 @@ export function OnboardingPage() {
   }
 
   useEffect(() => {
+    setDemoWalletScope(session.data?.user.id ?? null);
+  }, [session.data?.user.id]);
+
+  useEffect(() => {
     if (!signedIn) {
       setPasskeyReady(null);
       return;
@@ -165,7 +171,7 @@ export function OnboardingPage() {
       />
     );
   }
-  if (claimMemberId && !activeOrganization) {
+  if (claimMemberId) {
     return (
       <WalletProofPanel
         memberId={claimMemberId}
@@ -195,7 +201,9 @@ export function OnboardingPage() {
           className="ghost"
           disabled={Boolean(busy)}
           onClick={() => void run("passkey", async () => {
-            const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+            const result = await authClient.passkey.addPasskey({
+              name: `MandateOS ${session.data?.user.email ?? "console"}`,
+            });
             if (result.error) throw new Error(result.error.message ?? "Could not add passkey");
             setNotice("Passkey added.");
           })}
@@ -321,6 +329,34 @@ export function OnboardingPage() {
         ) : null}
 
         {treasury ? <Summary treasury={treasury} /> : null}
+        {treasury && demoWalletsEnabled() ? (
+          <section className="card">
+            <h2>Base governance gas (UAT)</h2>
+            <button
+              className="ghost"
+              disabled={Boolean(busy)}
+              onClick={() => void run("fund-gov", async () => {
+                const founder = members.find((member) => member.role === "owner" && member.evmAddress);
+                if (
+                  !founder?.evmAddress ||
+                  !selectDemoWalletScopeForEvmAddress(founder.evmAddress)
+                ) {
+                  throw new Error("Founding council demo wallet is unavailable");
+                }
+                const hash = await sendEvmTransaction({
+                  to: treasury.govAddress,
+                  value: "2000000000000000",
+                  data: "0x",
+                });
+                await waitForEvmTransaction(hash);
+                setNotice(`0xGOV funded: ${hash}`);
+              })}
+            >
+              Fund 0xGOV with 0.002 ETH
+            </button>
+          </section>
+        ) : null}
+
 
         {treasury ? (
           <section id="agents" className="card">
@@ -388,7 +424,7 @@ function PasskeyEnrollment(props: { email: string; onComplete: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await authClient.passkey.addPasskey({ name: "MandateOS console" });
+      const result = await authClient.passkey.addPasskey({ name: `MandateOS ${props.email}` });
       if (result.error) throw new Error(result.error.message ?? "Could not create passkey");
       props.onComplete();
     } catch (cause) {
@@ -461,7 +497,7 @@ export function SignIn() {
       if (!payload.context) throw new Error("Registration context missing");
       if (demoWalletsEnabled() && payload.nearAccountId) setGeneratedNearAccountId(payload.nearAccountId);
       const passkey = await authClient.passkey.addPasskey({
-        name: "MandateOS console",
+        name: `${name} — ${email}`,
         context: payload.context,
         createSession: true,
       });
@@ -757,6 +793,39 @@ function MemberWallets(props: {
   onError: (message: string) => void;
 }) {
   const self = props.members.find((member) => member.userId === props.currentUserId);
+  const [provisioningCouncil, setProvisioningCouncil] = useState(false);
+
+  async function provisionDemoCouncilAccounts() {
+    setProvisioningCouncil(true);
+    try {
+      for (const member of props.members) {
+        if (
+          member.userId === props.currentUserId ||
+          !member.walletProofVerifiedAt ||
+          !member.nearAccountId ||
+          !member.evmAddress
+        ) {
+          continue;
+        }
+        if (!selectDemoWalletScopeForAccounts(member.nearAccountId, member.evmAddress)) {
+          throw new Error(`No generated demo wallet matches ${member.name ?? member.id}`);
+        }
+        await api("/v1/console/treasury/sponsor-founder-wallet", {
+          method: "POST",
+          body: JSON.stringify({
+            nearAccountId: member.nearAccountId,
+            nearPublicKey: generatedNearPublicKey(),
+          }),
+        });
+      }
+    } catch (cause) {
+      props.onError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDemoWalletScope(props.currentUserId);
+      setProvisioningCouncil(false);
+    }
+  }
+
 
   return (
     <div className="stack">
@@ -780,6 +849,15 @@ function MemberWallets(props: {
           ))}
         </tbody>
       </table>
+      {demoWalletsEnabled() ? (
+        <button
+          className="ghost"
+          disabled={provisioningCouncil}
+          onClick={() => void provisionDemoCouncilAccounts()}
+        >
+          {provisioningCouncil ? "Provisioning council accounts…" : "Provision generated council NEAR accounts (UAT)"}
+        </button>
+      ) : null}
       {self ? (
         <>
           <h3>{self.walletProofVerifiedAt ? "Replace my wallet proof" : "Prove my wallets"}</h3>
@@ -813,6 +891,7 @@ function TreasuryWizard(props: {
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
   const [transactionHashes, setTransactionHashes] = useState<string[]>([]);
   const [baseDeploymentHashes, setBaseDeploymentHashes] = useState<string[]>([]);
+  const [baseDeploymentObserved, setBaseDeploymentObserved] = useState(false);
   const [nearAttestation, setNearAttestation] = useState<NearDeploymentRpcAttestation | null>(null);
   const [deploymentConfirmations, setDeploymentConfirmations] = useState<{
     digest: string;
@@ -851,6 +930,7 @@ function TreasuryWizard(props: {
       daoAccountId: props.plan.daoAccountId,
       vaultAccountId: props.plan.vault.accountId,
       relayAccountId: props.plan.relay.accountId,
+      delayAddress: props.plan.base.delayAddress,
       govAddress: props.plan.govAddress,
     };
   }
@@ -884,6 +964,10 @@ function TreasuryWizard(props: {
     setNearAttestation(null);
     setDeploymentConfirmations(null);
     setBaseDeploymentHashes([]);
+    setBaseDeploymentObserved(false);
+    void readBaseDeploymentRpc(props.plan)
+      .then(setBaseDeploymentObserved)
+      .catch((cause: unknown) => props.onError(String(cause)));
   }, [props.plan.daoAccountId]);
 
   async function deployBase() {
@@ -899,10 +983,10 @@ function TreasuryWizard(props: {
     }
   }
 
-  async function collectSafeSignature() {
+  async function collectSafeSignature(owner?: string) {
     const batch = safeBatch ?? (await buildSafeBatch(props.plan));
     setSafeBatch(batch);
-    const signature = await signSafeBatch(batch);
+    const signature = await signSafeBatch(batch, owner);
     setSignatures((current) => {
       if (current.some((item) => item.owner.toLowerCase() === signature.owner.toLowerCase())) {
         throw new Error(`${signature.owner} already signed`);
@@ -913,12 +997,16 @@ function TreasuryWizard(props: {
 
   async function executeBatch() {
     if (!safeBatch) throw new Error("Prepare the Safe batch first");
-    const hash = await executeSafeBatch(safeBatch, signatures);
+    const hash = await executeSafeBatch(
+      safeBatch,
+      signatures,
+      demoWalletsEnabled() ? props.plan.council[0]!.evmAddress : undefined,
+    );
     await waitForEvmTransaction(hash);
     setTransactionHashes((current) => [...current, hash]);
   }
 
-  const baseDeployed = baseDeploymentHashes.length >= 3;
+  const baseDeployed = baseDeploymentObserved || baseDeploymentHashes.length >= 3;
   const daoDeposit = BigInt(props.plan.daoCreate.depositYocto);
   const vaultDeposit = transferDeposit(props.plan.vault.actions);
   const relayDeposit = transferDeposit(props.plan.relay.actions);
@@ -1180,6 +1268,37 @@ function TreasuryWizard(props: {
           </p>
           <div className="row wrap">
             <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("base-bridge", async () => {
+                const hash = await bridgeSepoliaEthToBase(20_000_000_000_000_000n);
+                setTransactionHashes((current) => [...current, hash]);
+              })}
+            >
+              Bridge 0.02 ETH Sepolia → Base Sepolia
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(props.busy)}
+              onClick={() => props.run("fund-gov", async () => {
+                if (
+                  demoWalletsEnabled() &&
+                  !selectDemoWalletScopeForEvmAddress(props.plan.council[0]!.evmAddress)
+                ) {
+                  throw new Error("Founding council demo wallet is unavailable");
+                }
+                const hash = await sendEvmTransaction({
+                  to: props.plan.govAddress,
+                  value: "2000000000000000",
+                  data: "0x",
+                });
+                await waitForEvmTransaction(hash);
+                setTransactionHashes((current) => [...current, hash]);
+              })}
+            >
+              Fund 0xGOV with 0.002 ETH
+            </button>
+            <button
               className="primary"
               disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
               onClick={() => props.run("base-deploy", deployBase)}
@@ -1189,17 +1308,31 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy) || !baseDeployed}
-              onClick={() => props.run("safe-prepare", async () => { setSafeBatch(await buildSafeBatch(props.plan)); })}
+              onClick={() => props.run("safe-prepare", async () => {
+                setSafeBatch(await buildSafeBatch(props.plan));
+                setSignatures([]);
+              })}
             >
               Prepare Safe batch
             </button>
-            <button
-              className="ghost"
-              disabled={Boolean(props.busy) || !baseDeployed}
-              onClick={() => props.run("safe-sign", collectSafeSignature)}
-            >
-              Sign as owner ({signatures.length}/{props.plan.threshold})
-            </button>
+            {demoWalletsEnabled() ? props.plan.council.map((member) => (
+              <button
+                key={member.evmAddress}
+                className="ghost"
+                disabled={Boolean(props.busy) || !baseDeployed}
+                onClick={() => props.run(`safe-sign-${member.memberId}`, () => collectSafeSignature(member.evmAddress))}
+              >
+                Sign as {short(member.evmAddress)} ({signatures.length}/{props.plan.threshold})
+              </button>
+            )) : (
+              <button
+                className="ghost"
+                disabled={Boolean(props.busy) || !baseDeployed}
+                onClick={() => props.run("safe-sign", () => collectSafeSignature())}
+              >
+                Sign as owner ({signatures.length}/{props.plan.threshold})
+              </button>
+            )}
             <button
               className="ghost"
               disabled={Boolean(props.busy) || signatures.length < props.plan.threshold}
@@ -1329,7 +1462,8 @@ function orderedMandateProposals(preview: MandatePreview): MandateProposal[] {
     preview.proposals.vaultSetRole,
     preview.proposals.vaultRegisterAgent,
     preview.proposals.funding,
-    ...preview.proposals.zodiacRelay,
+    preview.proposals.relayDerive,
+    preview.proposals.zodiacRelay,
   ].filter((proposal): proposal is MandateProposal => proposal !== null);
 }
 
@@ -1337,6 +1471,12 @@ function onChainProposalDescription(proposal: MandateProposal): string {
   const value = (proposal.args.proposal as { description?: unknown } | undefined)?.description;
   if (typeof value !== "string") throw new Error("DAO proposal description missing");
   return value;
+}
+
+function onChainProposalKind(proposal: MandateProposal): unknown {
+  const body = proposal.args.proposal;
+  if (!body || typeof body !== "object" || !("kind" in body)) throw new Error("DAO proposal kind missing");
+  return body.kind;
 }
 
 type ProposalRun = DaoProposalRpc & { transactionHash?: string };
@@ -1372,9 +1512,6 @@ export function MandatePanel(props: {
   }
 
   useEffect(() => {
-    void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)));
-  }, [props.treasury.daoAccountId]);
-  useEffect(() => {
     if (!props.preview) {
       setProposalRuns({});
       return undefined;
@@ -1394,6 +1531,32 @@ export function MandatePanel(props: {
       window.clearInterval(interval);
     };
   }, [props.preview, props.treasury.daoAccountId]);
+  function mandateInput() {
+    return {
+      role,
+      operations: ["pay"],
+      maxPerTx,
+      budget,
+      periodDays: Number(periodDays),
+      recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
+      token,
+      gas: {
+        gasLimit: "200000",
+        maxFeePerGas: "20000000000",
+        maxPriorityFeePerGas: "1000000000",
+        maxTotalFee: "30000000000000000",
+      },
+      ...(agentAccount
+        ? {
+            agent: {
+              nearAccountId: agentAccount,
+              mpcPath: `agents/${role}/base`,
+            },
+          }
+        : {}),
+    };
+  }
+
 
 
 
@@ -1450,7 +1613,11 @@ export function MandatePanel(props: {
               <tr><td>DAO balance</td><td>{formatToken(budgetTokenStatus.daoBalance, budgetTokenStatus.decimals, budgetTokenStatus.symbol)}</td></tr>
             </tbody>
           </table>
-        ) : <div className="state">Reading test-token state…</div>}
+        ) : (
+          <button className="ghost" disabled={busy} onClick={() => void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)))}>
+            Read test-token state
+          </button>
+        )}
         <button
           className="primary"
           disabled={!signerId || busy || budgetTokenStatus?.decimals !== 6}
@@ -1486,29 +1653,7 @@ export function MandatePanel(props: {
             try {
               const preview = await api<MandatePreview>("/v1/console/mandates/preview", {
                 method: "POST",
-                body: JSON.stringify({
-                  role,
-                  operations: ["pay"],
-                  maxPerTx,
-                  budget,
-                  periodDays: Number(periodDays),
-                  recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
-                  token,
-                  gas: {
-                    gasLimit: "200000",
-                    maxFeePerGas: "20000000000",
-                    maxPriorityFeePerGas: "1000000000",
-                    maxTotalFee: "30000000000000000",
-                  },
-                  ...(agentAccount
-                    ? {
-                        agent: {
-                          nearAccountId: agentAccount,
-                          mpcPath: `agents/${role}/base`,
-                        },
-                      }
-                    : {}),
-                }),
+                body: JSON.stringify(mandateInput()),
               });
               props.onPreview(preview);
             } catch (cause) {
@@ -1604,15 +1749,46 @@ export function MandatePanel(props: {
                                 signerId,
                                 props.treasury.daoAccountId,
                                 run.id,
+                                run.kind,
                               );
                               const refreshed = await readDaoProposalRpc(props.treasury.daoAccountId, run.id);
+                              if (
+                                refreshed.state === "Executed" &&
+                                props.preview?.proposals.zodiacRelay === proposal
+                              ) {
+                                await api("/v1/console/governance/relay-operation", {
+                                  method: "POST",
+                                  body: JSON.stringify({
+                                    proposalId: run.id,
+                                    nearTransactionHash: transactionHash,
+                                    signerAccountId: signerId,
+                                  }),
+                                });
+                              }
                               setProposalRuns((current) => ({
                                 ...current,
                                 [description]: { ...refreshed, transactionHash },
                               }));
                               setProposalHashes((current) => [...current, transactionHash]);
                             } else {
-                              const submitted = await signDaoProposal(signerId, proposal);
+                              let proposalToSubmit = proposal;
+                              if (props.preview?.proposals.zodiacRelay === proposal) {
+                                proposalToSubmit = await api<MandateProposal>("/v1/console/mandates/zodiac-proposal", {
+                                  method: "POST",
+                                  body: JSON.stringify(mandateInput()),
+                                });
+                                if (onChainProposalDescription(proposalToSubmit) !== description) {
+                                  throw new Error("materialized Zodiac proposal identity changed");
+                                }
+                                props.onPreview({
+                                  ...props.preview,
+                                  proposals: {
+                                    ...props.preview.proposals,
+                                    zodiacRelay: proposalToSubmit,
+                                  },
+                                });
+                              }
+                              const submitted = await signDaoProposal(signerId, proposalToSubmit);
                               const refreshed = await readDaoProposalRpc(
                                 props.treasury.daoAccountId,
                                 submitted.proposalId,
@@ -1635,6 +1811,41 @@ export function MandatePanel(props: {
                       }}
                     >
                       {action}
+                    </button>
+                  ) : null}
+                  {state === "Executed" &&
+                  demoWalletsEnabled() &&
+                  props.preview?.proposals.zodiacRelay === proposal ? (
+                    <button
+                      className="ghost"
+                      disabled={!signerId || busy}
+                      onClick={() => {
+                        void (async () => {
+                          setBusy(true);
+                          try {
+                            const vetoProposal = await api<MandateProposal>("/v1/console/mandates/zodiac-proposal", {
+                              method: "POST",
+                              body: JSON.stringify(mandateInput()),
+                            });
+                            const submitted = await signDaoProposal(signerId, vetoProposal);
+                            const refreshed = await readDaoProposalRpc(
+                              props.treasury.daoAccountId,
+                              submitted.proposalId,
+                            );
+                            setProposalRuns((current) => ({
+                              ...current,
+                              [description]: { ...refreshed, transactionHash: submitted.transactionHash },
+                            }));
+                            setProposalHashes((current) => [...current, submitted.transactionHash]);
+                          } catch (cause) {
+                            props.onError(cause instanceof Error ? cause.message : String(cause));
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Propose again for veto test (UAT)
                     </button>
                   ) : null}
                 </div>

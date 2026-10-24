@@ -33,11 +33,14 @@ async fn main() -> Result<()> {
     relay
         .call("new")
         .args_json(json!({
+            "client_id": "acme",
             "owner_id": dao_id,
             "mpc_contract_id": MPC,
             "mpc_path": "governance/base-sepolia",
             "evm_chain_id": 84532,
             "delay_address": STANDARD.encode(evm_address("Dd860F2a45b62b84A94ABF61F7f6c2f262549533")),
+            "multisend_address": STANDARD.encode(evm_address("9641d764fc13c8B624c04430C7356C1C7C8102e2")),
+            "guard_public_key": STANDARD.encode([9u8; 32]),
             "max_gas_limit": "300000",
             "max_fee_per_gas": "100000000000",
             "max_priority_fee_per_gas": "10000000000",

@@ -1,4 +1,4 @@
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::{AccountId, near};
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +25,10 @@ pub enum OperationState {
     PossiblySigned,
     Confirmed,
     Cancelled,
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +58,7 @@ pub struct GovernanceOperation {
     pub target: EvmAddress,
     pub value: U128,
     pub data: Vec<u8>,
+    pub operation: u8,
     pub evm_nonce: u64,
     pub transaction: Eip1559Transaction,
     pub tx_digest: Digest,
@@ -62,6 +67,33 @@ pub struct GovernanceOperation {
     pub signature: Option<MpcSignature>,
     pub signed_transaction: Option<Vec<u8>>,
     pub cancellation: Option<CancellationAttempt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub enum FinalStatus {
+    Executed,
+    Vetoed,
+    Expired,
+    Failed,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct StatusReport {
+    pub client_id: String,
+    pub op_id: OperationId,
+    pub final_status: FinalStatus,
+    pub tx_hash: Digest,
+    pub report_nonce: u64,
+    pub block_number: u64,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [json])]
+pub struct SignedStatusReport {
+    pub report: StatusReport,
+    pub signature: Base64VecU8,
 }
 
 #[derive(Serialize)]

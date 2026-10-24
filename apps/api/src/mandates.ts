@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@mandateos/db";
-import { compilePaymentPermission, rolesAbi, type FlatCondition } from "@mandateos/deployer";
-import { encodeFunctionData, getAddress, type Address, type Hex } from "viem";
+import {
+  canonicalMultiSendCallOnlyAddress,
+  compilePaymentPermission,
+  encodeMultiSendTransactions,
+  rolesAbi,
+  type FlatCondition,
+} from "@mandateos/deployer";
+import { createPublicClient, encodeFunctionData, getAddress, http, type Address, type Hex } from "viem";
+import { base, baseSepolia } from "viem/chains";
 
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
@@ -62,6 +69,14 @@ export interface BudgetTokenPlan {
   status: BudgetTokenStatus;
   actions: BudgetTokenAction[];
 }
+interface AllowanceState {
+  refill: bigint;
+  maxRefill: bigint;
+  period: bigint;
+  balance: bigint;
+  timestamp: bigint;
+}
+
 
 
 export interface MandatePreview {
@@ -81,13 +96,15 @@ export interface MandatePreview {
     vaultSetRole: MandateProposal;
     vaultRegisterAgent: MandateProposal | null;
     funding: MandateProposal | null;
-    zodiacRelay: MandateProposal[];
+    relayDerive: MandateProposal;
+    zodiacRelay: MandateProposal | null;
   };
   warnings: string[];
 }
 
 export interface MandateGateway {
   preview(organizationId: string, input: MandateInput): Promise<MandatePreview>;
+  zodiacProposal(organizationId: string, input: MandateInput): Promise<MandateProposal>;
   budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus>;
   budgetTokenPlan(organizationId: string, amount: string): Promise<BudgetTokenPlan>;
 }
@@ -115,14 +132,41 @@ function b64(bytes: Hex): string {
   return Buffer.from(bytes.slice(2), "hex").toString("base64");
 }
 
+const multiSendAbi = [{
+  type: "function",
+  name: "multiSend",
+  stateMutability: "payable",
+  inputs: [{ name: "transactions", type: "bytes" }],
+  outputs: [],
+}] as const;
+
 export class MandateService implements MandateGateway {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
     private readonly budgetTokenAccountId = "test-ft.testnet",
+    private readonly baseRpcUrl = "https://sepolia.base.org",
+    private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
+    private readonly allowanceReader?: (chainId: number, roles: Address, key: Hex) => Promise<AllowanceState>,
   ) {}
 
-  async preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
+  preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
+    return this.buildPreview(organizationId, input, 0n);
+  }
+
+  async zodiacProposal(organizationId: string, input: MandateInput): Promise<MandateProposal> {
+    const preview = await this.buildPreview(organizationId, input, this.nowSeconds());
+    if (!preview.proposals.zodiacRelay) {
+      throw new TreasuryError(409, "agent_address_missing", "derive the agent EVM address before Zodiac configuration");
+    }
+    return preview.proposals.zodiacRelay;
+  }
+
+  private async buildPreview(
+    organizationId: string,
+    input: MandateInput,
+    allowanceTimestamp: bigint,
+  ): Promise<MandatePreview> {
     if (!/^[a-z][a-z0-9-]{1,31}$/.test(input.role)) {
       throw new TreasuryError(400, "invalid_role", "role must be a lowercase slug");
     }
@@ -201,6 +245,12 @@ export class MandateService implements MandateGateway {
     ]
       .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after))
       .map(([field, before, after]) => ({ field: String(field), current: before ?? null, next: after }));
+    const currentAllowance = await this.readAllowance(treasury.baseChainId, rolesModifier, compiled.allowanceKey);
+    const budget = BigInt(input.budget);
+    const allowanceExists = Object.values(currentAllowance).some((value) => value !== 0n);
+    const allowanceBalance = allowanceExists && currentAllowance.balance < budget
+      ? currentAllowance.balance
+      : budget;
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
     if (resolvedAgentAddress) {
@@ -234,9 +284,16 @@ export class MandateService implements MandateGateway {
         data: encodeFunctionData({
           abi: rolesAbi,
           functionName: "setAllowance",
-          args: [compiled.allowanceKey, BigInt(input.budget), 0n, 0n, 0n, 0n],
+          args: [
+            compiled.allowanceKey,
+            allowanceBalance,
+            BigInt(input.budget),
+            BigInt(input.budget),
+            BigInt(input.periodDays) * 86_400n,
+            allowanceTimestamp,
+          ],
         }),
-        description: `Set allowance ${input.budget} for ${input.role}`,
+        description: `Set periodic allowance ${input.budget} every ${input.periodDays} days for ${input.role} without replenishing current balance`,
       },
     );
     const stepDigest = (value: unknown) => createHash("sha256")
@@ -249,6 +306,10 @@ export class MandateService implements MandateGateway {
       role: input.role,
       amount: input.budget,
       tokenId: this.budgetTokenAccountId,
+    });
+    const relayDeriveDigest = stepDigest({
+      relayAccountId: treasury.relayAccountId,
+      method: "request_derived_public_key",
     });
 
 
@@ -308,43 +369,89 @@ export class MandateService implements MandateGateway {
         }
       : null;
 
-    const zodiacRelay: MandateProposal[] = zodiacCalls.map((call, index) => ({
-      receiverId: treasury.daoAccountId,
-      methodName: "add_proposal",
-      description: `DAO proposal: relay ${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
-      args: {
-        proposal: {
-          description: `${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
-          kind: {
-            FunctionCall: {
-              receiver_id: treasury.relayAccountId,
-              actions: [
-                {
-                  method_name: "propose",
-                  args: functionCallArgs({
-                    target: b64(call.to),
-                    value: "0",
-                    data: b64(call.data),
-                    gas_limit: input.gas.gasLimit,
-                    max_fee_per_gas: input.gas.maxFeePerGas,
-                    max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
-                  }),
-                  gas: "60000000000000",
-                  deposit: "0",
-                },
-              ],
-            },
-          },
-        },
-      },
-      deposit: "100000000000000000000000",
-    }));
-
     const agentStatus = !input.agent || !storedAgent
       ? "no_agent"
       : resolvedAgentAddress
         ? "ready"
         : "needs_agent_address";
+    const multiSendAddress = canonicalMultiSendCallOnlyAddress(treasury.baseChainId);
+    const multiSendTransactions = encodeMultiSendTransactions(zodiacCalls.map((call) => ({
+      operation: 0,
+      to: call.to,
+      value: 0n,
+      data: call.data,
+    })));
+    const multiSendData = encodeFunctionData({
+      abi: multiSendAbi,
+      functionName: "multiSend",
+      args: [multiSendTransactions],
+    });
+    const zodiacDigest = stepDigest({
+      role: input.role,
+      agent: input.agent?.nearAccountId ?? null,
+      agentAddress: resolvedAgentAddress,
+      rolesModifier,
+      multiSendAddress,
+      token,
+      recipients: input.recipients,
+      budget: input.budget,
+      periodDays: input.periodDays,
+    });
+    const relayDerive: MandateProposal = {
+      receiverId: treasury.daoAccountId,
+      methodName: "add_proposal",
+      description: `DAO proposal: derive relay 0xGOV [mandate:${relayDeriveDigest}:derive-relay]`,
+      args: {
+        proposal: {
+          description: `Derive relay 0xGOV [mandate:${relayDeriveDigest}:derive-relay]`,
+          kind: {
+            FunctionCall: {
+              receiver_id: treasury.relayAccountId,
+              actions: [{
+                method_name: "request_derived_public_key",
+                args: functionCallArgs({}),
+                gas: "60000000000000",
+                deposit: "0",
+              }],
+            },
+          },
+        },
+      },
+      deposit: "100000000000000000000000",
+    };
+
+    const zodiacRelay: MandateProposal | null = resolvedAgentAddress
+      ? {
+          receiverId: treasury.daoAccountId,
+          methodName: "add_proposal",
+          description: `DAO proposal: batch Zodiac configuration [mandate:${zodiacDigest}:zodiac]`,
+          args: {
+            proposal: {
+              description: `Batch Zodiac configuration [mandate:${zodiacDigest}:zodiac]`,
+              kind: {
+                FunctionCall: {
+                  receiver_id: treasury.relayAccountId,
+                  actions: [{
+                    method_name: "propose",
+                    args: functionCallArgs({
+                      target: b64(multiSendAddress),
+                      value: "0",
+                      data: b64(multiSendData),
+                      operation: 1,
+                      gas_limit: input.gas.gasLimit,
+                      max_fee_per_gas: input.gas.maxFeePerGas,
+                      max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
+                    }),
+                    gas: "60000000000000",
+                    deposit: "0",
+                  }],
+                },
+              },
+            },
+          },
+          deposit: "100000000000000000000000",
+        }
+      : null;
 
     return {
       roleKey: compiled.roleKey,
@@ -370,6 +477,7 @@ export class MandateService implements MandateGateway {
       proposals: {
         vaultSetRole,
         vaultRegisterAgent,
+        relayDerive,
         funding:
           input.agent === undefined
             ? null
@@ -402,6 +510,27 @@ export class MandateService implements MandateGateway {
       ],
     };
   }
+  private async readAllowance(chainId: number, roles: Address, key: Hex): Promise<AllowanceState> {
+    if (this.allowanceReader) return this.allowanceReader(chainId, roles, key);
+    const client = createPublicClient({
+      chain: chainId === 8453 ? base : baseSepolia,
+      transport: http(this.baseRpcUrl),
+    });
+    const allowance = await client.readContract({
+      address: roles,
+      abi: rolesAbi,
+      functionName: "allowances",
+      args: [key],
+    });
+    return {
+      refill: allowance[0],
+      maxRefill: allowance[1],
+      period: allowance[2],
+      balance: allowance[3],
+      timestamp: allowance[4],
+    };
+  }
+
   async budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus> {
     const treasury = await this.prisma.treasury.findUnique({
       where: { organizationId_environment: { organizationId, environment: "uat" } },
