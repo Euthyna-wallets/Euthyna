@@ -14,8 +14,8 @@ borsh.workspace = true
 serde.workspace = true
 sha3.workspace = true
 hex.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 alloy-sol-types = "0.8"
 alloy-primitives = "0.8"

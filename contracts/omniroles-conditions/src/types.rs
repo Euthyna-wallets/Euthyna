@@ -261,6 +261,16 @@ pub enum Status {
     DelegateCallNotAllowed,
     /// Stored conditions fail the integrity check (fail closed).
     ConditionsInvalid,
+    /// No signature scope of the role matches this domain / type / message kind.
+    SignatureNotAllowed,
+    /// EIP-712 typed data that cannot be hashed unambiguously.
+    TypedDataInvalid {
+        reason: String,
+    },
+    /// A personal message that does not follow its expected format.
+    MessageInvalid {
+        reason: String,
+    },
     CalldataTooShort,
     CalldataOutOfBounds,
     ParameterNotAllowed {
