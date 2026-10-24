@@ -64,6 +64,10 @@ pub struct RoleScope {
     pub targets: BTreeMap<Address, TargetScope>,
     pub functions: BTreeMap<(Address, Selector), FunctionScope>,
     pub global_functions: BTreeMap<Selector, FunctionScope>,
+    /// EIP-712 scopes keyed by (domain separator, primary type hash).
+    pub typed_data: BTreeMap<([u8; 32], [u8; 32]), crate::signature::SignatureScope>,
+    /// `personal_sign` scopes keyed by message kind.
+    pub messages: BTreeMap<crate::signature::MessageKind, crate::signature::SignatureScope>,
 }
 
 impl ScopeSource for RoleScope {

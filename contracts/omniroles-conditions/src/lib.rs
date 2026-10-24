@@ -15,20 +15,32 @@
 //! `WithinAllowance` (parameter or native value) and `CallWithinAllowance`.
 //! Other operators are rejected when a tree is validated, never ignored.
 //!
+//! Signature scoping ([`signature`]): EIP-712 typed data (x402 / EIP-3009,
+//! Permit2...) and Monerium orders are checked by the same conditions and
+//! allowances, on the values the vault hashes itself.
+//!
 //! The crate is pure (no NEAR SDK): the vault reads scopes and allowances from
 //! its storage through [`permission::ScopeSource`] and
 //! [`evaluate::AllowanceSource`], and persists the returned
 //! [`types::Consumption`]s once the call is executed.
 
 pub mod abi;
+pub mod eip712;
+pub mod encode;
 pub mod evaluate;
+pub mod monerium;
 pub mod permission;
+pub mod signature;
 pub mod tree;
 pub mod types;
 
 pub use evaluate::{AllowanceSource, Context, evaluate};
 pub use permission::{
     Call, Clearance, Environment, FunctionScope, RoleScope, ScopeSource, TargetScope, check_call,
+};
+pub use signature::{
+    MessageKind, SignatureApproval, SignatureScope, SignatureScopeSource, check_monerium_order,
+    check_typed_data,
 };
 pub use tree::{IntegrityError, Tree, validate};
 pub use types::{
