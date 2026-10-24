@@ -178,6 +178,7 @@ export class GovernanceService implements GovernanceGateway {
           organizationId,
           nearAccountId: input.signerAccountId,
           walletProofVerifiedAt: { not: null },
+          walletProofApprovedAt: { not: null },
         },
         select: { id: true },
       }),

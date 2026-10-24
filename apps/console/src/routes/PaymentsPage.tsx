@@ -16,7 +16,7 @@ export function PaymentsPage() {
     <div className="page">
       <header className="page-head"><div><h1>Payments</h1><p className="muted">Every payment crosses three independent locks.</p></div></header>
       <Card title="Operations" action={<select value={filter} onChange={(event) => setFilter(event.target.value)}>{states.map((state) => <option key={state}>{state}</option>)}</select>}>
-        <PageState loading={query.isLoading} error={query.error} empty={rows.length === 0}>
+        <PageState loading={query.isLoading} error={query.error} empty={rows.length === 0} emptyContent={<div className="state empty-action">No payments yet. <Link className="button primary" to="/agents">Connect an agent</Link></div>}>
           <table>
             <thead><tr><th>Reference</th><th>Amount</th><th>Status</th><th>Base tx</th><th>Created</th><th /></tr></thead>
             <tbody>

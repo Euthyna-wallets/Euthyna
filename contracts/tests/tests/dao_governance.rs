@@ -217,15 +217,61 @@ async fn vote_approve_execution_gas_is_measured() -> Result<()> {
     let transfer_gas = transfer_outcome.total_gas_burnt.as_gas();
     transfer_outcome.into_result()?;
 
+    let combined = json!({
+        "FunctionCall": {
+            "receiver_id": fixture.vault.id(),
+            "actions": [
+                {
+                    "method_name": "set_role",
+                    "args": STANDARD.encode(serde_json::to_vec(&json!({
+                        "role": "combined-role",
+                        "config": role_config()
+                    }))?),
+                    "deposit": "0",
+                    "gas": Gas::from_tgas(50).as_gas().to_string()
+                },
+                {
+                    "method_name": "register_agent",
+                    "args": STANDARD.encode(serde_json::to_vec(&json!({
+                        "agent": fixture.council[2].id(),
+                        "role": "combined-role",
+                        "mpc_path": "agents/combined-role/base"
+                    }))?),
+                    "deposit": "0",
+                    "gas": Gas::from_tgas(50).as_gas().to_string()
+                }
+            ]
+        }
+    });
+    let combined_id = add_proposal(&fixture, &fixture.council[0], combined.clone()).await?;
+    vote(&fixture, &fixture.council[0], combined_id, combined.clone())
+        .await?
+        .into_result()?;
+    let combined_outcome = fixture.council[1]
+        .call(fixture.dao.id(), "act_proposal")
+        .args_json(json!({
+            "id": combined_id,
+            "action": "VoteApprove",
+            "proposal": combined,
+            "memo": null
+        }))
+        .gas(Gas::from_tgas(200))
+        .transact()
+        .await?;
+    let combined_gas = combined_outcome.total_gas_burnt.as_gas();
+    combined_outcome.into_result()?;
+    assert!(get_role(&fixture, "combined-role").await?.is_some());
+
     println!(
         "MANDATEOS_DAO_VOTE_GAS={}",
         serde_json::to_string(&json!({
             "set_role": set_role_gas,
             "register_agent": register_gas,
-            "transfer": transfer_gas
+            "transfer": transfer_gas,
+            "combined_set_role_register_agent": combined_gas,
         }))?
     );
-    assert!(set_role_gas > 0 && register_gas > 0 && transfer_gas > 0);
+    assert!(set_role_gas > 0 && register_gas > 0 && transfer_gas > 0 && combined_gas > 0);
     Ok(())
 }
 

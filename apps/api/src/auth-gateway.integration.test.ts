@@ -156,4 +156,65 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
     const enrolled = await gateway.startPasskeyRegistration({ email, name: "Existing" });
     expect(enrolled.status).toBe(409);
   });
+  it("requires a different admin to approve a member's proven wallets", async () => {
+    const organizationId = randomUUID();
+    const adminUserId = randomUUID();
+    const memberUserId = randomUUID();
+    const verifiedAt = new Date();
+    const memberId = randomUUID();
+    await prisma.organization.create({
+      data: { id: organizationId, name: "Four Eyes", slug: `four-eyes-${organizationId}`, createdAt: new Date() },
+    });
+    await prisma.user.createMany({
+      data: [
+        { id: adminUserId, name: "Admin", email: `admin-${adminUserId}@acme.test`, emailVerified: true },
+        { id: memberUserId, name: "Ben", email: `ben-${memberUserId}@acme.test`, emailVerified: true },
+      ],
+    });
+    await prisma.member.createMany({
+      data: [
+        { id: randomUUID(), organizationId, userId: adminUserId, role: "admin", createdAt: new Date() },
+        {
+          id: memberId,
+          organizationId,
+          userId: memberUserId,
+          role: "member",
+          nearAccountId: "ben.testnet",
+          evmAddress: "0x0000000000000000000000000000000000000001",
+          walletProofVerifiedAt: verifiedAt,
+          createdAt: new Date(),
+        },
+      ],
+    });
+    await expect(
+      gateway.decideMemberWalletProof(organizationId, memberId, memberUserId, {
+        decision: "approve",
+        nearAccountId: "ben.testnet",
+        evmAddress: "0x0000000000000000000000000000000000000001",
+        walletProofVerifiedAt: verifiedAt.toISOString(),
+      }),
+    ).rejects.toThrow("own wallet proof");
+    await expect(
+      gateway.decideMemberWalletProof(organizationId, memberId, adminUserId, {
+        decision: "approve",
+        nearAccountId: "ben.testnet",
+        evmAddress: "0x0000000000000000000000000000000000000002",
+        walletProofVerifiedAt: verifiedAt.toISOString(),
+      }),
+    ).rejects.toThrow("proof changed");
+    await expect(
+      gateway.decideMemberWalletProof(organizationId, memberId, adminUserId, {
+        decision: "approve",
+        nearAccountId: "ben.testnet",
+        evmAddress: "0x0000000000000000000000000000000000000001",
+        walletProofVerifiedAt: verifiedAt.toISOString(),
+      }),
+    ).resolves.toMatchObject({
+      walletProofApprovedAt: expect.any(Date),
+      walletProofApprovedBy: adminUserId,
+    });
+    await prisma.organization.delete({ where: { id: organizationId } });
+    await prisma.user.deleteMany({ where: { id: { in: [adminUserId, memberUserId] } } });
+  });
+
 });

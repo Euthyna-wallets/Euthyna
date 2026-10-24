@@ -8,7 +8,7 @@ import { baseSepolia, sepolia } from "viem/chains";
 
 import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
 import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet, selectDemoWalletScopeForAccounts } from "./lib/wallet-store.js";
-export const DAO_VOTE_GAS = "120000000000000";
+export const DAO_VOTE_GAS = "200000000000000";
 
 
 interface WalletAction {

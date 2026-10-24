@@ -11,8 +11,10 @@ import { readDaoProposalRpc, signDaoVote } from "../wallets.js";
 interface InboxMember {
   id: string;
   userId: string;
+  role: string;
   nearAccountId: string | null;
   walletProofVerifiedAt: string | null;
+  walletProofApprovedAt: string | null;
 }
 
 interface InboxProposal {
@@ -54,10 +56,16 @@ export function SigningInbox() {
     return proposal.votes?.[member.nearAccountId] !== "Approve";
   });
   const proofPending = Boolean(member && !member.walletProofVerifiedAt);
+  const canApproveWallets = member?.role === "admin" || member?.role === "owner";
+  const walletApprovals = canApproveWallets
+    ? (members.data?.members ?? []).filter((item) =>
+        item.walletProofVerifiedAt && !item.walletProofApprovedAt && item.userId !== session.data?.user.id
+      )
+    : [];
   const vetoWindows = (governance.data?.operations ?? []).filter((operation) =>
     operation.state === "Queued" && operation.queueNonce !== null
   );
-  const count = pendingVotes.length + (proofPending ? 1 : 0) + vetoWindows.length;
+  const count = pendingVotes.length + (proofPending ? 1 : 0) + walletApprovals.length + vetoWindows.length;
 
   async function vote(proposal: InboxProposal) {
     if (!governance.data?.daoAccountId || !member?.nearAccountId) return;
@@ -99,35 +107,40 @@ export function SigningInbox() {
   return (
     <div className="signing-inbox">
       <button className="inbox-trigger" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        À signer <span>{count}</span>
+        Sign <span>{count}</span>
       </button>
       {open ? (
         <div className="inbox-popover">
           <div className="inbox-head">
-            <strong>À signer pour vous</strong>
-            <span>{member?.nearAccountId ?? "Wallet non prouvé"}</span>
+            <strong>Waiting for your signature</strong>
+            <span>{member?.nearAccountId ?? "Wallet not verified"}</span>
           </div>
           {error ? <div className="alert error">{error}</div> : null}
           {proofPending && member ? (
             <Link className="inbox-item" to={`/onboarding?member=${member.id}`} onClick={() => setOpen(false)}>
-              <span>Wallet proof</span><strong>Connecter et prouver</strong>
+              <span>Wallet proof</span><strong>Connect and verify</strong>
             </Link>
           ) : null}
           {pendingVotes.map((proposal) => (
             <div className="inbox-item" key={proposal.id}>
               <span>{proposalEffect({ ...proposal, relayAccountId: governance.data?.treasury?.relayAccountId })}</span>
               <small>{approvalCount(proposal.votes)}/{governance.data?.delay?.safeThreshold ?? "?"} approvals</small>
-              <button disabled={busy !== null} onClick={() => void vote(proposal)}>
-                {busy === proposal.id ? "Signature…" : "Voter"}
+              <button disabled={busy !== null} title={busy !== null ? "Wait for the current signature" : "Approve this council decision"} onClick={() => void vote(proposal)}>
+                {busy === proposal.id ? "Signing…" : "Approve"}
               </button>
             </div>
           ))}
-          {vetoWindows.map((operation) => (
-            <Link className="inbox-item" key={operation.opId} to="/governance" onClick={() => setOpen(false)}>
-              <span>Opération dans le Delay</span><strong>Examiner le veto</strong>
+          {walletApprovals.map((item) => (
+            <Link className="inbox-item" key={`approve-${item.id}`} to="/onboarding#wallets" onClick={() => setOpen(false)}>
+              <span>Review member wallets</span><strong>Approve or reject</strong>
             </Link>
           ))}
-          {count === 0 ? <div className="inbox-empty">Rien à signer.</div> : null}
+          {vetoWindows.map((operation) => (
+            <Link className="inbox-item" key={operation.opId} to="/governance" onClick={() => setOpen(false)}>
+              <span>Decision in waiting period</span><strong>Review veto</strong>
+            </Link>
+          ))}
+          {count === 0 ? <div className="inbox-empty">Nothing to sign.</div> : null}
         </div>
       ) : null}
     </div>

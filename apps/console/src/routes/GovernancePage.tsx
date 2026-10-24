@@ -12,7 +12,7 @@ import {
 } from "../safe.js";
 import { readDaoProposalRpc, signDaoProposal, signDaoVote } from "../wallets.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
-import { approvalCount, proposalEffect, relayAction } from "../lib/governance-view.js";
+import { approvalCount, proposalDecision, relayAction } from "../lib/governance-view.js";
 import { useWallets } from "../lib/wallet-context.js";
 
 interface GovernanceOperation {
@@ -61,15 +61,23 @@ interface GovernanceProposal {
 }
 
 
+function readableDuration(seconds: string): string {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return "Unavailable";
+  if (value < 60) return `${value} seconds`;
+  if (value < 3_600) return `${Math.round(value / 60)} minutes`;
+  return `${Math.round(value / 3_600)} hours`;
+}
+
 function timelineState(operation: GovernanceOperation): Array<{ label: string; done: boolean }> {
   const terminal = ["Executed", "Vetoed", "Expired", "Failed", "Confirmed"].includes(operation.state);
-  return [
-    { label: "DAO vote", done: operation.proposalId !== null },
-    { label: "Signed by 0xGOV", done: operation.txHash !== null || operation.state !== "PossiblySigned" },
-    { label: "Broadcast", done: operation.txHash !== null },
-    { label: "Delay queue", done: operation.queueNonce !== null },
-    { label: operation.state, done: terminal },
+  const stages = [
+    { label: "Voting", done: operation.proposalId !== null },
+    { label: "Signed", done: operation.txHash !== null || operation.state !== "PossiblySigned" },
+    { label: "Submitted", done: operation.txHash !== null },
+    { label: "Waiting period", done: operation.queueNonce !== null },
   ];
+  return terminal ? [...stages, { label: operation.state === "Confirmed" ? "Executed" : operation.state, done: true }] : stages;
 }
 
 export function GovernancePage() {
@@ -79,6 +87,11 @@ export function GovernancePage() {
     queryKey: ["governance"],
     queryFn: () => api<Governance>("/v1/console/governance"),
     refetchInterval: 5_000,
+  });
+  const members = useQuery({
+    queryKey: ["members", "decisions"],
+    queryFn: () => api<{ members: Array<{ evmAddress: string | null }> }>("/v1/console/members"),
+    refetchInterval: 10_000,
   });
   const [signer, setSigner] = useState("");
   const [lostOwner, setLostOwner] = useState("0x35150E37F032Fa3053fFEC849Ef7B392C7a0dA1e");
@@ -244,26 +257,31 @@ export function GovernancePage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Governance</h1>
-          <p className="muted">DAO vote → 0xGOV → Delay → Safe → Roles.</p>
+          <h1>Decisions</h1>
+          <p className="muted">Review, approve and veto changes to your Treasury.</p>
         </div>
       </header>
       {error || query.data?.error ? <div className="alert error">{error ?? query.data?.error}</div> : null}
-      <Card title="Delay — on-chain state">
+      <Card title="Waiting period">
         {query.data?.delay ? (
-          <table>
-            <tbody>
-              <tr><td>Address</td><td className="mono">{query.data.delay.address}</td></tr>
-              <tr><td>Cooldown</td><td>{query.data.delay.cooldownSeconds}s</td></tr>
-              <tr><td>Expiration</td><td>{query.data.delay.expirationSeconds}s</td></tr>
-              <tr><td>txNonce / queueNonce</td><td>{query.data.delay.txNonce} / {query.data.delay.queueNonce}</td></tr>
-              <tr><td>Safe threshold</td><td>{query.data.delay.safeThreshold}</td></tr>
-            </tbody>
-          </table>
-        ) : <div className="state">No Delay information.</div>}
+          <>
+            <table>
+              <tbody>
+                <tr><td>Changes can execute after</td><td>{readableDuration(query.data.delay.cooldownSeconds)}</td></tr>
+                <tr><td>Decision expires after</td><td>{readableDuration(query.data.delay.expirationSeconds)}</td></tr>
+                <tr><td>Required approvals</td><td>{query.data.delay.safeThreshold}</td></tr>
+              </tbody>
+            </table>
+            <details>
+              <summary>Advanced</summary>
+              <div className="mono small">{query.data.delay.address}</div>
+              <div className="mono small">Queue {query.data.delay.txNonce} / {query.data.delay.queueNonce}</div>
+            </details>
+          </>
+        ) : <div className="state">No waiting-period information.</div>}
       </Card>
       <div className="wallet-signing-context">
-        <span>DAO signatures</span>
+        <span>Decision signatures</span>
         <strong>{signer || "Connect a NEAR wallet in the global wallet bar"}</strong>
       </div>
       {showAdvanced ? (
@@ -275,6 +293,7 @@ export function GovernancePage() {
           <button
             className="primary"
             disabled={!signer || busy === "swap-owner" || Boolean(query.data?.relayActiveOperation)}
+            title={!signer ? "Connect your NEAR wallet" : query.data?.relayActiveOperation ? "Wait for the current decision to finish" : busy ? "A decision is being prepared" : "Prepare owner replacement"}
             onClick={() => void proposeOwnerRecovery()}
           >
             Propose Safe.swapOwner
@@ -285,6 +304,7 @@ export function GovernancePage() {
           <button
             className="primary"
             disabled={!signer || busy === "add-owner" || Boolean(query.data?.relayActiveOperation)}
+            title={!signer ? "Connect your NEAR wallet" : query.data?.relayActiveOperation ? "Wait for the current decision to finish" : busy ? "A decision is being prepared" : "Prepare owner addition"}
             onClick={() => void proposeThirdOwner()}
           >
             Propose add owner + threshold 2/3
@@ -292,8 +312,8 @@ export function GovernancePage() {
         </div>
       </Card>
       ) : null}
-      <Card title="Governance operations">
-        <PageState loading={query.isLoading} error={query.error} empty={query.data?.operations.length === 0}>
+      <Card title="Decision progress">
+        <PageState loading={query.isLoading} error={query.error} empty={query.data?.operations.length === 0} emptyContent={<div className="state empty-action">No decision is in its waiting period. <a className="button primary" href="/mandate">Create a spending permission</a></div>}>
           <div className="stack">
             {(query.data?.operations ?? []).map((operation) => {
               const veto = vetoes[operation.opId];
@@ -302,10 +322,9 @@ export function GovernancePage() {
               return (
                 <div className="step" key={operation.opId}>
                   <div className="row wrap">
-                    <strong className="mono">{short(operation.opId)}</strong>
+                    <strong>Decision {operation.proposalId !== null ? `#${operation.proposalId}` : ""}</strong>
                     <Status value={operation.displayState} />
-                    {operation.queueNonce !== null ? <span className="pill">Delay #{operation.queueNonce}</span> : null}
-                    {operation.state === "Queued" ? <span className="pill">{operation.countdownSeconds}s remaining</span> : null}
+                    {operation.state === "Queued" ? <span className="pill">{readableDuration(operation.countdownSeconds)} remaining</span> : null}
                   </div>
                   <div className="row wrap">
                     {timelineState(operation).map((stage, index) => (
@@ -314,9 +333,14 @@ export function GovernancePage() {
                       </span>
                     ))}
                   </div>
-                  {operation.txHash ? <div className="mono small">queue tx {operation.txHash}</div> : null}
-                  {operation.executeTxHash ? <div className="mono small">execute tx {operation.executeTxHash}</div> : null}
-                  {operation.cancellationTxHash ? <div className="mono small">cancellation tx {operation.cancellationTxHash}</div> : null}
+                  {(operation.txHash || operation.executeTxHash || operation.cancellationTxHash) ? (
+                    <details>
+                      <summary>Advanced transaction details</summary>
+                      {operation.txHash ? <div className="mono small">queue tx {operation.txHash}</div> : null}
+                      {operation.executeTxHash ? <div className="mono small">execute tx {operation.executeTxHash}</div> : null}
+                      {operation.cancellationTxHash ? <div className="mono small">cancellation tx {operation.cancellationTxHash}</div> : null}
+                    </details>
+                  ) : null}
                   {operation.lastError ? <div className="alert error">{operation.lastError}</div> : null}
                   {operation.underpriced ? (
                     <div className="alert warning">
@@ -327,6 +351,7 @@ export function GovernancePage() {
                       <button
                         className="primary"
                         disabled={!signer || busy === `cancel-${operation.opId}`}
+                        title={!signer ? "Connect your NEAR wallet" : busy ? "A cancellation is being prepared" : "Prepare cancellation for council approval"}
                         onClick={() => void proposeUnderpricedCancellation(operation)}
                       >
                         Propose cancellation
@@ -335,7 +360,7 @@ export function GovernancePage() {
                   ) : null}
                   {operation.state === "Failed" && operation.cancellationTxHash ? (
                     <div className="alert warning">
-                      Cancellation confirmed. <a href="/mandates">Re-propose with fresh gas fees</a>.
+                      Cancellation confirmed. <a href="/mandate">Re-propose with fresh gas fees</a>.
                     </div>
                   ) : null}
                   {vetoable ? (
@@ -344,12 +369,13 @@ export function GovernancePage() {
                         <button
                           className="ghost"
                           disabled={busy === operation.opId}
+                          title={busy === operation.opId ? "Wait for the current veto action" : "Prepare the council veto"}
                           onClick={() => void prepareVeto(operation)}
                         >
                           Prepare veto signatures
                         </button>
                       ) : !demoWalletsEnabled() ? (
-                        <button className="ghost" disabled={busy === operation.opId} onClick={() => void signVeto(operation)}>
+                        <button className="ghost" disabled={busy === operation.opId} title={busy === operation.opId ? "Wait for the current veto signature" : "Sign the veto with your connected council wallet"} onClick={() => void signVeto(operation)}>
                           Veto — sign with council wallet
                         </button>
                       ) : veto?.batch.owners?.filter((owner) =>
@@ -359,15 +385,17 @@ export function GovernancePage() {
                           key={owner}
                           className="ghost"
                           disabled={busy === operation.opId}
+                          title={busy === operation.opId ? "Wait for the current veto signature" : `Sign as ${short(owner)}`}
                           onClick={() => void signVeto(operation, owner)}
                         >
                           Sign veto as {short(owner)}
                         </button>
                       ))}
-                      <span>{veto?.signatures.length ?? 0}/{threshold} Safe signatures</span>
+                      <span>{veto?.signatures.length ?? 0}/{threshold} council signatures</span>
                       <button
                         className="primary"
                         disabled={!veto || veto.signatures.length < threshold || busy === operation.opId}
+                        title={!veto ? "Collect council signatures first" : veto.signatures.length < threshold ? `${threshold - veto.signatures.length} more signature(s) required` : busy ? "Wait for the current veto action" : "Submit the signed veto"}
                         onClick={() => void executeVeto(operation)}
                       >
                         Execute veto
@@ -377,14 +405,16 @@ export function GovernancePage() {
                   {query.data?.relayActiveOperation?.toLowerCase() === operation.opId.toLowerCase()
                     && ["Vetoed", "Expired", "Failed", "Executed"].includes(operation.state) ? (
                     <div className="alert warning">
-                      <strong>Relay blocked by this terminal operation.</strong>
-                      <div>DAO fallback: propose <span className="mono">confirm_original</span>, then approve it with the council below.</div>
+                      <strong>The decision queue needs manual recovery.</strong>
+                      <div>Prepare a council decision to release the completed item.</div>
+                      <details><summary>Advanced</summary>Relay fallback: confirm the original operation.</details>
                       <button
                         className="ghost"
                         disabled={!signer || busy === operation.opId}
+                        title={!signer ? "Connect your NEAR wallet" : busy ? "A decision is being prepared" : "Prepare the recovery decision"}
                         onClick={() => void proposeRelayUnblock(operation)}
                       >
-                        Propose relay unblock
+                        Prepare recovery decision
                       </button>
                     </div>
                   ) : null}
@@ -394,56 +424,71 @@ export function GovernancePage() {
           </div>
         </PageState>
       </Card>
-      <Card title="DAO proposals">
-        <PageState loading={query.isLoading} error={query.error} empty={query.data?.proposals.length === 0}>
+      <Card title="Council decisions">
+        <PageState loading={query.isLoading} error={query.error} empty={query.data?.proposals.length === 0} emptyContent={<div className="state empty-action">No council decision yet. <a className="button primary" href="/mandate">Create a spending permission</a></div>}>
           <table>
-            <thead><tr><th>Proposal</th><th>Effect</th><th>Status</th><th>Approvals</th><th /></tr></thead>
+            <thead><tr><th>Decision</th><th>Effect</th><th>Status</th><th>Approvals</th><th /></tr></thead>
             <tbody>
               {(query.data?.proposals ?? []).map((proposal) => {
                 const approvals = approvalCount(proposal.votes);
                 const threshold = Number(query.data?.delay?.safeThreshold ?? 2);
                 const alreadyVoted = Boolean(signer && proposal.votes?.[signer]);
+                const decision = proposalDecision({
+                  kind: proposal.kind,
+                  relayAccountId: query.data?.treasury?.relayAccountId,
+                  knownEvmAddresses: members.data?.members?.flatMap((item) => item.evmAddress ? [item.evmAddress] : []),
+                });
+                const disabledReason = !signer
+                  ? "Connect your NEAR wallet to approve"
+                  : alreadyVoted
+                    ? "You already approved this decision"
+                    : null;
                 return (
                 <tr key={proposal.id}>
                   <td>#{proposal.id}</td>
-                  <td>
-                    <strong>{proposalEffect({ ...proposal, relayAccountId: query.data?.treasury?.relayAccountId })}</strong>
-                    <details><summary>Technical details</summary><code>{proposal.description ?? "—"}</code></details>
+                  <td className={decision.recognized ? "" : "effect-unrecognized"}>
+                    <strong>{decision.title}</strong>
+                    {decision.details.map((detail) => <div key={detail} className="small">{detail}</div>)}
+                    {decision.warnings.map((warning) => <div key={warning} className="alert warning">{warning}</div>)}
+                    <details><summary>Advanced</summary><code>{proposal.description ?? "No proposer note"}</code></details>
                   </td>
                   <td><Status value={String(proposal.status ?? "Unknown")} /></td>
                   <td>{approvals}/{threshold} approvals</td>
                   <td>
-                    <button
-                      className="primary"
-                      disabled={!signer || alreadyVoted || proposal.status !== "InProgress"}
-                      onClick={() => {
-                      void signDaoVote(signer, query.data?.daoAccountId ?? "", proposal.id, proposal.kind)
-                        .then(async (hash) => {
-                          const refreshed = await readDaoProposalRpc(
-                            query.data?.daoAccountId ?? "",
-                            proposal.id,
-                          );
-                          if (
-                            refreshed.state === "Executed" &&
-                            relayAction(proposal.kind, query.data?.treasury?.relayAccountId) !== null
-                          ) {
-                            await api("/v1/console/governance/relay-operation", {
-                              method: "POST",
-                              body: JSON.stringify({
-                                proposalId: proposal.id,
-                                nearTransactionHash: hash,
-                                signerAccountId: signer,
-                              }),
-                            });
-                          }
-                          setHashes((current) => [...current, hash]);
-                          await client.invalidateQueries({ queryKey: ["governance"] });
-                        })
-                        .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
-                      }}
-                    >
-                      {alreadyVoted ? "Signed" : "Approve"}
-                    </button>
+                    {proposal.status === "InProgress" ? (
+                      <button
+                        className="primary"
+                        disabled={disabledReason !== null}
+                        title={disabledReason ?? "Approve this decision"}
+                        onClick={() => {
+                        void signDaoVote(signer, query.data?.daoAccountId ?? "", proposal.id, proposal.kind)
+                          .then(async (hash) => {
+                            const refreshed = await readDaoProposalRpc(
+                              query.data?.daoAccountId ?? "",
+                              proposal.id,
+                            );
+                            if (
+                              refreshed.state === "Executed" &&
+                              relayAction(proposal.kind, query.data?.treasury?.relayAccountId) !== null
+                            ) {
+                              await api("/v1/console/governance/relay-operation", {
+                                method: "POST",
+                                body: JSON.stringify({
+                                  proposalId: proposal.id,
+                                  nearTransactionHash: hash,
+                                  signerAccountId: signer,
+                                }),
+                              });
+                            }
+                            setHashes((current) => [...current, hash]);
+                            await client.invalidateQueries({ queryKey: ["governance"] });
+                          })
+                          .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
+                        }}
+                      >
+                        {alreadyVoted ? "Approved" : "Approve"}
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
                 );

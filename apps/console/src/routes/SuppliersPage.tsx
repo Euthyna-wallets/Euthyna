@@ -99,7 +99,7 @@ export function SuppliersPage() {
                 <input placeholder="Name" value={name} onChange={(event) => setName(event.target.value)} />
                 <input placeholder="Contact" value={contact} onChange={(event) => setContact(event.target.value)} />
                 <input placeholder="0x wallet" value={address} onChange={(event) => setAddress(event.target.value)} />
-                <button className="primary" disabled={request.isPending} onClick={() => request.mutate({ path: "/v1/console/suppliers", body: { name, contact, chainId: 84532, address } })}>Request supplier</button>
+                <button className="primary" disabled={request.isPending} title={request.isPending ? "A supplier request is being submitted" : "Request four-eyes approval for this supplier"} onClick={() => request.mutate({ path: "/v1/console/suppliers", body: { name, contact, chainId: 84532, address } })}>Request supplier</button>
               </div>
             </Card>
             <Card title="Request a wallet or contract">
@@ -109,13 +109,13 @@ export function SuppliersPage() {
                   {query.data.suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
                 </select>
                 <input placeholder="new wallet 0x…" value={address} onChange={(event) => setAddress(event.target.value)} />
-                <button className="ghost" disabled={!supplierId || request.isPending} onClick={() => request.mutate({ path: `/v1/console/suppliers/${supplierId}/wallets`, body: { chainId: 84532, address } })}>Request wallet</button>
+                <button className="ghost" disabled={!supplierId || request.isPending} title={!supplierId ? "Select a supplier first" : request.isPending ? "A supplier request is being submitted" : "Request approval for this wallet"} onClick={() => request.mutate({ path: `/v1/console/suppliers/${supplierId}/wallets`, body: { chainId: 84532, address } })}>Request wallet</button>
               </div>
               <div className="row wrap">
                 <input placeholder="reference" value={reference} onChange={(event) => setReference(event.target.value)} />
                 <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
                 <input placeholder="max amount" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} />
-                <button className="ghost" disabled={!supplierId || request.isPending} onClick={() => request.mutate({ path: "/v1/console/contracts", body: { reference, role, supplierId, maxAmount, periodicity: "monthly", token } })}>Request contract</button>
+                <button className="ghost" disabled={!supplierId || request.isPending} title={!supplierId ? "Select a supplier first" : request.isPending ? "A supplier request is being submitted" : "Request approval for this contract"} onClick={() => request.mutate({ path: "/v1/console/contracts", body: { reference, role, supplierId, maxAmount, periodicity: "monthly", token } })}>Request contract</button>
               </div>
               {request.error ? <div className="state error">{request.error.message}</div> : null}
             </Card>

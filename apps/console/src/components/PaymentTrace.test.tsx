@@ -20,7 +20,7 @@ describe("PaymentTrace", () => {
   it("renders the strict three-lock order and only completed steps", () => {
     render(<PaymentTrace steps={steps} state="Confirmed" />);
     expect(screen.getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent)).toEqual([
-      "Agent request", "Guard visa", "Vault", "MPC signature", "Base broadcast", "Zodiac", "Confirmed",
+      "Agent request", "Policy check", "Spending limit", "Transaction signature", "Base submission", "Treasury permission", "Confirmed",
     ]);
     expect(document.querySelectorAll(".trace-step.done")).toHaveLength(7);
     expect(screen.getAllByRole("link", { name: "0xabc" })[0]?.getAttribute("href")).toBe("https://sepolia.basescan.org/tx/0xabc");

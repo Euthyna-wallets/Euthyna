@@ -28,7 +28,14 @@ export function Layout() {
     queryFn: () => api<{ treasury: TreasuryView | null }>("/v1/console/treasury"),
     enabled: Boolean(active),
   });
-  const setupRequired = !treasury.data?.treasury || treasury.data.treasury.status !== "active";
+  const setup = useQuery({
+    queryKey: ["setup-status", active?.id],
+    queryFn: () => api<{ roleBudgets: Array<{ role: string }> }>("/v1/console/overview"),
+    enabled: Boolean(active),
+  });
+  const setupRequired = !treasury.data?.treasury
+    || treasury.data.treasury.status !== "active"
+    || (setup.data?.roleBudgets.length ?? 0) === 0;
 
   useEffect(() => {
     setDemoWalletScope(session.data?.user.id ?? null);
@@ -67,9 +74,9 @@ export function Layout() {
           <nav className="app-nav">
             <NavLink to="/" end>Overview</NavLink>
             <NavLink to="/agents">Agents</NavLink>
-            <NavLink to="/mandate">Mandates</NavLink>
+            <NavLink to="/mandate">Spending permissions</NavLink>
             <NavLink to="/payments">Payments</NavLink>
-            <NavLink to="/governance">Governance</NavLink>
+            <NavLink to="/governance">Decisions</NavLink>
             <NavLink to="/settings">Settings</NavLink>
             {setupRequired ? <NavLink className="setup-link" to="/onboarding">Finish setup</NavLink> : null}
           </nav>

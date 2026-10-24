@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
 
-export function PageState({ loading, error, empty, children }: {
+export function PageState({ loading, error, empty, emptyContent, children }: {
   loading?: boolean;
   error?: unknown;
   empty?: boolean;
+  emptyContent?: ReactNode;
   children: ReactNode;
 }) {
   if (loading) return <div className="state">Loading…</div>;
   if (error) return <div className="state error">Error: {error instanceof Error ? error.message : String(error)}</div>;
-  if (empty) return <div className="state">Nothing here yet.</div>;
+  if (empty) return <>{emptyContent ?? <div className="state">Nothing here yet.</div>}</>;
   return <>{children}</>;
 }
 

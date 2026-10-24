@@ -126,17 +126,17 @@ describe("GovernancePage", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
 
-    await waitFor(() => expect(screen.getByText("280s remaining")).toBeTruthy());
-    expect(screen.getByText("cooldown", { exact: false })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("5 minutes remaining")).toBeTruthy());
+    expect(screen.getByText("Changes can execute after")).toBeTruthy();
     const execute = screen.getByRole("button", { name: "Execute veto" }) as HTMLButtonElement;
     expect(execute.disabled).toBe(true);
 
     const sign = screen.getByRole("button", { name: "Veto — sign with council wallet" });
     fireEvent.click(sign);
-    await waitFor(() => expect(screen.getByText("1/2 Safe signatures")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("1/2 council signatures")).toBeTruthy());
     expect(execute.disabled).toBe(true);
     fireEvent.click(sign);
-    await waitFor(() => expect(screen.getByText("2/2 Safe signatures")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("2/2 council signatures")).toBeTruthy());
     expect(execute.disabled).toBe(false);
 
     fireEvent.click(execute);
@@ -192,8 +192,8 @@ describe("GovernancePage", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
 
-    await waitFor(() => expect(screen.getByText("Relay blocked by this terminal operation.")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Propose relay unblock" }));
+    await waitFor(() => expect(screen.getByText("The decision queue needs manual recovery.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Prepare recovery decision" }));
     await waitFor(() => expect(mocks.signDaoProposal).toHaveBeenCalledWith(
       "alice.testnet",
       expect.objectContaining({ receiverId: "dao.testnet" }),

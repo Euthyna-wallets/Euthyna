@@ -6,6 +6,7 @@ import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type B
 import { demoWalletsEnabled, generatedNearPublicKey, selectDemoWalletScopeForAccounts, selectDemoWalletScopeForEvmAddress, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import { formatToken } from "../lib/format.js";
 import { useWallets } from "../lib/wallet-context.js";
+import { proposalDecision } from "../lib/governance-view.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -49,6 +50,8 @@ type Member = {
   name: string | null;
   walletProofClaimable: boolean;
   walletProofVerifiedAt: string | null;
+  walletProofApprovedAt: string | null;
+  walletProofApprovedBy: string | null;
 };
 
 function short(value: string): string {
@@ -81,6 +84,7 @@ export function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [apiKeyCopied, setApiKeyCopied] = useState(false);
   const [mandate, setMandate] = useState<MandatePreview | null>(null);
   const [setupOverview, setSetupOverview] = useState<{
     treasury: TreasuryView | null;
@@ -93,6 +97,29 @@ export function OnboardingPage() {
   const claimMemberId = new URLSearchParams(window.location.search).get("member");
 
   const signedIn = Boolean(session.data?.user);
+  const approvedMemberCount = members.filter((member) => member.walletProofApprovedAt).length;
+  const setupStage = !activeOrganization
+    ? "company"
+    : approvedMemberCount < 3
+      ? "members"
+      : !treasury || treasury.status !== "active"
+        ? "treasury"
+        : (setupOverview?.agents.total ?? 0) === 0
+          ? "agent"
+          : (setupOverview?.roleBudgets.length ?? 0) === 0
+            ? "mandate"
+            : "done";
+  const waitingFor = setupStage === "members"
+    ? `${approvedMemberCount} of 3 done · waiting for invited members and an admin review`
+    : setupStage === "treasury"
+      ? "Council members approve the Treasury deployment"
+      : setupStage === "agent"
+        ? "Company admin registers the AI agent"
+        : setupStage === "mandate"
+          ? "Council members approve the first spending permission"
+          : setupStage === "done"
+            ? "Setup complete"
+            : "Company founder creates the workspace";
 
   async function refreshOrganizations() {
     const result = await authClient.organization.list();
@@ -182,6 +209,16 @@ export function OnboardingPage() {
       />
     );
   }
+  if (claimMemberId && session.data?.user.emailVerified !== true) {
+    return (
+      <EmailVerification
+        email={session.data?.user.email ?? ""}
+        onVerified={async () => {
+          await session.refetch();
+        }}
+      />
+    );
+  }
   if (claimMemberId) {
     return (
       <WalletProofPanel
@@ -202,6 +239,7 @@ export function OnboardingPage() {
           <span className="eyebrow">Guided company setup</span>
           <h1>{activeOrganization?.name ?? "Create your company"}</h1>
           <p className="muted">Resume at any time. Every signature stays in the connected member wallet.</p>
+          <p className="setup-actor">{waitingFor}</p>
         </div>
         <div className="row wrap">
           <div className="pill">Base Sepolia · NEAR testnet</div>
@@ -220,15 +258,31 @@ export function OnboardingPage() {
 
         <SetupProgress
           companyReady={Boolean(activeOrganization)}
-          membersReady={members.filter((member) => member.walletProofVerifiedAt).length >= 3}
+          membersReady={approvedMemberCount >= 3}
           treasuryReady={treasury?.status === "active"}
-          funded={BigInt(setupOverview?.safeBalance ?? "0") > 0n}
           agentReady={(setupOverview?.agents.total ?? 0) > 0}
           mandateReady={(setupOverview?.roleBudgets.length ?? 0) > 0}
         />
-        <section id="onboarding" className="card">
-          <h2>1. Company and members</h2>
+        {apiKey ? (
+          <section className="card secret">
+            <span className="eyebrow">Agent API key · shown once</span>
+            <p>Save this key in your agent environment. It cannot be displayed again.</p>
+            <pre>{apiKey}</pre>
+            <div className="row">
+              <button
+                className="primary"
+                onClick={() => void navigator.clipboard.writeText(apiKey).then(() => setApiKeyCopied(true))}
+              >
+                {apiKeyCopied ? "Copied" : "Copy API key"}
+              </button>
+              <button className="ghost" onClick={() => setApiKey(null)}>I saved it</button>
+            </div>
+          </section>
+        ) : null}
+        {setupStage === "company" ? <section id="onboarding" className="card">
+          <h2>Create your company</h2>
           <OrganizationPanel
+            mode="company"
             organizations={organizations}
             active={activeOrganization}
             onChanged={async () => {
@@ -244,11 +298,24 @@ export function OnboardingPage() {
               if (activeOrganization) await refreshMembers(activeOrganization.id);
             }}
           />
-        </section>
+        </section> : null}
 
-        {activeOrganization ? (
+        {setupStage === "members" && activeOrganization ? (
           <section id="wallets" className="card">
-            <h2>2. Member wallets</h2>
+            <h2>Invite and verify members</h2>
+            <OrganizationPanel
+              mode="members"
+              organizations={organizations}
+              active={activeOrganization}
+              onChanged={refreshOrganizations}
+              onSelect={(organization) => {
+                setActiveOrganization(organization);
+                localStorage.setItem("mandateos.organization", organization.id);
+              }}
+              members={members}
+              onError={setError}
+              onMembersChanged={async () => refreshMembers(activeOrganization.id)}
+            />
             <p className="muted">
               Each member proves the NEAR account that signs DAO proposals and the EVM address
               that becomes a Safe owner. The server stores public addresses and signed proofs.
@@ -262,12 +329,12 @@ export function OnboardingPage() {
           </section>
         ) : null}
 
-        {activeOrganization && !treasury ? (
+        {setupStage === "treasury" && activeOrganization && !treasury ? (
           <section id="treasury" className="card">
-            <h2>3–4. Deploy and fund treasury</h2>
+            <h2>Deploy your Treasury</h2>
             <p className="muted">
-              The server builds unsigned transactions only. DAO, Vault, relay and Base transactions
-              are signed in your wallets.
+              The server prepares unsigned council and Treasury transactions.
+              Every change is signed in member wallets.
             </p>
             <div className="wallet-signing-context">
               <span>Founder NEAR wallet</span>
@@ -276,6 +343,7 @@ export function OnboardingPage() {
             <button
               className="primary"
               disabled={Boolean(busy) || founderNear.length < 2}
+              title={busy ? "Wait for the current setup action" : founderNear.length < 2 ? "Connect the founder's NEAR wallet first" : "Build the unsigned Treasury plan"}
               onClick={() =>
                 run("plan", async () => {
                   const result = await api<TreasuryPlan>("/v1/console/treasury/plan", {
@@ -296,7 +364,7 @@ export function OnboardingPage() {
           </section>
         ) : null}
 
-        {plan ? (
+        {setupStage === "treasury" && plan ? (
           <TreasuryWizard
             plan={plan}
             busy={busy}
@@ -311,13 +379,14 @@ export function OnboardingPage() {
           />
         ) : null}
 
-        {treasury ? <Summary treasury={treasury} /> : null}
-        {treasury && demoWalletsEnabled() ? (
+        {setupStage === "treasury" && treasury ? <Summary treasury={treasury} /> : null}
+        {setupStage === "treasury" && treasury && demoWalletsEnabled() ? (
           <section className="card">
             <h2>Base governance gas (UAT)</h2>
             <button
               className="ghost"
               disabled={Boolean(busy)}
+              title={busy ? "Wait for the current setup action" : "Send Base Sepolia gas to the governance signer"}
               onClick={() => void run("fund-gov", async () => {
                 const founder = members.find((member) => member.role === "owner" && member.evmAddress);
                 if (
@@ -341,9 +410,9 @@ export function OnboardingPage() {
         ) : null}
 
 
-        {treasury ? (
+        {treasury && (setupStage === "agent" || (setupStage === "treasury" && treasury.status !== "active")) ? (
           <section id="agents" className="card">
-            <h2>5. Register an agent</h2>
+            <h2>{treasury.status === "active" ? "Register an agent" : "Finish Treasury verification"}</h2>
             {treasury.status === "active" ? (
               <>
                 <AgentForm
@@ -355,18 +424,18 @@ export function OnboardingPage() {
                   }}
                   onError={setError}
                 />
-                {apiKey ? <pre className="secret">{apiKey}</pre> : null}
                 <AgentList key={apiKey ?? "agents"} treasury={treasury} onError={setError} />
               </>
             ) : (
               <>
               <div className="alert error">
-                Treasury status: {treasury.status}. Agent registration is blocked until every
-                register check passes (DAO hardening, init parameters, Safe modules and Delay).
+                Treasury status: {treasury.status}. Agent registration is blocked until the
+                on-chain controls and waiting period are verified.
               </div>
               <button
                 className="primary"
                 disabled={Boolean(busy)}
+                title={busy ? "Wait for the current verification" : "Re-read Treasury controls on-chain"}
                 onClick={() =>
                   run("refresh", async () => {
                     const refreshed = await api<TreasuryView>("/v1/console/treasury/refresh", {
@@ -389,10 +458,17 @@ export function OnboardingPage() {
           </section>
         ) : null}
 
-        {treasury?.status === "active" ? (
+        {setupStage === "mandate" && treasury?.status === "active" ? (
           <section id="mandates" className="card">
-            <h2>6. First mandate</h2>
+            <h2>Create the first spending permission</h2>
             <MandatePanel treasury={treasury} preview={mandate} onPreview={setMandate} onError={setError} />
+          </section>
+        ) : null}
+        {setupStage === "done" ? (
+          <section className="card empty-action">
+            <h2>Company setup complete</h2>
+            <p>Your Treasury and first spending permission are ready.</p>
+            <a className="button primary" href="/">Go to Overview</a>
           </section>
         ) : null}
     </div>
@@ -403,33 +479,95 @@ function SetupProgress(props: {
   companyReady: boolean;
   membersReady: boolean;
   treasuryReady: boolean;
-  funded: boolean;
   agentReady: boolean;
   mandateReady: boolean;
 }) {
   const steps = [
-    { label: "Company", ready: props.companyReady, href: "#onboarding" },
-    { label: "Members", ready: props.membersReady, href: "#wallets" },
-    { label: "Treasury", ready: props.treasuryReady, href: "#treasury" },
-    { label: "Fund", ready: props.funded, href: "#treasury" },
-    { label: "Agent", ready: props.agentReady, href: "#agents" },
-    { label: "Mandate", ready: props.mandateReady, href: "#mandates" },
-    { label: "Done", ready: props.mandateReady, href: "/" },
+    { label: "Company", ready: props.companyReady },
+    { label: "Members", ready: props.membersReady },
+    { label: "Treasury", ready: props.treasuryReady },
+    { label: "Agent", ready: props.agentReady },
+    { label: "Spending permission", ready: props.mandateReady },
   ];
   const current = steps.findIndex((step) => !step.ready);
   return (
     <nav className="setup-progress" aria-label="Company setup progress">
       {steps.map((step, index) => (
-        <a
+        <div
           key={step.label}
-          href={step.href}
           className={`${step.ready ? "done" : ""} ${index === current ? "current" : ""}`}
         >
           <span>{step.ready ? "✓" : index + 1}</span>
           {step.label}
-        </a>
+        </div>
       ))}
     </nav>
+  );
+}
+
+function EmailVerification(props: { email: string; onVerified: () => Promise<void> }) {
+  const [otp, setOtp] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await authClient.emailOtp.sendVerificationOtp({
+        email: props.email,
+        type: "email-verification",
+      });
+      if (result.error) throw new Error(result.error.message ?? "Could not send verification code");
+      setSent(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await authClient.emailOtp.verifyEmail({ email: props.email, otp });
+      if (result.error) throw new Error(result.error.message ?? "Invalid verification code");
+      await props.onVerified();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="page invitation-page">
+      <header className="page-head">
+        <div>
+          <span className="eyebrow">Invitation security</span>
+          <h1>Verify your invited email</h1>
+          <p className="muted">The invitation is locked to <strong>{props.email}</strong>.</p>
+        </div>
+      </header>
+      <section className="panel stack">
+        {error ? <div className="alert error">{error}</div> : null}
+        {!sent ? (
+          <button className="primary" disabled={busy} title={busy ? "Wait for email delivery" : "Send a verification code to the invited email"} onClick={() => void send()}>
+            {busy ? "Sending…" : "Send verification code"}
+          </button>
+        ) : (
+          <>
+            <label>Verification code<input inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} /></label>
+            <button className="primary" disabled={busy || otp.length < 6} title={busy ? "Verification is in progress" : otp.length < 6 ? "Enter the six-digit code" : "Verify the invited email"} onClick={() => void verify()}>
+              {busy ? "Verifying…" : "Verify email"}
+            </button>
+            <button className="secondary" disabled={busy} title={busy ? "Verification is in progress" : "Send a fresh code"} onClick={() => void send()}>Send again</button>
+          </>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -460,10 +598,10 @@ function PasskeyEnrollment(props: { email: string; onComplete: () => void }) {
           Profile <strong>{props.email}</strong> must enroll a passkey before accessing the company console.
         </p>
         {error ? <div className="alert error">{error}</div> : null}
-        <button className="primary" disabled={busy} onClick={() => void enroll()}>
+        <button className="primary" disabled={busy} title={busy ? "Wait for your authenticator" : "Create a passkey for this profile"} onClick={() => void enroll()}>
           {busy ? "Waiting for your authenticator…" : "Create passkey"}
         </button>
-        <button className="ghost" disabled={busy} onClick={() => void authClient.signOut()}>
+        <button className="ghost" disabled={busy} title={busy ? "Finish or cancel the authenticator prompt first" : "Sign out"} onClick={() => void authClient.signOut()}>
           Sign out
         </button>
       </div>
@@ -533,9 +671,9 @@ export function SignIn() {
         <div className="brand">MandateOS</div>
         <h2>AI agents move company funds. Humans keep the keys and the limits.</h2>
         <ul>
-          <li>Guard visa bound to one exact transaction</li>
-          <li>Vault role, budget and idempotence on NEAR</li>
-          <li>Zodiac permissions on a 2/3 Safe</li>
+          <li>One-time approval bound to the exact payment</li>
+          <li>Agent role, budget and supplier limits</li>
+          <li>Two-of-three human control of the Treasury</li>
         </ul>
         <p className="small muted">Non-custodial by design. The server never holds a key that can move funds.</p>
       </aside>
@@ -558,14 +696,14 @@ export function SignIn() {
           <button className={mode === "register" ? "tab active" : "tab"} onClick={() => { setMode("register"); setError(null); }}>Create account</button>
         </div>
         {mode === "login" ? (
-          <button className="primary" disabled={busy} onClick={() => void signInWithPasskey()}>
+          <button className="primary" disabled={busy} title={busy ? "Wait for your authenticator" : "Sign in with a saved passkey"} onClick={() => void signInWithPasskey()}>
             {busy ? "Waiting for your authenticator…" : "Continue with passkey"}
           </button>
         ) : (
           <>
             <label>Full name<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
             <label>Work email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <button className="primary" disabled={busy || !email || !name} onClick={() => void register(email, name)}>
+            <button className="primary" disabled={busy || !email || !name} title={busy ? "Wait for your authenticator" : !email || !name ? "Enter your name and work email" : "Create your passkey profile"} onClick={() => void register(email, name)}>
               {busy ? "Creating passkey…" : "Create account with passkey"}
             </button>
             <p className="muted small">
@@ -580,6 +718,7 @@ export function SignIn() {
 }
 
 function OrganizationPanel(props: {
+  mode: "company" | "members";
   organizations: Organization[];
   active: Organization | null;
   onChanged: () => Promise<void>;
@@ -597,7 +736,7 @@ function OrganizationPanel(props: {
 
   return (
     <div className="stack">
-      {props.organizations.length ? (
+      {props.mode === "company" && props.organizations.length ? (
         <div className="row wrap">
           {props.organizations.map((organization) => (
             <button
@@ -610,28 +749,31 @@ function OrganizationPanel(props: {
           ))}
         </div>
       ) : null}
-      <div className="row">
-        <input placeholder="Company name" value={name} onChange={(event) => setName(event.target.value)} />
-        <button
-          className="primary"
-          disabled={name.trim().length < 2}
-          onClick={() =>
-            void (async () => {
-              try {
-                const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-                const created = await authClient.organization.create({ name, slug });
-                if (created.error) throw new Error(created.error.message);
-                await props.onChanged();
-              } catch (cause) {
-                props.onError(cause instanceof Error ? cause.message : String(cause));
-              }
-            })()
-          }
-        >
-          Create company
-        </button>
-      </div>
-      {props.active ? (
+      {props.mode === "company" ? (
+        <div className="row">
+          <input placeholder="Company name" value={name} onChange={(event) => setName(event.target.value)} />
+          <button
+            className="primary"
+            disabled={name.trim().length < 2}
+            title={name.trim().length < 2 ? "Enter a company name" : "Create this company"}
+            onClick={() =>
+              void (async () => {
+                try {
+                  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+                  const created = await authClient.organization.create({ name, slug });
+                  if (created.error) throw new Error(created.error.message);
+                  await props.onChanged();
+                } catch (cause) {
+                  props.onError(cause instanceof Error ? cause.message : String(cause));
+                }
+              })()
+            }
+          >
+            Create company
+          </button>
+        </div>
+      ) : null}
+      {props.mode === "members" && props.active ? (
         <div className="stack">
           <div className="muted small">
             Invite a new member by email. They sign in with their own passkey, connect both wallets
@@ -679,6 +821,7 @@ function OrganizationPanel(props: {
             <button
               className="ghost"
               disabled={selectedMemberId ? !memberNear || !memberEvm : !memberName || !memberEmail}
+              title={selectedMemberId ? (!memberNear || !memberEvm ? "Enter both wallet addresses" : "Save these declared wallets") : (!memberName || !memberEmail ? "Enter the member name and email" : "Create and copy the invitation")}
               onClick={() =>
                 void (async () => {
                   try {
@@ -749,6 +892,7 @@ function WalletProofForm(props: {
         <button
           className="primary"
           disabled={busy || !nearAccountId || !evmAddress || !wallets.nearConnected || !wallets.evmConnected}
+          title={busy ? "Wallet verification is in progress" : !nearAccountId || !evmAddress ? "Connect both wallets" : !wallets.nearConnected || !wallets.evmConnected ? "Connect the displayed wallets in the global wallet bar" : "Sign both wallet proofs"}
           onClick={() => void (async () => {
             setBusy(true);
             setError(null);
@@ -776,8 +920,8 @@ function WalletProofForm(props: {
         </button>
       </div>
       <div className="muted small">
-        The challenge is scoped to this member, organization, both wallets, Base Sepolia and a
-        ten-minute nonce. MandateOS verifies the NEAR full-access key and recovered EVM signer.
+        This one-time challenge is scoped to this member, company and both wallets for ten minutes.
+        MandateOS verifies both wallet signatures.
       </div>
     </div>
   );
@@ -788,13 +932,29 @@ function WalletProofPanel(props: {
   onVerified: () => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const [invitation, setInvitation] = useState<{
+    memberName: string;
+    organizationName: string;
+    role: string;
+  } | null>(null);
+  useEffect(() => {
+    void api<{
+      memberName: string;
+      organizationName: string;
+      role: string;
+    }>(`/v1/profile/invitations/${props.memberId}`)
+      .then(setInvitation)
+      .catch((cause: unknown) => props.onError(cause instanceof Error ? cause.message : String(cause)));
+  }, [props.memberId]);
+
+  if (!invitation) return <div className="state">Loading invitation…</div>;
   return (
     <div className="page invitation-page">
       <header className="page-head">
         <div>
           <span className="eyebrow">Member invitation</span>
-          <h1>Connect your wallets</h1>
-          <p className="muted">Your passkey identifies the profile. Both wallet signatures accept the membership.</p>
+          <h1>You've been invited to {invitation.organizationName} as {invitation.memberName}</h1>
+          <p className="muted">Role: {invitation.role}. The invited email is verified. Now prove control of both connected wallets.</p>
         </div>
       </header>
       <section className="panel"><WalletProofForm {...props} /></section>
@@ -810,6 +970,13 @@ function MemberWallets(props: {
 }) {
   const self = props.members.find((member) => member.userId === props.currentUserId);
   const [provisioningCouncil, setProvisioningCouncil] = useState(false);
+  const [decidingMemberId, setDecidingMemberId] = useState<string | null>(null);
+  const [copiedInvitationId, setCopiedInvitationId] = useState<string | null>(null);
+
+  function invitationUrl(memberId: string): string {
+    return `${window.location.origin}/onboarding?member=${encodeURIComponent(memberId)}`;
+  }
+  const canApproveWallets = self?.role === "admin" || self?.role === "owner";
 
   async function provisionDemoCouncilAccounts() {
     setProvisioningCouncil(true);
@@ -855,11 +1022,68 @@ function MemberWallets(props: {
               <td>{member.nearAccountId ?? "—"}</td>
               <td>{member.evmAddress ? short(member.evmAddress) : "—"}</td>
               <td>
-                {member.walletProofVerifiedAt
-                  ? "proved"
-                  : member.walletProofClaimable
-                    ? <a href={`/onboarding?member=${member.id}`}>claim link</a>
-                    : "signature required"}
+                {member.walletProofApprovedAt
+                  ? "Approved"
+                  : member.walletProofVerifiedAt
+                    ? "Waiting for another admin"
+                    : member.walletProofClaimable
+                      ? "Invitation pending"
+                      : "Signature required"}
+                {member.walletProofClaimable ? (
+                  <span className="row wrap">
+                    <button
+                      className="secondary"
+                      onClick={() => void navigator.clipboard.writeText(invitationUrl(member.id)).then(() => setCopiedInvitationId(member.id))}
+                    >
+                      {copiedInvitationId === member.id ? "Link copied" : "Copy invitation link"}
+                    </button>
+                    {member.email ? (
+                      <a
+                        className="button"
+                        href={`mailto:${encodeURIComponent(member.email)}?subject=${encodeURIComponent("Your MandateOS invitation")}&body=${encodeURIComponent(`You've been invited. Open ${invitationUrl(member.id)}`)}`}
+                      >
+                        Send again
+                      </a>
+                    ) : null}
+                  </span>
+                ) : null}
+                {canApproveWallets && member.walletProofVerifiedAt && member.nearAccountId && member.evmAddress && !member.walletProofApprovedAt && member.userId !== props.currentUserId ? (
+                  <span className="row wrap">
+                    <button
+                      className="secondary"
+                      disabled={decidingMemberId !== null}
+                      title={decidingMemberId !== null ? "Wait for the current wallet review" : "Approve this member's proven wallets"}
+                      onClick={() => {
+                        setDecidingMemberId(member.id);
+                        void api(`/v1/console/members/${member.id}/wallet-proof-decision`, {
+                          method: "POST",
+                          body: JSON.stringify({
+                            decision: "approve",
+                            nearAccountId: member.nearAccountId,
+                            evmAddress: member.evmAddress,
+                            walletProofVerifiedAt: member.walletProofVerifiedAt,
+                          }),
+                        }).then(props.onSaved).catch((cause: unknown) => props.onError(String(cause))).finally(() => setDecidingMemberId(null));
+                      }}
+                    >
+                      Approve wallets
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={decidingMemberId !== null}
+                      title={decidingMemberId !== null ? "Wait for the current wallet review" : "Reject and clear these wallet proofs"}
+                      onClick={() => {
+                        setDecidingMemberId(member.id);
+                        void api(`/v1/console/members/${member.id}/wallet-proof-decision`, {
+                          method: "POST",
+                          body: JSON.stringify({ decision: "reject" }),
+                        }).then(props.onSaved).catch((cause: unknown) => props.onError(String(cause))).finally(() => setDecidingMemberId(null));
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </span>
+                ) : null}
               </td>
             </tr>
           ))}
@@ -869,14 +1093,15 @@ function MemberWallets(props: {
         <button
           className="ghost"
           disabled={provisioningCouncil}
+          title={provisioningCouncil ? "Demo account provisioning is in progress" : "Provision the generated UAT council accounts"}
           onClick={() => void provisionDemoCouncilAccounts()}
         >
           {provisioningCouncil ? "Provisioning council accounts…" : "Provision generated council NEAR accounts (UAT)"}
         </button>
       ) : null}
-      {self ? (
+      {self && !self.walletProofVerifiedAt ? (
         <>
-          <h3>{self.walletProofVerifiedAt ? "Replace my wallet proof" : "Prove my wallets"}</h3>
+          <h3>Verify my wallets</h3>
           <WalletProofForm
             memberId={self.id}
             initialNear={self.nearAccountId ?? ""}
@@ -885,11 +1110,15 @@ function MemberWallets(props: {
             onError={props.onError}
           />
         </>
+      ) : self?.walletProofApprovedAt ? (
+        <div className="alert success">Your wallets are verified and approved.</div>
+      ) : self?.walletProofVerifiedAt ? (
+        <div className="alert warning">Your signatures are verified. Another admin must approve the wallet addresses before you join the council.</div>
       ) : (
         <div className="alert error">This passkey profile is not a member of the active organization.</div>
       )}
       <div className="muted small">
-        Unproved admin declarations remain pending and are excluded from DAO council and Safe owners.
+        Unverified or unapproved wallet declarations remain pending and are excluded from the council.
       </div>
     </div>
   );
@@ -1054,13 +1283,14 @@ function TreasuryWizard(props: {
 
   return (
     <section className="card">
-      <h2>3. Treasury transactions</h2>
+      <h2>Treasury transactions</h2>
       <div className="alert">
-        One-time NEAR setup balances (not payment-operation fees): DAO {formatNear(daoDeposit)} +
-        Vault {formatNear(vaultDeposit)} + relay {formatNear(relayDeposit)} ={" "}
-        <strong>{formatNear(setupDeposit)} NEAR</strong>. Most of this balance is locked against
-        contract storage. The observed 14.288 Tgas payment authorization costs about 0.00143 NEAR
-        at the current testnet gas price.
+        One-time NEAR setup: <strong>{formatNear(setupDeposit)} NEAR</strong>. Most of this balance is locked for contract storage, not spent per payment.
+        <details>
+          <summary>Advanced cost breakdown</summary>
+          Council {formatNear(daoDeposit)} + Vault {formatNear(vaultDeposit)} + relay {formatNear(relayDeposit)}.
+          The observed 14.288 Tgas payment authorization costs about 0.00143 NEAR at the current testnet gas price.
+        </details>
       </div>
       {sponsor ? (
         <div className="muted small">
@@ -1071,7 +1301,7 @@ function TreasuryWizard(props: {
       ) : null}
       <div className="steps">
         <div className="step">
-          <h3>a. DAO</h3>
+          <h3>a. Treasury council</h3>
           <p className="muted">{props.plan.daoAccountId} · threshold {props.plan.threshold}</p>
           <div className="stack">
             <strong>Exact initial policy signed by the founder</strong>
@@ -1098,6 +1328,7 @@ function TreasuryWizard(props: {
                 !creationPolicyConfirmed ||
                 signerId !== props.plan.founderNearAccountId
               }
+              title={props.busy ? "Wait for the current setup action" : !creationPolicyConfirmed ? "Confirm the displayed council and threshold" : signerId !== props.plan.founderNearAccountId ? `Connect ${props.plan.founderNearAccountId}` : "Sign and create the Treasury council"}
               onClick={() => props.run("dao", async () => {
                 if (demoWalletsEnabled()) {
                   await api("/v1/console/treasury/sponsor-founder-wallet", {
@@ -1123,6 +1354,7 @@ function TreasuryWizard(props: {
                 !signerId ||
                 !props.plan.council.some((member) => member.nearAccountId === signerId)
               }
+              title={props.busy ? "Wait for the current setup action" : !signerId ? "Connect a council NEAR wallet" : !props.plan.council.some((member) => member.nearAccountId === signerId) ? "The connected account is not in the council" : "Prepare the optional update-policy decision"}
               onClick={() => props.run("auto-update", async () => {
                 const hashes = await disableFactoryAutoUpdate(props.plan, signerId);
                 setTransactionHashes((current) => [...current, ...hashes]);
@@ -1147,6 +1379,7 @@ function TreasuryWizard(props: {
           <button
             className="ghost"
             disabled={Boolean(props.busy)}
+            title={props.busy ? "Wait for the current setup action" : "Read the council policy directly from NEAR RPC"}
             onClick={() => props.run("dao-policy-rpc", verifyDaoPolicy)}
           >
             Read get_policy directly from NEAR RPC
@@ -1193,15 +1426,16 @@ function TreasuryWizard(props: {
         </div>
 
         <div className="step">
-          <h3>b. Vault and relay</h3>
-          <p className="muted">
-            Two accounts, each deployed with CreateAccount + Transfer + DeployContract + new().
-            No AddKey action is emitted.
-          </p>
+          <h3>b. NEAR Treasury controls</h3>
+          <p className="muted">Deploy the keyless controls that enforce spending permissions and council decisions.</p>
+          <details><summary>Advanced deployment shape</summary>
+            Two accounts use CreateAccount + Transfer + DeployContract + new(). No AddKey action is emitted.
+          </details>
           <div className="row">
             <button
               className="primary"
               disabled={Boolean(props.busy) || !contractsAffordable || !policyConfirmed}
+              title={props.busy ? "Wait for the current setup action" : !contractsAffordable ? "The sponsor balance is too low" : !policyConfirmed ? "Confirm the on-chain council policy first" : "Deploy the NEAR Treasury controls"}
               onClick={() => props.run("near-deploy", async () => {
                 const deployed = await api<{ vaultTxHash: string; relayTxHash: string }>(
                   "/v1/console/treasury/deploy-contracts",
@@ -1220,13 +1454,14 @@ function TreasuryWizard(props: {
                 await refreshSponsor();
               })}
             >
-              Deploy Vault + relay (MandateOS pays)
+              Deploy NEAR controls (MandateOS pays)
             </button>
           </div>
           <div className="row wrap">
             <button
               className="ghost"
               disabled={Boolean(props.busy)}
+              title={props.busy ? "Wait for the current setup action" : "Read the deployed contracts directly from NEAR RPC"}
               onClick={() => props.run("near-rpc-attestation", verifyNearDeploymentAndConfirm)}
             >
               Verify by direct RPC and confirm as this member
@@ -1234,15 +1469,17 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy)}
+              title={props.busy ? "Wait for the current setup action" : "Refresh council confirmations"}
               onClick={() => props.run("near-confirmations", refreshDeploymentConfirmations)}
             >
               Refresh member confirmations
             </button>
           </div>
-          <div className="muted small">Signed by the MandateOS relayer; contracts remain owned by the DAO.</div>
-          <div className="muted small">
-            Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}
-          </div>
+          <details>
+            <summary>Advanced deployment evidence</summary>
+            <div className="muted small">Signed by the MandateOS relayer; contracts remain owned by the council.</div>
+            <div className="muted small">Vault wasm {short(props.plan.vault.wasmSha256)} · relay wasm {short(props.plan.relay.wasmSha256)}</div>
+          </details>
           {nearAttestation ? (
             <table>
               <thead><tr><th>Direct NEAR RPC check</th><th>Expected</th><th>Observed</th><th>Status</th></tr></thead>
@@ -1272,18 +1509,19 @@ function TreasuryWizard(props: {
           ) : null}
           {!policyConfirmed ? (
             <div className="muted small">
-              Read the DAO policy from NEAR RPC and confirm every council member and the threshold
-              before deploying Vault/relay.
+              Read the council policy from NEAR RPC and confirm every council member and the threshold
+              before deploying the NEAR controls.
             </div>
           ) : null}
         </div>
 
         <div className="step">
-          <h3>c. Base Safe, Roles and Delay</h3>
-          <p className="muted">
+          <h3>c. Base Treasury and waiting period</h3>
+          <details>
+            <summary>Advanced addresses</summary>
             Safe {short(props.plan.base.safeAddress)} · Roles {short(props.plan.base.rolesAddress)} · Delay{" "}
             {short(props.plan.base.delayAddress)} · 0xGOV {short(props.plan.govAddress)}
-          </p>
+          </details>
           {!demoWalletsEnabled() ? (
             <div className="notice">
               Before deployment, fund the connected Base owner for deployment gas and send at least
@@ -1298,6 +1536,7 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy)}
+              title={props.busy ? "Wait for the current setup action" : "Bridge demo gas to Base Sepolia"}
               onClick={() => props.run("base-bridge", async () => {
                 const hash = await bridgeSepoliaEthToBase(20_000_000_000_000_000n);
                 setTransactionHashes((current) => [...current, hash]);
@@ -1308,6 +1547,7 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy)}
+              title={props.busy ? "Wait for the current setup action" : "Fund the demo governance signer"}
               onClick={() => props.run("fund-gov", async () => {
                 if (
                   demoWalletsEnabled() &&
@@ -1331,25 +1571,28 @@ function TreasuryWizard(props: {
             <button
               className="primary"
               disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
+              title={props.busy ? "Wait for the current setup action" : baseDeployed ? "The Base Treasury is already deployed" : !deploymentConfirmed ? "Every council member must confirm the NEAR controls first" : "Deploy the Base Treasury"}
               onClick={() => props.run("base-deploy", deployBase)}
             >
-              Deploy Safe + modules
+              Deploy Base Treasury
             </button>
             <button
               className="ghost"
               disabled={Boolean(props.busy) || !baseDeployed}
+              title={props.busy ? "Wait for the current setup action" : !baseDeployed ? "Deploy the Base Treasury first" : "Prepare the owner configuration"}
               onClick={() => props.run("safe-prepare", async () => {
                 setSafeBatch(await buildSafeBatch(props.plan));
                 setSignatures([]);
               })}
             >
-              Prepare Safe batch
+              Prepare owner setup
             </button>
             {demoWalletsEnabled() ? props.plan.council.map((member) => (
               <button
                 key={member.evmAddress}
                 className="ghost"
                 disabled={Boolean(props.busy) || !baseDeployed}
+                title={props.busy ? "Wait for the current setup action" : !baseDeployed ? "Deploy the Base Treasury first" : `Sign as ${short(member.evmAddress)}`}
                 onClick={() => props.run(`safe-sign-${member.memberId}`, () => collectSafeSignature(member.evmAddress))}
               >
                 Sign as {short(member.evmAddress)} ({signatures.length}/{props.plan.threshold})
@@ -1358,6 +1601,7 @@ function TreasuryWizard(props: {
               <button
                 className="ghost"
                 disabled={Boolean(props.busy) || !baseDeployed}
+                title={props.busy ? "Wait for the current setup action" : !baseDeployed ? "Deploy the Base Treasury first" : "Sign with the connected owner wallet"}
                 onClick={() => props.run("safe-sign", () => collectSafeSignature())}
               >
                 Sign as owner ({signatures.length}/{props.plan.threshold})
@@ -1366,15 +1610,16 @@ function TreasuryWizard(props: {
             <button
               className="ghost"
               disabled={Boolean(props.busy) || signatures.length < props.plan.threshold}
+              title={props.busy ? "Wait for the current setup action" : signatures.length < props.plan.threshold ? `${props.plan.threshold - signatures.length} more signature(s) required` : "Execute the owner configuration"}
               onClick={() => props.run("safe-execute", executeBatch)}
             >
-              Execute Safe batch
+              Execute owner setup
             </button>
           </div>
           {!deploymentConfirmed ? (
             <div className="alert">
-              Safe deployment remains blocked until every proven council member independently reads
-              Vault and relay from NEAR RPC and confirms the same deployment digest.
+              Base Treasury deployment remains blocked until every proven council member independently reads
+              the NEAR controls from RPC and confirms the same deployment digest.
             </div>
           ) : null}
         </div>
@@ -1384,6 +1629,7 @@ function TreasuryWizard(props: {
         <button
           className="primary"
           disabled={Boolean(props.busy) || !baseDeployed || signatures.length < props.plan.threshold}
+          title={props.busy ? "Wait for the current setup action" : !baseDeployed ? "Deploy the Base Treasury first" : signatures.length < props.plan.threshold ? "Complete the council owner signatures first" : "Register the verified Treasury"}
           onClick={() => props.run("register", async () => {
             const registered = await api<TreasuryView>("/v1/console/treasury/register", {
               method: "POST",
@@ -1425,15 +1671,20 @@ function Summary({ treasury }: { treasury: TreasuryView }) {
       </p>
       <table>
         <tbody>
-          <tr><td>DAO</td><td><a href={explorerNear(treasury.daoAccountId)} target="_blank" rel="noreferrer">{treasury.daoAccountId}</a></td></tr>
+          <tr><td>Treasury council</td><td><a href={explorerNear(treasury.daoAccountId)} target="_blank" rel="noreferrer">{treasury.daoAccountId}</a></td></tr>
+          <tr><td>Base account</td><td><a href={explorerBase(treasury.safeAddress)} target="_blank" rel="noreferrer">{treasury.safeAddress}</a></td></tr>
+        </tbody>
+      </table>
+      <details>
+        <summary>Advanced</summary>
+        <table><tbody>
           <tr><td>Vault</td><td><a href={explorerNear(treasury.vaultAccountId)} target="_blank" rel="noreferrer">{treasury.vaultAccountId}</a></td></tr>
           <tr><td>Relay</td><td><a href={explorerNear(treasury.relayAccountId)} target="_blank" rel="noreferrer">{treasury.relayAccountId}</a></td></tr>
-          <tr><td>Safe</td><td><a href={explorerBase(treasury.safeAddress)} target="_blank" rel="noreferrer">{treasury.safeAddress}</a></td></tr>
           <tr><td>Roles</td><td><a href={explorerBase(treasury.rolesAddress)} target="_blank" rel="noreferrer">{treasury.rolesAddress}</a></td></tr>
           <tr><td>Delay</td><td><a href={explorerBase(treasury.delayAddress)} target="_blank" rel="noreferrer">{treasury.delayAddress}</a></td></tr>
           <tr><td>0xGOV</td><td><a href={explorerBase(treasury.govAddress)} target="_blank" rel="noreferrer">{treasury.govAddress}</a></td></tr>
-        </tbody>
-      </table>
+        </tbody></table>
+      </details>
     </section>
   );
 }
@@ -1468,12 +1719,14 @@ function AgentForm(props: {
   return (
     <div className="stack">
       <div className="row wrap">
-        <input placeholder="Agent name" value={name} onChange={(event) => setName(event.target.value)} />
-        <input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} />
-        <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
+        <label>Agent name<input placeholder="Invoice agent" value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label>Agent public key<input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} /></label>
+        <label>Role<input placeholder="purchasing" value={role} onChange={(event) => setRole(event.target.value)} /></label>
         <button className="secondary" type="button" onClick={generateAgentKey}>Generate & download key</button>
         <button
           className="primary"
+          disabled={!name.trim() || !nearPublicKey.trim() || !role.trim()}
+          title={!name.trim() || !nearPublicKey.trim() || !role.trim() ? "Enter the agent name, public key and role" : "Create the agent and show its one-time API key"}
           onClick={() =>
             void (async () => {
               try {
@@ -1570,9 +1823,10 @@ export function MandatePanel(props: {
       .then(([agentResult, registryResult]) => {
         setAgents(agentResult.agents);
         setRegistry(registryResult);
-        if (agentResult.agents[0]) {
-          setAgentAccount((current) => current || agentResult.agents[0]!.nearAccountId);
-          setRole(agentResult.agents[0].role);
+        const firstAgent = agentResult.agents[0];
+        if (firstAgent) {
+          setAgentAccount((current) => current || firstAgent.nearAccountId);
+          setRole(firstAgent.role);
         }
       })
       .catch((cause: unknown) => props.onError(String(cause)));
@@ -1634,7 +1888,7 @@ export function MandatePanel(props: {
   return (
     <div className="stack">
       <p className="muted">
-        Define the business mandate. MandateOS converts USDC values to six-decimal on-chain amounts and prepares unsigned DAO proposals.
+        Define the agent's spending permission. Amounts use six-decimal USDC values.
       </p>
       <div className="business-form">
         <label>
@@ -1651,7 +1905,7 @@ export function MandatePanel(props: {
             {agents.length === 0 ? <option value="">Create an agent first</option> : null}
             {agents.map((agent) => (
               <option key={agent.id} value={agent.nearAccountId}>
-                {agent.name} · {agent.evmAddress ?? "0xAAA pending"}
+                {agent.name} · {agent.evmAddress ?? "Base account pending"}
               </option>
             ))}
           </select>
@@ -1665,8 +1919,8 @@ export function MandatePanel(props: {
           <input aria-label="Maximum per payment in USDC" inputMode="decimal" value={maxPerTx} onChange={(event) => setMaxPerTx(event.target.value)} />
         </label>
         <label>
-          Monthly budget (USDC)
-          <input aria-label="Monthly budget in USDC" inputMode="decimal" value={budget} onChange={(event) => setBudget(event.target.value)} />
+          Budget per period (USDC)
+          <input aria-label="Budget per period in USDC" inputMode="decimal" value={budget} onChange={(event) => setBudget(event.target.value)} />
         </label>
         <label>
           Period
@@ -1697,10 +1951,10 @@ export function MandatePanel(props: {
             </label>
           );
         })}
-        {registry.suppliers.length === 0 ? <div className="state">Add and approve a supplier in Settings first.</div> : null}
+        {registry.suppliers.length === 0 ? <div className="state">No approved suppliers. <a href="/settings">Add a supplier</a>.</div> : null}
       </fieldset>
       <div className="mandate-summary">
-        <strong>Mandate summary</strong>
+        <strong>Spending permission summary</strong>
         <p>
           {agents.find((agent) => agent.nearAccountId === agentAccount)?.name ?? "The selected agent"} can pay {registry.suppliers
             .filter((supplier) => selectedSupplierIds.includes(supplier.id))
@@ -1709,7 +1963,7 @@ export function MandatePanel(props: {
         </p>
       </div>
       <div className="wallet-signing-context">
-        <span>DAO signatures</span>
+        <span>Council signatures</span>
         <strong>{signerId || "Connect a NEAR wallet in the global wallet bar"}</strong>
       </div>
       {demoWalletsEnabled() ? (
@@ -1729,13 +1983,14 @@ export function MandatePanel(props: {
             </tbody>
           </table>
         ) : (
-          <button className="ghost" disabled={busy} onClick={() => void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)))}>
+          <button className="ghost" disabled={busy} title={busy ? "Wait for the current token action" : "Read the test-token state"} onClick={() => void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)))}>
             Read test-token state
           </button>
         )}
         <button
           className="primary"
           disabled={!signerId || busy || budgetTokenStatus?.decimals !== 6}
+          title={!signerId ? "Connect a council NEAR wallet" : busy ? "Wait for the current token action" : budgetTokenStatus?.decimals !== 6 ? "The budget token must use six decimals" : "Register storage and mint the UAT budget"}
           onClick={() => {
             void (async () => {
               setBusy(true);
@@ -1763,6 +2018,7 @@ export function MandatePanel(props: {
       <button
         className="primary"
         disabled={busy || !agentAccount || selectedSupplierIds.length === 0 || !budgetTokenAddress}
+        title={busy ? "Wait for the current permission review" : !agentAccount ? "Select an agent" : selectedSupplierIds.length === 0 ? "Select at least one approved supplier" : !budgetTokenAddress ? "Approve a supplier contract with a USDC token first" : "Review this spending permission"}
         onClick={() => {
           void (async () => {
             setBusy(true);
@@ -1780,19 +2036,19 @@ export function MandatePanel(props: {
           })();
         }}
       >
-        {busy ? "Compiling…" : "Review mandate"}
+        {busy ? "Compiling…" : "Review spending permission"}
       </button>
 
       {props.preview ? (
         <>
           <div className="row wrap">
-            <span className="pill">roleKey {short(props.preview.roleKey)}</span>
-            <span className="pill">allowance {short(props.preview.allowanceKey)}</span>
-            <span className="pill">agent: {props.preview.agentStatus}</span>
+            <span className="pill">Agent status: {props.preview.agentStatus === "ready" ? "Ready" : "Setup required"}</span>
           </div>
           {props.preview.warnings.map((warning) => (
             <div key={warning} className="alert warning">{warning}</div>
           ))}
+          <details>
+            <summary>Advanced on-chain details</summary>
           <h3>Diff</h3>
           <table>
             <thead><tr><th>Field</th><th>Current</th><th>Next</th></tr></thead>
@@ -1820,13 +2076,18 @@ export function MandatePanel(props: {
               <pre>{JSON.stringify(props.preview.guard, null, 2)}</pre>
             </div>
           </div>
-          <h3>Ordered DAO execution</h3>
+          </details>
+          <h3>Council decisions</h3>
           <div className="stack">
             {orderedMandateProposals(props.preview).map((proposal, index, proposals) => {
               const description = onChainProposalDescription(proposal);
               const run = proposalRuns[description];
               const state = run?.state ?? "Not proposed";
               const proposalWarnings = proposal.warnings ?? [];
+              const decision = proposalDecision({
+                kind: onChainProposalKind(proposal),
+                relayAccountId: props.treasury.relayAccountId,
+              });
               const previousDescription = index > 0
                 ? onChainProposalDescription(proposals[index - 1]!)
                 : null;
@@ -1842,11 +2103,13 @@ export function MandatePanel(props: {
               return (
                 <div key={description} className="step">
                   <div className="row wrap">
-                    <strong>{index + 1}. {proposal.description}</strong>
+                    <strong>{index + 1}. {decision.title}</strong>
                     <span className="pill">
                       {state}{run ? ` · #${run.id} · ${run.rawStatus}` : ""}
                     </span>
                   </div>
+                  {decision.details.map((detail) => <div key={detail} className="small">{detail}</div>)}
+                  {decision.warnings.map((warning) => <div key={warning} className="alert warning">{warning}</div>)}
                   {!previousExecuted ? (
                     <div className="muted small">Waiting for the previous proposal to be Executed on-chain.</div>
                   ) : null}
@@ -1860,6 +2123,7 @@ export function MandatePanel(props: {
                     <button
                       className="primary"
                       disabled={!signerId || busy || !previousExecuted || proposalWarnings.length > 0}
+                      title={!signerId ? "Connect a council NEAR wallet" : busy ? "Wait for the current council action" : !previousExecuted ? "The previous decision must execute first" : proposalWarnings.length > 0 ? proposalWarnings.join(" ") : `${action} this decision`}
                       onClick={() => {
                         void (async () => {
                           setBusy(true);
@@ -1942,6 +2206,7 @@ export function MandatePanel(props: {
                     <button
                       className="ghost"
                       disabled={!signerId || busy}
+                      title={!signerId ? "Connect a council NEAR wallet" : busy ? "Wait for the current council action" : "Run the UAT veto scenario"}
                       onClick={() => {
                         void (async () => {
                           setBusy(true);
@@ -2049,20 +2314,21 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
         <button className="ghost" onClick={() => void load().catch((cause) => props.onError(String(cause)))}>Refresh</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>0xAAA</th><th>Status</th><th /></tr></thead>
+        <thead><tr><th>Name</th><th>Role</th><th>NEAR account</th><th>Base account</th><th>Status</th><th /></tr></thead>
         <tbody>
           {agents.map((agent) => (
             <tr key={agent.id}>
               <td>{agent.name}</td>
               <td>{agent.role}</td>
               <td>{agent.nearAccountId}</td>
-              <td>{agent.evmAddress ? short(agent.evmAddress) : "derive after register_agent"}</td>
+              <td>{agent.evmAddress ? short(agent.evmAddress) : "Created after council registration"}</td>
               <td>{agent.active ? "active" : "revoked"}</td>
               <td>
                 <div className="row wrap">
                   <button
                     className="primary"
                     disabled={busy}
+                    title={busy ? "Wait for the current agent action" : "Create the limited NEAR account and verify its access key"}
                     onClick={() => {
                       void (async () => {
                         setBusy(true);
@@ -2081,6 +2347,7 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
                   <button
                     className="ghost"
                     disabled={busy}
+                    title={busy ? "Wait for the current agent action" : "Refresh this agent's on-chain state"}
                     onClick={() => {
                       void (async () => {
                         setBusy(true);
@@ -2096,7 +2363,7 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
                       })();
                     }}
                   >
-                    On-chain state
+                    Advanced state
                   </button>
                 </div>
               </td>
@@ -2123,6 +2390,7 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
           <button
             className="primary"
             disabled={busy || !provisioning.browser.valid}
+            title={busy ? "Wait for the current agent action" : !provisioning.browser.valid ? "The browser RPC attestation must pass first" : "Confirm the limited access key"}
             onClick={() => {
               void (async () => {
                 setBusy(true);

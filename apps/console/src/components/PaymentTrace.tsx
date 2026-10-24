@@ -9,6 +9,17 @@ export interface TraceRow extends TraceStep {
 }
 
 const BASE_STEPS = ["Agent request", "Guard visa", "Vault", "MPC signature", "Base broadcast", "Zodiac", "Confirmed"];
+const STEP_LABELS: Record<string, string> = {
+  "Agent request": "Agent request",
+  "Guard visa": "Policy check",
+  Vault: "Spending limit",
+  "MPC signature": "Transaction signature",
+  "Base broadcast": "Base submission",
+  Zodiac: "Treasury permission",
+  Confirmed: "Confirmed",
+  Reverted: "Failed",
+  Cancelled: "Cancelled",
+};
 
 function doneCount(state: string): number {
   switch (state) {
@@ -49,7 +60,7 @@ export function PaymentTrace({ steps, state }: { steps: TraceStep[]; state: stri
         <li key={step.step} className={step.done ? "trace-step done" : "trace-step"}>
           <div className="trace-dot" aria-hidden="true" />
           <div className="trace-body">
-            <strong>{step.step}</strong>
+            <strong>{STEP_LABELS[step.step] ?? "Unrecognized step"}</strong>
             <div className="muted small">
               {step.done ? (step.at ? new Date(step.at).toLocaleString() : "Done") : "Pending"}
             </div>

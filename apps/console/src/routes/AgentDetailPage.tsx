@@ -21,6 +21,12 @@ interface Detail {
   audit: Array<{ id: string; action: string; actorId: string; createdAt: string }>;
 }
 
+function mandateField(mandate: Record<string, unknown> | null, field: string): unknown {
+  const config = mandate?.config;
+  if (!config || typeof config !== "object" || !(field in config)) return undefined;
+  return Reflect.get(config, field);
+}
+
 export function AgentDetailPage() {
   const { id = "" } = useParams();
   const client = useQueryClient();
@@ -42,10 +48,9 @@ export function AgentDetailPage() {
           <>
             <div className="metrics">
               <div className="metric"><span>Status</span><strong>{query.data.agent.active ? "Active" : "Revoked"}</strong></div>
-              <div className="metric"><span>0xAAA</span><strong className="mono small">{short(query.data.agent.evmAddress)}</strong></div>
-              <div className="metric"><span>Gas ETH</span><strong>{formatEth(query.data.ethBalance)}</strong></div>
-              <div className="metric"><span>Gas NEAR</span><strong>{formatToken(query.data.nearGasBalanceYocto, 24, "NEAR", 4)}</strong></div>
-              <div className="metric"><span>Nonce</span><strong>{formatNonce(query.data.nonce)}</strong></div>
+              <div className="metric"><span>Base account</span><strong className="mono small">{short(query.data.agent.evmAddress)}</strong></div>
+              <div className="metric"><span>Base gas</span><strong>{formatEth(query.data.ethBalance)}</strong></div>
+              <div className="metric"><span>NEAR gas</span><strong>{formatToken(query.data.nearGasBalanceYocto, 24, "NEAR", 4)}</strong></div>
             </div>
             {query.data.nearGasLow ? (
               <div className="alert error">
@@ -56,50 +61,53 @@ export function AgentDetailPage() {
             ) : null}
             {!query.data.onChain ? (
               <div className="alert error">
-                Agent is not registered in the Vault. Execute set_role, then register_agent before starting the SDK.
+                This agent is not registered for spending. Finish its spending permission before starting the agent.
               </div>
-            ) : !(query.data.onChain as { evm_address?: unknown }).evm_address ? (
+            ) : !query.data.onChain.evm_address ? (
               <div className="alert">
-                0xAAA is not derived. Start the SDK with this agent key; it will call request_derived_public_key once before prepare.
+                The Base account is pending. Start the agent once to create it before the first payment.
               </div>
             ) : null}
-            <Card title="On-chain state">
-              <table>
-                <tbody>
-                  <tr><td>Active</td><td><Status value={(query.data.onChain as { active?: unknown })?.active === true ? "active" : "revoked"} /></td></tr>
-                  <tr><td>Role</td><td>{String((query.data.onChain as { role?: unknown })?.role ?? "—")}</td></tr>
-                  <tr><td>0xAAA</td><td className="mono">{formatBytesAddress((query.data.onChain as { evm_address?: unknown })?.evm_address ?? query.data.agent.evmAddress)}</td></tr>
-                  <tr><td>Provisioning</td><td><Status value={query.data.provisioning?.status ?? "not started"} /></td></tr>
-                  <tr><td>MPC path</td><td className="mono">{String((query.data.onChain as { mpc_path?: unknown })?.mpc_path ?? query.data.agent.mpcPath)}</td></tr>
-                  <tr><td>Nonce</td><td>{formatNonce(query.data.nonce)}</td></tr>
-                  <tr><td>Budget funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>
-                  <tr><td>Budget reserved</td><td className="mono">{formatToken(query.data.budget?.reserved)}</td></tr>
-                  <tr><td>Budget spent</td><td className="mono">{formatToken(query.data.budget?.spent)}</td></tr>
-                </tbody>
-              </table>
+            <Card title="Advanced">
+              <details>
+                <summary>On-chain agent state</summary>
+                <table>
+                  <tbody>
+                    <tr><td>Active</td><td><Status value={query.data.onChain?.active === true ? "active" : "revoked"} /></td></tr>
+                    <tr><td>Role</td><td>{String(query.data.onChain?.role ?? "—")}</td></tr>
+                    <tr><td>Base account</td><td className="mono">{formatBytesAddress(query.data.onChain?.evm_address ?? query.data.agent.evmAddress)}</td></tr>
+                    <tr><td>Provisioning</td><td><Status value={query.data.provisioning?.status ?? "not started"} /></td></tr>
+                    <tr><td>MPC path</td><td className="mono">{String(query.data.onChain?.mpc_path ?? query.data.agent.mpcPath)}</td></tr>
+                    <tr><td>Nonce</td><td>{formatNonce(query.data.nonce)}</td></tr>
+                    <tr><td>Budget funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>
+                    <tr><td>Budget reserved</td><td className="mono">{formatToken(query.data.budget?.reserved)}</td></tr>
+                    <tr><td>Budget spent</td><td className="mono">{formatToken(query.data.budget?.spent)}</td></tr>
+                  </tbody>
+                </table>
+              </details>
             </Card>
-            <Card title="Current mandate">
+            <Card title="Current spending permission">
               {query.data.mandate ? (
                 <table>
                   <tbody>
-                    <tr><td>Role</td><td>{String((query.data.mandate as { config?: { enabled?: boolean } }).config?.enabled === false ? "disabled" : query.data.agent.role)}</td></tr>
-                    <tr><td>Max per tx</td><td className="mono">{formatToken(String((query.data.mandate as { config?: { max_per_tx?: string } }).config?.max_per_tx ?? "0"))}</td></tr>
+                    <tr><td>Role</td><td>{String(mandateField(query.data.mandate, "enabled") === false ? "disabled" : query.data.agent.role)}</td></tr>
+                    <tr><td>Max per tx</td><td className="mono">{formatToken(String(mandateField(query.data.mandate, "max_per_tx") ?? "0"))}</td></tr>
                     <tr><td>Funded</td><td className="mono">{formatToken(query.data.budget?.funded)}</td></tr>
                     <tr><td>Reserved</td><td className="mono">{formatToken(query.data.budget?.reserved)}</td></tr>
                     <tr><td>Spent</td><td className="mono">{formatToken(query.data.budget?.spent)}</td></tr>
                   </tbody>
                 </table>
-              ) : <div className="state">No mandate.</div>}
+              ) : <div className="state">No spending permission.</div>}
             </Card>
-            <Card title="Mandate" action={<Link to="/mandate">Open mandate</Link>}>
-              <p className="muted small">Preview the role diff and prepare the proposals.</p>
+            <Card title="Spending permission" action={<Link to="/mandate">Open settings</Link>}>
+              <p className="muted small">Preview the role changes and prepare council decisions.</p>
             </Card>
             <Card title="Actions" action={<Status value={query.data.agent.active ? "active" : "revoked"} />}>
               <div className="row wrap">
-                <SecondaryButton onClick={() => revoke.mutate()} disabled={!query.data.agent.active || revoke.isPending}>Revoke agent</SecondaryButton>
-                <SecondaryButton onClick={() => pause.mutate()} disabled={pause.isPending}>Prepare pause proposal</SecondaryButton>
+                <SecondaryButton onClick={() => revoke.mutate()} disabled={!query.data.agent.active || revoke.isPending} title={!query.data.agent.active ? "This agent is already revoked" : revoke.isPending ? "Revocation is in progress" : "Revoke this agent credential"}>Revoke agent</SecondaryButton>
+                <SecondaryButton onClick={() => pause.mutate()} disabled={pause.isPending} title={pause.isPending ? "A pause decision is being prepared" : "Prepare a council decision to pause this agent"}>Prepare pause proposal</SecondaryButton>
               </div>
-              {pause.data ? <pre>{JSON.stringify(pause.data, null, 2)}</pre> : null}
+              {pause.data ? <details><summary>Advanced proposal</summary><pre>{JSON.stringify(pause.data, null, 2)}</pre></details> : null}
             </Card>
             <Card title="Audit">
               {query.data.audit.length === 0 ? <div className="state">No audit rows.</div> : (

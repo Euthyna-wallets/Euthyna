@@ -76,12 +76,12 @@ The current repository contains:
 - `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
 - `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds three focused tests for global-hash, keyless creation, name validation and funding guards;
 - `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
-- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, wallet-proof membership claims, IP/email registration limits, per-agent API keys and append-only audit rows;
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` includes only members with verified NEP-413 + EIP-191 proofs; the founder confirms/signs the exact policy locally; every member independently re-reads Vault/relay from NEAR RPC and confirms one server-verified digest before Safe; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap;
+- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, OTP verification restricted to invitation claims, wallet-proof membership claims with four-eyes approval, IP/email registration limits, per-agent API keys and append-only audit rows ([`auth.ts`](./apps/api/src/auth.ts), [`wallet-proof.ts`](./apps/api/src/wallet-proof.ts));
+- `apps/api` treasury onboarding: `/v1/console/treasury/plan` includes only members whose NEP-413 + EIP-191 proofs another administrator approved; the founder confirms/signs the exact policy locally; every member independently re-reads Vault/relay from NEAR RPC and confirms one server-verified digest before Safe; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap ([`treasury.ts`](./apps/api/src/treasury.ts));
 - `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
 - `apps/api` agent payments: `POST /v1/operations/pay` issues a visa/escalation/refusal, then the leased `worker.ts` recovers missed MPC callbacks, broadcasts exact raw transactions, follows receipts, sends `report_status`, requests governed same-nonce cancellation and releases references only after terminal Vault state;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
-- `apps/console`: one founder-facing console with a resumable seven-step setup, global per-profile NEAR/EVM wallet bar, per-member signing inbox, business-labelled USDC mandates sourced from the approved supplier registry, readable governance effects and normal signing through NEAR Wallet Selector plus MetaMask/Rabby; explicit UAT tools appear only in demo mode;
+- `apps/console`: one founder-facing console with a resumable five-step setup, global per-profile NEAR/EVM wallet bar, per-member signing inbox, business-labelled USDC spending permissions sourced from the approved supplier registry, readable decision effects and normal signing through NEAR Wallet Selector plus MetaMask/Rabby; explicit UAT tools appear only in demo mode ([`OnboardingPage.tsx`](./apps/console/src/routes/OnboardingPage.tsx));
 - `packages/sdk`: `mandateos agent init`, local `0600` ed25519 key storage, Vault registration and one-shot `0xAAA` derivation, then `prepare → visa → authorize`, automatic authorization-hash registration, status polling and agent-authorized `cancel_nonce`;
 - `packages/mcp`: stdio MCP server exposing `pay`, `status` and `cancel` over the SDK;
 - `apps/demo-agent`: OpenAI-compatible LLM adapter wired to MCP, with nominal, changed-details, prompt-injection and direct-bypass scenarios;
@@ -131,7 +131,7 @@ Funds credited to `0xINT` are protected by the Vault but no longer by Zodiac. Th
 - on-chain or independently verified Base receipt proofs instead of trusted confirmation calls;
 - audit coverage for `omni-transaction` and the MandateOS contracts before production use.
 
-The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no email is sent and no password exists. The email remains an unverified profile identifier. Membership invitations are accepted instead by proving the admin-declared NEAR and EVM wallets with NEP-413 and EIP-191; unsigned declarations never become DAO/Safe signers. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey]).
+The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no password exists. Email is verified by a ten-minute OTP only when an invited member claims a seat. The session email must match the invitation, both wallets must pass NEP-413/EIP-191 proof, and a different administrator must approve the exact pair before it can enter the DAO/Safe council. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey], [`wallet-proof.ts`](./apps/api/src/wallet-proof.ts), [`auth-gateway.ts`](./apps/api/src/auth-gateway.ts)).
 
 ## Governance
 
@@ -243,7 +243,7 @@ pnpm --filter @mandateos/api dev
 pnpm --filter @mandateos/api worker
 ```
 
-Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build. Better Auth email invitations are blocked; a `/onboarding?member=<id>` wallet invitation is claimed only after valid NEP-413 and EIP-191 proofs. Agent credentials are per-agent API keys in `x-api-key`.
+Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled. Better Auth's generic email-invitation acceptance is blocked. A `/onboarding?member=<id>` invitation requires OTP verification of the invited email, valid NEP-413 and EIP-191 proofs, then approval by a different administrator. Agent credentials are per-agent API keys in `x-api-key` ([`auth.ts`](./apps/api/src/auth.ts), [`app.ts`](./apps/api/src/app.ts)).
 
 Initialize an agent key locally; only copy the printed public key into the
 console:

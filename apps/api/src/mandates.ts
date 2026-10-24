@@ -136,6 +136,12 @@ function b64(bytes: Hex): string {
   return Buffer.from(bytes.slice(2), "hex").toString("base64");
 }
 
+function formatUsdc(amount: bigint): string {
+  const whole = amount / 1_000_000n;
+  const fraction = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return `${whole}${fraction ? `.${fraction}` : ""} USDC`;
+}
+
 const multiSendAbi = [{
   type: "function",
   name: "multiSend",
@@ -271,6 +277,14 @@ export class MandateService implements MandateGateway {
     const allowanceBalance = allowanceExists && currentAllowance.balance < budget
       ? currentAllowance.balance
       : budget;
+    const allowanceBudgetBefore = currentAllowance.maxRefill;
+    if (allowanceBudgetBefore !== budget) {
+      diff.push({
+        field: "budget_per_period",
+        current: allowanceExists ? allowanceBudgetBefore.toString() : null,
+        next: budget.toString(),
+      });
+    }
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
     if (resolvedAgentAddress) {
@@ -542,6 +556,9 @@ export class MandateService implements MandateGateway {
           : []),
         ...(zodiacGas && !zodiacGas.sufficientBalance
           ? [`0xGOV needs ${zodiacGas.requiredBalance} wei but holds ${zodiacGas.senderBalance} wei`]
+          : []),
+        ...(allowanceExists && budget > allowanceBudgetBefore
+          ? [`Budget per period increases from ${formatUsdc(allowanceBudgetBefore)} to ${formatUsdc(budget)}.`]
           : []),
         "The server prepares proposals only. It never signs a DAO, Vault or Safe transaction.",
       ],

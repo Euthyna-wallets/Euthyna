@@ -24,7 +24,7 @@ import type { MandateGateway, MandatePreview } from "./mandates.js";
 import type { RegistryService } from "./registry-db.js";
 import type { PaymentService } from "./payments.js";
 import type { ConsoleDataService } from "./console-data.js";
-import type { WalletProofGateway } from "./wallet-proof.js";
+import { WalletProofError, type WalletProofGateway } from "./wallet-proof.js";
 
 const operation: VaultOperation = {
   op_id: Array(32).fill(1) as number[],
@@ -106,7 +106,7 @@ class FakeAuth implements AuthGateway {
   identifyPasskeyUser(headers: Headers) {
     const cookie = headers.get("cookie");
     const identity = cookie ? this.consoles.get(cookie) : null;
-    return Promise.resolve(identity ? { userId: identity.userId, email: identity.email } : null);
+    return Promise.resolve(identity ? { userId: identity.userId, email: identity.email, emailVerified: identity.emailVerified } : null);
   }
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
     const cookie = headers.get("cookie");
@@ -137,6 +137,8 @@ class FakeAuth implements AuthGateway {
       name: "Owner",
       walletProofClaimable: false,
       walletProofVerifiedAt: null,
+      walletProofApprovedAt: null,
+      walletProofApprovedBy: null,
     });
   }
 
@@ -151,6 +153,29 @@ class FakeAuth implements AuthGateway {
       name: input.name,
       walletProofClaimable: true,
       walletProofVerifiedAt: null,
+      walletProofApprovedAt: null,
+      walletProofApprovedBy: null,
+    });
+  }
+
+  decideMemberWalletProof(
+    _organizationId: string,
+    memberId: string,
+    actorId: string,
+    input: { decision: "approve" | "reject" },
+  ) {
+    return Promise.resolve({
+      id: memberId,
+      userId: "user-member",
+      role: "member",
+      nearAccountId: input.decision === "approve" ? "member.testnet" : null,
+      evmAddress: input.decision === "approve" ? "0x0000000000000000000000000000000000000001" : null,
+      email: "member@example.test",
+      name: "Member",
+      walletProofClaimable: false,
+      walletProofVerifiedAt: input.decision === "approve" ? new Date() : null,
+      walletProofApprovedAt: input.decision === "approve" ? new Date() : null,
+      walletProofApprovedBy: input.decision === "approve" ? actorId : null,
     });
   }
 
@@ -223,6 +248,7 @@ function testApp(options?: {
   treasuryStatus?: string;
   sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
   registrationRateLimitEnabled?: boolean;
+  walletProofError?: WalletProofError;
 }) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
@@ -385,17 +411,27 @@ function testApp(options?: {
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
   const walletProof: WalletProofGateway = {
-    createChallenge: async (_userId, input) => ({
-      id: "11111111-1111-4111-8111-111111111111",
-      memberId: input.memberId,
-      nearAccountId: input.nearAccountId,
-      evmAddress: input.evmAddress,
-      message: "proof",
-      nonceBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-      recipient: "mandateos.testnet",
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    }),
+    createChallenge: async (_identity, input) => {
+      if (options?.walletProofError) throw options.walletProofError;
+      return {
+        id: "11111111-1111-4111-8111-111111111111",
+        memberId: input.memberId,
+        nearAccountId: input.nearAccountId,
+        evmAddress: input.evmAddress,
+        message: "proof",
+        nonceBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        recipient: "mandateos.testnet",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+    },
     verify: async () => ({ memberId: admin.memberId, organizationId: admin.organizationId }),
+    invitation: async (_identity, memberId) => ({
+      memberId,
+      memberName: "Ben",
+      role: "member",
+      organizationName: "ACME",
+      invitedEmail: "ben@acme.test",
+    }),
   };
   const agentProvisioning = {
     provision: async () => ({
@@ -950,6 +986,23 @@ describe("treasury onboarding", () => {
       evmAddress: "0x1111111111111111111111111111111111111111",
       message: "proof",
     });
+  });
+
+  it("returns 403 when a session email does not match the invited seat", async () => {
+    const { app } = testApp({
+      walletProofError: new WalletProofError(403, "invitation_email_mismatch", "This invitation belongs to another email address"),
+    });
+    const response = await app.request("/v1/profile/wallet-proof/challenge", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: JSON.stringify({
+        memberId: "ben-invitation",
+        nearAccountId: "mallory.testnet",
+        evmAddress: "0x1111111111111111111111111111111111111111",
+      }),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "invitation_email_mismatch" });
   });
 
   it("builds a treasury plan for the session organization", async () => {

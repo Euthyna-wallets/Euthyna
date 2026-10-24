@@ -16,6 +16,7 @@ export interface AgentIdentity {
 export interface PasskeyIdentity {
   userId: string;
   email: string;
+  emailVerified: boolean;
 }
 
 export interface ConsoleIdentity extends PasskeyIdentity {
@@ -48,6 +49,8 @@ export interface MemberView {
   name: string | null;
   walletProofClaimable: boolean;
   walletProofVerifiedAt: Date | null;
+  walletProofApprovedAt: Date | null;
+  walletProofApprovedBy: string | null;
 }
 
 export interface CreateAgentInput {
@@ -105,6 +108,17 @@ export interface AuthGateway {
     memberId: string,
     input: { nearAccountId: string; evmAddress: string },
   ): Promise<MemberView | null>;
+  decideMemberWalletProof(
+    organizationId: string,
+    memberId: string,
+    actorId: string,
+    input: {
+      decision: "approve" | "reject";
+      nearAccountId?: string | undefined;
+      evmAddress?: string | undefined;
+      walletProofVerifiedAt?: string | undefined;
+    },
+  ): Promise<MemberView | null>;
   startPasskeyRegistration(
     input: { email: string; name: string; nearPublicKey?: string | undefined },
   ): Promise<Response>;
@@ -155,6 +169,8 @@ function toMemberView(member: {
   evmAddress: string | null;
   walletProofClaimable: boolean;
   walletProofVerifiedAt: Date | null;
+  walletProofApprovedAt: Date | null;
+  walletProofApprovedBy: string | null;
   user: { email: string; name: string };
 }): MemberView {
   return {
@@ -167,6 +183,8 @@ function toMemberView(member: {
     name: member.user.name,
     walletProofClaimable: member.walletProofClaimable,
     walletProofVerifiedAt: member.walletProofVerifiedAt,
+    walletProofApprovedAt: member.walletProofApprovedAt,
+    walletProofApprovedBy: member.walletProofApprovedBy,
   };
 }
 
@@ -213,7 +231,7 @@ export class BetterAuthGateway implements AuthGateway {
   async identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null> {
     const session = await this.passkeySession(headers);
     if (!session) return null;
-    return { userId: session.user.id, email: session.user.email };
+    return { userId: session.user.id, email: session.user.email, emailVerified: session.user.emailVerified };
   }
 
   async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
@@ -287,6 +305,7 @@ export class BetterAuthGateway implements AuthGateway {
         organizationId: input.organizationId,
         nearAccountId: input.nearAccountId,
         walletProofVerifiedAt: { not: null },
+        walletProofApprovedAt: { not: null },
       },
     });
     if (!member) return "member_mismatch";
@@ -440,6 +459,8 @@ export class BetterAuthGateway implements AuthGateway {
           nearAccountId: input.nearAccountId,
           evmAddress: getAddress(input.evmAddress),
           walletProofVerifiedAt: null,
+          walletProofApprovedAt: null,
+          walletProofApprovedBy: null,
           walletProofMessage: null,
           nearProofPublicKey: null,
           nearProofSignature: null,
@@ -449,6 +470,60 @@ export class BetterAuthGateway implements AuthGateway {
       this.prisma.walletProofChallenge.deleteMany({ where: { memberId } }),
       this.prisma.treasuryDeploymentConfirmation.deleteMany({ where: { memberId } }),
     ]);
+    const updated = await this.prisma.member.findUniqueOrThrow({
+      where: { id: memberId },
+      include: { user: true },
+    });
+    return toMemberView(updated);
+  }
+
+  async decideMemberWalletProof(
+    organizationId: string,
+    memberId: string,
+    actorId: string,
+    input: {
+      decision: "approve" | "reject";
+      nearAccountId?: string | undefined;
+      evmAddress?: string | undefined;
+      walletProofVerifiedAt?: string | undefined;
+    },
+  ): Promise<MemberView | null> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, organizationId },
+      include: { user: true },
+    });
+    if (!member) return null;
+    if (!member.walletProofVerifiedAt) throw new Error("wallet proof has not been verified");
+    if (member.userId === actorId) throw new Error("a member cannot approve their own wallet proof");
+    if (input.decision === "approve") {
+      if (!input.nearAccountId || !input.evmAddress || !input.walletProofVerifiedAt) {
+        throw new Error("approved wallet proof snapshot is required");
+      }
+      const result = await this.prisma.member.updateMany({
+        where: {
+          id: memberId,
+          organizationId,
+          nearAccountId: input.nearAccountId,
+          evmAddress: getAddress(input.evmAddress),
+          walletProofVerifiedAt: new Date(input.walletProofVerifiedAt),
+        },
+        data: { walletProofApprovedAt: new Date(), walletProofApprovedBy: actorId },
+      });
+      if (result.count !== 1) throw new Error("wallet proof changed during approval");
+    } else {
+      await this.prisma.member.update({
+        where: { id: memberId },
+        data: {
+          walletProofApprovedAt: null,
+          walletProofApprovedBy: null,
+          walletProofVerifiedAt: null,
+          walletProofMessage: null,
+          nearProofPublicKey: null,
+          nearProofSignature: null,
+          evmProofSignature: null,
+        },
+      });
+    }
     const updated = await this.prisma.member.findUniqueOrThrow({
       where: { id: memberId },
       include: { user: true },
