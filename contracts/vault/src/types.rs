@@ -28,6 +28,37 @@ pub struct Permission {
     pub allow_value: bool,
 }
 
+/// Result of `check_operation` (dry run of `prepare`).
+#[derive(Clone, Debug)]
+#[near(serializers = [json])]
+pub struct OperationCheck {
+    pub allowed: bool,
+    /// Refusal code, e.g. `ERR_PERMISSION_DENIED:{"status":"parameterNotAllowed","node":1}`.
+    pub reason: Option<String>,
+    pub permission_index: Option<u32>,
+    pub consumptions: Vec<AllowanceConsumption>,
+    pub measured_value: Option<U128>,
+    pub requires_delay: bool,
+    pub requires_cosign: bool,
+    /// Another operation is in flight on this wallet: `prepare` would wait.
+    pub wallet_busy: bool,
+}
+
+impl OperationCheck {
+    pub(crate) fn refused(reason: &str) -> Self {
+        Self {
+            allowed: false,
+            reason: Some(reason.to_owned()),
+            permission_index: None,
+            consumptions: Vec::new(),
+            measured_value: None,
+            requires_delay: false,
+            requires_cosign: false,
+            wallet_busy: false,
+        }
+    }
+}
+
 /// Amount charged to one allowance by an operation.
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]

@@ -807,3 +807,70 @@ fn fixture_constants_bind_the_demo_payment() {
     assert_eq!(RECIPIENT, [0x66; 20]);
     assert_eq!(ALLOWANCE_BALANCE, 1_000);
 }
+
+#[tokio::test]
+#[serial]
+async fn check_operation_explains_refusals_without_state_change() -> Result<()> {
+    let fixture = setup().await?;
+    let check = |member: String, request: Value| {
+        let vault = fixture.vault.clone();
+        async move {
+            vault
+                .view("check_operation")
+                .args_json(json!({"role": ROLE, "member": member, "request": request}))
+                .await?
+                .json::<Value>()
+                .map_err(anyhow::Error::from)
+        }
+    };
+    let agent = fixture.agent.id().to_string();
+
+    let allowed = check(agent.clone(), request("CHECK-1", 100)).await?;
+    assert_eq!(allowed["allowed"], true);
+    assert_eq!(allowed["consumptions"][0]["amount"], "100");
+    assert_eq!(allowed["requires_delay"], false);
+
+    let mut other = request("CHECK-2", 100);
+    other["calldata"] = json!(erc20_transfer([0x99; 20], 100));
+    let refused = check(agent.clone(), other).await?;
+    assert_eq!(refused["allowed"], false);
+    assert!(
+        refused["reason"]
+            .as_str()
+            .unwrap()
+            .contains("parameterNotAllowed")
+    );
+
+    let outsider = check(fixture.outsider.id().to_string(), request("CHECK-3", 100)).await?;
+    assert_eq!(outsider["reason"], "ERR_MEMBERSHIP_NOT_FOUND");
+
+    // A dry run reserves nothing: the real prepare still succeeds with the same reference.
+    let operation = prepare(&fixture, "CHECK-1", 100).await?;
+    assert_eq!(operation["consumptions"][0]["amount"], "100");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn lists_rule_changes_newest_first() -> Result<()> {
+    let fixture = setup().await?;
+    let sequence: u64 = fixture.vault.view("rule_sequence").await?.json()?;
+    assert!(sequence >= 2, "setup queues several rule changes");
+    let all: Vec<Value> = fixture
+        .vault
+        .view("list_rule_changes")
+        .args_json(json!({"before": null, "limit": 50}))
+        .await?
+        .json()?;
+    assert_eq!(all.len() as u64, sequence);
+    assert!(all.iter().all(|entry| entry["state"] == "Executed"));
+    let older: Vec<Value> = fixture
+        .vault
+        .view("list_rule_changes")
+        .args_json(json!({"before": sequence, "limit": 1}))
+        .await?
+        .json()?;
+    assert_eq!(older.len(), 1);
+    assert_eq!(older[0]["queue_id"], all[1]["queue_id"]);
+    Ok(())
+}
