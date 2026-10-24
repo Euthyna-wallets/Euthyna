@@ -10,3 +10,4 @@ packages/deployer/cache/
 dist-check/
 apps/console/test-results/
 apps/console/playwright-report/
+packages/sdk/.mandateos/

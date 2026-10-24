@@ -48,7 +48,13 @@ const addressSchema = z
   .regex(/^0x[0-9a-fA-F]{40}$/)
   .transform((value) => value as `0x${string}`);
 
-const opIdSchema = z.object({ opId: z.array(z.number().int().min(0).max(255)).length(32) });
+const opIdSchema = z.object({
+  opId: z.array(z.number().int().min(0).max(255)).length(32),
+  invoice: z.object({
+    text: z.string().max(10_000).optional(),
+    claimedRecipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  }).optional(),
+});
 const authorizationSchema = z.object({
   nearTransactionHash: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,64}$/),
 });
@@ -471,7 +477,7 @@ export function createApp({
   app.post("/v1/operations/pay", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
     const input = await parseJson(context, opIdSchema);
-    const result = await payments.pay(agent.organizationId, agent, input.opId);
+    const result = await payments.pay(agent.organizationId, agent, input.opId, input.invoice);
     return context.json(result.body, result.status);
   });
 
@@ -482,6 +488,20 @@ export function createApp({
     const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
     const input = await parseJson(context, authorizationSchema);
     return context.json(await payments.recordAuthorization(
+      agent.organizationId,
+      agent,
+      opId,
+      input.nearTransactionHash,
+    ));
+  });
+
+  app.post("/v1/operations/:opId/cancellation", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const raw = context.req.param("opId") ?? "";
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
+    const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
+    const input = await parseJson(context, authorizationSchema);
+    return context.json(await payments.recordCancellation(
       agent.organizationId,
       agent,
       opId,

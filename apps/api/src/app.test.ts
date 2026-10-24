@@ -339,6 +339,18 @@ function testApp(options?: {
       nearTransactionHash,
       state: "PossiblySigned",
     }),
+    recordCancellation: async (
+      organizationId: string,
+      agent: AgentIdentity,
+      opId: number[],
+      nearTransactionHash: string,
+    ) => ({
+      organizationId,
+      agentId: agent.agentId,
+      opId,
+      nearTransactionHash,
+      state: "CancellationRequested",
+    }),
     listEscalations: async () => [],
     decideEscalation: async () => ({}),
   } as unknown as PaymentService;
@@ -463,6 +475,23 @@ describe("agent and console boundaries", () => {
       agentId: "agent-a",
       nearTransactionHash,
       state: "PossiblySigned",
+    });
+  });
+
+  it("records an agent-signed cancellation transaction for worker recovery", async () => {
+    const { app } = testApp();
+    const nearTransactionHash = "2".repeat(43);
+    const response = await app.request(`/v1/operations/0x${"01".repeat(32)}/cancellation`, {
+      method: "POST",
+      headers: headers({ "x-api-key": "key-a" }),
+      body: JSON.stringify({ nearTransactionHash }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      organizationId: "org-1",
+      agentId: "agent-a",
+      nearTransactionHash,
+      state: "CancellationRequested",
     });
   });
 
