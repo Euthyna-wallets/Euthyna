@@ -1,6 +1,6 @@
 import { getPublicKeyAsync, verifyAsync } from "@noble/ed25519";
 import { describe, expect, it } from "vitest";
-import { bytesToHex, concatHex, hexToBytes, keccak256, stringToHex } from "viem";
+import { bytesToHex, concatHex, encodeFunctionData, hexToBytes, keccak256, stringToHex } from "viem";
 import { serializeRelayStatusReport, serializeStatusReport, serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { Guard } from "./guard.js";
@@ -9,6 +9,13 @@ import type { GovernanceOperation, Registry, VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
 const recipient = "0x1111111111111111111111111111111111111111" as const;
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }],
+  outputs: [{ type: "bool" }],
+}] as const;
 const registry: Registry = {
   clientId: "acme",
   registryVersion: 11,
@@ -28,36 +35,49 @@ function addressBytes(address: `0x${string}`): number[] {
 }
 
 function operationFor(target: `0x${string}` = recipient): VaultOperation {
+  const calldata = Array.from(hexToBytes(encodeFunctionData({
+    abi: erc20TransferAbi,
+    functionName: "transfer",
+    args: [target, 1_000_000n],
+  })));
   const operation: VaultOperation = {
     op_id: Array(32).fill(1) as number[],
     client_id: "acme",
-    agent: "researcher.agent.testnet",
+    member: "researcher.agent.testnet",
     role: "researcher",
-    intent: {
-      token: addressBytes(token),
-      recipient: addressBytes(target),
-      amount: "1000000",
+    request: {
+      chain_id: 84532,
+      target: addressBytes(token),
+      value: "0",
+      calldata,
+      allowance_amount: "1000000",
       reference: "INV-001",
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
+    permission_index: 0,
+    allowance_key: Array(32).fill(0x55),
     policy_version: 7,
     registry_version: 11,
     evm_nonce: 0,
     transaction: {
       chain_id: 84532,
       nonce: 0,
-      to: Array(20).fill(0x44) as number[],
+      to: addressBytes(token),
       value: "0",
-      input: [0xc6, 0xfe, 0x87, 0x47],
+      input: calldata,
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
     tx_digest: Array(32).fill(0) as number[],
-    expires_at_block: 1_000,
-    possibly_signed_at_block: null,
+    created_at_ns: "1",
+    expires_at_ns: "1000000000000",
+    execute_after_ns: null,
+    visa_authorized: false,
+    cosigned_by: null,
+    possibly_signed_at_ns: null,
     state: "Prepared",
     signature: null,
     signed_transaction: null,

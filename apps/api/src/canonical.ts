@@ -21,10 +21,11 @@ function u32(value: number): Uint8Array {
   return bytes;
 }
 
-function u64(value: number): Uint8Array {
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error("u64 must be a safe non-negative integer");
+function u64(value: number | string | bigint): Uint8Array {
+  const parsed = typeof value === "bigint" ? value : BigInt(value);
+  if (parsed < 0n || parsed > 0xffff_ffff_ffff_ffffn) throw new Error("u64 is out of range");
   const bytes = new Uint8Array(8);
-  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+  new DataView(bytes.buffer).setBigUint64(0, parsed, true);
   return bytes;
 }
 
@@ -51,7 +52,7 @@ export function serializeVisa(visa: GuardVisa): Uint8Array {
     u64(visa.policy_version),
     u64(visa.registry_version),
     u64(visa.visa_nonce),
-    u64(visa.expires_at_block),
+    u64(visa.expires_at_ns),
   );
 }
 
@@ -59,7 +60,7 @@ export function serializeStatusReport(report: StatusReport): Uint8Array {
   return concat(
     string(report.client_id),
     fixed(report.op_id, 32),
-    Uint8Array.of(0),
+    Uint8Array.of(report.kind === "Confirmed" ? 0 : 1),
     fixed(report.tx_hash, 32),
     u64(report.report_nonce),
     u64(report.block_number),

@@ -3,18 +3,17 @@ import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { KeyPair, Near, keyStores, type Account } from "near-api-js";
-import { bytesToHex, getAddress, hexToBytes, type Address, type Hex } from "viem";
+import { bytesToHex, encodeFunctionData, getAddress, hexToBytes, type Hex } from "viem";
 
 export const AGENT_FUNCTION_CALL_METHODS = [
   "prepare",
   "authorize",
   "cancel_nonce",
-  "request_derived_public_key",
+  "renounce_role",
 ] as const;
 
 export const AGENT_GAS = {
-  requestDerivedPublicKey: "50000000000000",
-  prepare: "10000000000000",
+  prepare: "30000000000000",
   authorize: "50000000000000",
 } as const;
 
@@ -45,6 +44,18 @@ export type PaymentRequest = Omit<
   PaymentIntent,
   "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas"
 > & Partial<Pick<PaymentIntent, "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas">>;
+
+export interface OmniRolesOperationRequest {
+  chain_id: number;
+  target: number[];
+  value: string;
+  calldata: number[];
+  allowance_amount: string;
+  reference: string;
+  gas_limit: string;
+  max_fee_per_gas: string;
+  max_priority_fee_per_gas: string;
+}
 
 export interface AgentGasQuote {
   gas: {
@@ -96,6 +107,10 @@ export type PayResult =
   | { outcome: "authorized"; opId: Hex; nearTransactionHash: string; visa: GuardApproval }
   | { outcome: "escalated"; opId: Hex; escalationId: string | null; reasons: unknown }
   | { outcome: "refused"; opId: Hex; error: string; message: string };
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "number");
+}
 
 export function operationIdHex(opId: number[]): Hex {
   if (opId.length !== 32) throw new Error("operation id must contain 32 bytes");
@@ -333,39 +348,7 @@ export class FileAgentKeyStore {
   }
 }
 
-export interface VaultAgentState {
-  role: string;
-  mpc_path: string;
-  active: boolean;
-  derived_public_key: string | null;
-  evm_address: number[] | string | null;
-}
-
-export function decodeAgentEvmAddress(value: number[] | string | null | undefined): Address | null {
-  if (value === null || value === undefined) return null;
-  const bytes = Array.isArray(value) ? Uint8Array.from(value) : Uint8Array.from(Buffer.from(value, "base64"));
-  if (bytes.length !== 20) throw new Error("Vault agent EVM address must contain 20 bytes");
-  return getAddress(bytesToHex(bytes));
-}
-
-export class AgentNotRegisteredError extends Error {
-  constructor(accountId: string) {
-    super(`agent ${accountId} is not registered in the Vault; execute set_role then register_agent first`);
-  }
-}
-
-export class AgentDerivationPendingError extends Error {
-  constructor(accountId: string) {
-    super(`agent ${accountId} has no derived 0xAAA yet; request_derived_public_key is still pending`);
-  }
-}
-
 export interface AgentNearAccount {
-  viewFunction(input: {
-    contractId: string;
-    methodName: string;
-    args: Record<string, unknown>;
-  }): Promise<unknown>;
   functionCall(input: {
     contractId: string;
     methodName: string;
@@ -375,91 +358,39 @@ export interface AgentNearAccount {
   }): Promise<{ transaction_outcome: { id: string } }>;
 }
 
-export class NearAgentVaultClient {
-  private derivationRequest: Promise<string> | null = null;
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "recipient", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+  outputs: [{ type: "bool" }],
+}] as const;
 
-  constructor(
-    private readonly account: AgentNearAccount,
-    readonly accountId: string,
-    readonly vaultAccountId: string,
-  ) {}
-
-  static async connect(input: {
-    networkId: string;
-    rpcUrl: string;
-    accountId: string;
-    privateKey: string;
-    vaultAccountId: string;
-  }): Promise<NearAgentVaultClient> {
-    const keyStore = new keyStores.InMemoryKeyStore();
-    await keyStore.setKey(
-      input.networkId,
-      input.accountId,
-      KeyPair.fromString(input.privateKey as `ed25519:${string}`),
-    );
-    const near = new Near({ networkId: input.networkId, nodeUrl: input.rpcUrl, keyStore });
-    const account = await near.account(input.accountId);
-    return new NearAgentVaultClient(account as unknown as AgentNearAccount, input.accountId, input.vaultAccountId);
-  }
-
-  async getAgent(): Promise<VaultAgentState | null> {
-    return this.account.viewFunction({
-      contractId: this.vaultAccountId,
-      methodName: "get_agent",
-      args: { agent: this.accountId },
-    }) as Promise<VaultAgentState | null>;
-  }
-
-  async ensureDerivedAddress(options: { attempts?: number; intervalMs?: number } = {}): Promise<{
-    address: Address;
-    requested: boolean;
-    nearTransactionHash: string | null;
-  }> {
-    const initial = await this.getAgent();
-    if (!initial) throw new AgentNotRegisteredError(this.accountId);
-    const existing = decodeAgentEvmAddress(initial.evm_address);
-    if (existing) return { address: existing, requested: false, nearTransactionHash: null };
-
-    const requested = this.derivationRequest === null;
-    this.derivationRequest ??= this.account.functionCall({
-      contractId: this.vaultAccountId,
-      methodName: "request_derived_public_key",
-      args: { agent: this.accountId },
-      gas: AGENT_GAS.requestDerivedPublicKey,
-      attachedDeposit: "0",
-    }).then((outcome) => outcome.transaction_outcome.id);
-    const nearTransactionHash = await this.derivationRequest;
-    const attempts = options.attempts ?? 20;
-    const intervalMs = options.intervalMs ?? 1_000;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const state = await this.getAgent();
-      const address = decodeAgentEvmAddress(state?.evm_address);
-      if (address) return { address, requested, nearTransactionHash };
-      if (attempt + 1 < attempts && intervalMs > 0) await sleep(intervalMs);
-    }
-    throw new AgentDerivationPendingError(this.accountId);
-  }
-
-  async prepare(intent: Record<string, unknown>): Promise<unknown> {
-    await this.ensureDerivedAddress();
-    return this.account.functionCall({
-      contractId: this.vaultAccountId,
-      methodName: "prepare",
-      args: { intent },
-      gas: AGENT_GAS.prepare,
-      attachedDeposit: "0",
-    });
-  }
-
-  async authorize(opId: number[] | string, approval: Record<string, unknown>): Promise<unknown> {
-    return this.account.functionCall({
-      contractId: this.vaultAccountId,
-      methodName: "authorize",
-      args: { op_id: opId, approval },
-      gas: AGENT_GAS.authorize,
-      attachedDeposit: "0",
-    });
-  }
+export function omniRolesPaymentRequest(
+  intent: PaymentIntent,
+  chainId: number,
+): OmniRolesOperationRequest {
+  const token = getAddress(bytesToHex(Uint8Array.from(intent.token)));
+  const recipient = getAddress(bytesToHex(Uint8Array.from(intent.recipient)));
+  const calldata = encodeFunctionData({
+    abi: erc20TransferAbi,
+    functionName: "transfer",
+    args: [recipient, BigInt(intent.amount)],
+  });
+  return {
+    chain_id: chainId,
+    target: evmAddressBytes(token),
+    value: "0",
+    calldata: Array.from(hexToBytes(calldata)),
+    allowance_amount: intent.amount,
+    reference: intent.reference,
+    gas_limit: intent.gas_limit,
+    max_fee_per_gas: intent.max_fee_per_gas,
+    max_priority_fee_per_gas: intent.max_priority_fee_per_gas,
+  };
 }
 
 export function decodeNearSuccessValue(outcome: unknown): unknown {
@@ -473,19 +404,12 @@ export function decodeNearSuccessValue(outcome: unknown): unknown {
 }
 
 export class NearVaultGateway implements VaultGateway {
-  private readonly agent: NearAgentVaultClient;
-
   private constructor(
     private readonly account: Account,
-    private readonly accountId: string,
     private readonly vaultAccountId: string,
-  ) {
-    this.agent = new NearAgentVaultClient(
-      account as unknown as AgentNearAccount,
-      accountId,
-      vaultAccountId,
-    );
-  }
+    private readonly role: string,
+    private readonly chainId: number,
+  ) {}
 
   static async connect(input: {
     networkId: string;
@@ -493,6 +417,8 @@ export class NearVaultGateway implements VaultGateway {
     accountId: string;
     privateKey: string;
     vaultAccountId: string;
+    role: string;
+    chainId: number;
   }): Promise<NearVaultGateway> {
     const keyStore = new keyStores.InMemoryKeyStore();
     await keyStore.setKey(
@@ -501,17 +427,29 @@ export class NearVaultGateway implements VaultGateway {
       KeyPair.fromString(input.privateKey as `ed25519:${string}`),
     );
     const near = new Near({ networkId: input.networkId, nodeUrl: input.rpcUrl, keyStore });
-    return new NearVaultGateway(await near.account(input.accountId), input.accountId, input.vaultAccountId);
+    return new NearVaultGateway(
+      await near.account(input.accountId),
+      input.vaultAccountId,
+      input.role,
+      input.chainId,
+    );
   }
 
   async prepare(intent: PaymentIntent): Promise<PreparedOperation> {
-    await this.agent.ensureDerivedAddress();
-    const outcome = await this.call("prepare", { intent }, AGENT_GAS.prepare);
+    const request = omniRolesPaymentRequest(intent, this.chainId);
+    const outcome = await this.call("prepare", { role: this.role, request }, AGENT_GAS.prepare);
     const operation = decodeNearSuccessValue(outcome);
-    if (!operation || typeof operation !== "object" || !("op_id" in operation)) {
-      throw new Error("Vault prepare did not return an operation");
+    if (
+      !operation ||
+      typeof operation !== "object" ||
+      !("op_id" in operation) ||
+      !isNumberArray(operation.op_id) ||
+      !("state" in operation) ||
+      typeof operation.state !== "string"
+    ) {
+      throw new Error("OmniRoles prepare did not return an operation");
     }
-    return operation as PreparedOperation;
+    return { ...operation, op_id: operation.op_id, state: operation.state };
   }
 
   async authorize(opId: number[], approval: GuardApproval): Promise<string> {
@@ -526,6 +464,11 @@ export class NearVaultGateway implements VaultGateway {
       max_fee_per_gas: fees.maxFeePerGas,
       max_priority_fee_per_gas: fees.maxPriorityFeePerGas,
     }, AGENT_GAS.authorize);
+    return outcome.transaction_outcome.id;
+  }
+
+  async renounceRole(): Promise<string> {
+    const outcome = await this.call("renounce_role", { role: this.role }, AGENT_GAS.prepare);
     return outcome.transaction_outcome.id;
   }
 

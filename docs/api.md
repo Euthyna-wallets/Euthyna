@@ -3,6 +3,19 @@
 Base URL: `http://localhost:3000`. All bodies are JSON. The server never stores an
 agent's NEAR function-call private key: the console registers only its public key.
 
+> **OmniRoles cutover (#40):** task 1a replaces per-agent EVM addresses and
+> Safe/Zodiac execution with one MPC-derived wallet per chain. Agent `prepare`
+> now sends `{ role, request }`, where `request` contains `chain_id`, direct
+> `target`, raw `calldata`, ETH `value`, `allowance_amount`, reference and
+> EIP-1559 fields. The worker reads `get_wallet(chain_id)`, broadcasts that exact
+> direct transaction, executes matured queued operations, and reports both
+> `Confirmed` and `Failed` receipts
+> ([`contracts/vault/src/types.rs`](../contracts/vault/src/types.rs),
+> [`packages/sdk/src/index.ts`](../packages/sdk/src/index.ts),
+> [`apps/api/src/operation-worker.ts`](../apps/api/src/operation-worker.ts)).
+> Safe/Relay/Zodiac onboarding routes documented below remain a legacy PR #36
+> surface until issue #40 task 2 removes them; they are not used by OmniRoles.
+
 ## Identities
 
 | Identity | Credential | Header | Routes |

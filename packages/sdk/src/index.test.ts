@@ -6,20 +6,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   AGENT_FUNCTION_CALL_METHODS,
-  AGENT_GAS,
-  AgentDerivationPendingError,
-  AgentNotRegisteredError,
   decodeNearSuccessValue,
   FileAgentKeyStore,
   HttpAgentApi,
   MandateAgentClient,
-  NearAgentVaultClient,
+  omniRolesPaymentRequest,
   proposedAgentAccountId,
   type AgentApiGateway,
   type PaymentIntent,
   type VaultGateway,
-  type AgentNearAccount,
-  type VaultAgentState,
 } from "./index.js";
 
 const opId = Array(32).fill(1) as number[];
@@ -179,79 +174,28 @@ describe("FileAgentKeyStore", () => {
   });
 });
 
-const derivedBytes = Array.from(Buffer.from("1111111111111111111111111111111111111111", "hex"));
-const registered = (evm: number[] | null): VaultAgentState => ({
-  role: "researcher",
-  mpc_path: "agents/researcher/base",
-  active: true,
-  derived_public_key: evm ? "secp256k1:key" : null,
-  evm_address: evm,
-});
-
-class FakeAccount implements AgentNearAccount {
-  views: Array<VaultAgentState | null> = [];
-  calls: Array<{ methodName: string; gas: string; deposit: string }> = [];
-
-  viewFunction(): Promise<unknown> {
-    return Promise.resolve(this.views.shift() ?? null);
-  }
-
-  functionCall(input: {
-    methodName: string;
-    gas: string;
-    attachedDeposit: string;
-  }): Promise<{ transaction_outcome: { id: string } }> {
-    this.calls.push({
-      methodName: input.methodName,
-      gas: input.gas,
-      deposit: input.attachedDeposit,
-    });
-    return Promise.resolve({ transaction_outcome: { id: `tx-${input.methodName}` } });
-  }
-}
-
-describe("agent provisioning SDK", () => {
-  it("derives the account id and exposes the exact FunctionCall allowlist", () => {
+describe("OmniRoles SDK", () => {
+  it("derives the account id and exposes only member-authorized FunctionCall methods", () => {
     expect(proposedAgentAccountId("Compta Bot", "mandateos.testnet")).toBe("compta-bot-agent.mandateos.testnet");
     expect(AGENT_FUNCTION_CALL_METHODS).toEqual([
       "prepare",
       "authorize",
       "cancel_nonce",
-      "request_derived_public_key",
+      "renounce_role",
     ]);
   });
 
-  it("requests derivation once and then uses measured payment gas", async () => {
-    const account = new FakeAccount();
-    account.views.push(registered(null), registered(derivedBytes), registered(derivedBytes));
-    const client = new NearAgentVaultClient(account, "agent.testnet", "vault.testnet");
-    await expect(client.ensureDerivedAddress({ attempts: 1, intervalMs: 0 })).resolves.toMatchObject({
-      requested: true,
-      nearTransactionHash: "tx-request_derived_public_key",
+  it("encodes a direct ERC-20 transfer from the shared chain wallet", () => {
+    const request = omniRolesPaymentRequest(intent, 84_532);
+    expect(request).toMatchObject({
+      chain_id: 84_532,
+      target: intent.token,
+      value: "0",
+      allowance_amount: intent.amount,
+      reference: intent.reference,
     });
-    await client.prepare({ amount: "1" });
-    await client.authorize([1, 2], { visa: {} });
-    expect(account.calls.map(({ methodName, gas, deposit }) => ({ methodName, gas, deposit }))).toEqual([
-      {
-        methodName: "request_derived_public_key",
-        gas: AGENT_GAS.requestDerivedPublicKey,
-        deposit: "0",
-      },
-      { methodName: "prepare", gas: AGENT_GAS.prepare, deposit: "0" },
-      { methodName: "authorize", gas: AGENT_GAS.authorize, deposit: "0" },
-    ]);
-  });
-
-  it("fails explicitly when registration or the derivation callback is missing", async () => {
-    const missing = new FakeAccount();
-    missing.views.push(null);
-    await expect(new NearAgentVaultClient(missing, "missing.testnet", "vault.testnet").prepare({ amount: "1" }))
-      .rejects.toBeInstanceOf(AgentNotRegisteredError);
-
-    const pending = new FakeAccount();
-    pending.views.push(registered(null), registered(null));
-    await expect(new NearAgentVaultClient(pending, "agent.testnet", "vault.testnet")
-      .ensureDerivedAddress({ attempts: 1, intervalMs: 0 }))
-      .rejects.toBeInstanceOf(AgentDerivationPendingError);
+    expect(request.calldata.slice(0, 4)).toEqual([0xa9, 0x05, 0x9c, 0xbb]);
+    expect(request.calldata.slice(16, 36)).toEqual(intent.recipient);
+    expect(BigInt(`0x${Buffer.from(request.calldata.slice(36)).toString("hex")}`)).toBe(1_000_000n);
   });
 });

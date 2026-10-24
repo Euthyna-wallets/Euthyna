@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@mandateos/db";
-import { bytesToHex, encodeFunctionData, getAddress, type Hex } from "viem";
+import { bytesToHex, decodeFunctionData, encodeFunctionData, getAddress, type Hex } from "viem";
 import { z } from "zod";
 
 import {
@@ -8,7 +8,6 @@ import {
   type BaseGasQuote,
   type BaseGasQuoter,
 } from "./base-gas.js";
-import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { Guard, GuardResult } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
@@ -25,32 +24,24 @@ const erc20TransferAbi = [{
   ],
   outputs: [{ type: "bool" }],
 }] as const;
-const rolesExecutionAbi = [{
-  type: "function",
-  name: "execTransactionWithRole",
-  stateMutability: "nonpayable",
-  inputs: [
-    { name: "to", type: "address" },
-    { name: "value", type: "uint256" },
-    { name: "data", type: "bytes" },
-    { name: "operation", type: "uint8" },
-    { name: "roleKey", type: "bytes32" },
-    { name: "shouldRevert", type: "bool" },
-  ],
-  outputs: [{ type: "bool" }],
-}] as const;
 const roleGasSchema = z.object({
-  roles_modifier: z.array(z.number().int().min(0).max(255)).length(20),
-  role_key: z.array(z.number().int().min(0).max(255)).length(32),
-  gas_limit: z.string().regex(/^\d+$/),
-  max_fee_per_gas: z.string().regex(/^\d+$/),
-  max_priority_fee_per_gas: z.string().regex(/^\d+$/),
+  config: z.object({
+    gas_limit: z.string().regex(/^\d+$/),
+    max_fee_per_gas: z.string().regex(/^\d+$/),
+    max_priority_fee_per_gas: z.string().regex(/^\d+$/),
+  }),
+});
+const chainWalletSchema = z.object({
+  address: z.array(z.number().int().min(0).max(255)).length(20).nullable(),
 });
 export type OperationStatus =
   | "Prepared"
   | "PossiblySigned"
+  | "Queued"
   | "Broadcast"
   | "Confirmed"
+  | "Failed"
+  | "Vetoed"
   | "CancellationRequested"
   | "CancellationBroadcast"
   | "CancellationMined"
@@ -82,14 +73,35 @@ function hardRuleFailure(operation: VaultOperation, registry: Registry): string 
   const role = registry.roles[operation.role];
   if (!role) return "role_not_in_registry";
   const token = registry.token.address;
-  if (!token || bytesToHex(Uint8Array.from(operation.intent.token)) !== token.toLowerCase()) return "token_mismatch";
-  if (BigInt(operation.intent.amount) > BigInt(role.maximumPayment)) return "amount_above_cap";
-  const recipient = bytesToHex(Uint8Array.from(operation.intent.recipient)).toLowerCase();
-  const allowed = role.vendors.some((vendor) =>
-    vendor.addresses.some((address) => address.address.toLowerCase() === recipient),
-  );
-  if (!allowed) return "recipient_not_allowed";
-  return null;
+  if (!token || bytesToHex(Uint8Array.from(operation.request.target)) !== token.toLowerCase()) {
+    return "token_mismatch";
+  }
+  try {
+    const decoded = decodeFunctionData({
+      abi: erc20TransferAbi,
+      data: bytesToHex(Uint8Array.from(operation.request.calldata)),
+    });
+    if (decoded.functionName !== "transfer") return "unrecognized_payment_calldata";
+    const [recipient, amount] = decoded.args;
+    if (amount > BigInt(role.maximumPayment)) return "amount_above_cap";
+    const allowed = role.vendors.some((vendor) =>
+      vendor.addresses.some((address) => getAddress(address.address) === recipient),
+    );
+    return allowed ? null : "recipient_not_allowed";
+  } catch {
+    return "unrecognized_payment_calldata";
+  }
+}
+
+function operationPayment(operation: VaultOperation): { recipient: string; amount: string } {
+  const decoded = decodeFunctionData({
+    abi: erc20TransferAbi,
+    data: bytesToHex(Uint8Array.from(operation.request.calldata)),
+  });
+  if (decoded.functionName !== "transfer") {
+    throw new PaymentError(422, "unrecognized_payment_calldata", "operation is not an ERC-20 transfer");
+  }
+  return { recipient: decoded.args[0].toLowerCase(), amount: decoded.args[1].toString() };
 }
 
 function containsPromptInjection(text: string | undefined): boolean {
@@ -122,13 +134,16 @@ export class PaymentService {
       orderBy: { createdAt: "desc" },
     });
     if (!treasury) throw new PaymentError(409, "treasury_missing", "active treasury not found");
-    const [rawRole, rawAgent] = await Promise.all([
+    const [rawRole, rawWallet] = await Promise.all([
       this.near.viewFunction<unknown>(agent.vaultAccountId, "get_role", { role: agent.role }),
-      this.near.viewFunction<unknown>(agent.vaultAccountId, "get_agent", { agent: agent.nearAccountId }),
+      this.near.viewFunction<unknown>(agent.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }),
     ]);
-    const role = roleGasSchema.parse(rawRole);
-    const agentAddress = onChainAgentEvmAddress(rawAgent);
-    if (!agentAddress) throw new PaymentError(409, "agent_address_missing", "agent 0xAAA is not derived");
+    const role = roleGasSchema.parse(rawRole).config;
+    const wallet = chainWalletSchema.parse(rawWallet);
+    if (!wallet.address) {
+      throw new PaymentError(409, "wallet_address_missing", "ACME Base wallet is not derived");
+    }
+    const walletAddress = getAddress(bytesToHex(Uint8Array.from(wallet.address)));
     const token = getAddress(input.token);
     const recipient = getAddress(input.recipient);
     const transferData = encodeFunctionData({
@@ -136,24 +151,12 @@ export class PaymentService {
       functionName: "transfer",
       args: [recipient, BigInt(input.amount)],
     });
-    const rolesData = encodeFunctionData({
-      abi: rolesExecutionAbi,
-      functionName: "execTransactionWithRole",
-      args: [
-        token,
-        0n,
-        transferData,
-        0,
-        bytesToHex(Uint8Array.from(role.role_key)),
-        true,
-      ],
-    });
     let quote: BaseGasQuote;
     try {
       quote = await this.gasEstimator.quote({
-        from: agentAddress,
-        to: bytesToHex(Uint8Array.from(role.roles_modifier)),
-        data: rolesData,
+        from: walletAddress,
+        to: token,
+        data: transferData,
       });
     } catch (error) {
       const message = error instanceof BaseGasEstimationError ? error.message : String(error);
@@ -170,7 +173,7 @@ export class PaymentService {
       gas: gasQuoteView(quote),
       warnings: quote.sufficientBalance
         ? []
-        : [`Agent ${agentAddress} needs ${quote.requiredBalance} wei but holds ${quote.senderBalance} wei`],
+        : [`ACME wallet ${walletAddress} needs ${quote.requiredBalance} wei but holds ${quote.senderBalance} wei`],
     };
   }
 
@@ -181,8 +184,8 @@ export class PaymentService {
     invoice?: { text?: string | undefined; claimedRecipient?: string | undefined },
   ): Promise<PayResult> {
     const operation = await this.near.getOperation(agent.vaultAccountId, opId);
-    if (operation.agent !== agent.nearAccountId) {
-      throw new PaymentError(403, "agent_mismatch", "operation belongs to another agent");
+    if (operation.member !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "operation belongs to another member");
     }
     if (operation.state !== "Prepared") {
       throw new PaymentError(422, "not_prepared", `operation state is ${operation.state}`);
@@ -219,7 +222,7 @@ export class PaymentService {
     if (containsPromptInjection(invoice?.text)) {
       throw new PaymentError(422, "prompt_injection_detected", "invoice contains instruction-like text");
     }
-    if (await this.registry.isConsumed(organizationId, operation.intent.reference)) {
+    if (await this.registry.isConsumed(organizationId, operation.request.reference)) {
       throw new PaymentError(422, "reference_consumed", "this reference is already consumed");
     }
 
@@ -228,9 +231,9 @@ export class PaymentService {
       orderBy: { createdAt: "desc" },
     });
     if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this organization");
+    const payment = operationPayment(operation);
     const claimedRecipient = invoice?.claimedRecipient?.toLowerCase();
-    const operationRecipient = bytesToHex(Uint8Array.from(operation.intent.recipient)).toLowerCase();
-    const result: GuardResult = claimedRecipient && claimedRecipient !== operationRecipient
+    const result: GuardResult = claimedRecipient && claimedRecipient !== payment.recipient
       ? { decision: "escalate", reasons: ["invoice payment details differ from the prepared registry recipient"] }
       : await this.guard.approve(operation, registry);
     await this.upsertOperation(organizationId, agent.agentId, operation);
@@ -238,7 +241,7 @@ export class PaymentService {
       const stored = await this.storeVisa(
         organizationId,
         opHex(opId),
-        operation.intent.reference,
+        operation.request.reference,
         result.approval.visa as unknown as object,
         result.approval.signature,
       );
@@ -252,7 +255,7 @@ export class PaymentService {
         agentId: agent.agentId,
         environment: treasury.environment,
         reasons: result.reasons,
-        invoice: (invoice ?? operation.intent) as unknown as object,
+        invoice: (invoice ?? payment) as unknown as object,
         registrySnapshot: registry as unknown as object,
         status: "pending",
       },
@@ -327,10 +330,10 @@ export class PaymentService {
       throw new PaymentError(409, "authorization_tx_conflict", "a different authorization transaction is already registered");
     }
     const operation = await this.near.getOperation(agent.vaultAccountId, opId);
-    if (operation.agent !== agent.nearAccountId) {
-      throw new PaymentError(403, "agent_mismatch", "Vault operation belongs to another agent");
+    if (operation.member !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "OmniRoles operation belongs to another member");
     }
-    if (operation.state !== "PossiblySigned" && operation.state !== "Confirmed") {
+    if (operation.state !== "Queued" && operation.state !== "PossiblySigned" && operation.state !== "Confirmed") {
       throw new PaymentError(422, "authorization_not_final", `operation state is ${operation.state}`);
     }
     const updated = await this.prisma.operation.update({
@@ -367,8 +370,8 @@ export class PaymentService {
       throw new PaymentError(409, "cancellation_tx_conflict", "a different cancellation transaction is already registered");
     }
     const operation = await this.near.getOperation(agent.vaultAccountId, opId);
-    if (operation.agent !== agent.nearAccountId) {
-      throw new PaymentError(403, "agent_mismatch", "Vault operation belongs to another agent");
+    if (operation.member !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "OmniRoles operation belongs to another member");
     }
     if (operation.state !== "PossiblySigned" || !operation.cancellation) {
       throw new PaymentError(422, "cancellation_not_final", "Vault has no finalized cancellation request");
@@ -437,7 +440,7 @@ export class PaymentService {
         },
       });
       await tx.consumedReference.create({
-        data: { organizationId, reference: operation.intent.reference, opId: escalation.opId },
+        data: { organizationId, reference: operation.request.reference, opId: escalation.opId },
       });
       await tx.escalation.update({
         where: { id: escalation.id },
@@ -496,11 +499,11 @@ export class PaymentService {
       organizationId,
       opId: opHex(operation.op_id),
       agentId,
-      reference: operation.intent.reference,
+      reference: operation.request.reference,
       state: "Prepared",
       txDigest: bytesToHex(Uint8Array.from(operation.tx_digest)),
       evmNonce: BigInt(operation.evm_nonce),
-      amount: operation.intent.amount,
+      amount: operation.request.allowance_amount,
     };
     await this.prisma.operation.upsert({
       where: { organizationId_opId: { organizationId, opId: data.opId } },

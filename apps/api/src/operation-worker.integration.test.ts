@@ -67,9 +67,12 @@ describe.skipIf(!databaseUrl)("PrismaWorkerStore against PostgreSQL", () => {
     await expect(second.acquireLease(now, 1_000)).resolves.toBe(false);
     await expect(second.acquireLease(new Date(now.getTime() + 1_001), 1_000)).resolves.toBe(true);
 
-    const [queued] = await second.listReady(now);
+    const queued = (await second.listReady(now)).find((record) =>
+      record.organizationId === organizationId && record.opId === opId
+    );
     expect(queued).toMatchObject({ organizationId, opId, reference: "INV-WORKER-1" });
-    await second.releaseReference(queued!, "Cancelled");
+    if (!queued) throw new Error("test operation was not leased");
+    await second.releaseReference(queued, "Cancelled");
     await expect(prisma.consumedReference.findUnique({
       where: { organizationId_reference: { organizationId, reference: "INV-WORKER-1" } },
     })).resolves.toBeNull();

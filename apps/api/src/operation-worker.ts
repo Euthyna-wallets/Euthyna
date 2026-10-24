@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@mandateos/db";
 import { hexToBytes, type Hex } from "viem";
 
-import { onChainAgentEvmAddress } from "./agent-chain.js";
+import { onChainWalletEvmAddress } from "./agent-chain.js";
 import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
 const ACTIVE_STATES = [
   "Prepared",
+  "Queued",
   "Escalated",
   "Rejected",
   "PossiblySigned",
@@ -46,6 +47,7 @@ export interface WorkerOperationUpdate {
   state?: string;
   txHash?: string | null;
   cancellationTxHash?: string | null;
+  nearAuthorizationTxHash?: string | null;
   nearCancellationTxHash?: string | null;
   receiptBlock?: bigint | null;
   reportNonce?: bigint | null;
@@ -63,7 +65,7 @@ export interface WorkerStore {
   acquireLease(now: Date, leaseMs: number): Promise<boolean>;
   listReady(now: Date): Promise<WorkerOperationRecord[]>;
   update(operation: WorkerOperationRecord, data: WorkerOperationUpdate): Promise<void>;
-  releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void>;
+  releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed"): Promise<void>;
   syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void>;
 }
 export interface GovernanceJobRunner {
@@ -74,7 +76,8 @@ export interface GovernanceJobRunner {
 export interface WorkerNearGateway {
   getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation>;
   getAccount(accountId: string): Promise<{ amount: string }>;
-  currentBlockHeight(): Promise<number>;
+  currentBlockTimestampNs(): Promise<bigint>;
+  executeQueuedOperation(vaultAccountId: string, opId: number[]): Promise<string>;
   transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus>;
   submitSignature(vaultAccountId: string, opId: number[], signature: MpcSignature): Promise<string>;
   reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string>;
@@ -214,7 +217,7 @@ export class PrismaWorkerStore implements WorkerStore {
   }
   async releaseReference(
     operation: WorkerOperationRecord,
-    terminalState: "Cancelled" | "Expired",
+    terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed",
   ): Promise<void> {
     await this.prisma.$transaction([
       this.prisma.operation.update({
@@ -246,7 +249,7 @@ export class OperationWorker {
     private readonly store: WorkerStore,
     private readonly near: WorkerNearGateway,
     private readonly base: WorkerBaseGateway,
-    private readonly guard: Pick<Guard, "confirmationReport">,
+    private readonly guard: Pick<Guard, "confirmationReport" | "failureReport">,
     private readonly config: WorkerConfig,
     private readonly now: () => Date = () => new Date(),
     private readonly governance?: GovernanceJobRunner,
@@ -260,11 +263,11 @@ export class OperationWorker {
     const operations = await this.store.listReady(now);
     let processed = 0;
     if (operations.length > 0) {
-      const blockHeight = await this.near.currentBlockHeight();
+      const blockTimestampNs = await this.near.currentBlockTimestampNs();
       for (const operation of operations) {
         if (!(await this.store.acquireLease(this.now(), this.config.leaseMs))) break;
         try {
-          await this.process(operation, blockHeight);
+          await this.process(operation, blockTimestampNs);
         } catch (error) {
           const attempts = operation.attempts + 1;
           const message = error instanceof Error ? error.message : String(error);
@@ -284,13 +287,13 @@ export class OperationWorker {
     return { leased: true, processed };
   }
 
-  private async process(record: WorkerOperationRecord, blockHeight: number): Promise<void> {
+  private async process(record: WorkerOperationRecord, blockTimestampNs: bigint): Promise<void> {
     const id = opBytes(record.opId);
     let operation = await this.near.getOperation(record.vaultAccountId, id);
-    const chainAgent = await this.near.viewFunction<unknown>(record.vaultAccountId, "get_agent", {
-      agent: record.agentNearAccountId,
+    const chainWallet = await this.near.viewFunction<unknown>(record.vaultAccountId, "get_wallet", {
+      chain_id: operation.request.chain_id,
     });
-    const derivedAddress = onChainAgentEvmAddress(chainAgent);
+    const derivedAddress = onChainWalletEvmAddress(chainWallet);
     if (derivedAddress && derivedAddress !== record.agentEvmAddress) {
       await this.store.syncAgentEvmAddress(record, derivedAddress);
     }
@@ -338,12 +341,12 @@ export class OperationWorker {
       await this.store.releaseReference(record, "Cancelled");
       return;
     }
-    if (operation.state === "Expired") {
-      await this.store.releaseReference(record, "Expired");
+    if (operation.state === "Expired" || operation.state === "Failed" || operation.state === "Vetoed") {
+      await this.store.releaseReference(record, operation.state);
       return;
     }
     if (operation.state === "Prepared") {
-      if (blockHeight > operation.expires_at_block) {
+      if (blockTimestampNs > BigInt(operation.expires_at_ns)) {
         await this.near.expireOperation(record.vaultAccountId, id);
         await this.store.releaseReference(record, "Expired");
       } else {
@@ -351,6 +354,26 @@ export class OperationWorker {
           record,
           record.state === "Escalated" || record.state === "Rejected" ? record.state : "Prepared",
         );
+      }
+      return;
+    }
+    if (operation.state === "Queued") {
+      if (blockTimestampNs > BigInt(operation.expires_at_ns)) {
+        await this.near.expireOperation(record.vaultAccountId, id);
+        await this.store.releaseReference(record, "Expired");
+      } else if (
+        operation.execute_after_ns !== null &&
+        blockTimestampNs >= BigInt(operation.execute_after_ns)
+      ) {
+        const nearSigningTxHash = await this.near.executeQueuedOperation(record.vaultAccountId, id);
+        await this.store.update(record, {
+          state: "PossiblySigned",
+          nearAuthorizationTxHash: nearSigningTxHash,
+          nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
+          lastError: null,
+        });
+      } else {
+        await this.schedule(record, "Queued");
       }
       return;
     }
@@ -364,7 +387,7 @@ export class OperationWorker {
         record,
         id,
         record.nearAuthorizationTxHash,
-        operation.agent,
+        operation.member,
       );
       operation = await this.near.getOperation(record.vaultAccountId, id);
     }
@@ -383,15 +406,15 @@ export class OperationWorker {
     }
 
     if (operation.cancellation) {
-      await this.processCancellation(record, operation, blockHeight);
+      await this.processCancellation(record, operation, blockTimestampNs);
       return;
     }
     if (operation.signed_transaction) {
-      await this.processOriginal(record, operation, blockHeight);
+      await this.processOriginal(record, operation, blockTimestampNs);
       return;
     }
 
-    if (this.isStuck(operation, blockHeight)) {
+    if (this.isStuck(operation, blockTimestampNs)) {
       await this.requestCancellation(record, operation, id);
       return;
     }
@@ -422,7 +445,7 @@ export class OperationWorker {
   private async processOriginal(
     record: WorkerOperationRecord,
     operation: VaultOperation,
-    blockHeight: number,
+    blockTimestampNs: bigint,
   ): Promise<void> {
     const hash = this.base.rawTransactionHash(operation.signed_transaction);
     if (record.txHash && record.txHash.toLowerCase() !== hash.toLowerCase()) {
@@ -466,6 +489,8 @@ export class OperationWorker {
       return;
     }
     if (receipt.status === "reverted") {
+      const signedReport = await this.guard.failureReport(operation, hash, receipt.blockNumber);
+      await this.near.reportStatus(record.vaultAccountId, signedReport);
       await this.store.update(record, {
         state: "Reverted",
         txHash: hash,
@@ -473,8 +498,9 @@ export class OperationWorker {
         revertedAt: this.now(),
         lastAttemptAt: this.now(),
         nextAttemptAt: null,
-        lastError: `Base transaction ${hash} reverted; governance resolution required`,
+        lastError: `Base transaction ${hash} reverted`,
       });
+      await this.store.releaseReference(record, "Failed");
       return;
     }
 
@@ -494,11 +520,11 @@ export class OperationWorker {
   private async processCancellation(
     record: WorkerOperationRecord,
     operation: VaultOperation,
-    blockHeight: number,
+    blockTimestampNs: bigint,
   ): Promise<void> {
     const cancellation = operation.cancellation!;
     if (!cancellation.signed_transaction) {
-      if (this.isStuck(operation, blockHeight)) {
+      if (this.isStuck(operation, blockTimestampNs)) {
         await this.requestCancellation(record, operation, opBytes(record.opId));
       } else {
         await this.schedule(record, "CancellationRequested");
@@ -576,9 +602,8 @@ export class OperationWorker {
     operation: VaultOperation,
     opId: number[],
   ): Promise<void> {
-    const [paused, agent, role] = await Promise.all([
+    const [paused, role] = await Promise.all([
       this.near.viewFunction<boolean>(record.vaultAccountId, "is_paused"),
-      this.near.viewFunction<{ active?: boolean }>(record.vaultAccountId, "get_agent", { agent: operation.agent }),
       this.near.viewFunction<{
         config: {
           gas_limit: string;
@@ -588,11 +613,11 @@ export class OperationWorker {
         };
       }>(record.vaultAccountId, "get_role", { role: operation.role }),
     ]);
-    if (!paused && agent.active !== false) {
+    if (!paused) {
       await this.schedule(
         record,
         record.txHash ? "Broadcast" : "PossiblySigned",
-        "stuck transaction requires Vault pause or agent revocation before worker cancellation",
+        "stuck transaction requires OmniRoles pause or member-authorized cancellation",
       );
       return;
     }
@@ -631,9 +656,11 @@ export class OperationWorker {
     });
   }
 
-  private isStuck(operation: VaultOperation, blockHeight: number): boolean {
-    const since = operation.cancellation?.requested_at_block ?? operation.possibly_signed_at_block;
-    return since !== null && since !== undefined && blockHeight - since >= this.config.stuckBlocks;
+  private isStuck(operation: VaultOperation, blockTimestampNs: bigint): boolean {
+    const since = operation.cancellation?.requested_at_ns ?? operation.possibly_signed_at_ns;
+    if (since === null || since === undefined) return false;
+    const thresholdNs = BigInt(this.config.stuckBlocks) * 1_000_000_000n;
+    return blockTimestampNs - BigInt(since) >= thresholdNs;
   }
 
   private async schedule(record: WorkerOperationRecord, state: string, lastError: string | null = null): Promise<void> {

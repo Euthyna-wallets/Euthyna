@@ -75,7 +75,7 @@ describe("readAgentAccessKeyRpc", () => {
             FunctionCall: {
               allowance: null,
               receiver_id: "vault.testnet",
-              method_names: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+              method_names: ["prepare", "authorize", "cancel_nonce", "renounce_role"],
             },
           },
         },
@@ -85,7 +85,7 @@ describe("readAgentAccessKeyRpc", () => {
       accountId: "agent.testnet",
       publicKey: "ed25519:agent",
       vaultAccountId: "vault.testnet",
-      methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+      methodNames: ["prepare", "authorize", "cancel_nonce", "renounce_role"],
       allowanceYocto: null,
     })).resolves.toMatchObject({ valid: true });
   });

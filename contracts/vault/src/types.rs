@@ -1,20 +1,43 @@
-use near_sdk::json_types::{Base64VecU8, U128};
+use near_sdk::json_types::{Base64VecU8, U64, U128};
 use near_sdk::{AccountId, near};
 use serde::{Deserialize, Serialize};
 
 pub type OperationId = [u8; 32];
+pub type QueueId = [u8; 32];
 pub type EvmAddress = [u8; 20];
 pub type Digest = [u8; 32];
+pub type AllowanceKey = [u8; 32];
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct Permission {
+    pub chain_id: u64,
+    pub target: EvmAddress,
+    /// `None` allows any function on the target. A selector requires at least
+    /// four calldata bytes and an exact match.
+    pub selector: Option<[u8; 4]>,
+    /// Flattened Roles-compatible condition bytes. Empty means unconditional.
+    pub conditions: Vec<u8>,
+    /// Optional shared cross-chain allowance charged by `allowance_amount`.
+    pub allowance_key: Option<AllowanceKey>,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct VelocityConfig {
+    pub limit: U128,
+    pub window_ns: u64,
+}
 
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
 pub struct RoleConfig {
     pub enabled: bool,
-    pub token: EvmAddress,
-    pub roles_modifier: EvmAddress,
-    pub role_key: [u8; 32],
-    pub allowed_recipients: Vec<EvmAddress>,
-    pub max_per_tx: U128,
+    pub permissions: Vec<Permission>,
+    pub operation_delay_threshold: Option<U128>,
+    pub operation_delay_ns: u64,
+    pub co_sign_threshold: Option<U128>,
+    pub velocity: Option<VelocityConfig>,
     pub gas_limit: U128,
     pub max_fee_per_gas: U128,
     pub max_priority_fee_per_gas: U128,
@@ -25,53 +48,87 @@ pub struct RoleConfig {
 #[near(serializers = [borsh])]
 pub(crate) struct RoleState {
     pub config: RoleConfig,
-    pub funded: u128,
-    pub spent: u128,
-    pub reserved: u128,
 }
 
 #[derive(Clone, Debug)]
 #[near(serializers = [json])]
 pub struct RoleView {
     pub config: RoleConfig,
-    pub funded: U128,
-    pub spent: U128,
-    pub reserved: U128,
-    pub available: U128,
 }
 
 impl From<&RoleState> for RoleView {
     fn from(state: &RoleState) -> Self {
-        let available = state
-            .funded
-            .saturating_sub(state.spent)
-            .saturating_sub(state.reserved);
         Self {
             config: state.config.clone(),
-            funded: U128(state.funded),
-            spent: U128(state.spent),
-            reserved: U128(state.reserved),
-            available: U128(available),
         }
     }
 }
 
-#[derive(Clone)]
-#[near(serializers = [borsh, json])]
-pub struct AgentState {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[near(serializers = [borsh])]
+pub(crate) struct MembershipKey {
     pub role: String,
-    pub mpc_path: String,
-    pub active: bool,
-    pub derived_public_key: Option<String>,
-    pub evm_address: Option<EvmAddress>,
+    pub member: AccountId,
 }
 
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
-pub struct PaymentIntent {
-    pub token: EvmAddress,
-    pub recipient: EvmAddress,
-    pub amount: U128,
+pub struct Membership {
+    pub role: String,
+    pub member: AccountId,
+    pub starts_at_ns: U64,
+    pub ends_at_ns: Option<U64>,
+    pub max_uses: Option<u64>,
+    pub used_uses: u64,
+    pub reserved_uses: u64,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct Allowance {
+    pub balance: U128,
+    pub refill: U128,
+    pub max_refill: U128,
+    pub period_ns: u64,
+    pub timestamp_ns: U64,
+    pub reserved: U128,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[near(serializers = [borsh])]
+pub(crate) struct VelocityKey {
+    pub role: String,
+    pub chain_id: u64,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct VelocityState {
+    pub window_started_at_ns: U64,
+    pub spent: U128,
+    pub reserved: U128,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct ChainWallet {
+    pub chain_id: u64,
+    pub mpc_path: String,
+    pub derived_public_key: Option<String>,
+    pub address: Option<EvmAddress>,
+    pub next_nonce: u64,
+    pub active_operation: Option<OperationId>,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct OperationRequest {
+    pub chain_id: u64,
+    pub target: EvmAddress,
+    pub value: U128,
+    pub calldata: Vec<u8>,
+    pub allowance_amount: U128,
     pub reference: String,
     pub gas_limit: U128,
     pub max_fee_per_gas: U128,
@@ -95,9 +152,12 @@ pub struct Eip1559Transaction {
 #[near(serializers = [borsh, json])]
 pub enum OperationState {
     Prepared,
+    Queued,
     PossiblySigned,
     Confirmed,
+    Failed,
     Cancelled,
+    Vetoed,
     Expired,
 }
 
@@ -116,7 +176,7 @@ pub struct CancellationAttempt {
     pub tx_digest: Digest,
     pub signature: Option<MpcSignature>,
     pub signed_transaction: Option<Vec<u8>>,
-    pub requested_at_block: u64,
+    pub requested_at_ns: u64,
     pub request_count: u32,
 }
 
@@ -125,21 +185,88 @@ pub struct CancellationAttempt {
 pub struct Operation {
     pub op_id: OperationId,
     pub client_id: String,
-    pub agent: AccountId,
+    pub member: AccountId,
     pub role: String,
-    pub intent: PaymentIntent,
+    pub request: OperationRequest,
+    pub permission_index: u32,
+    pub allowance_key: Option<AllowanceKey>,
     pub policy_version: u64,
     pub registry_version: u64,
     pub evm_nonce: u64,
     pub transaction: Eip1559Transaction,
     pub tx_digest: Digest,
-    pub created_at_block: u64,
-    pub expires_at_block: u64,
-    pub possibly_signed_at_block: Option<u64>,
+    pub created_at_ns: U64,
+    pub expires_at_ns: U64,
+    pub execute_after_ns: Option<U64>,
+    pub visa_authorized: bool,
+    pub cosigned_by: Option<AccountId>,
+    pub possibly_signed_at_ns: Option<U64>,
     pub state: OperationState,
     pub signature: Option<MpcSignature>,
     pub signed_transaction: Option<Vec<u8>>,
     pub cancellation: Option<CancellationAttempt>,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub enum RuleChange {
+    SetRole {
+        role: String,
+        config: RoleConfig,
+    },
+    RemoveRole {
+        role: String,
+    },
+    GrantMembership {
+        role: String,
+        member: AccountId,
+        starts_at_ns: U64,
+        ends_at_ns: Option<U64>,
+        max_uses: Option<u64>,
+    },
+    RevokeMembership {
+        role: String,
+        member: AccountId,
+    },
+    SetAllowance {
+        key: AllowanceKey,
+        balance: U128,
+        refill: U128,
+        max_refill: U128,
+        period_ns: u64,
+    },
+    SetCouncil {
+        members: Vec<AccountId>,
+    },
+    SetGuardPublicKey {
+        guard_public_key: Vec<u8>,
+    },
+    SetVersions {
+        policy_version: u64,
+        registry_version: u64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub enum RuleChangeState {
+    Queued,
+    Executed,
+    Vetoed,
+    Expired,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct QueuedRuleChange {
+    pub queue_id: QueueId,
+    pub change: RuleChange,
+    pub proposed_by: AccountId,
+    pub queued_at_ns: U64,
+    pub execute_after_ns: U64,
+    pub expires_at_ns: U64,
+    pub state: RuleChangeState,
+    pub vetoed_by: Option<AccountId>,
 }
 
 #[derive(Clone, Debug)]
@@ -154,7 +281,7 @@ pub struct GuardVisa {
     pub policy_version: u64,
     pub registry_version: u64,
     pub visa_nonce: u64,
-    pub expires_at_block: u64,
+    pub expires_at_ns: U64,
 }
 
 #[derive(Clone, Debug)]
@@ -168,6 +295,7 @@ pub struct GuardApproval {
 #[near(serializers = [borsh, json])]
 pub enum StatusKind {
     Confirmed,
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -193,13 +321,6 @@ pub struct SignedStatusReport {
 pub(crate) struct ReferenceKey {
     pub role: String,
     pub reference: String,
-}
-
-#[derive(Deserialize)]
-#[serde(crate = "near_sdk::serde", deny_unknown_fields)]
-pub(crate) struct FundingMessage {
-    pub role: String,
-    pub config: Option<RoleConfig>,
 }
 
 #[derive(Serialize)]

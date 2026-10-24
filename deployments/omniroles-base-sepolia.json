@@ -1,0 +1,32 @@
+{
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "status": "direct-payment-executed",
+  "vaultArtifact": {
+    "sha256": "418698a680503afb7173e20c89e2f6cefb3ca07e66237b64e4e1611098288826",
+    "sha256Base58": "5QnYCpX13uC3LM4SJJonm8UDSBrkuMqMnQzfVGWzcbBs"
+  },
+  "wallet": "0x371c60b0D191f2b23D7fE087860f99cf9A7ca629",
+  "token": {
+    "name": "TestUSDC",
+    "address": "0x418A2b47911dE05e21688F7490195F5324B49474",
+    "decimals": 6
+  },
+  "payment": {
+    "recipient": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
+    "amount": "1000000",
+    "transactionHash": "0x6ca3c097b610797af47555da8c32ddb520df38329637ebde489c16e4728684b1",
+    "blockNumber": "0x2f5f6ad",
+    "status": "success",
+    "execution": "direct ERC20.transfer from the MPC-derived OmniRoles wallet"
+  },
+  "funding": {
+    "ethereumSepoliaBridgeTransactionHash": "0xbc5691e5358bfc2f12b139d247d91728bef87ee877f9a8a383a737a65f73cd18",
+    "baseEthFundingTransactionHash": "0x8d977ed8c746431192b9814997de4f76d852777118306020297118ea7557bd9e",
+    "baseTokenFundingTransactionHash": "0x3efa9225e5f7209caeed25630d30f38afe6118ed7c2dbfee42e8f58f63092236"
+  },
+  "nearTerminalReport": {
+    "status": "not-recorded",
+    "reason": "The first runner version parsed cast publish output as a hash after Base execution. The committed runner now accepts cast receipt JSON and submits report_status. This manifest claims the observed Base payment only."
+  }
+}

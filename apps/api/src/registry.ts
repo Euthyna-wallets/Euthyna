@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { getAddress, type Address } from "viem";
+import { bytesToHex, decodeFunctionData, getAddress, type Address } from "viem";
 import { z } from "zod";
 import { bytesToAddress } from "./evm.js";
 import type { Registry, VaultOperation } from "./types.js";
@@ -27,6 +27,17 @@ const registrySchema = z.object({
     }),
   ),
 });
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "recipient", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+  outputs: [{ type: "bool" }],
+}] as const;
+
 
 export async function loadRegistry(path: string): Promise<Registry> {
   return registrySchema.parse(JSON.parse(await readFile(path, "utf8"))) as Registry;
@@ -41,7 +52,7 @@ export function evaluateExactRules(registry: Registry, operation: VaultOperation
   if (operation.client_id !== registry.clientId) reasons.push("client_id mismatch");
   if (operation.registry_version !== registry.registryVersion) reasons.push("registry_version mismatch");
   if (operation.transaction.chain_id !== registry.chainId) reasons.push("chain_id mismatch");
-  const token = bytesToAddress(operation.intent.token);
+  const token = bytesToAddress(operation.request.target);
   if (!registry.token.address) {
     reasons.push("token not deployed");
   } else if (token !== getAddress(registry.token.address)) {
@@ -49,12 +60,22 @@ export function evaluateExactRules(registry: Registry, operation: VaultOperation
   }
   const role = registry.roles[operation.role];
   if (!role) return { decision: "escalate", reasons: [...reasons, "role not registered"] };
-  const recipient = bytesToAddress(operation.intent.recipient);
+  let recipient: Address;
+  let amount: bigint;
+  try {
+    const decoded = decodeFunctionData({
+      abi: erc20TransferAbi,
+      data: bytesToHex(Uint8Array.from(operation.request.calldata)),
+    });
+    if (decoded.functionName !== "transfer") throw new Error("not transfer");
+    [recipient, amount] = decoded.args;
+  } catch {
+    return { decision: "escalate", reasons: [...reasons, "unrecognized payment calldata"] };
+  }
   const match = role.vendors
     .flatMap((vendor) => vendor.addresses.map((entry) => ({ vendor, entry })))
     .find(({ entry }) => getAddress(entry.address) === recipient);
   if (!match) return { decision: "escalate", reasons: [...reasons, "recipient not registered"] };
-  const amount = BigInt(operation.intent.amount);
   const maximum = BigInt(match.entry.maximumPayment ?? role.maximumPayment);
   if (amount > maximum) reasons.push("amount exceeds exact vendor limit");
   if (reasons.length > 0) return { decision: "escalate", reasons };

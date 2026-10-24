@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { PrismaClient } from "@mandateos/db";
-import { getAddress } from "viem";
+import { encodeFunctionData, getAddress, hexToBytes } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
@@ -15,39 +15,59 @@ import type { VaultOperation } from "./types.js";
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const token = getAddress("0x418A2b47911dE05e21688F7490195F5324B49474");
 const recipient = getAddress("0x1111111111111111111111111111111111111111");
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }],
+  outputs: [{ type: "bool" }],
+}] as const;
 
 function operation(opIdHex: `0x${string}`, reference: string): VaultOperation {
   const opId = hexToByteArray(opIdHex);
+  const calldata = Array.from(hexToBytes(encodeFunctionData({
+    abi: erc20TransferAbi,
+    functionName: "transfer",
+    args: [recipient, 1_000_000n],
+  })));
   const operation: VaultOperation = {
     op_id: opId,
     client_id: "acme",
-    agent: "agent.testnet",
+    member: "agent.testnet",
     role: "researcher",
-    intent: {
-      token: Array.from(Buffer.from(token.slice(2), "hex")),
-      recipient: Array.from(Buffer.from(recipient.slice(2), "hex")),
-      amount: "1000000",
+    request: {
+      chain_id: 84532,
+      target: Array.from(Buffer.from(token.slice(2), "hex")),
+      value: "0",
+      calldata,
+      allowance_amount: "1000000",
       reference,
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
+    permission_index: 0,
+    allowance_key: Array(32).fill(0x55),
     policy_version: 1,
     registry_version: 1,
     evm_nonce: 0,
     transaction: {
       chain_id: 84532,
       nonce: 0,
-      to: Array(20).fill(0x44),
+      to: Array.from(Buffer.from(token.slice(2), "hex")),
       value: "0",
-      input: [1, 2, 3, 4],
+      input: calldata,
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
     tx_digest: Array(32).fill(0),
-    expires_at_block: 10_000,
-    possibly_signed_at_block: null,
+    created_at_ns: "1",
+    expires_at_ns: "1000000000000",
+    execute_after_ns: null,
+    visa_authorized: false,
+    cosigned_by: null,
+    possibly_signed_at_ns: null,
     state: "Prepared",
     signature: null,
     signed_transaction: null,
@@ -173,7 +193,7 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     currentOperation = {
       ...currentOperation,
       state: "PossiblySigned",
-      possibly_signed_at_block: 100,
+      possibly_signed_at_ns: "100000000000",
     };
     const nearTransactionHash = "1".repeat(43);
     await expect(
@@ -224,7 +244,7 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     currentOperation = {
       ...operation(originalOpId, "INV-CONCURRENT"),
       state: "PossiblySigned",
-      possibly_signed_at_block: 100,
+      possibly_signed_at_ns: "100000000000",
       cancellation: {
         transaction: {
           ...operation(originalOpId, "INV-CONCURRENT").transaction,
@@ -237,7 +257,7 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
         tx_digest: Array(32).fill(8),
         signature: null,
         signed_transaction: null,
-        requested_at_block: 110,
+        requested_at_ns: "110000000000",
         request_count: 1,
       },
     };

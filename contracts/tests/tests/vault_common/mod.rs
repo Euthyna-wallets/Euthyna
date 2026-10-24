@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use borsh::BorshSerialize;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signer as _, SigningKey};
 use near_workspaces::network::Sandbox;
 use near_workspaces::result::ExecutionFinalResult;
-use near_workspaces::types::{Gas, NearToken};
+use near_workspaces::types::Gas;
 use near_workspaces::{Account, Contract, Worker};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -12,31 +12,31 @@ use sha3::{Digest as _, Keccak256};
 
 pub const CLIENT_ID: &str = "acme";
 pub const ROLE: &str = "researcher";
-pub const FUNDED_BUDGET: u128 = 1_000;
-pub const MAX_PER_TX: u128 = 500;
+pub const CHAIN_ID: u64 = 84_532;
+pub const ALLOWANCE_BALANCE: u128 = 1_000;
+pub const MAX_PER_OPERATION: u128 = 500;
 pub const POLICY_VERSION: u64 = 7;
 pub const REGISTRY_VERSION: u64 = 11;
-pub const TTL_BLOCKS: u64 = 50;
 pub const TOKEN: [u8; 20] = [0x83; 20];
-pub const ROLES_MODIFIER: [u8; 20] = [0x44; 20];
 pub const RECIPIENT: [u8; 20] = [0x66; 20];
-pub const ROLE_KEY: [u8; 32] = [0x55; 32];
-pub const MPC_SECRET: [u8; 32] = [0x42; 32];
+pub const ALLOWANCE_KEY: [u8; 32] = [0x55; 32];
 pub const MPC_PUBLIC_KEY: &str = "secp256k1:jCrfJ5wjMBroDh6Mefb1bohaBtzE9me5MaKEhmfmFqK5CudvdSWviXXxfowdtttqh9KWN3zNK9QQu5kq8FfXBK8";
+pub const RULE_DELAY_NS: u64 = 1_000_000_000;
+pub const RULE_EXPIRATION_NS: u64 = 60_000_000_000;
+pub const OPERATION_TTL_NS: u64 = 120_000_000_000;
 
 const VAULT_WASM: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/vault.wasm"));
 const MOCK_MPC_WASM: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/mock_mpc.wasm"));
-const TEST_FT_WASM: &[u8] =
-    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/test_ft.wasm"));
 
 pub struct Fixture {
     pub worker: Worker<Sandbox>,
     pub owner: Account,
     pub agent: Account,
+    pub cosigner: Account,
+    pub council: Account,
     pub outsider: Account,
     pub vault: Contract,
-    pub mpc: Contract,
     pub guard: SigningKey,
 }
 
@@ -51,7 +51,7 @@ struct VisaForSigning {
     policy_version: u64,
     registry_version: u64,
     visa_nonce: u64,
-    expires_at_block: u64,
+    expires_at_ns: u64,
 }
 
 #[derive(Serialize)]
@@ -65,12 +65,13 @@ struct VisaJson {
     policy_version: u64,
     registry_version: u64,
     visa_nonce: u64,
-    expires_at_block: u64,
+    expires_at_ns: String,
 }
 
 #[derive(BorshSerialize)]
 enum StatusKindForSigning {
     Confirmed,
+    Failed,
 }
 
 #[derive(BorshSerialize)]
@@ -87,10 +88,11 @@ pub async fn setup() -> Result<Fixture> {
     let worker = near_workspaces::sandbox().await?;
     let owner = worker.dev_create_account().await?;
     let agent = worker.dev_create_account().await?;
+    let cosigner = worker.dev_create_account().await?;
+    let council = worker.dev_create_account().await?;
     let outsider = worker.dev_create_account().await?;
     let vault = worker.dev_deploy(VAULT_WASM).await?;
     let mpc = worker.dev_deploy(MOCK_MPC_WASM).await?;
-    let ft = worker.dev_deploy(TEST_FT_WASM).await?;
     let guard = SigningKey::from_bytes(&[7u8; 32]);
 
     mpc.call("new")
@@ -98,19 +100,19 @@ pub async fn setup() -> Result<Fixture> {
         .transact()
         .await?
         .into_result()?;
-    ft.call("new").transact().await?.into_result()?;
     vault
         .call("new")
         .args_json(json!({
             "client_id": CLIENT_ID,
             "owner_id": owner.id(),
-            "token_id": ft.id(),
             "mpc_contract_id": mpc.id(),
-            "evm_chain_id": 84532,
             "guard_public_key": STANDARD.encode(guard.verifying_key().to_bytes()),
             "policy_version": POLICY_VERSION,
             "registry_version": REGISTRY_VERSION,
-            "reservation_ttl_blocks": TTL_BLOCKS
+            "operation_ttl_ns": OPERATION_TTL_NS,
+            "rule_delay_ns": RULE_DELAY_NS,
+            "rule_expiration_ns": RULE_EXPIRATION_NS,
+            "council": [council.id()]
         }))
         .gas(Gas::from_tgas(100))
         .transact()
@@ -118,55 +120,71 @@ pub async fn setup() -> Result<Fixture> {
         .into_result()?;
 
     owner
-        .call(vault.id(), "set_role")
-        .args_json(json!({"role": ROLE, "config": role_config()}))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await?
-        .into_result()?;
-    owner
-        .call(vault.id(), "register_agent")
-        .args_json(json!({
-            "agent": agent.id(),
-            "role": ROLE,
-            "mpc_path": "agents/researcher/base"
-        }))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await?
-        .into_result()?;
-    owner
-        .call(vault.id(), "request_derived_public_key")
-        .args_json(json!({"agent": agent.id()}))
+        .call(vault.id(), "request_wallet")
+        .args_json(json!({"chain_id": CHAIN_ID}))
         .gas(Gas::from_tgas(50))
         .transact()
         .await?
         .into_result()?;
 
-    ft.call("mint")
-        .args_json(json!({"account_id": owner.id(), "amount": FUNDED_BUDGET.to_string()}))
-        .transact()
-        .await?
-        .into_result()?;
-    ft.call("storage_deposit")
-        .args_json(json!({"account_id": vault.id(), "registration_only": true}))
-        .deposit(NearToken::from_near(1))
-        .transact()
-        .await?
-        .into_result()?;
-    owner
-        .call(ft.id(), "ft_transfer_call")
-        .args_json(json!({
-            "receiver_id": vault.id(),
-            "amount": FUNDED_BUDGET.to_string(),
-            "memo": null,
-            "msg": json!({"role": ROLE}).to_string()
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?
-        .into_result()?;
+    apply_rule_change(
+        &owner,
+        &outsider,
+        &worker,
+        &vault,
+        json!({
+            "SetRole": {"role": ROLE, "config": role_config()}
+        }),
+    )
+    .await?;
+    apply_rule_change(
+        &owner,
+        &outsider,
+        &worker,
+        &vault,
+        json!({
+            "GrantMembership": {
+                "role": ROLE,
+                "member": agent.id(),
+                "starts_at_ns": "0",
+                "ends_at_ns": null,
+                "max_uses": 10
+            }
+        }),
+    )
+    .await?;
+    apply_rule_change(
+        &owner,
+        &outsider,
+        &worker,
+        &vault,
+        json!({
+            "GrantMembership": {
+                "role": ROLE,
+                "member": cosigner.id(),
+                "starts_at_ns": "0",
+                "ends_at_ns": null,
+                "max_uses": null
+            }
+        }),
+    )
+    .await?;
+    apply_rule_change(
+        &owner,
+        &outsider,
+        &worker,
+        &vault,
+        json!({
+            "SetAllowance": {
+                "key": ALLOWANCE_KEY,
+                "balance": ALLOWANCE_BALANCE.to_string(),
+                "refill": "100",
+                "max_refill": ALLOWANCE_BALANCE.to_string(),
+                "period_ns": 10_000_000_000u64
+            }
+        }),
+    )
+    .await?;
 
     let vault_public_key = vault.as_account().secret_key().public_key();
     vault
@@ -184,9 +202,10 @@ pub async fn setup() -> Result<Fixture> {
         worker,
         owner,
         agent,
+        cosigner,
+        council,
         outsider,
         vault,
-        mpc,
         guard,
     })
 }
@@ -194,11 +213,17 @@ pub async fn setup() -> Result<Fixture> {
 pub fn role_config() -> Value {
     json!({
         "enabled": true,
-        "token": TOKEN,
-        "roles_modifier": ROLES_MODIFIER,
-        "role_key": ROLE_KEY,
-        "allowed_recipients": [RECIPIENT],
-        "max_per_tx": MAX_PER_TX.to_string(),
+        "permissions": [{
+            "chain_id": CHAIN_ID,
+            "target": TOKEN,
+            "selector": [0xa9, 0x05, 0x9c, 0xbb],
+            "conditions": [],
+            "allowance_key": ALLOWANCE_KEY
+        }],
+        "operation_delay_threshold": MAX_PER_OPERATION.to_string(),
+        "operation_delay_ns": 5_000_000_000u64,
+        "co_sign_threshold": "300",
+        "velocity": {"limit": "800", "window_ns": 60_000_000_000u64},
         "gas_limit": "300000",
         "max_fee_per_gas": "100000000000",
         "max_priority_fee_per_gas": "10000000000",
@@ -206,23 +231,34 @@ pub fn role_config() -> Value {
     })
 }
 
-pub fn intent(reference: &str, amount: u128) -> Value {
+pub fn request(reference: &str, amount: u128) -> Value {
     json!({
-        "token": TOKEN,
-        "recipient": RECIPIENT,
-        "amount": amount.to_string(),
+        "chain_id": CHAIN_ID,
+        "target": TOKEN,
+        "value": "0",
+        "calldata": erc20_transfer(RECIPIENT, amount),
+        "allowance_amount": amount.to_string(),
         "reference": reference,
-        "gas_limit": "200000",
+        "gas_limit": "120000",
         "max_fee_per_gas": "20000000000",
         "max_priority_fee_per_gas": "1000000000"
     })
+}
+
+pub fn erc20_transfer(recipient: [u8; 20], amount: u128) -> Vec<u8> {
+    let mut calldata = vec![0xa9, 0x05, 0x9c, 0xbb];
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(&recipient);
+    calldata.extend_from_slice(&[0u8; 16]);
+    calldata.extend_from_slice(&amount.to_be_bytes());
+    calldata
 }
 
 pub async fn prepare(fixture: &Fixture, reference: &str, amount: u128) -> Result<Value> {
     Ok(fixture
         .agent
         .call(fixture.vault.id(), "prepare")
-        .args_json(json!({"intent": intent(reference, amount)}))
+        .args_json(json!({"role": ROLE, "request": request(reference, amount)}))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?
@@ -234,98 +270,90 @@ pub fn approval(
     fixture: &Fixture,
     operation: &Value,
     visa_nonce: u64,
-    expires_at_block: u64,
+    expires_at_ns: u64,
     digest_override: Option<[u8; 32]>,
 ) -> Value {
     let op_id = array32(&operation["op_id"]);
-    let tx_digest = digest_override.unwrap_or_else(|| array32(&operation["tx_digest"]));
+    let digest = digest_override.unwrap_or_else(|| array32(&operation["tx_digest"]));
+    let reference = operation["request"]["reference"]
+        .as_str()
+        .expect("reference")
+        .to_owned();
     let visa = VisaForSigning {
-        client_id: CLIENT_ID.to_string(),
+        client_id: CLIENT_ID.to_owned(),
         op_id,
-        tx_digest,
+        tx_digest: digest,
         agent: fixture.agent.id().to_string(),
-        role: ROLE.to_string(),
-        reference: operation["intent"]["reference"]
-            .as_str()
-            .expect("operation reference")
-            .to_string(),
+        role: ROLE.to_owned(),
+        reference: reference.clone(),
         policy_version: POLICY_VERSION,
         registry_version: REGISTRY_VERSION,
         visa_nonce,
-        expires_at_block,
+        expires_at_ns,
     };
     let mut message = b"mandateos:visa:v1".to_vec();
     message.extend_from_slice(&borsh::to_vec(&visa).expect("visa serializes"));
-    let signature = fixture.guard.sign(&message).to_bytes();
-    let json_visa = VisaJson {
-        client_id: visa.client_id,
-        op_id: visa.op_id,
-        tx_digest: visa.tx_digest,
-        agent: visa.agent,
-        role: visa.role,
-        reference: visa.reference,
-        policy_version: visa.policy_version,
-        registry_version: visa.registry_version,
-        visa_nonce: visa.visa_nonce,
-        expires_at_block: visa.expires_at_block,
-    };
+    let signature = fixture.guard.sign(&message);
     json!({
-        "visa": json_visa,
-        "signature": STANDARD.encode(signature)
+        "visa": VisaJson {
+            client_id: CLIENT_ID.to_owned(),
+            op_id,
+            tx_digest: digest,
+            agent: fixture.agent.id().to_string(),
+            role: ROLE.to_owned(),
+            reference,
+            policy_version: POLICY_VERSION,
+            registry_version: REGISTRY_VERSION,
+            visa_nonce,
+            expires_at_ns: expires_at_ns.to_string(),
+        },
+        "signature": STANDARD.encode(signature.to_bytes())
     })
 }
 
-pub fn signed_transaction_hash(operation: &Value, cancellation: bool) -> [u8; 32] {
-    let signed_transaction = if cancellation {
-        &operation["cancellation"]["signed_transaction"]
-    } else {
-        &operation["signed_transaction"]
-    };
-    let raw = signed_transaction
+pub fn status_report(
+    fixture: &Fixture,
+    operation: &Value,
+    report_nonce: u64,
+    confirmed: bool,
+) -> Value {
+    let op_id = array32(&operation["op_id"]);
+    let signed_transaction = operation["signed_transaction"]
         .as_array()
         .expect("signed transaction")
         .iter()
         .map(|byte| byte.as_u64().expect("byte") as u8)
         .collect::<Vec<_>>();
-    Keccak256::digest(raw).into()
-}
-
-pub fn status_report(fixture: &Fixture, operation: &Value, report_nonce: u64) -> Value {
-    status_report_with_hash(
-        fixture,
-        operation,
-        signed_transaction_hash(operation, false),
-        report_nonce,
-    )
-}
-
-pub fn status_report_with_hash(
-    fixture: &Fixture,
-    operation: &Value,
-    tx_hash: [u8; 32],
-    report_nonce: u64,
-) -> Value {
+    let tx_hash: [u8; 32] = Keccak256::digest(&signed_transaction).into();
+    let kind = if confirmed {
+        StatusKindForSigning::Confirmed
+    } else {
+        StatusKindForSigning::Failed
+    };
     let report = StatusReportForSigning {
-        client_id: CLIENT_ID.to_string(),
-        op_id: op_id(operation),
-        kind: StatusKindForSigning::Confirmed,
+        client_id: CLIENT_ID.to_owned(),
+        op_id,
+        kind,
         tx_hash,
         report_nonce,
         block_number: 1,
     };
     let mut message = b"mandateos:status:v1".to_vec();
-    message.extend_from_slice(&borsh::to_vec(&report).expect("status report serializes"));
-    let signature = fixture.guard.sign(&message).to_bytes();
+    message.extend_from_slice(&borsh::to_vec(&report).expect("report serializes"));
+    let signature = fixture.guard.sign(&message);
     json!({
-        "report": {
-            "client_id": CLIENT_ID,
-            "op_id": report.op_id,
-            "kind": "Confirmed",
-            "tx_hash": report.tx_hash,
-            "report_nonce": report.report_nonce,
-            "block_number": report.block_number
+        "signed_report": {
+            "report": {
+                "client_id": CLIENT_ID,
+                "op_id": op_id,
+                "kind": if confirmed { "Confirmed" } else { "Failed" },
+                "tx_hash": tx_hash,
+                "report_nonce": report_nonce,
+                "block_number": 1
+            },
+            "signature": STANDARD.encode(signature.to_bytes())
         },
-        "signature": STANDARD.encode(signature)
+        "mpc_signature": null
     })
 }
 
@@ -353,69 +381,51 @@ pub async fn get_operation(fixture: &Fixture, operation: &Value) -> Result<Value
         .context("operation missing")?)
 }
 
-pub async fn set_mpc_mode(fixture: &Fixture, mode: &str) -> Result<()> {
-    fixture
-        .mpc
-        .call("set_mode")
-        .args_json(json!({"mode": mode}))
+pub fn op_id(operation: &Value) -> [u8; 32] {
+    array32(&operation["op_id"])
+}
+
+pub fn assert_failure_contains(outcome: &ExecutionFinalResult, expected: &str) {
+    let failure = outcome
+        .clone()
+        .into_result()
+        .expect_err("transaction should fail");
+    assert!(
+        format!("{failure:?}").contains(expected),
+        "expected {expected}, got {failure:?}"
+    );
+}
+
+pub async fn apply_rule_change(
+    owner: &Account,
+    executor: &Account,
+    worker: &Worker<Sandbox>,
+    vault: &Contract,
+    change: Value,
+) -> Result<()> {
+    let queued: Value = owner
+        .call(vault.id(), "queue_rule_change")
+        .args_json(json!({"change": change}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    worker.fast_forward(2).await?;
+    executor
+        .call(vault.id(), "execute_rule_change")
+        .args_json(json!({"queue_id": queued["queue_id"]}))
+        .gas(Gas::from_tgas(100))
         .transact()
         .await?
         .into_result()?;
     Ok(())
 }
 
-pub fn op_id(operation: &Value) -> [u8; 32] {
-    array32(&operation["op_id"])
-}
-
-pub fn operation_digest(operation: &Value) -> [u8; 32] {
-    array32(&operation["tx_digest"])
-}
-
-pub fn cancellation_digest(operation: &Value) -> [u8; 32] {
-    array32(&operation["cancellation"]["tx_digest"])
-}
-
-pub fn expected_evm_address(public_key: &str) -> [u8; 20] {
-    let decoded = bs58::decode(public_key.strip_prefix("secp256k1:").expect("secp key"))
-        .into_vec()
-        .expect("base58 key");
-    assert_eq!(decoded.len(), 64);
-    let hash = Keccak256::digest(decoded);
-    hash[12..].try_into().expect("20 byte address")
-}
-
-/// Signs `digest` with the fixture MPC secret and returns the Chain Signatures
-/// JSON shape: compressed R, scalar s and recovery id.
-pub fn mpc_signature(digest: [u8; 32]) -> Value {
-    use k256::ecdsa::SigningKey;
-
-    let signing_key = SigningKey::from_bytes((&MPC_SECRET).into()).expect("fixture MPC key");
-    let (signature, recovery_id) = signing_key
-        .sign_prehash_recoverable(&digest)
-        .expect("fixture MPC signature");
-    let mut big_r = vec![0x02 + recovery_id.to_byte()];
-    big_r.extend_from_slice(&signature.r().to_bytes());
-    json!({
-        "big_r": big_r,
-        "s": signature.s().to_bytes().to_vec(),
-        "recovery_id": recovery_id.to_byte()
-    })
-}
-
-pub fn assert_failure_contains(outcome: &ExecutionFinalResult, expected: &str) {
-    assert!(outcome.is_failure(), "transaction unexpectedly succeeded");
-    let failures = format!("{:#?}", outcome.failures());
-    assert!(
-        failures.contains(expected),
-        "expected failure containing {expected:?}, got {failures}"
-    );
-}
-
 fn array32(value: &Value) -> [u8; 32] {
     value
         .as_array()
-        .expect("byte array")
+        .expect("array")
         .iter()
         .map(|byte| byte.as_u64().expect("byte") as u8)
         .collect::<Vec<_>>()

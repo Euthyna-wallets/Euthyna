@@ -24,6 +24,18 @@ export interface PaymentIntent {
   max_priority_fee_per_gas: string;
 }
 
+export interface OperationRequest {
+  chain_id: number;
+  target: Bytes20;
+  value: string;
+  calldata: number[];
+  allowance_amount: string;
+  reference: string;
+  gas_limit: string;
+  max_fee_per_gas: string;
+  max_priority_fee_per_gas: string;
+}
+
 export interface MpcSignature {
   big_r: number[];
   s: Bytes32;
@@ -35,29 +47,35 @@ export interface CancellationAttempt {
   tx_digest: Bytes32;
   signature: MpcSignature | null;
   signed_transaction: number[] | null;
-  requested_at_block: number;
+  requested_at_ns: string;
   request_count: number;
 }
 
 export interface VaultOperation {
   op_id: Bytes32;
   client_id: string;
-  agent: string;
+  member: string;
   role: string;
-  intent: PaymentIntent;
+  request: OperationRequest;
+  permission_index: number;
+  allowance_key: Bytes32 | null;
   policy_version: number;
   registry_version: number;
   evm_nonce: number;
   transaction: VaultTransaction;
   tx_digest: Bytes32;
-  created_at_block?: number;
-  expires_at_block: number;
-  possibly_signed_at_block: number | null;
-  state: "Prepared" | "PossiblySigned" | "Confirmed" | "Cancelled" | "Expired";
+  created_at_ns: string;
+  expires_at_ns: string;
+  execute_after_ns: string | null;
+  visa_authorized: boolean;
+  cosigned_by: string | null;
+  possibly_signed_at_ns: string | null;
+  state: "Prepared" | "Queued" | "PossiblySigned" | "Confirmed" | "Failed" | "Cancelled" | "Vetoed" | "Expired";
   signature: MpcSignature | null;
   signed_transaction: number[] | null;
   cancellation: CancellationAttempt | null;
 }
+
 export interface GovernanceOperation {
   op_id: Bytes32;
   proposer: string;
@@ -86,13 +104,13 @@ export interface GuardVisa {
   policy_version: number;
   registry_version: number;
   visa_nonce: number;
-  expires_at_block: number;
+  expires_at_ns: string;
 }
 
 export interface StatusReport {
   client_id: string;
   op_id: Bytes32;
-  kind: "Confirmed";
+  kind: "Confirmed" | "Failed";
   tx_hash: Bytes32;
   report_nonce: number;
   block_number: number;

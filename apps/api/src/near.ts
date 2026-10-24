@@ -270,12 +270,21 @@ export class NearClient {
   }
 
   async expireOperation(vaultAccountId: string, opId: number[]): Promise<string> {
-    return this.functionCall(vaultAccountId, "expire", { op_id: opId }, "30000000000000");
+    return this.functionCall(vaultAccountId, "expire_operation", { op_id: opId }, "30000000000000");
+  }
+
+  async executeQueuedOperation(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "execute_queued_operation", { op_id: opId }, "60000000000000");
   }
 
   async currentBlockHeight(): Promise<number> {
     const block = await this.rpc<{ header: { height: number } }>("block", { finality: "final" });
     return block.header.height;
+  }
+
+  async currentBlockTimestampNs(): Promise<bigint> {
+    const block = await this.rpc<{ header: { timestamp_nanosec: string } }>("block", { finality: "final" });
+    return BigInt(block.header.timestamp_nanosec);
   }
 
   async transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus> {
