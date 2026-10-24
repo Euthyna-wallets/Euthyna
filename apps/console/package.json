@@ -15,6 +15,7 @@
   "dependencies": {
     "@better-auth/passkey": "^1.7.12",
     "@mandateos/deployer": "workspace:^",
+    "@mandateos/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",
     "@near-wallet-selector/modal-ui": "^9.1.0",
     "@near-wallet-selector/my-near-wallet": "^9.1.0",

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { RoleDraft } from "@mandateos/sdk/roles";
+import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
 import { Hono, type Context, type Next } from "hono";
@@ -258,6 +260,7 @@ export interface AppDependencies {
   nearSponsorDailyWalletLimit: number;
   nearSponsorWalletAmountYocto: string;
   registrationRateLimitEnabled: boolean;
+  omniroles?: OmniRolesService;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -375,6 +378,7 @@ export function createApp({
   nearSponsorDailyWalletLimit,
   nearSponsorWalletAmountYocto,
   registrationRateLimitEnabled,
+  omniroles,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -1179,8 +1183,102 @@ export function createApp({
     });
   });
 
+  if (omniroles) {
+    const daoNameSchema = z.object({ daoName: z.string().min(2).max(60) });
+    const roleDraftSchema = z.object({
+      draft: z.object({
+        name: z.string(),
+        blocks: z.array(z.union([
+          z.object({
+            kind: z.literal("payments"),
+            token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+            recipients: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(80) })).min(1).max(20),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+          }),
+          z.object({
+            kind: z.literal("swap"),
+            tokenIn: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+            tokensOut: z.array(z.string().regex(/^0x[0-9a-fA-F]{40}$/)).min(1).max(10),
+            protocols: z.array(z.enum(["uniswap-v3", "uniswap-v2"])).min(1),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+            maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
+          }),
+        ])).min(1).max(10),
+        members: z.array(z.object({
+          accountId: z.string().min(2).max(64),
+          kind: z.enum(["Agent", "Human"]),
+          maxUses: z.number().int().positive().nullable().optional(),
+        })).max(20),
+      }),
+    });
+    const membershipSchema = z.object({
+      role: z.string().min(2).max(32),
+      member: z.string().min(2).max(64),
+      kind: z.enum(["Agent", "Human"]),
+      action: z.enum(["grant", "revoke"]),
+      maxUses: z.number().int().positive().nullable().optional(),
+    });
+    const orgOf = (context: AppContext) => context.get("console").organizationId;
+    app.get("/v1/console/omniroles/status", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.status(orgOf(context))));
+    app.post("/v1/console/omniroles/plan", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, daoNameSchema);
+      return context.json(await omniroles.plan(orgOf(context), input.daoName));
+    });
+    app.post("/v1/console/omniroles/create", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, daoNameSchema);
+      const result = await omniroles.create(orgOf(context), input.daoName);
+      await auth.recordAudit({
+        organizationId: orgOf(context),
+        actorType: "console",
+        actorId: context.get("console").userId,
+        action: "treasury.created",
+        targetType: "treasury",
+        targetId: input.daoName,
+        metadata: result,
+      });
+      return context.json(result);
+    });
+    app.post("/v1/console/omniroles/proposals/wallet", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.walletProposal(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, roleDraftSchema);
+      return context.json(await omniroles.roleProposal(orgOf(context), input.draft as RoleDraft));
+    });
+    app.post("/v1/console/omniroles/proposals/membership", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, membershipSchema);
+      return context.json(await omniroles.membershipProposal(orgOf(context), {
+        role: input.role,
+        member: input.member,
+        kind: input.kind,
+        action: input.action,
+        maxUses: input.maxUses ?? null,
+      }));
+    });
+    app.post("/v1/console/omniroles/proposals/pause", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ pause: z.boolean() }));
+      return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
+    });
+    app.get("/v1/console/omniroles/governance", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.governance(orgOf(context))));
+    app.post("/v1/console/omniroles/rules/activate", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json({ transactions: await omniroles.activateReadyRules(orgOf(context)) }));
+    app.get("/v1/console/omniroles/roles", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.roles(orgOf(context))));
+    app.get("/v1/console/omniroles/activity", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.activity(orgOf(context))));
+    app.post("/v1/operations/check", requireAgent(auth, agentLimiter), async (context) => {
+      const agent = context.get("agent");
+      const input = await parseJson(context, z.object({ request: z.record(z.string(), z.unknown()) }));
+      return context.json(await omniroles.checkOperation(agent.organizationId, agent, input.request));
+    });
+  }
+
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof OmniRolesError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
     if (error instanceof TreasuryError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }

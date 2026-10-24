@@ -883,3 +883,47 @@ export async function signDaoVote(
   });
   return outcome.transaction_outcome.id;
 }
+
+/** Approve or reject a DAO proposal from the connected member wallet. */
+export async function signDaoAction(
+  signerId: string,
+  daoAccountId: string,
+  proposalId: number,
+  proposalKind: unknown,
+  action: "VoteApprove" | "VoteReject",
+): Promise<string> {
+  const wallet = await transactionWallet();
+  const outcome = await wallet.signAndSendTransaction({
+    signerId,
+    receiverId: daoAccountId,
+    actions: [{
+      type: "FunctionCall",
+      params: {
+        methodName: "act_proposal",
+        args: { id: proposalId, action, proposal: proposalKind, memo: null },
+        gas: DAO_VOTE_GAS,
+        deposit: "0",
+      },
+    }],
+  });
+  return outcome.transaction_outcome.id;
+}
+
+/** Direct call on the vault by a council member (veto, emergency pause). */
+export async function signVaultCall(
+  signerId: string,
+  vaultAccountId: string,
+  methodName: "veto_rule_change" | "pause" | "veto_operation",
+  args: Record<string, unknown>,
+): Promise<string> {
+  const wallet = await transactionWallet();
+  const outcome = await wallet.signAndSendTransaction({
+    signerId,
+    receiverId: vaultAccountId,
+    actions: [{
+      type: "FunctionCall",
+      params: { methodName, args, gas: "50000000000000", deposit: "0" },
+    }],
+  });
+  return outcome.transaction_outcome.id;
+}

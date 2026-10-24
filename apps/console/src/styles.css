@@ -262,3 +262,38 @@ button.compact { padding: 5px 8px !important; min-height: 28px; font-size: 11px;
 .wallet-proof span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .wallet-proof strong { font: 500 13px "IBM Plex Mono", monospace; }
 .wallet-identity button.ghost { color: #334155; border-color: #d7dce2; background: #f8fafc; }
+
+/* OmniRoles console */
+.app-main button.danger, button.danger { background: #fff; color: #b42318; border: 1px solid #f1b9b3; }
+.app-main button.danger:hover:not(:disabled) { background: #fdeceb; }
+.app-main select { border-radius: 8px; padding: 8px 10px; font: inherit; }
+.decision { border: 1px solid #e2e5ea; border-radius: 12px; padding: 16px 18px; background: #fff; display: flex; flex-direction: column; gap: 10px; }
+.decision > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0; }
+.decision h3 { margin: 0; color: #111827; }
+.decision footer { border-top: 1px solid #edf0f3; padding-top: 10px; }
+.votes { display: flex; flex-direction: column; align-items: flex-end; }
+.votes strong { font-size: 22px; color: #111827; }
+.sentences { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: #1f2937; }
+.sentences ul { margin: 4px 0 0; padding-left: 18px; color: #374151; }
+.sentences li.rule { list-style: "· "; color: #4b5563; font-size: 14px; }
+.block { border: 1px dashed #cbd2da; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; background: #fafbfc; }
+label.check { flex-direction: row; align-items: center; gap: 8px; color: #1f2937; font-size: 14px; margin: 0 12px 0 0; }
+label.check input { min-width: 0; min-height: 0; width: 16px; height: 16px; }
+.explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 12px 0; }
+.explain > div { border: 1px solid #e2e5ea; border-radius: 10px; padding: 12px 14px; background: #fff; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.explain strong { overflow-wrap: anywhere; color: #111827; }
+.explain p { margin: 4px 0 0; }
+.checks { margin: 8px 0 14px; color: #1f2937; }
+.checks summary { cursor: pointer; font-weight: 500; }
+.checks td { padding: 6px 8px; }
+.role-grid { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 24px; }
+.role-grid h3 { color: #111827; font-size: 14px; }
+.budget { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; color: #1f2937; }
+.bar { height: 8px; background: #edf0f3; border-radius: 999px; overflow: hidden; }
+.bar span { display: block; height: 100%; background: #0f6e66; }
+ul.plain { margin: 0; padding-left: 18px; color: #1f2937; }
+.inbox { background: #fff4e5; color: #92400e; border: 1px solid #f2d58a; border-radius: 999px; padding: 6px 12px; text-decoration: none; font-size: 14px; }
+tr.refused td { background: #fff8f7; }
+.status-disabled, .status-vetoed, .status-expired, .status-failed { background: #fdeceb; color: #b42318; }
+.status-inprogress, .status-queued { background: #fff4e5; color: #92400e; }
+@media (max-width: 900px) { .role-grid { grid-template-columns: 1fr; } }

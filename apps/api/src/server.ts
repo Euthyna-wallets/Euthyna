@@ -17,6 +17,7 @@ import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { ConsoleDataService } from "./console-data.js";
 import { WalletProofService } from "./wallet-proof.js";
+import { OmniRolesService } from "./omniroles.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -110,6 +111,24 @@ const consoleData = new ConsoleDataService(
   env.BASE_SEPOLIA_RPC_URL,
   env.NEAR_AGENT_GAS_LOW_YOCTO,
 );
+const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
+  nearNetwork: env.NEAR_NETWORK_ID,
+  daoFactoryId: env.DAO_FACTORY_ID,
+  mpcContractId: env.MPC_CONTRACT_ID,
+  artifactsDir: env.CONTRACT_ARTIFACTS_DIR,
+  accountParent: env.NEAR_ACCOUNT_PARENT,
+  daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
+  vaultDepositYocto: env.OMNIROLES_VAULT_DEPOSIT_YOCTO,
+  baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
+  ruleDelayNs: env.OMNIROLES_RULE_DELAY_SECONDS * 1_000_000_000,
+  ruleExpirationNs: (env.OMNIROLES_RULE_DELAY_SECONDS + 7 * 86_400) * 1_000_000_000,
+  operationTtlNs: 600_000_000_000,
+  proposalPeriodNs: "604800000000000",
+  proposalBondYocto: env.OMNIROLES_PROPOSAL_BOND_YOCTO,
+});
+// Rule changes activate by themselves once their veto window has passed.
+setInterval(() => void omniroles.activateAllReadyRules(), 30_000).unref();
+
 const app = createApp({
   near,
   guard,
@@ -128,6 +147,7 @@ const app = createApp({
   nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
   registrationRateLimitEnabled: !env.UAT_DEMO_WALLETS_ENABLED,
+  omniroles,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

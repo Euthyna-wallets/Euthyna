@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { authClient } from "../auth.js";
-import { api, type TreasuryView } from "../api.js";
+import { omni } from "../omniroles-api.js";
 import { SigningInbox } from "./SigningInbox.js";
 import { WalletBar } from "./WalletBar.js";
 import { WalletProvider } from "../lib/wallet-context.js";
@@ -23,19 +23,19 @@ export function Layout() {
   const active = organizations.data?.find((organization) => organization.id === activeOrganizationId)
     ?? organizations.data?.[0]
     ?? null;
-  const treasury = useQuery({
-    queryKey: ["treasury", active?.id],
-    queryFn: () => api<{ treasury: TreasuryView | null }>("/v1/console/treasury"),
+  const status = useQuery({
+    queryKey: ["omni-status", active?.id],
+    queryFn: omni.status,
     enabled: Boolean(active),
+    refetchInterval: 30_000,
   });
-  const setup = useQuery({
-    queryKey: ["setup-status", active?.id],
-    queryFn: () => api<{ roleBudgets: Array<{ role: string }> }>("/v1/console/overview"),
-    enabled: Boolean(active),
+  const roles = useQuery({
+    queryKey: ["omni-roles", active?.id],
+    queryFn: omni.roles,
+    enabled: Boolean(status.data?.treasury),
   });
-  const setupRequired = !treasury.data?.treasury
-    || treasury.data.treasury.status !== "active"
-    || (setup.data?.roleBudgets.length ?? 0) === 0;
+  const setupRequired = !status.data?.wallet || (roles.data?.roles.length ?? 0) === 0;
+  const paused = status.data?.paused ?? false;
 
   useEffect(() => {
     setDemoWalletScope(session.data?.user.id ?? null);
@@ -73,10 +73,11 @@ export function Layout() {
           ) : null}
           <nav className="app-nav">
             <NavLink to="/" end>Overview</NavLink>
+            <NavLink to="/roles">Roles</NavLink>
             <NavLink to="/agents">Agents</NavLink>
-            <NavLink to="/mandate">Spending permissions</NavLink>
-            <NavLink to="/payments">Payments</NavLink>
+            <NavLink to="/activity">Activity</NavLink>
             <NavLink to="/governance">Decisions</NavLink>
+            <NavLink to="/suppliers">Suppliers</NavLink>
             <NavLink to="/settings">Settings</NavLink>
             {setupRequired ? <NavLink className="setup-link" to="/onboarding">Finish setup</NavLink> : null}
           </nav>
@@ -90,6 +91,7 @@ export function Layout() {
             <WalletBar />
           </header>
           <main className="app-main">
+            {paused ? <div className="alert error"><strong>Operations are paused by the security council.</strong> Agents cannot move funds until members vote to resume.</div> : null}
             <Outlet />
           </main>
         </div>
