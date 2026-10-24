@@ -1,397 +1,200 @@
 # MandateOS
 
-**Let AI agents manage company funds inside mandates approved by humans, without giving an agent a treasury key.**
+**Let AI agents use company funds inside rules approved by humans, without giving an agent a treasury key.**
 
-MandateOS assigns each agent a role, a budget, permitted assets, approved destinations and permitted operations. An agent can request an operation; it cannot sign an arbitrary treasury transaction. Every operation must pass three independent controls before funds move.
+MandateOS is a NEAR control plane for chain-agnostic company wallets. **OmniRoles**, a keyless Rust contract on NEAR, owns one MPC-derived company wallet per chain and enforces role memberships, call permissions, shared allowances, waiting periods, co-signatures, velocity limits, nonces, and targeted vetoes. The demo chain is Base Sepolia ([architecture](./Architecture.md), [issue #40](https://github.com/joindefi/MandateOS/issues/40)).
 
-> Hackathon scope: NEAR Hackathon 2026, track 06 — AI Security & Defense.
->
-> Project status: Phase 1 runs end to end on NEAR testnet + Base Sepolia: DAO-governed Vault, Guard visa, real MPC signature, Zodiac/Safe execution, 1 TestUSDC (test token) payment, signed confirmation, `0xGOV` governance and council veto. Phase 2 Intents and production deployment/hardening remain roadmap.
+## Current status
 
-## Problem
-
-AI agents can prepare invoices, rebalance assets and move funds across chains. Giving such an agent a wallet key makes its prompt, dependencies and runtime part of the treasury security boundary. A prompt injection, compromised dependency or leaked credential can then become an unrestricted signing capability.
-
-MandateOS moves the limits outside the agent. The agent receives an API identity and a NEAR function-call key restricted to its client's Vault. `mandateos agent init` generates that key locally; the relayer provisions the proposed account with no full-access key. The agent never receives an EVM key. NEAR function-call keys can restrict a key to named methods on one receiver contract ([NEAR access keys][near-access-keys]).
-
-## A mandate
-
-The current Guard reads an explicit per-client JSON registry from `config/clients/<client>/vendors.json`. It contains exact addresses and amount ceilings; an absent case is escalated. The target control plane stores versioned drafts and immutable policy snapshots in PostgreSQL through Prisma, then compiles Guard, Vault and Zodiac artifacts from one approved snapshot.
-An illustrative Phase 1 mandate contains:
-
-| Field | Value |
+| Block | Status |
 |---|---|
-| Client | ACME |
-| Role | `researcher` |
-| Agent | Better Auth client + NEAR function-call account |
-| Operation | Base USDC payment |
-| Vendors | ACME SAS, Data Provider |
-| Maximum per transaction | 5,000 USDC |
-| Monthly budget | 6,000 USDC |
-| Idempotency | Contract-period or purchase-order reference |
-| Gas | Governed `gasLimit`, `maxFeePerGas` and total fee |
+| Invitation security and founder console, PR #36 | Implemented; awaiting user validation before merge |
+| OmniRoles task 1a | Implemented on `feat/omniroles-vault`; under test/UAT |
+| `contracts/omniroles-conditions` task 1b | Parallel work owned separately; this branch does not touch it |
+| Console OmniRoles cutover, issue #40 task 2 | Next PR after task 1a review |
+| Paymaster, issue #39 | Later |
 
-The JSON registry is the reviewable hackathon input, not an on-chain authority. The Vault and Zodiac remain the sources of truth for active controls. The target multi-client service moves drafts and versions to PostgreSQL; the repository already contains the Prisma schema, while database-backed policy publication remains unimplemented.
+Safe, Zodiac Roles, Zodiac Delay, the Base governance relay, `0xAAA`, and `0xGOV` are **not** part of the target architecture. Legacy console/deployment files remain only until issue #40 task 2 replaces that UI; they are not evidence of an OmniRoles deployment.
 
-## Three locks
+## Why
 
-| Lock | Location | Decision |
-|---|---|---|
-| **1. Guard** | TypeScript backend | Applies exact business rules to a prepared operation and signs a short-lived ed25519 visa bound to its exact transaction digest. An uncovered case is escalated to a human; it is never approved by inference. |
-| **2. Vault** | Rust contract on NEAR, one per client | Enforces agent identity, role, budget, allowlist, reference idempotence, visa nonce and expiry. It builds the EIP-1559 transaction and requests an ECDSA signature from NEAR Chain Signatures. The Phase 1 builder is [`omni-transaction` 0.3][omni-transaction]. |
-| **3. Zodiac Roles** | Roles Modifier attached to a Safe on Base | Restricts the target, function, calldata parameters and periodic allowance before the Safe executes the USDC transfer. Roles exposes `execTransactionWithRole` for this controlled execution path ([Roles repository][zodiac-roles]). |
+Giving an AI agent an EVM key makes its prompt, runtime, and dependencies part of the treasury security boundary. MandateOS instead gives the agent:
+
+- a Better Auth API identity;
+- a NEAR function-call key limited to `prepare`, `authorize`, `cancel_nonce`, and `renounce_role` on one OmniRoles vault;
+- no EVM private key.
+
+The company wallet is derived by NEAR Chain Signatures from the vault account and a chain path such as `omniroles/evm/84532`. Only the vault code can request its signatures ([NEAR Chain Signatures](https://docs.near.org/chain-abstraction/chain-signatures), [`contracts/vault`](./contracts/vault)).
+
+## Payment flow
 
 ```mermaid
 sequenceDiagram
-  participant A as AI agent
-  participant V as Vault · NEAR
+  participant A as Agent
+  participant O as OmniRoles · NEAR
   participant G as Guard
   participant M as Chain Signatures MPC
-  participant R as Relayer
-  participant Z as Zodiac Roles
-  participant S as Safe · Base
+  participant W as Worker
+  participant B as ACME wallet · Base
 
-  A->>V: prepare(intent)
-  V-->>A: op_id + tx_digest
-  A->>G: request visa(op_id)
-  G->>V: read prepared operation
-  G-->>A: signed visa
-  A->>V: authorize(op_id, visa)
-  V->>M: sign EIP-1559 digest
-  M-->>V: ECDSA signature
-  V-->>R: signed raw transaction
-  R->>Z: broadcast execTransactionWithRole
-  Z->>S: execute allowed USDC transfer
+  A->>O: prepare(role, target, calldata)
+  O->>O: membership + permission + allowance + velocity
+  A->>G: visa(op_id)
+  G-->>A: exact ed25519 visa
+  A->>O: authorize(op_id, visa)
+  opt amount above threshold
+    O->>O: waiting period + human co-signer role
+    W->>O: execute_queued_operation(op_id)
+  end
+  O->>M: sign direct EIP-1559 transaction
+  M-->>O: secp256k1 signature
+  W->>B: eth_sendRawTransaction
+  G->>O: exact terminal receipt report
 ```
 
-The MPC address `0xAAA` is derived from `(Vault account, agent path)`. The Vault is the caller of the MPC contract, so only the Vault's code can request signatures for that derived address. Chain Signatures derives foreign-chain accounts from the NEAR caller and a derivation path ([Chain Signatures documentation][chain-signatures], [MPC repository][near-mpc]).
+The transaction directly calls the permitted target. For the Base Sepolia payment demo it is canonical `TestUSDC.transfer(recipient, amount)` calldata; no Safe/module wrapper exists.
 
-## Implemented
+## OmniRoles controls
 
-The current repository contains:
+### Roles and memberships
 
-- `contracts/vault`: `prepare`, domain-separated Guard visas, EIP-1559 construction, `PossiblySigned`, permissionless `submit_signature` recovery for failed MPC callbacks, nonce cancellation and signed confirmation reports;
-- `contracts/governance-relay`: DAO-only Delay calls, sequential `0xGOV` nonces, MPC signing, `PossiblySigned`, `submit_signature` recovery and same-nonce cancellation;
-- `contracts/dao-factory`: permissionless, keyless factory that creates caller-funded per-Company DAOs under `factory-v2.mandateos.testnet` using the official immutable global Sputnik hash; failed creation refunds the caller;
-- `contracts/mock-mpc` and `contracts/test-ft`: sandbox dependencies, including delayed MPC response simulation;
-- `contracts/tests`: nine DAO tests, ten Vault tests and six governance-relay tests using NEAR Sandbox; the factory adds three focused tests for global-hash, keyless creation, name validation and funding guards;
-- `apps/api`: Hono Guard and Base relayer, exact JSON registry evaluation, viem digest recomputation, ed25519 visas and confirmation reports;
-- `apps/api` auth: Better Auth passkey-first registration with a signed 10-minute context, email/password disabled, OTP verification restricted to invitation claims, wallet-proof membership claims with four-eyes approval, IP/email registration limits, per-agent API keys and append-only audit rows ([`auth.ts`](./apps/api/src/auth.ts), [`wallet-proof.ts`](./apps/api/src/wallet-proof.ts));
-- `apps/api` treasury onboarding: `/v1/console/treasury/plan` includes only members whose NEP-413 + EIP-191 proofs another administrator approved; the founder confirms/signs the exact policy locally; every member independently re-reads Vault/relay from NEAR RPC and confirms one server-verified digest before Safe; UAT wallet sponsorship is deferred to DAO time and bounded by a durable daily cap ([`treasury.ts`](./apps/api/src/treasury.ts));
-- `apps/api` mandates: `/v1/console/mandates/preview` compiles one role into Vault, Zodiac and Guard artifacts, a deterministic diff and unsigned DAO proposals; the console signs them with the member's NEAR wallet. `/v1/console/treasury/refresh` re-verifies the deployed controls;
-- `apps/api` agent payments: `POST /v1/operations/pay` issues a visa/escalation/refusal, then the leased `worker.ts` recovers missed MPC callbacks, broadcasts exact raw transactions, follows receipts, sends `report_status`, requests governed same-nonce cancellation and releases references only after terminal Vault state;
-- `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
-- `apps/console`: one founder-facing console with a resumable five-step setup, global per-profile NEAR/EVM wallet bar, per-member signing inbox, business-labelled USDC spending permissions sourced from the approved supplier registry, readable decision effects and normal signing through NEAR Wallet Selector plus MetaMask/Rabby; explicit UAT tools appear only in demo mode ([`OnboardingPage.tsx`](./apps/console/src/routes/OnboardingPage.tsx));
-- `packages/sdk`: `mandateos agent init`, local `0600` ed25519 key storage, Vault registration and one-shot `0xAAA` derivation, then `prepare → visa → authorize`, automatic authorization-hash registration, status polling and agent-authorized `cancel_nonce`;
-- `packages/mcp`: stdio MCP server exposing `pay`, `status` and `cancel` over the SDK;
-- `apps/demo-agent`: OpenAI-compatible LLM adapter wired to MCP, with nominal, changed-details, prompt-injection and direct-bypass scenarios;
-- `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
-- `packages/db`: validated Prisma schema for Better Auth organizations, members and API keys, plus agents, environments, vendors, policy snapshots, operations and audit rows;
-- [`docs/dao-spike.md`](./docs/dao-spike.md): DAO policy, source citations and factory verification;
-- [`docs/vault-testnet.md`](./docs/vault-testnet.md): Vault protocol, test coverage and testnet deployment evidence;
-- [`docs/api.md`](./docs/api.md): console and agent authentication, routes, errors, audit rows and local setup;
-- [`deployments/near-testnet.json`](./deployments/near-testnet.json) and [`deployments/base-sepolia.json`](./deployments/base-sepolia.json): observed addresses, policies and transaction hashes.
+Agents and humans are both NEAR `AccountId` members. Memberships support:
 
-Phase 1 payment, governance and MCP/LLM demos run on NEAR testnet + Base Sepolia. Founder-wallet and agent-account setup sponsorship are implemented under one daily cap; Phase 2 Intents and production hardening remain roadmap.
+- start and end timestamps;
+- maximum use count;
+- reservation while an operation is active;
+- administrative revocation through a delayed rule change;
+- immediate self-renouncement.
 
-## Architecture target
+### Permissions
 
-### Phase 1 — Base USDC payment
-
-Phase 1 is complete only when this path runs end to end:
-
-1. an authenticated agent calls `prepare(intent)` on its client's Vault;
-2. the Vault reserves the role budget and business reference, assigns `op_id` and the next EVM nonce, builds the canonical EIP-1559 transaction and exposes `tx_digest`;
-3. Guard reads that prepared operation, applies exact registry and policy rules, and signs the Borsh-encoded visa;
-4. the agent calls `authorize(op_id, visa)`;
-5. before calling the MPC, the Vault consumes the visa, enters `PossiblySigned` and permanently advances the EVM nonce; callback failure or timeout never releases the reservation, and a public `submit_signature` rebuilds the exact signed transaction for the original or cancellation digest;
-6. a relayer broadcasts the signed transaction without modifying it, or signs a higher-fee zero-value cancellation at the same nonce after a circuit breaker;
-7. Zodiac validates the USDC target, `transfer` function, recipient and allowance before the Safe executes it.
-
-Local development uses NEAR Sandbox. UAT uses **NEAR testnet as the control plane and Base Sepolia as the execution plane**, with test assets and a 5 USDC allowance. Production remains NEAR mainnet + Base mainnet after the UAT and negative tests pass ([NEAR networks][near-networks], [Base networks][base-networks]).
-
-Each derived Base address holds a small ETH balance funded by an approved governance action. `maxFeePerGas`, `maxPriorityFeePerGas` and `gasLimit` are part of the signed EIP-1559 transaction and therefore of `tx_digest`; the Vault also enforces `maxFeePerGas × gasLimit` against the role's fee cap. `omni-transaction` exposes the EVM signing preimage and signed transaction assembly ([omni-transaction][omni-transaction]).
-
-### Phase 2 — swap and bridge through NEAR Intents
-
-Phase 2 is a stretch target, not an implemented feature. The Vault derives a dedicated Intents account `0xINT` and signs ERC-191 payloads through the MPC. The Intents verifier supports ERC-191 payload recovery and `0x…` implicit account IDs ([ERC-191 implementation][intents-erc191], [public-key implementation][intents-public-key]).
-
-- **Deposit:** the Safe may transfer Base USDC only to the POA deposit address associated with `0xINT` and returned by `deposit_address` for chain `eth:8453` ([deposit example][intents-deposit-example]).
-- **Swap:** Guard provides a reference price; the Vault accepts a quote only when the minimum received satisfies that reference, then signs and publishes the intent.
-- **Bridge:** the Vault signs an `ft_withdraw` intent only for a wallet registered to the client.
-
-Funds credited to `0xINT` are protected by the Vault but no longer by Zodiac. The design therefore keeps at most one period's Intents budget in that account.
-
-## Roadmap
-
-- member voting accounts restricted to on-chain votes and backed by passkeys;
-- NEP-366 sponsorship for agent and relayer calls;
-- production `0xGOV` deployment on NEAR mainnet with Delay cooldown `86 400` seconds;
-- additional assets and chains;
-- on-chain or independently verified Base receipt proofs instead of trusted confirmation calls;
-- audit coverage for `omni-transaction` and the MandateOS contracts before production use.
-
-The console creates the profile and session during the WebAuthn registration ceremony from a short-lived signed context; no password exists. Email is verified by a ten-minute OTP only when an invited member claims a seat. The session email must match the invitation, both wallets must pass NEP-413/EIP-191 proof, and a different administrator must approve the exact pair before it can enter the DAO/Safe council. On-chain signatures use NEAR Wallet Selector or MetaMask/Rabby; explicit UAT demo mode may store test keys locally with a warning ([Better Auth passkey][better-auth-passkey], [`wallet-proof.ts`](./apps/api/src/wallet-proof.ts), [`auth-gateway.ts`](./apps/api/src/auth-gateway.ts)).
-
-## Governance
-
-The UAT governance path is implemented:
-
-1. three company members vote through Sputnik/Trezu with absolute threshold `2`;
-2. an approved proposal calls `gov-relay-v1.mandateos-root-20261021.testnet`;
-3. the relay, owned by the DAO and without access keys, builds `Delay.execTransactionFromModule`, advances the sequential EVM nonce and asks Chain Signatures to sign for `0xGOV`;
-4. `0xGOV` queues the call in Delay;
-5. Base Sepolia uses a `300`-second cooldown, then `executeNextTx` forwards the call through the Safe;
-6. production keeps a `86 400`-second cooldown.
-
-`0xGOV` is `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`; it is a Delay module, never a Safe owner. The Safe owners are the three council addresses listed in the deployment manifest, threshold 2/3. A council veto calls `setTxNonce`; the demonstrated post-veto `executeNextTx` reverted with `Transaction queue is empty`.
-
-## Non-custodial properties
-
-- MandateOS services do not hold an EVM private key for an agent, `0xAAA`, `0xINT` or `0xGOV`.
-- The Guard key can approve only a prepared operation; it cannot call the Safe or force the Vault to request a signature.
-- The Vault account has no access key after deployment. Policy changes and contract upgrades require the configured Trezu governance path.
-- The relayer receives a complete signed transaction and only broadcasts it.
-- A signature is treated as public from the moment the MPC request is made. `PossiblySigned` therefore keeps budget, reference and nonce locked through callback failure, timeout, pause and revocation.
-- A compromised agent remains subject to Guard, Vault and Zodiac limits.
-- A compromised Guard remains subject to Vault and Zodiac limits.
-
-The DAO and Vault properties are exercised by automated tests. Safe/Zodiac and the complete payment path remain architecture claims until `deployments/base-sepolia.json` contains observed addresses and transaction hashes.
-
-## Threat model
-
-| Scenario | Required result | Bound |
-|---|---|---|
-| Agent calls `authorize` without a visa | Vault rejects | No payment |
-| Visa is changed, expired or replayed | Vault rejects signature, digest, expiry or nonce | No payment |
-| MPC response is late or its callback fails | Operation remains `PossiblySigned`; nonce cannot be reused; anyone may store the published signature with `submit_signature` | Confirmation waits for the exact signature or a same-nonce cancellation |
-| Vault is paused or agent is revoked after `sign` | Reservation remains; emergency worker requests `cancel_nonce` | No automatic reopening |
-| Agent requests an MPC signature directly | Derived address differs from the role member | Zodiac rejects |
-| Prompt injection changes the recipient | Guard registry check, Vault allowlist and Zodiac parameter condition reject | No payment |
-| Invoice reference is submitted twice | Active reservation or consumed reference rejects it | No duplicate payment |
-| Guard signing key is compromised | Vault budget and Zodiac allowance still apply | Role budget/allowance |
-| Vault is compromised | Zodiac still restricts Base calls | Sum of funded role allowances until intervention |
-| Common policy is wrong | All three compiled targets can accept the same error | Human-approved erroneous budget |
-| Phase 2 `0xINT` path is compromised | Zodiac is no longer in that path | Balance held by `0xINT` |
-
-The detailed assumptions and state transitions are in [`Architecture.md`](./Architecture.md#modèle-de-menace).
-
-## Repository layout
-
-Current monorepo layout:
+Each permission binds:
 
 ```text
-MandateOS/
-├── apps/
-│   ├── api/                   # Hono API plus leased crash-recoverable Base/NEAR worker
-│   ├── console/               # React/Vite console
-│   └── demo-agent/            # OpenAI-compatible LLM agent wired to MCP
-├── config/
-│   └── clients/acme/          # Exact hackathon vendor registry
-├── contracts/
-│   ├── vault/
-│   ├── governance-relay/
-│   ├── mock-mpc/
-│   ├── test-ft/
-│   ├── tests/
-│   └── res/
-├── packages/
-│   ├── db/                    # Prisma schema and shared client
-│   ├── deployer/              # viem Safe/Roles/Delay deployment
-│   ├── sdk/                   # agent NEAR key, pay/status/cancel lifecycle
-│   └── mcp/                   # stdio pay/status/cancel tools
-├── docs/
-│   ├── api.md
-│   ├── console/               # console screenshots
-│   ├── dao-spike.md
-│   └── vault-testnet.md
-├── deployments/
-│   ├── base-sepolia.json
-│   └── near-testnet.json
-├── Architecture.md
-├── pnpm-workspace.yaml
-└── README.md
+chain_id + target + optional selector + condition bytes + optional allowance key
 ```
 
-Additional protocol/policy packages remain roadmap work. Authentication lives in `apps/api` (Better Auth with Prisma). The API uses [Hono][hono], and [Prisma][prisma] is the PostgreSQL source of truth. MandateOS is independent and does not import or copy JOIN code.
+Empty condition bytes mean unconditional. Non-empty condition trees fail closed until the separate `contracts/omniroles-conditions` crate is wired through:
 
-## Getting started
+```rust
+evaluate(conditions, calldata, context)
+```
 
-Run all local checks:
+Task 1a supports arbitrary unconditional calls, canonical ERC-20 transfer allowance binding, and native ETH value binding. It never silently accepts an unsupported allowance-bearing call ([`conditions.rs`](./contracts/vault/src/conditions.rs), [`evm.rs`](./contracts/vault/src/evm.rs)).
+
+### Shared allowances
+
+Allowances are global to the vault, not to one chain:
+
+- `balance`;
+- `refill`;
+- `max_refill`;
+- `period_ns`;
+- `timestamp_ns`;
+- `reserved`.
+
+Complete elapsed periods refill the balance up to `max_refill`. A prepared operation reserves allowance; confirmation consumes it; veto, failure, expiry, or cancellation releases it.
+
+### Waiting periods and veto
+
+Every rule change is queued on NEAR. The DAO can queue; anyone can execute after the waiting period; one stored council account can veto one exact queue entry. A council member may pause immediately; only the DAO can unpause.
+
+Operations above a role threshold are also queued before MPC signing. This matters: a veto happens before a raw, broadcastable EVM transaction exists. Vetoing one operation does not advance or clear another chain wallet's queue.
+
+### Co-signature and velocity
+
+A distinct active **human** member of the role named by `co_signer_role` must call `co_sign` above the configured threshold. An agent or a member of the operation role cannot approve its peer's operation. Velocity accounting reserves risk value during preparation and charges it only after confirmed execution.
+
+### Nonces and gas
+
+Each chain wallet has one nonce and one active operation. The nonce advances only when OmniRoles commits to MPC signing. A vetoed pre-signature operation does not consume it. Once signing may have succeeded, cancellation uses the same nonce and a higher fee.
+
+Until issue #39 provides a paymaster, the derived wallet holds a small ETH balance. The API estimates the direct token call from that wallet, refuses insufficient balance, and the vault caps `gas_limit`, `max_fee_per_gas`, `max_priority_fee_per_gas`, and total fee.
+
+## Human governance
+
+Sputnik/Trezu remains the human governance layer. A final vote calls `queue_rule_change`; it does not immediately mutate policy. OmniRoles itself enforces the waiting period and targeted council veto. Sandbox tests cover DAO authorization, delayed execution, direct-account rejection, and independent veto entries ([`dao_governance.rs`](./contracts/tests/tests/dao_governance.rs)).
+
+## Repository
+
+| Path | Responsibility |
+|---|---|
+| `contracts/vault` | OmniRoles policy state, queues, direct EVM transaction construction, MPC signing |
+| `contracts/tests/tests/vault_operations.rs` | Membership, allowance, queue, veto, co-signature, velocity, nonce, visa and failure tests |
+| `contracts/tests/tests/dao_governance.rs` | Sputnik-owned delayed rule changes |
+| `contracts/tests/examples/deploy_omniroles_testnet.rs` | Real NEAR testnet → Base Sepolia payment runner |
+| `apps/api` | Authentication, Guard, registry, gas estimation, payment worker |
+| `packages/sdk` | Agent key store and direct ERC-20 OmniRoles request encoding |
+| `packages/mcp` | Claude/MCP tools over the SDK |
+| `packages/deployer/src/fund-omniroles-wallet.ts` | Funds the derived UAT wallet with ETH and TestUSDC |
+| `packages/db` | Better Auth, organizations, members, agents, operations and audit rows |
+| `apps/console` | PR #36 visual base; OmniRoles flow arrives in task 2 |
+
+## Local verification
 
 ```bash
 pnpm install
-DATABASE_URL=${DATABASE_URL:-postgresql://mandateos:mandateos@127.0.0.1:5432/mandateos} \
-  pnpm --filter @mandateos/db exec prisma db push
 pnpm typecheck
 pnpm test
+pnpm build
+
 cd contracts
 ./build.sh
-cargo test -p tests -- --nocapture
+cargo test --workspace
 ```
 
-`build.sh` rebuilds the Vault and its two local test dependencies with the NEAR-compatible Rust 1.86 toolchain. The contract suite deploys Sputnik DAO and the Vault, removes their access keys and exercises DAO-only governance, visa checks, `PossiblySigned`, reservations, cancellation, EIP-1559 construction and delayed MPC responses. The TypeScript suite covers exact Guard escalation, domain-separated visas, agent/console credential separation, organization isolation and the compiled Roles recipient/allowance conditions. `apps/api/src/auth-gateway.integration.test.ts` runs the real Prisma adapter when `TEST_DATABASE_URL` points at a migrated database.
+The Vault reproducible-build metadata is in [`contracts/vault/Cargo.toml`](./contracts/vault/Cargo.toml). Sandbox tests use the built artifact in `contracts/res/vault.wasm`.
 
-Run the local API only after filling a non-committed `.env` from [`env.example`](./env.example):
+## Base Sepolia UAT
+
+Required secrets stay in local environment files and must never be printed or passed as CLI arguments. The payment runner reads them from the environment.
+
+1. Deploy/configure OmniRoles and wait for the derived wallet:
 
 ```bash
-set -a
-source .env
-set +a
-pnpm --filter @mandateos/api dev
-# separate terminal/process:
-pnpm --filter @mandateos/api worker
+cargo run -p tests --example deploy_omniroles_testnet
 ```
 
-Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled. Better Auth's generic email-invitation acceptance is blocked. A `/onboarding?member=<id>` invitation requires OTP verification of the invited email, valid NEP-413 and EIP-191 proofs, then approval by a different administrator. Agent credentials are per-agent API keys in `x-api-key` ([`auth.ts`](./apps/api/src/auth.ts), [`app.ts`](./apps/api/src/app.ts)).
-
-Initialize an agent key locally; only copy the printed public key into the
-console:
+2. When it prints `OMNIROLES_WALLET_READY`, fund that public address in another terminal:
 
 ```bash
-pnpm --filter @mandateos/sdk build
-node packages/sdk/dist/cli.js agent init --name \"Compta Bot\"
+pnpm --filter @mandateos/deployer fund:omniroles
 ```
 
-Run the console in another terminal:
+3. The runner waits for `OMNIROLES_MIN_GAS_WEI` and the requested TestUSDC amount, then prepares, authorizes, broadcasts, confirms, and reports the payment. It prints one `OMNIROLES_BASE_PAYMENT` JSON object containing every NEAR and Base transaction hash.
 
-```bash
-# Normal mode: NEAR Wallet Selector + MetaMask/Rabby; no localStorage keys.
-pnpm --filter @mandateos/console dev
+Observed jury UAT using the exact artifact in [`deployments/omniroles-base-sepolia.json`](./deployments/omniroles-base-sepolia.json):
 
-# Explicit test-only UAT demo mode:
-VITE_UAT_DEMO_MODE=1 pnpm --filter @mandateos/console dev
-```
+- Sputnik owner: [`omni-92860380.factory-v2.mandateos.testnet`](https://testnet.nearblocks.io/address/omni-92860380.factory-v2.mandateos.testnet), with a distinct three-account council and threshold 2;
+- keyless Vault: [`omni-vault-92860380…testnet`](https://testnet.nearblocks.io/address/omni-vault-92860380.dev-20261024164616-35109844835097.testnet), `rule_delay_ns = 300_000_000_000`, zero access keys, deployed code hash equal to the repository artifact;
+- derived wallet: [`0x8cb6…aB81`](https://sepolia.basescan.org/address/0x8cb6e51ee112e848fc24d76030a54a160f1bab81);
+- payment: [`0x2318…bd2d`](https://sepolia.basescan.org/tx/0x23183aac4f3744879dce974b2636e7fdce84781b64ad58bcf3ab4cae1fe9bd2d), a direct `TestUSDC.transfer` of `1.000000` token;
+- terminal `Confirmed` report: [`CUMv…NniY`](https://testnet.nearblocks.io/txns/CUMv4QHQwU2tr3GVJr3TRLtmrtRonQGPGvBaxxhXNniY).
 
-It listens on `http://localhost:5173` (`CONSOLE_ORIGIN`) and calls the API at
-`VITE_API_URL` (default `http://localhost:3000`) with credentials. The API's CORS
-and CSRF checks accept exactly `CONSOLE_ORIGIN`.
+See [`.env.example`](./.env.example) for variable names. Never use faucet rotation or IP rotation.
 
-The Base Sepolia script performs no transaction unless every required variable is present and `BASE_DEPLOY_CONFIRM=DEPLOY_ACME_BASE_SEPOLIA`. On success it writes observed addresses, code hashes and transaction hashes to `deployments/base-sepolia.json`:
+## Security boundaries
 
-```bash
-pnpm --filter @mandateos/deployer deploy:base-sepolia
-```
+- The server has no MPC or EVM fund-moving key.
+- Guard uses separate ed25519 keys for business visas and terminal reports. Each key rotates only through a delayed rule change; neither can construct an MPC signature.
+- Worker broadcasts exact raw bytes already signed by MPC.
+- Unknown condition trees and unknown allowance-bearing calldata fail closed.
+- Rule/allowance replacement is blocked while reservations are active.
+- Failed Base transactions consume the wallet nonce but release policy spend through a signed `Failed` report.
+- Contracts are unaudited and testnet-only.
+- Wallet proof does not prove that invited accounts belong to distinct humans; PR #36 documents this limitation.
 
-The MCP server can be used by any MCP client:
+## Authentication
 
-```bash
-pnpm --filter @mandateos/mcp start
-```
+Humans use Better Auth passkeys. An invited council seat requires:
 
-The demo agent starts that stdio server as a child by default:
+1. session email equals the invited email;
+2. OTP verification;
+3. NEP-413 and EIP-191 wallet proofs;
+4. approval of that exact wallet-proof snapshot by another administrator.
 
-```bash
-DEMO_SCENARIO=payment-ok pnpm --filter @mandateos/demo-agent start
-```
+Email/password is disabled. Normal mode uses NEAR Wallet Selector and MetaMask/Rabby; browser-generated private keys exist only behind explicit UAT demo mode.
 
-`DEMO_SCENARIO` also accepts `bank-change`, `injection` and `bypass`. The bypass
-scenario calls Vault `authorize` directly with the supplied forged/old approval
-and succeeds only when the contract reverts.
+## License note
 
-The AI-security segment runs four deterministic outcomes before the explorer
-walkthrough: approved payment, changed payment details → escalation, prompt
-injection → `prompt_injection_detected` with no visa, and direct/old-visa bypass
-→ Vault revert.
-
-## Demo acceptance scenario
-
-The three-minute demonstration is considered valid only with public explorer links:
-
-1. show the approved ACME role, budget, registry entry and corresponding Zodiac permission;
-2. pay 1 TestUSDC (test token) from the Safe through the Vault/MPC path;
-3. show Guard refusing to issue a visa, Vault refusing an out-of-allowlist `prepare`, and Zodiac reverting a signed direct call;
-4. approve proposal `19` with two council votes to raise the researcher allowance to 10 TestUSDC (test token);
-5. queue through `0xGOV`, wait 300 seconds, execute through Delay, and verify the 10 TestUSDC (test token) allowance;
-6. approve malicious proposal `23`, queue it, veto with `setTxNonce(3)`, then show `executeNextTx` reverting;
-7. show `cancel_nonce` keeping the same nonce and ending in `Cancelled` after cancellation confirmation.
-
-## Deployments
-
-The current UAT uses the security-corrected Vault and Base Sepolia chain ID `84532`. The older testnet deployment remains listed only under `superseded_deployment` in the machine-readable manifest.
-
-| Component | NEAR testnet | Base Sepolia UAT |
-|---|---|---|
-| ACME DAO | `mandateos-uat-92543787.sputnikv2.testnet` | — |
-| ACME Vault | `vault-v4.mandateos-root-20261021.testnet` | — |
-| Test FT | `test-ft-v4.mandateos-root-20261021.testnet` | — |
-| Agent | `agent-v4.mandateos-root-20261021.testnet` | `0x10EdE0F3C618321919934Fd63df173DD37F037Af` |
-| Restricted-key provisioning proof | [`pr-a-unlimited-1761142000-agent.mandateos.testnet`](https://testnet.nearblocks.io/address/pr-a-unlimited-1761142000-agent.mandateos.testnet) · [tx](https://testnet.nearblocks.io/txns/FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw) · unlimited (`null`) FC allowance | — |
-| MPC signer | `v1.signer-prod.testnet` | — |
-| Safe 1.4.1 | — | `0x19C06E5bfCd7C31c71508f14df2f1C70d9D199cD` |
-| Operational Roles 2.1.1 | — | `0x7178555779097cAE1BA20C5D7ED7205708a5ed40` |
-| TestUSDC (test token) | — | `0x418A2b47911dE05e21688F7490195F5324B49474` |
-| Delay 1.1.1 | — | `0xDd860F2a45b62b84A94ABF61F7f6c2f262549533` |
-| Governance relay | `gov-relay-v1.mandateos-root-20261021.testnet` | `0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb` |
-| Researcher `0xAAA` | — | `0x10EdE0F3C618321919934Fd63df173DD37F037Af` |
-
-Observed NEAR state is recorded in [`deployments/near-testnet.json`](./deployments/near-testnet.json). Base Sepolia addresses, bytecode hashes, council policy and transaction hashes are recorded in [`deployments/base-sepolia.json`](./deployments/base-sepolia.json).
-
-On-chain verification observed Safe owners `3`, threshold `2`, Safe modules Roles + Delay, Delay module `0xGOV`, Delay `300 / 604 800`, funded gas accounts, a confirmed 1 TestUSDC (test token) payment, researcher allowance raised to 10 TestUSDC (test token), and a veto that advanced `txNonce` to `queueNonce = 3`. Separate failures prove Guard, Vault and Zodiac each reject independently.
-
-| Governance proof | Base Sepolia transaction |
-|---|---|
-| Queue allowance 10 TestUSDC (test token) | `0x0a0f5f6adb19b287499abf82923300a63abb9b2cd60d4c8e39b1908b89f56f84` |
-| Execute allowance after cooldown | `0x08a2fb37cf467fbfaf440b322d58093a2c2d138814d50ff77403637d09752e57` |
-| Queue malicious allowance | `0xc4cdf2767f875e2b73dee0a2c0068352ec534821555ca8a5ec5d8f0b117f7586` |
-| Council veto `setTxNonce(3)` | `0xab38cd090d4864c1826fdd45bff0f8291a2749f35230a0d0f1a3175a5760e324` |
-| Rejected execution after veto | `0x5f24a2d514917499de2a81d8e60cb181d00c4471deda7f0b35ee288ecdbf14df` |
-| Signed direct Zodiac attack rejected | `0xaddc852fa9967d6171127c424ba5c2c1e819e6ea98b98634e640faa9b1688ebb` |
-
-## Limits
-
-- The contracts and backend have not been audited. UAT uses deterministic/test-only Guard and council credentials and assets without financial value.
-- The deployed UAT Vault (`11cb6f03…acc21`) and relay (`4f0bf6b1…3ac41`) predate the `submit_signature` recovery fix; the fix is covered by Sandbox tests and requires a governed redeployment. Local build hashes are recorded in `deployments/near-testnet.json`.
-- `contracts/build-reproducible.sh` pins a digest-addressed cargo-near image for factory, Vault and relay; reproducible hashes are documented separately from already deployed/keyless UAT bytecode.
-- The three council keys used for the UAT veto demo are stored in one `.env` on one machine; production requires separate hardware keys.
-- The UAT `allowedRecipient` (`0xa7BE833AD5422421204198E47C04516B0026F9B6`) is also council owner 3, so the demo recipient and one veto key share an address.
-- An MPC signature is considered public as soon as `sign` is called. Callback failure, timeout, pause or revocation does not release a `PossiblySigned` reservation; `submit_signature` stores the published signature after verification with `ecrecover`, otherwise a confirmed same-nonce cancellation is required.
-- The Vault depends on NEAR Chain Signatures availability. Testnet uses `v1.signer-prod.testnet`; production targets `v1.signer` ([MPC repository][near-mpc]).
-- `omni-transaction` 0.3 builds the EIP-1559 preimage and does not publish an audit report in its repository ([omni-transaction][omni-transaction]).
-- Agent-side NEAR gas sponsorship through NEP-366 is designed but not yet implemented; testnet smoke accounts are faucet-funded ([NEAR meta-transactions][near-meta-transactions]).
-- Founder-wallet sponsorship is UAT-only, deferred until DAO creation, tied to the authenticated member's proved deterministic wallet and capped per UTC day in PostgreSQL.
-- Phase 1 is confirmed end to end. The payment transaction is `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4`; the Vault state is `Confirmed`, with `1_000_000` spent and no reservation.
-- Phase 1 Base Sepolia uses `TestUSDC (test token)`, a 6-decimal ERC-20 deployed by the UAT script. It is not Circle USDC and has no value.
-- A Guard-signed status report can only confirm the exact original transaction. Only the DAO owner can confirm an on-chain cancellation.
-- A reverted transaction is never reopened automatically; DAO governance is required.
-- The Safe security council retains full 2/3 emergency authority; operational policy limits it to veto and incidents.
-- The common mandate is a common-mode risk: a policy error can be compiled into all three locks.
-- Phase 2 assets held by `0xINT` are outside Zodiac protection; exposure is limited operationally to the period budget.
-- The Base withdrawal memo and independent reference-price source remain open design points.
-- Treasury onboarding deploys the Safe first, then deploys Roles/Delay and enables them in a 2/3 Safe batch. Deploying the modules inside Safe `setup` would require predicting module addresses that themselves depend on the Safe address (circular dependency).
-- Financing a new role budget and depositing TestUSDC on the Safe remain operator steps; the mandate preview returns a funding payload but does not sign it.
-- `auto_update: true` is reported as a warning for the immutable-hash DAO factory, not a blocker: the keyless factory exposes no update method. The optional council proposal remains defense in depth.
-- Trezu's official Sputnik UI source displays and votes on the custom factory DAO when configured for testnet; the hosted `testenv.trezu.app` indexer currently rejects DAO IDs outside `.sputnik-dao.near`.
-- Browser-generated private keys exist only when `VITE_UAT_DEMO_MODE=1`; normal startup purges legacy demo keys, uses wallet providers and rejects generated-key calls.
-
-## License
-
-[MIT](./LICENSE), copyright 2026 JOIN.
-
-## Sources
-
-- [NEAR access keys][near-access-keys]
-- [NEAR Chain Signatures][chain-signatures] and the [MPC implementation][near-mpc]
-- [`omni-transaction` 0.3][omni-transaction]
-- [Zodiac Roles Modifier][zodiac-roles]
-- [Safe signature encoding][safe-signatures]
-- [Sputnik DAO v2][sputnik]
-- [NEAR Intents contracts][near-intents]
-
-[near-access-keys]: https://docs.near.org/protocol/accounts-contracts/access-keys
-[chain-signatures]: https://docs.near.org/chain-abstraction/chain-signatures
-[near-mpc]: https://github.com/near/mpc/blob/main/README.md
-[omni-transaction]: https://github.com/near/omni-transaction-rs
-[zodiac-roles]: https://github.com/gnosisguild/zodiac-modifier-roles
-[safe-signatures]: https://github.com/safe-global/safe-smart-account/blob/main/docs/signatures.md
-[sputnik]: https://github.com/near-daos/sputnik-dao-contract
-[near-intents]: https://github.com/near/intents
-[intents-erc191]: https://github.com/near/intents/blob/main/contracts/defuse/core/src/payload/erc191.rs
-[intents-public-key]: https://github.com/near/intents/blob/main/contracts/defuse/core/src/public_key.rs
-[intents-deposit-example]: https://github.com/near-examples/near-intents-examples/blob/main/verifier-examples/get-token-deposit-address.ts
-[near-networks]: https://docs.near.org/protocol/network/networks
-[base-networks]: https://docs.base.org/base-chain/network-information
-[better-auth-passkey]: https://www.better-auth.com/docs/plugins/passkey
-[hono]: https://hono.dev/docs/
-[prisma]: https://www.prisma.io/docs/orm
-[near-meta-transactions]: https://docs.near.org/protocol/transactions/meta-tx
+OmniRoles reimplements the required Roles v3 semantics in Rust. It does not copy BUSL-licensed Zodiac contract code. The condition-tree wire format is kept compatible where practical so the independently developed condition crate can interoperate with existing authoring tools.

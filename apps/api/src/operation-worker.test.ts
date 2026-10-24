@@ -11,6 +11,7 @@ import {
   type WorkerStore,
 } from "./operation-worker.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
+import type { NearTransactionStatus } from "./near.js";
 
 const opId = `0x${"01".repeat(32)}`;
 const originalHash = `0x${"11".repeat(32)}` as Hex;
@@ -21,17 +22,21 @@ function operation(overrides: Partial<VaultOperation> = {}): VaultOperation {
   return {
     op_id: Array(32).fill(1),
     client_id: "acme",
-    agent: "agent.testnet",
+    member: "agent.testnet",
     role: "researcher",
-    intent: {
-      token: Array(20).fill(1),
-      recipient: Array(20).fill(2),
-      amount: "100",
+    request: {
+      chain_id: 84532,
+      target: Array(20).fill(3),
+      value: "0",
+      calldata: [],
+      allowance_amount: "100",
       reference: "INV-1",
       gas_limit: "200000",
       max_fee_per_gas: "20",
       max_priority_fee_per_gas: "10",
     },
+    permission_index: 0,
+    allowance_key: null,
     policy_version: 1,
     registry_version: 1,
     evm_nonce: 0,
@@ -46,9 +51,12 @@ function operation(overrides: Partial<VaultOperation> = {}): VaultOperation {
       max_priority_fee_per_gas: "10",
     },
     tx_digest: Array(32).fill(4),
-    created_at_block: 1,
-    expires_at_block: 50,
-    possibly_signed_at_block: 10,
+    created_at_ns: "1000000000",
+    expires_at_ns: "50000000000",
+    execute_after_ns: null,
+    visa_authorized: true,
+    cosigned_by: null,
+    possibly_signed_at_ns: "10000000000",
     state: "PossiblySigned",
     signature: { big_r: [2, ...Array(32).fill(1)], s: Array(32).fill(2), recovery_id: 0 },
     signed_transaction: [2, 1],
@@ -110,7 +118,7 @@ class FakeStore implements WorkerStore {
     return Promise.resolve();
   }
 
-  releaseReference(_operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void> {
+  releaseReference(_operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed"): Promise<void> {
     this.released.push(terminalState);
     this.operation.state = terminalState;
     return Promise.resolve();
@@ -118,14 +126,15 @@ class FakeStore implements WorkerStore {
 }
 
 class FakeNear implements WorkerNearGateway {
-  blockHeight = 20;
+  timestampNs = 20_000_000_000n;
   submitted: MpcSignature[] = [];
   reports = 0;
   cancellations = 0;
+  queuedExecutions = 0;
   cancellationFees: Array<{ gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> = [];
   reportFailsAfterCommit = false;
-  status: import("./near.js").NearTransactionStatus = {};
-  agentState: Record<string, unknown> = { active: false };
+  status: NearTransactionStatus = {};
+  walletState: Record<string, unknown> = { address: Array(20).fill(0x11) };
   gasBalanceYocto = "100000000000000000000000";
 
   constructor(public operation: VaultOperation) {}
@@ -137,11 +146,18 @@ class FakeNear implements WorkerNearGateway {
     return Promise.resolve(this.operation);
   }
 
-  currentBlockHeight(): Promise<number> {
-    return Promise.resolve(this.blockHeight);
+
+  currentBlockTimestampNs(): Promise<bigint> {
+    return Promise.resolve(this.timestampNs);
   }
 
-  transactionStatus(): Promise<import("./near.js").NearTransactionStatus> {
+  executeQueuedOperation(): Promise<string> {
+    this.queuedExecutions += 1;
+    this.operation = { ...this.operation, state: "PossiblySigned" };
+    return Promise.resolve("near-execute-queued");
+  }
+
+  transactionStatus(): Promise<NearTransactionStatus> {
     return Promise.resolve(this.status);
   }
 
@@ -151,9 +167,17 @@ class FakeNear implements WorkerNearGateway {
     return Promise.resolve("near-submit-signature");
   }
 
-  reportStatus(): Promise<string> {
+  reportStatus(_vault: string, signedReport: unknown): Promise<string> {
     this.reports += 1;
-    this.operation = { ...this.operation, state: "Confirmed" };
+    const failed =
+      signedReport !== null &&
+      typeof signedReport === "object" &&
+      "report" in signedReport &&
+      signedReport.report !== null &&
+      typeof signedReport.report === "object" &&
+      "kind" in signedReport.report &&
+      signedReport.report.kind === "Failed";
+    this.operation = { ...this.operation, state: failed ? "Failed" : "Confirmed" };
     if (this.reportFailsAfterCommit) return Promise.reject(new Error("connection lost after commit"));
     return Promise.resolve("near-report");
   }
@@ -186,7 +210,7 @@ class FakeNear implements WorkerNearGateway {
         tx_digest: Array(32).fill(8),
         signature: null,
         signed_transaction: null,
-        requested_at_block: this.blockHeight,
+        requested_at_ns: this.timestampNs.toString(),
         request_count: this.cancellations,
       },
     };
@@ -195,7 +219,7 @@ class FakeNear implements WorkerNearGateway {
 
   viewFunction<T>(_accountId: string, methodName: string): Promise<T> {
     if (methodName === "is_paused") return Promise.resolve(true as T);
-    if (methodName === "get_agent") return Promise.resolve(this.agentState as T);
+    if (methodName === "get_wallet") return Promise.resolve(this.walletState as T);
     if (methodName === "get_role") {
       return Promise.resolve({
         config: {
@@ -250,18 +274,27 @@ function harness(overrides: Partial<VaultOperation> = {}) {
   const store = new FakeStore(record());
   const near = new FakeNear(operation(overrides));
   const base = new FakeBase();
+  const report = async (
+    current: VaultOperation,
+    hash: Hex,
+    blockNumber: bigint,
+    kind: "Confirmed" | "Failed",
+  ) => ({
+    report: {
+      client_id: current.client_id,
+      op_id: current.op_id,
+      kind,
+      tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
+      report_nonce: 7,
+      block_number: Number(blockNumber),
+    },
+    signature: "signed-report",
+  });
   const guard = {
-    confirmationReport: async (current: VaultOperation, hash: Hex, blockNumber: bigint) => ({
-      report: {
-        client_id: current.client_id,
-        op_id: current.op_id,
-        kind: "Confirmed" as const,
-        tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
-        report_nonce: 7,
-        block_number: Number(blockNumber),
-      },
-      signature: "signed-report",
-    }),
+    confirmationReport: (current: VaultOperation, hash: Hex, blockNumber: bigint) =>
+      report(current, hash, blockNumber, "Confirmed"),
+    failureReport: (current: VaultOperation, hash: Hex, blockNumber: bigint) =>
+      report(current, hash, blockNumber, "Failed"),
   };
   const createWorker = () => new OperationWorker(store, near, base, guard, config, () => now);
   return {
@@ -275,7 +308,7 @@ function harness(overrides: Partial<VaultOperation> = {}) {
   };
 }
 
-function mpcStatus(): import("./near.js").NearTransactionStatus {
+function mpcStatus(): NearTransactionStatus {
   const response = {
     scheme: "Secp256k1",
     big_r: { affine_point: `02${"11".repeat(32)}` },
@@ -348,15 +381,15 @@ describe("OperationWorker", () => {
   });
 
 
-  it("synchronizes the derived 0xAAA while processing an operation", async () => {
+  it("synchronizes the shared ACME wallet while processing an operation", async () => {
     const test = harness();
-    test.near.agentState = { active: true, evm_address: Array(20).fill(0x11) };
+    test.near.walletState = { address: Array(20).fill(0x11) };
     await test.createWorker().tick();
     expect(test.store.syncedAgentAddresses).toEqual(["0x1111111111111111111111111111111111111111"]);
   });
   it("requests and broadcasts a same-nonce cancellation, then releases only after on-chain confirmation", async () => {
     const test = harness({ signature: null, signed_transaction: null });
-    test.near.blockHeight = 20;
+    test.near.timestampNs = 20_000_000_000n;
     await test.createWorker().tick();
     expect(test.near.cancellations).toBe(1);
     expect(test.store.operation).toMatchObject({
@@ -405,25 +438,48 @@ describe("OperationWorker", () => {
   it("expires Prepared operations and releases their references", async () => {
     const test = harness({
       state: "Prepared",
-      possibly_signed_at_block: null,
+      possibly_signed_at_ns: null,
       signature: null,
       signed_transaction: null,
-      expires_at_block: 10,
+      expires_at_ns: "10000000000",
     });
-    test.near.blockHeight = 11;
+    test.near.timestampNs = 11_000_000_000n;
     await test.createWorker().tick();
     expect(test.store.released).toEqual(["Expired"]);
   });
 
-  it("records a reverted original without releasing its reference", async () => {
+  it("executes a delayed operation only after its on-chain waiting period", async () => {
+    const before = harness({
+      state: "Queued",
+      signed_transaction: null,
+      signature: null,
+      execute_after_ns: "25000000000",
+    });
+    await before.createWorker().tick();
+    expect(before.near.queuedExecutions).toBe(0);
+    expect(before.store.operation.state).toBe("Queued");
+
+    const ready = harness({
+      state: "Queued",
+      signed_transaction: null,
+      signature: null,
+      execute_after_ns: "15000000000",
+    });
+    await ready.createWorker().tick();
+    expect(ready.near.queuedExecutions).toBe(1);
+    expect(ready.store.operation.state).toBe("PossiblySigned");
+    expect(ready.store.operation.nearAuthorizationTxHash).toBe("near-execute-queued");
+  });
+
+  it("reports a reverted original and releases its policy reservations", async () => {
     const test = harness();
     test.store.operation.txHash = originalHash;
     test.store.operation.broadcastAt = new Date(nowStart);
     test.base.receipts.set(originalHash, { status: "reverted", blockNumber: 42n });
     await test.createWorker().tick();
-    expect(test.store.operation.state).toBe("Reverted");
-    expect(test.store.released).toEqual([]);
-    expect(test.store.operation.lastError).toContain("governance resolution required");
+    expect(test.store.operation.state).toBe("Failed");
+    expect(test.store.released).toEqual(["Failed"]);
+    expect(test.near.reports).toBe(1);
   });
 
   it("does no work while another process holds the lease", async () => {
@@ -448,6 +504,17 @@ describe("OperationWorker", () => {
             kind: "Confirmed" as const,
             tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
             report_nonce: 1,
+            block_number: Number(blockNumber),
+          },
+          signature: "signed",
+        }),
+        failureReport: async (current: VaultOperation, hash: Hex, blockNumber: bigint) => ({
+          report: {
+            client_id: current.client_id,
+            op_id: current.op_id,
+            kind: "Failed" as const,
+            tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
+            report_nonce: 2,
             block_number: Number(blockNumber),
           },
           signature: "signed",

@@ -33,6 +33,8 @@ const env = z.object({
   AGENT_NEAR_ACCOUNT_ID: z.string().min(2),
   AGENT_KEY_PATH: z.string().default(".mandateos/agent-key.json"),
   VAULT_ACCOUNT_ID: z.string().min(2),
+  AGENT_ROLE: z.string().min(1).default("researcher"),
+  EVM_CHAIN_ID: z.coerce.number().int().positive().default(84532),
   BYPASS_OP_ID: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   BYPASS_APPROVAL_JSON: z.string().optional(),
 }).parse(process.env);
@@ -56,6 +58,8 @@ if (env.DEMO_SCENARIO === "bypass") {
     accountId: env.AGENT_NEAR_ACCOUNT_ID,
     privateKey: key.privateKey,
     vaultAccountId: env.VAULT_ACCOUNT_ID,
+    role: env.AGENT_ROLE,
+    chainId: env.EVM_CHAIN_ID,
   });
   const result = await runBypassProbe(() => vault.authorize(
     operationIdBytes(env.BYPASS_OP_ID as `0x${string}`),

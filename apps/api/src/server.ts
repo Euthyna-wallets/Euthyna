@@ -19,9 +19,13 @@ import { ConsoleDataService } from "./console-data.js";
 import { WalletProofService } from "./wallet-proof.js";
 
 const env = loadEnv();
-const guardKey = Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64"));
-const signer = new EnvKmsSigner(guardKey);
-const guard = new Guard(signer);
+const visaSigner = new EnvKmsSigner(
+  Uint8Array.from(Buffer.from(env.GUARD_VISA_ED25519_PRIVATE_KEY_BASE64, "base64")),
+);
+const statusSigner = new EnvKmsSigner(
+  Uint8Array.from(Buffer.from(env.GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64, "base64")),
+);
+const guard = new Guard(visaSigner, statusSigner);
 const near = new NearClient(env);
 const relayer = createBaseRelayer(env, near, guard);
 const gasEstimator = BaseGasEstimator.fromRpc(env.BASE_SEPOLIA_RPC_URL, {
@@ -44,7 +48,7 @@ const agentProvisioning = new AgentProvisioningService(
   env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   env.NEAR_AGENT_GAS_RESERVE_YOCTO,
 );
-const treasury = new TreasuryService(prisma, near, signer, {
+const treasury = new TreasuryService(prisma, near, visaSigner, {
   nearNetwork: env.NEAR_NETWORK_ID,
   daoFactoryId: env.DAO_FACTORY_ID,
   mpcContractId: env.MPC_CONTRACT_ID,

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { loadEnv } from "./env.js";
 
 const required = {
-  GUARD_ED25519_PRIVATE_KEY_BASE64: "guard",
+  GUARD_VISA_ED25519_PRIVATE_KEY_BASE64: "visa-guard",
+  GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64: "status-guard",
   NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
   NEAR_RELAYER_PRIVATE_KEY: "ed25519:test",
   DATABASE_URL: "postgresql://localhost/mandateos",

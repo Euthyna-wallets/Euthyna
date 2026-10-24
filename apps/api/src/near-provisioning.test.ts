@@ -24,7 +24,7 @@ it("provisions the agent in one transaction with one restricted FunctionCall key
     accountId: "compta-bot-agent.mandateos.testnet",
     publicKey: agentKey,
     receiverId: "vault.testnet",
-    methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+    methodNames: ["prepare", "authorize", "cancel_nonce", "renounce_role"],
     reserveYocto: "300000000000000000000000",
     allowanceYocto: null,
   })).resolves.toBe("near-provision-hash");
@@ -49,7 +49,7 @@ it("provisions the agent in one transaction with one restricted FunctionCall key
   expect(actions[2]?.addKey?.accessKey?.permission?.fullAccess).toBeUndefined();
   expect(actions[2]?.addKey?.accessKey?.permission?.functionCall).toMatchObject({
     receiverId: "vault.testnet",
-    methodNames: ["prepare", "authorize", "cancel_nonce", "request_derived_public_key"],
+    methodNames: ["prepare", "authorize", "cancel_nonce", "renounce_role"],
     allowance: undefined,
   });
 });

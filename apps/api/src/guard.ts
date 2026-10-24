@@ -15,7 +15,10 @@ export interface GuardApproval {
 export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: "escalate" }>;
 
 export class Guard {
-  constructor(private readonly signer: KmsSigner) {}
+  constructor(
+    private readonly visaSigner: KmsSigner,
+    private readonly statusSigner: KmsSigner,
+  ) {}
 
   async approve(operation: VaultOperation, registry: Registry): Promise<GuardResult> {
     if (operation.state !== "Prepared") {
@@ -31,15 +34,15 @@ export class Guard {
       client_id: operation.client_id,
       op_id: operation.op_id,
       tx_digest: operation.tx_digest,
-      agent: operation.agent,
+      agent: operation.member,
       role: operation.role,
-      reference: operation.intent.reference,
+      reference: operation.request.reference,
       policy_version: operation.policy_version,
       registry_version: operation.registry_version,
       visa_nonce: randomSafeNonce(),
-      expires_at_block: operation.expires_at_block,
+      expires_at_ns: operation.expires_at_ns,
     };
-    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.signer);
+    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.visaSigner);
     return {
       decision: "approve",
       vendorId: decision.vendorId,
@@ -48,10 +51,27 @@ export class Guard {
     };
   }
 
-  async confirmationReport(
+  confirmationReport(
     operation: VaultOperation,
     txHash: Hex,
     blockNumber: bigint,
+  ): Promise<SignedPayload<StatusReport>> {
+    return this.statusReport(operation, txHash, blockNumber, "Confirmed");
+  }
+
+  failureReport(
+    operation: VaultOperation,
+    txHash: Hex,
+    blockNumber: bigint,
+  ): Promise<SignedPayload<StatusReport>> {
+    return this.statusReport(operation, txHash, blockNumber, "Failed");
+  }
+
+  private async statusReport(
+    operation: VaultOperation,
+    txHash: Hex,
+    blockNumber: bigint,
+    kind: StatusReport["kind"],
   ): Promise<SignedPayload<StatusReport>> {
     if (!operation.signed_transaction) throw new Error("operation has no signed transaction");
     const storedHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
@@ -60,7 +80,7 @@ export class Guard {
     const report: StatusReport = {
       client_id: operation.client_id,
       op_id: operation.op_id,
-      kind: "Confirmed",
+      kind,
       tx_hash: hexToByteArray(txHash),
       report_nonce: randomSafeNonce(),
       block_number: Number(blockNumber),
@@ -68,7 +88,7 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:status:v1",
       serializeStatusReport(report),
-      this.signer,
+      this.statusSigner,
     );
     return { report, signature };
   }
@@ -94,7 +114,7 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:relay-status:v1",
       serializeRelayStatusReport(report),
-      this.signer,
+      this.statusSigner,
     );
     return { report, signature };
   }

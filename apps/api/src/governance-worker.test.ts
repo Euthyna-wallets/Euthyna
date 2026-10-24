@@ -327,7 +327,7 @@ describe("GovernanceWorker", () => {
       tx_digest: Array(32).fill(9) as number[],
       signature: { big_r: Array(33).fill(9), s: Array(32).fill(9) as number[], recovery_id: 0 },
       signed_transaction: [9, 1, 2],
-      requested_at_block: 10,
+      requested_at_ns: "10000000000",
       request_count: 1,
     };
     test.near.current = current;

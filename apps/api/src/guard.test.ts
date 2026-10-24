@@ -1,6 +1,6 @@
 import { getPublicKeyAsync, verifyAsync } from "@noble/ed25519";
 import { describe, expect, it } from "vitest";
-import { bytesToHex, concatHex, hexToBytes, keccak256, stringToHex } from "viem";
+import { bytesToHex, concatHex, encodeFunctionData, hexToBytes, keccak256, stringToHex } from "viem";
 import { serializeRelayStatusReport, serializeStatusReport, serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { Guard } from "./guard.js";
@@ -9,6 +9,23 @@ import type { GovernanceOperation, Registry, VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
 const recipient = "0x1111111111111111111111111111111111111111" as const;
+const visaPrivateKey = Uint8Array.from({ length: 32 }, () => 7);
+const statusPrivateKey = Uint8Array.from({ length: 32 }, () => 8);
+
+function testGuard(): Guard {
+  return new Guard(
+    new EnvKmsSigner(visaPrivateKey),
+    new EnvKmsSigner(statusPrivateKey),
+  );
+}
+
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }],
+  outputs: [{ type: "bool" }],
+}] as const;
 const registry: Registry = {
   clientId: "acme",
   registryVersion: 11,
@@ -28,36 +45,49 @@ function addressBytes(address: `0x${string}`): number[] {
 }
 
 function operationFor(target: `0x${string}` = recipient): VaultOperation {
+  const calldata = Array.from(hexToBytes(encodeFunctionData({
+    abi: erc20TransferAbi,
+    functionName: "transfer",
+    args: [target, 1_000_000n],
+  })));
   const operation: VaultOperation = {
     op_id: Array(32).fill(1) as number[],
     client_id: "acme",
-    agent: "researcher.agent.testnet",
+    member: "researcher.agent.testnet",
     role: "researcher",
-    intent: {
-      token: addressBytes(token),
-      recipient: addressBytes(target),
-      amount: "1000000",
+    request: {
+      chain_id: 84532,
+      target: addressBytes(token),
+      value: "0",
+      calldata,
+      allowance_amount: "1000000",
       reference: "INV-001",
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
+    permission_index: 0,
+    allowance_key: Array(32).fill(0x55),
     policy_version: 7,
     registry_version: 11,
     evm_nonce: 0,
     transaction: {
       chain_id: 84532,
       nonce: 0,
-      to: Array(20).fill(0x44) as number[],
+      to: addressBytes(token),
       value: "0",
-      input: [0xc6, 0xfe, 0x87, 0x47],
+      input: calldata,
       gas_limit: "200000",
       max_fee_per_gas: "20000000000",
       max_priority_fee_per_gas: "1000000000",
     },
     tx_digest: Array(32).fill(0) as number[],
-    expires_at_block: 1_000,
-    possibly_signed_at_block: null,
+    created_at_ns: "1",
+    expires_at_ns: "1000000000000",
+    execute_after_ns: null,
+    visa_authorized: false,
+    cosigned_by: null,
+    possibly_signed_at_ns: null,
     state: "Prepared",
     signature: null,
     signed_transaction: null,
@@ -69,8 +99,8 @@ function operationFor(target: `0x${string}` = recipient): VaultOperation {
 
 describe("Guard exact rules", () => {
   it("signs the exact prepared transaction and produces a verifiable domain-separated visa", async () => {
-    const privateKey = Uint8Array.from({ length: 32 }, () => 7);
-    const guard = new Guard(new EnvKmsSigner(privateKey));
+    const privateKey = visaPrivateKey;
+    const guard = testGuard();
     const result = await guard.approve(operationFor(), registry);
     expect(result.decision).toBe("approve");
     if (result.decision !== "approve") throw new Error("expected approval");
@@ -88,14 +118,14 @@ describe("Guard exact rules", () => {
   });
 
   it("Guard refuses an uncovered recipient and emits no visa", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const result = await guard.approve(operationFor("0x2222222222222222222222222222222222222222"), registry);
     expect(result).toEqual({ decision: "escalate", reasons: ["recipient not registered"] });
     expect("approval" in result).toBe(false);
   });
 
   it("escalates when the persisted digest no longer matches the transaction", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const operation = operationFor();
     operation.tx_digest[0] = (operation.tx_digest[0] ?? 0) ^ 1;
     const result = await guard.approve(operation, registry);
@@ -106,7 +136,7 @@ describe("Guard exact rules", () => {
   });
 
   it("refuses to confirm a hash other than the stored raw transaction hash", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const operation = operationFor();
     operation.state = "PossiblySigned";
     operation.signed_transaction = [0x02, 0x01, 0x02];
@@ -115,8 +145,8 @@ describe("Guard exact rules", () => {
     ).rejects.toThrow("receipt hash does not match the stored signed transaction");
   });
   it("signs relay confirmations under the relay-only domain", async () => {
-    const privateKey = Uint8Array.from({ length: 32 }, () => 7);
-    const guard = new Guard(new EnvKmsSigner(privateKey));
+    const privateKey = statusPrivateKey;
+    const guard = testGuard();
     const operation: GovernanceOperation = {
       op_id: Array(32).fill(4) as number[],
       proposer: "dao.testnet",

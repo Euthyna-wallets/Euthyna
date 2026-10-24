@@ -9,7 +9,6 @@ import { PaymentService } from "./payments.js";
 import type { RegistryService } from "./registry-db.js";
 
 const agentAddress = getAddress("0x1111111111111111111111111111111111111111");
-const rolesAddress = getAddress("0x2222222222222222222222222222222222222222");
 const token = getAddress("0x3333333333333333333333333333333333333333");
 const recipient = getAddress("0x4444444444444444444444444444444444444444");
 
@@ -31,15 +30,15 @@ function service() {
     viewFunction: async (_account: string, method: string) => {
       if (method === "get_role") {
         return {
-          roles_modifier: Array.from(Buffer.from(rolesAddress.slice(2), "hex")),
-          role_key: Array(32).fill(7),
-          gas_limit: "300000",
-          max_fee_per_gas: "100000000000",
-          max_priority_fee_per_gas: "10000000000",
+          config: {
+            gas_limit: "300000",
+            max_fee_per_gas: "100000000000",
+            max_priority_fee_per_gas: "10000000000",
+          },
         };
       }
-      if (method === "get_agent") {
-        return { evm_address: Array.from(Buffer.from(agentAddress.slice(2), "hex")) };
+      if (method === "get_wallet") {
+        return { address: Array.from(Buffer.from(agentAddress.slice(2), "hex")) };
       }
       throw new Error(`unexpected view ${method}`);
     },
@@ -58,7 +57,7 @@ function service() {
 }
 
 describe("PaymentService gas quote", () => {
-  it("estimates the actual Roles execution from 0xAAA and returns EIP-1559 fields", async () => {
+  it("estimates the direct token call from the shared ACME wallet and returns EIP-1559 fields", async () => {
     const test = service();
     await expect(test.payments.gasQuote("org-1", {
       nearAccountId: "agent.testnet",
@@ -79,7 +78,7 @@ describe("PaymentService gas quote", () => {
     });
     expect(test.quote).toHaveBeenCalledWith(expect.objectContaining({
       from: agentAddress,
-      to: rolesAddress,
+      to: token,
       data: expect.stringMatching(/^0x[0-9a-f]+$/),
     }));
   });
