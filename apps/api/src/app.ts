@@ -1113,7 +1113,7 @@ export function createApp({
       );
     }
     const input = await parseJson(context, createAgentSchema);
-    const expectedAccountId = proposedAgentAccountId(input.name, nearParentAccount);
+    const expectedAccountId = proposedAgentAccountId(input.name, nearParentAccount, consoleIdentity.organizationId);
     if (input.nearAccountId && input.nearAccountId !== expectedAccountId) {
       return context.json({ error: "agent_account_mismatch", expectedAccountId }, 422);
     }
@@ -1259,6 +1259,14 @@ export function createApp({
       const input = await parseJson(context, z.object({ pause: z.boolean() }));
       return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
     });
+    app.get("/v1/console/omniroles/members", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json({ ...(await omniroles.members(orgOf(context))), me: context.get("console").nearAccountId ?? null }));
+    app.post("/v1/console/omniroles/members", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ nearAccountId: z.string().min(2).max(64), name: z.string().max(80).optional() }));
+      return context.json(await omniroles.addMember(orgOf(context), input));
+    });
+    app.delete("/v1/console/omniroles/members/:id", requireConsoleAdmin(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.removeMember(orgOf(context), context.req.param("id") ?? "", context.get("console").memberId)));
     app.post("/v1/console/omniroles/refresh", requireConsole(auth, consoleLimiter), async (context) => {
       await omniroles.refresh(orgOf(context));
       return context.json({ ok: true });

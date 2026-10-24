@@ -75,7 +75,7 @@ export type RoleView = {
 };
 
 export type ActivityItem = {
-  kind: "operation" | "refusal";
+  kind: "operation" | "refusal" | "allowed";
   at: string;
   agent: string;
   reference: string;
@@ -87,7 +87,13 @@ export type ActivityItem = {
   summary: string | null;
 };
 
+export type CouncilMember = { id: string; nearAccountId: string | null; name: string | null; role: string; signedIn: boolean };
+type Members = { locked: boolean; members: CouncilMember[]; me?: string | null };
+
 export const omni = {
+  members: () => api<Members>("/v1/console/omniroles/members"),
+  addMember: (input: { nearAccountId: string; name?: string }) => api<Members>("/v1/console/omniroles/members", { method: "POST", body: JSON.stringify(input) }),
+  removeMember: (id: string) => api<Members>(`/v1/console/omniroles/members/${id}`, { method: "DELETE" }),
   status: () => api<OmniStatus>("/v1/console/omniroles/status"),
   plan: (daoName: string) => api<OmniPlan>("/v1/console/omniroles/plan", { method: "POST", body: JSON.stringify({ daoName }) }),
   create: (daoName: string) => api<{ daoTransaction: string; vaultTransaction: string }>("/v1/console/omniroles/create", { method: "POST", body: JSON.stringify({ daoName }) }),

@@ -1,3 +1,4 @@
+import { proposedAgentAccountId } from "@mandateos/sdk";
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
@@ -1143,7 +1144,7 @@ describe("console isolation and emergency", () => {
       body: JSON.stringify({
         name: "Research agent",
         role: "researcher",
-        nearAccountId: "research-agent-agent.mandateos.testnet",
+        nearAccountId: proposedAgentAccountId("Research agent", "mandateos.testnet", "org-1"),
         nearPublicKey: "ed25519:11111111111111111111111111111111",
         vaultAccountId: "vault-1.near",
         mpcPath: "agents/researcher/base",
@@ -1153,7 +1154,7 @@ describe("console isolation and emergency", () => {
     expect(auth.created).toEqual([
       expect.objectContaining({
         organizationId: "org-1",
-        nearAccountId: "research-agent-agent.mandateos.testnet",
+        nearAccountId: expect.stringMatching(/^research-agent-[0-9a-f]{6}-agent\.mandateos\.testnet$/),
         nearPublicKey: "ed25519:11111111111111111111111111111111",
       }),
     ]);

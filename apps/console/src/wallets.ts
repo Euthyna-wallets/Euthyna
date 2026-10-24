@@ -139,6 +139,19 @@ async function transactionWallet(): Promise<E2eNearWallet> {
 }
 
 
+/** NEP-413 signature from the connected NEAR wallet (sign-in). */
+export async function signNearMessage(input: { message: string; recipient: string; nonceBase64: string }): Promise<SignedMessage> {
+  const params = { message: input.message, recipient: input.recipient, nonce: Buffer.from(input.nonceBase64, "base64") };
+  const injected = e2eNear();
+  const signed = injected?.signMessage
+    ? await injected.signMessage(params)
+    : demoWalletsEnabled()
+      ? await (await generatedNear()).signMessage!(params)
+      : await (await nearSelector()).wallet().then((wallet) => wallet.signMessage(params));
+  if (!signed) throw new Error("The NEAR wallet did not return a signature");
+  return signed;
+}
+
 export type WalletProofChallenge = {
   id: string;
   memberId: string;

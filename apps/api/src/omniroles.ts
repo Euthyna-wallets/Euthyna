@@ -8,7 +8,7 @@
  * happen through DAO proposals signed by members; the server never holds a key
  * that moves funds.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -34,6 +34,7 @@ import { baseSepolia } from "viem/chains";
 
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
+import { NEAR_ACCOUNT_ID, NEAR_PROVIDER_ID, nearUserEmail } from "./near-auth.js";
 
 export class OmniRolesError extends Error {
   constructor(
@@ -147,7 +148,7 @@ export class OmniRolesService {
 
   async plan(organizationId: string, daoName: string): Promise<OmniRolesPlan> {
     const members = await this.prisma.member.findMany({
-      where: { organizationId, walletProofVerifiedAt: { not: null }, walletProofApprovedAt: { not: null } },
+      where: { organizationId, nearAccountId: { not: null } },
       include: { user: true },
       orderBy: { createdAt: "asc" },
     });
@@ -155,7 +156,7 @@ export class OmniRolesService {
       .filter((member) => member.nearAccountId)
       .map((member) => ({ memberId: member.id, nearAccountId: member.nearAccountId as string, name: member.user.name }));
     if (council.length < 3) {
-      throw new OmniRolesError(409, "council_too_small", "at least three verified members are needed to govern the treasury");
+      throw new OmniRolesError(409, "council_too_small", "at least three members (NEAR accounts) are needed to govern the treasury");
     }
     const slug = slugify(daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
@@ -172,6 +173,73 @@ export class OmniRolesService {
       ruleDelaySeconds: this.config.ruleDelayNs / 1e9,
       vaultWasmSha256: artifact.sha256,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Members: NEAR accounts entered by an admin before the DAO exists
+  // -------------------------------------------------------------------------
+
+  async members(organizationId: string) {
+    const members = await this.prisma.member.findMany({
+      where: { organizationId },
+      include: { user: { include: { sessions: { select: { id: true }, take: 1 } } } },
+      orderBy: { createdAt: "asc" },
+    });
+    const treasury = await this.treasury(organizationId);
+    return {
+      locked: Boolean(treasury),
+      members: members.map((member) => ({
+        id: member.id,
+        nearAccountId: member.nearAccountId,
+        name: member.user.name === member.nearAccountId ? null : member.user.name,
+        role: member.role,
+        signedIn: member.user.sessions.length > 0,
+      })),
+    };
+  }
+
+  async addMember(organizationId: string, input: { nearAccountId: string; name?: string | undefined }) {
+    if (await this.treasury(organizationId)) {
+      throw new OmniRolesError(409, "treasury_exists", "members are fixed in the DAO once the treasury exists");
+    }
+    const accountId = input.nearAccountId.trim().toLowerCase();
+    if (!NEAR_ACCOUNT_ID.test(accountId)) throw new OmniRolesError(400, "invalid_account", `${accountId} is not a NEAR account id`);
+    if (!(await this.accountExists(accountId))) {
+      throw new OmniRolesError(422, "account_not_found", `${accountId} does not exist on NEAR ${this.config.nearNetwork}`);
+    }
+    const taken = await this.prisma.member.findFirst({ where: { organizationId, nearAccountId: accountId } });
+    if (taken) throw new OmniRolesError(409, "member_exists", `${accountId} is already a member`);
+    // The user is the NEAR account: signing in with that wallet later lands on this seat.
+    const email = nearUserEmail(accountId);
+    const linked = await this.prisma.account.findFirst({ where: { providerId: NEAR_PROVIDER_ID, accountId } });
+    const user = linked
+      ? await this.prisma.user.findUniqueOrThrow({ where: { id: linked.userId } })
+      : (await this.prisma.user.findUnique({ where: { email } })) ?? await this.prisma.user.create({
+        data: { id: randomUUID(), name: input.name?.trim() || accountId, email, emailVerified: true },
+      });
+    if (!linked) {
+      await this.prisma.account.create({
+        data: { id: randomUUID(), userId: user.id, providerId: NEAR_PROVIDER_ID, accountId, createdAt: new Date(), updatedAt: new Date() },
+      });
+    }
+    const existingSeat = await this.prisma.member.findFirst({ where: { organizationId, userId: user.id } });
+    if (existingSeat) throw new OmniRolesError(409, "member_exists", `${accountId} is already a member`);
+    await this.prisma.member.create({
+      data: { id: randomUUID(), organizationId, userId: user.id, role: "member", nearAccountId: accountId, createdAt: new Date() },
+    });
+    return this.members(organizationId);
+  }
+
+  async removeMember(organizationId: string, memberId: string, actorMemberId: string) {
+    if (await this.treasury(organizationId)) {
+      throw new OmniRolesError(409, "treasury_exists", "members are fixed in the DAO once the treasury exists");
+    }
+    if (memberId === actorMemberId) throw new OmniRolesError(400, "cannot_remove_self", "you cannot remove yourself");
+    const member = await this.prisma.member.findFirst({ where: { id: memberId, organizationId } });
+    if (!member) throw new OmniRolesError(404, "member_not_found", "member not found");
+    if (member.role === "owner") throw new OmniRolesError(400, "cannot_remove_owner", "the company owner cannot be removed");
+    await this.prisma.member.delete({ where: { id: memberId } });
+    return this.members(organizationId);
   }
 
   async create(organizationId: string, daoName: string): Promise<{ daoTransaction: string; vaultTransaction: string }> {
@@ -546,13 +614,14 @@ export class OmniRolesService {
       "check_operation",
       { role: agent.role, member: agent.nearAccountId, request },
     );
-    if (!result.allowed) {
+    {
+      // Both outcomes are logged: the activity page shows what agents asked for, allowed or not.
       await this.prisma.auditLog.create({
         data: {
           organizationId,
           actorType: "agent",
           actorId: agent.agentId,
-          action: "operation.refused",
+          action: result.allowed ? "operation.allowed" : "operation.refused",
           targetType: "operation",
           targetId: typeof request.reference === "string" ? request.reference : null,
           metadata: {
@@ -571,7 +640,7 @@ export class OmniRolesService {
   async activity(organizationId: string) {
     const [operations, refusals] = await Promise.all([
       this.prisma.operation.findMany({ where: { organizationId }, include: { agent: true }, orderBy: { createdAt: "desc" }, take: 50 }),
-      this.prisma.auditLog.findMany({ where: { organizationId, action: "operation.refused" }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
     ]);
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
     const labels = await this.labels(organizationId);
@@ -599,16 +668,17 @@ export class OmniRolesService {
       })),
       ...refusals.map((refusal) => {
         const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
+        const allowed = refusal.action === "operation.allowed";
         return {
-          kind: "refusal" as const,
+          kind: allowed ? ("allowed" as const) : ("refusal" as const),
           at: refusal.createdAt.toISOString(),
           agent: agentName(refusal.actorId),
           reference: refusal.targetId ?? "",
-          state: "Refused",
+          state: allowed ? "Allowed" : "Refused",
           amount: null as string | null,
           txHash: null as string | null,
           opId: null as string | null,
-          reason: explainRefusal(String(metadata.reason ?? "")),
+          reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
           summary: describe(metadata),
         };
       }),

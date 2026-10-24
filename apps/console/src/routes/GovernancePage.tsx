@@ -1,6 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { BASE_SEPOLIA, budgetsOf, decodeVaultCalls, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
+
+import { api } from "../api.js";
 import { Card, PageState, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { approvalsNeeded, omni, thresholdText, type GovernanceProposal, type GovernanceRule, type Sentence } from "../omniroles-api.js";
@@ -127,6 +130,7 @@ export function GovernancePage() {
                 <ProposalCard
                   key={proposal.id}
                   proposal={proposal}
+                  vaultAccountId={data!.vaultAccountId}
                   needed={needed}
                   me={me}
                   canVote={isMember && !(me in proposal.votes)}
@@ -214,8 +218,32 @@ export function GovernancePage() {
   );
 }
 
+type Registry = { suppliers: Array<{ name: string; wallets: Array<{ chainId: number; address: string }> }> };
+
+/**
+ * What a member approves is decoded here, in the browser, from the proposal
+ * stored in the DAO. Sputnik only accepts a vote that repeats that exact
+ * proposal, so a server that showed something else could not collect votes for it.
+ * Supplier names come from MandateOS: the full address is printed next to each one.
+ */
+function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string): Sentence[] | null {
+  const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry"), staleTime: 60_000 });
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, staleTime: 60_000 });
+  const calls = decodeVaultCalls(proposal.kind as Parameters<typeof decodeVaultCalls>[0], vaultAccountId);
+  if (!calls) return null;
+  const labels: Record<string, string> = {};
+  for (const supplier of registry.data?.suppliers ?? []) {
+    for (const wallet of supplier.wallets) if (wallet.chainId === BASE_SEPOLIA.chainId) labels[wallet.address] = supplier.name;
+  }
+  if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
+  const changes = calls.flatMap((call) => (call.method === "queue_rule_change" ? [call.change as RuleChange] : []));
+  const context = { profile: BASE_SEPOLIA, labels, budgets: budgetsOf(changes, BASE_SEPOLIA), fullAddresses: true };
+  return calls.map((call) => describeVaultCall(call, context));
+}
+
 function ProposalCard(props: {
   proposal: GovernanceProposal;
+  vaultAccountId: string;
   needed: number;
   me: string;
   canVote: boolean;
@@ -224,6 +252,7 @@ function ProposalCard(props: {
   onVote: (action: "VoteApprove" | "VoteReject") => void;
 }) {
   const { proposal } = props;
+  const verified = useVerifiedChanges(proposal, props.vaultAccountId);
   const approvals = Object.values(proposal.votes).filter((vote) => vote === "Approve").length;
   const rejections = Object.values(proposal.votes).filter((vote) => vote === "Reject").length;
   return (
@@ -238,7 +267,14 @@ function ProposalCard(props: {
           <span className="small muted">approvals{rejections ? ` · ${rejections} against` : ""}</span>
         </div>
       </header>
-      <SentenceList items={proposal.changes} />
+      {verified ? (
+        <>
+          <SentenceList items={verified} />
+          <p className="small muted verified">✓ Read in your browser from the proposal stored in the DAO. Your vote is only valid for exactly this content.</p>
+        </>
+      ) : (
+        <div className="alert error">This proposal does not change this company's vault. Read it carefully before voting.<SentenceList items={proposal.changes} /></div>
+      )}
       <footer className="row wrap">
         <span className="small muted">Expires {relativeTime(proposal.expiresAt, props.now)}</span>
         <span className="small muted">

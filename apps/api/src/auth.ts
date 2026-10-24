@@ -2,11 +2,12 @@ import { apiKey } from "@better-auth/api-key";
 import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { emailOTP, organization } from "better-auth/plugins";
+import { organization } from "better-auth/plugins";
 import { jwtVerify, SignJWT } from "jose";
 import type { PrismaClient } from "@mandateos/db";
 
 import type { Env } from "./env.js";
+import { nearSignIn, type NearSignInOptions } from "./near-auth.js";
 
 export const AGENT_API_KEY_CONFIG_ID = "agent";
 
@@ -67,6 +68,7 @@ export function buildAuthOptions(
   env: AuthEnvironment,
   database: BetterAuthOptions["database"],
   resolveRegistrationUser?: RegistrationResolver,
+  near?: NearSignInOptions,
 ): BetterAuthOptions {
   return {
     database,
@@ -87,32 +89,8 @@ export function buildAuthOptions(
           },
         },
       }),
-      emailOTP({
-        expiresIn: 10 * 60,
-        allowedAttempts: 5,
-        storeOTP: "hashed",
-        overrideDefaultEmailVerification: true,
-        sendVerificationOTP: async ({ email, otp, type }) => {
-          if (!env.RESEND_API_KEY || !env.AUTH_EMAIL_FROM) {
-            throw new Error("email OTP delivery is not configured");
-          }
-          const response = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${env.RESEND_API_KEY}`,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              from: env.AUTH_EMAIL_FROM,
-              to: [email],
-              subject: type === "email-verification" ? "Verify your MandateOS email" : "Your MandateOS code",
-              text: `Your MandateOS verification code is ${otp}. It expires in 10 minutes.`,
-            }),
-          });
-          if (!response.ok) throw new Error(`OTP email delivery failed with HTTP ${response.status}`);
-        },
-      }),
       organization(),
+      ...(near ? [nearSignIn(near)] : []),
       apiKey({
         configId: AGENT_API_KEY_CONFIG_ID,
         references: "user",
@@ -123,7 +101,7 @@ export function buildAuthOptions(
   } satisfies BetterAuthOptions;
 }
 
-export function createAuth(env: AuthEnvironment, client: PrismaClient): MandateAuth {
+export function createAuth(env: AuthEnvironment, client: PrismaClient, near?: NearSignInOptions): MandateAuth {
   const issuer = `${env.BETTER_AUTH_URL}/api/auth/registration`;
   const audience = "mandateos:passkey-registration";
   const key = new TextEncoder().encode(env.BETTER_AUTH_SECRET);
@@ -166,6 +144,7 @@ export function createAuth(env: AuthEnvironment, client: PrismaClient): MandateA
     env,
     prismaAdapter(client, { provider: "postgresql" }),
     resolveRegistrationUser,
+    near,
   )) as unknown as MandateAuth;
   auth.createRegistrationContext = ({ email, name, userId }) =>
     new SignJWT({ email: email.trim().toLowerCase(), name })

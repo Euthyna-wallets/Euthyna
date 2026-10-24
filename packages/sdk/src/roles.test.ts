@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Hex } from "viem";
+import { getAddress, type Hex } from "viem";
 
 import fixture from "./fixtures/presets.json" with { type: "json" };
 import {
@@ -115,6 +115,12 @@ describe("descriptions", () => {
     expect(text).toContain("recipient must be the company wallet");
     expect(text).toContain("minimum received must be set (not zero)");
     expect(text).toContain("route must be TestUSDC → WETH");
+  });
+
+  it("prints full addresses for server-provided labels when asked", () => {
+    const text = describeChange(changes[2]!, { ...context, fullAddresses: true }).details.join("\n");
+    expect(text).toContain(`recipient must be Studio Pixel (${getAddress(SUPPLIER)})`);
+    expect(text).toContain("spender must be one of: Uniswap V3 router, Uniswap V2 router");
   });
 
   it("describes members", () => {

@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@mandateos/db";
 import { getAddress } from "viem";
 
 import { AGENT_API_KEY_CONFIG_ID, type MandateAuth } from "./auth.js";
+import { NEAR_PROVIDER_ID } from "./near-auth.js";
 
 export interface AgentIdentity {
   agentId: string;
@@ -21,6 +22,7 @@ export interface PasskeyIdentity {
 
 export interface ConsoleIdentity extends PasskeyIdentity {
   memberId: string;
+  nearAccountId?: string | null;
   organizationId: string;
   role: string;
   emailVerified: boolean;
@@ -221,11 +223,13 @@ export class BetterAuthGateway implements AuthGateway {
   private async passkeySession(headers: Headers) {
     const session = await this.auth.api.getSession({ headers });
     if (!session) return null;
-    const enrolledPasskey = await this.prisma.passkey.findFirst({
-      where: { userId: session.user.id },
-      select: { id: true },
-    });
-    return enrolledPasskey ? session : null;
+    // Console users sign in with their NEAR wallet (NEP-413); older profiles with a passkey still work.
+    const [nearAccount, enrolledPasskey] = await Promise.all([
+      this.prisma.account.findFirst({ where: { userId: session.user.id, providerId: NEAR_PROVIDER_ID }, select: { accountId: true } }),
+      this.prisma.passkey.findFirst({ where: { userId: session.user.id }, select: { id: true } }),
+    ]);
+    if (!nearAccount && !enrolledPasskey) return null;
+    return { ...session, nearAccountId: nearAccount?.accountId ?? null };
   }
 
   async identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null> {
@@ -251,13 +255,18 @@ export class BetterAuthGateway implements AuthGateway {
       return null;
     }
 
-    const member = await this.prisma.member.findFirst({
+    let member = await this.prisma.member.findFirst({
       where: { userId: passkeyUser.userId, organizationId: activeOrganizationId },
     });
     if (!member) return null;
+    if (!member.nearAccountId && session.nearAccountId) {
+      // The company creator's seat is created by Better Auth; its NEAR account is the one they signed in with.
+      member = await this.prisma.member.update({ where: { id: member.id }, data: { nearAccountId: session.nearAccountId } });
+    }
     return {
       ...passkeyUser,
       memberId: member.id,
+      nearAccountId: member.nearAccountId,
       organizationId: member.organizationId,
       role: member.role,
       emailVerified: session.user.emailVerified,

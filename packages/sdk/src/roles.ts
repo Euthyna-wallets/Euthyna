@@ -438,6 +438,12 @@ export type DescribeContext = {
   labels?: Record<string, string>;
   /** Allowance key (hex, lowercase) -> what it measures; see `budgetsOf`. */
   budgets?: Record<string, BudgetInfo>;
+  /**
+   * Print the full address next to every label that does not come from the
+   * profile. Labels are names a server stored; the address is what the vault
+   * enforces, so a voter must see it.
+   */
+  fullAddresses?: boolean;
 };
 
 /** Name a V2 route by matching its hash against two-hop routes between known tokens. */
@@ -467,12 +473,13 @@ function short(address: string): string {
 export function labelAddress(address: Hex, context: DescribeContext): string {
   const key = address.toLowerCase();
   const label = Object.entries(context.labels ?? {}).find(([candidate]) => candidate.toLowerCase() === key)?.[1];
-  if (label) return label;
+  const full = getAddress(address);
+  if (label) return context.fullAddresses ? `${label} (${full})` : label;
   const token = context.profile.tokens.find((item) => item.address.toLowerCase() === key);
   if (token) return token.symbol;
   const protocol = Object.values(context.profile.protocols).find((item) => item.router.toLowerCase() === key);
   if (protocol) return `${protocol.name} router`;
-  return `${short(getAddress(address))} (not a registered supplier)`;
+  return `${context.fullAddresses ? full : short(full)} (not a registered supplier)`;
 }
 
 function wordToAddress(value: Hex): Hex {

@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { KeyPair, Near, keyStores, type Account } from "near-api-js";
-import { bytesToHex, encodeFunctionData, getAddress, hexToBytes, type Hex } from "viem";
+import { bytesToHex, encodeFunctionData, getAddress, hexToBytes, keccak256, stringToHex, type Hex } from "viem";
 
 export const AGENT_FUNCTION_CALL_METHODS = [
   "prepare",
@@ -17,7 +17,11 @@ export const AGENT_GAS = {
   authorize: "50000000000000",
 } as const;
 
-export function proposedAgentAccountId(name: string, parent: string): string {
+/**
+ * NEAR account of an agent. With an organization id, a short tag derived from
+ * it keeps two companies' "Treasury bot" from claiming the same account.
+ */
+export function proposedAgentAccountId(name: string, parent: string, organizationId?: string): string {
   const slug = name
     .trim()
     .toLowerCase()
@@ -26,7 +30,8 @@ export function proposedAgentAccountId(name: string, parent: string): string {
     .slice(0, 40)
     .replace(/-+$/g, "");
   if (slug.length < 2) throw new Error("agent name must produce at least a two-character account slug");
-  const accountId = `${slug}-agent.${parent}`;
+  const tag = organizationId ? `-${keccak256(stringToHex(organizationId)).slice(2, 8)}` : "";
+  const accountId = `${slug}${tag}-agent.${parent}`;
   if (accountId.length > 64) throw new Error("proposed agent account exceeds NEAR's 64-character limit");
   return accountId;
 }

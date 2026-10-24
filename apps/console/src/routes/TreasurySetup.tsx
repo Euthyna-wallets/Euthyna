@@ -169,7 +169,7 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
   );
 }
 
-export function FundWallet({ status }: { status: OmniStatus }) {
+export function FundWallet({ status, showNext = true }: { status: OmniStatus; showNext?: boolean }) {
   if (!status.wallet) return null;
   const usdc = status.wallet.tokens.filter((token) => Number(token.amount) > 0);
   return (
@@ -191,7 +191,7 @@ export function FundWallet({ status }: { status: OmniStatus }) {
         <button onClick={() => void navigator.clipboard.writeText(status.wallet!.address)}>Copy address</button>
         <a className="button" href={`https://sepolia.basescan.org/address/${status.wallet.address}`} target="_blank" rel="noreferrer">Open in explorer</a>
         <div className="spacer" />
-        <Link className="button primary" to="/roles">Next: create a role →</Link>
+        {showNext ? <Link className="button primary" to="/roles">Next: create a role →</Link> : null}
       </div>
     </section>
   );
