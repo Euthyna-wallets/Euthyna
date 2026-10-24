@@ -254,6 +254,15 @@ describe("TreasuryService.plan", () => {
     ).rejects.toMatchObject({ code: "proven_wallets_missing" });
   });
 
+
+  it("refuses a two-member 2-of-2 council without liveness margin", async () => {
+    const { prisma } = fakePrisma({ members: members.slice(0, 2) });
+    await expect(service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "acme",
+      founderNearAccountId: "alice.testnet",
+    })).rejects.toMatchObject({ code: "council_too_small" });
+  });
   it("excludes an admin-declared member without wallet signatures from the council", async () => {
     const pending = {
       id: "m4",
@@ -326,6 +335,14 @@ describe("TreasuryService.register", () => {
       service(prisma, fakeNear({ codeHashes: await artifactHashes() }))
         .register("org-1", "user-1", registerInput),
     ).rejects.toMatchObject({ code: "deployment_confirmations_missing" });
+  });
+
+  it("refuses to register a two-member council even if its on-chain policy is 2-of-2", async () => {
+    const { prisma } = fakePrisma({ members: members.slice(0, 2), confirmedMemberIds: ["m1", "m2"] });
+    await expect(
+      service(prisma, await validNear({ codeHashes: await artifactHashes() }))
+        .register("org-1", "user-1", registerInput),
+    ).rejects.toMatchObject({ code: "council_too_small" });
   });
 });
 

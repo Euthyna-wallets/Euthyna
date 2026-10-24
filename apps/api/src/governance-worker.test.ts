@@ -293,6 +293,7 @@ describe("GovernanceWorker", () => {
     await test.worker().tick();
     expect(test.base.prepared).toBe(0);
     expect(test.store.current.state).toBe("Queued");
+    expect(test.store.current.nextAttemptAt).toEqual(new Date(now.getTime() + 1_000));
   });
 
   it("reports a veto even when Roles already matches the proposed state", async () => {

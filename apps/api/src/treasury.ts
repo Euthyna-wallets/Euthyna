@@ -441,6 +441,10 @@ export class TreasuryService {
       throw new TreasuryError(400, "founder_not_proven", "founder must prove both wallets before joining the council");
     }
 
+    if (council.length < 3) {
+      throw new TreasuryError(409, "council_too_small", "at least three proven council members are required");
+    }
+
     const slug = slugify(input.daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
     const short = slug.slice(0, 8).replace(/-+$/, "");
@@ -451,6 +455,9 @@ export class TreasuryService {
     }
 
     const threshold = Math.ceil((2 * council.length) / 3);
+    if (threshold >= council.length) {
+      throw new TreasuryError(409, "council_no_liveness_margin", "council threshold must be lower than member count");
+    }
     const policy = {
       roles: [
         {
@@ -722,7 +729,13 @@ export class TreasuryService {
     if (members.some((member) => !member.nearAccountId || !member.evmAddress)) {
       throw new TreasuryError(409, "proven_wallets_missing", "a proven member is missing a wallet");
     }
+    if (members.length < 3) {
+      throw new TreasuryError(409, "council_too_small", "at least three proven council members are required");
+    }
     const expectedThreshold = BigInt(Math.ceil((2 * members.length) / 3));
+    if (expectedThreshold >= BigInt(members.length)) {
+      throw new TreasuryError(409, "council_no_liveness_margin", "council threshold must be lower than member count");
+    }
 
     const factoryCodeHash = await this.near.viewFunction<string>(this.config.daoFactoryId, "get_default_code_hash");
     const daoAccount = await this.near.getAccount(input.daoAccountId);

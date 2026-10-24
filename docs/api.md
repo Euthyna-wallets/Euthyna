@@ -316,6 +316,10 @@ Available to every organization member so each signer can independently inspect
 the deterministic plan. Only members with a stored NEP-413 and EIP-191 proof
 appear in the DAO council and Safe owners. It never signs and never receives a
 private key.
+The plan is rejected unless at least three proven members remain and the
+absolute threshold is strictly lower than the council size. Registration
+rechecks both liveness invariants against the direct `get_policy` result
+([`apps/api/src/treasury.ts`](../apps/api/src/treasury.ts)).
 
 ```json
 { "environment": "uat", "daoName": "acme", "founderNearAccountId": "alice.testnet" }
@@ -564,6 +568,26 @@ approve it from the Governance page; the server receives no council key
 
 ![Council relay rescue proposal](./console/governance-relay-rescue.webp)
 
+### `POST /v1/console/governance/swap-owner-proposal`
+
+Admin only. While the relay is idle, reads the current Safe owners directly
+from Base and returns an unsigned DAO proposal for
+`Safe.swapOwner(prevOwner, oldOwner, newOwner)`. It rejects an absent old owner
+or an existing replacement. Council votes, 0xGOV, Delay and the normal
+governance worker remain on the execution path; no server key is made a Safe
+owner.
+
+### `POST /v1/console/governance/add-owner-proposal`
+
+Admin only, and limited to recovery of a two-owner Safe. Returns an unsigned
+DAO proposal for `Safe.addOwnerWithThreshold(newOwner, 2)`, producing the
+required 2/3 Safe after execution. The console records either recovery proposal
+as a generic governance operation; successful execution is classified from
+the exact Safe `ExecutionFromModuleSuccess` evidence and receipt rather than
+Zodiac state
+([`apps/api/src/governance.ts`](../apps/api/src/governance.ts),
+[`apps/console/src/routes/GovernancePage.tsx`](../apps/console/src/routes/GovernancePage.tsx)).
+
 ![Governance worker timeline and veto](./console/governance-worker-timeline.webp)
 
 Fresh PR C UAT treasury (no migration):
@@ -597,8 +621,9 @@ The corrected relay artifact was built reproducibly from commit
 [`contracts/res/governance_relay.wasm`](../contracts/res/governance_relay.wasm)).
 This artifact is not claimed as deployed on the superseded UAT relay above.
 
-Corrected clean 2/2 UAT treasury (created entirely from the console, except the
-allowed `mandateos agent init` command):
+Corrected CallOnly UAT treasury, initially created as 2/2 entirely from the
+console (except the allowed `mandateos agent init` command), then recovered to
+2/3 through the same DAO → relay → Delay path:
 
 | Component | Address/account |
 |---|---|
@@ -626,6 +651,15 @@ allowed `mandateos agent init` command):
 | First Delay execution | `0x5ce72b873d15b4e00664d6d67b212e26c340468c8537061f31ee9f5e41f7a2bf` |
 | Veto-test DAO final vote | [`3eQWu2…`](https://testnet.nearblocks.io/txns/3eQWu2cP1Vu5xxMuKcgHUAHNaDieBLM6kJscWdFaFiF7) |
 | Veto-test 0xGOV Delay queue | `0xc31b1dd1216591adcdffb94bffbdbb8e16465fab6044892ed7c77475efa3afdb` |
+| Second Delay execution to release relay | `0xb5a9e80af1759867795b579ac7655575535f391a34afe07ee0026fcb44c90de6` |
+| `swapOwner` DAO final vote | [`7BtAvU…`](https://testnet.nearblocks.io/txns/7BtAvUqHJiZWcsgM5g3HkjzU73a6qzxjBc3NKC5jyJP7) |
+| `swapOwner` 0xGOV Delay queue | [`0xd463…`](https://sepolia.basescan.org/tx/0xd4639328917af0cf3a55cbfb7e7c2a5b64c19a722964b42f801e9b4e566c6178) |
+| `swapOwner` Delay execution | [`0x669a…`](https://sepolia.basescan.org/tx/0x669adaf7edb644d294ca482adb8b2f721981fc7ce56ee0e8f901d425a44c9a18) |
+| `addOwnerWithThreshold(…, 2)` DAO final vote | [`EvpHAY…`](https://testnet.nearblocks.io/txns/EvpHAYe6qbEBhxALteWmebLBHiaBwyFM6QzcHXnh6VMj) |
+| Add third owner 0xGOV Delay queue | [`0x3a2c…`](https://sepolia.basescan.org/tx/0x3a2c61b0eeb32cd083a4ed7aa2d82c97b29e8c918d52b738561ed08242908641) |
+| Add third owner Delay execution | [`0xcdcf…`](https://sepolia.basescan.org/tx/0xcdcff14aa2569f714a0bc42fba1285be02bb1ee26b1424632b533f7762660f2d) |
+| Veto-target 0xGOV Delay queue | [`0xbfdd…`](https://sepolia.basescan.org/tx/0xbfddaa829d8560b848573ce71eb9bcf7f3965548af5424af8d67296b86e9ba61) |
+| Council 2/3 veto | [`0xa4f0…`](https://sepolia.basescan.org/tx/0xa4f0b072edd1f5648751aa1d11b5ffcf40341c735cb8a3e5fb4a84fdd121890c) |
 
 Both members confirmed the direct Vault/relay RPC attestation. On-chain reads
 confirmed Roles and Delay enabled on the Safe and 0xGOV enabled on Delay. The
@@ -635,13 +669,18 @@ The first Zodiac operation reached `Executed`; the worker verified
 `AssignRoles`, `ScopeTarget`, `ScopeFunction`, `SetAllowance`, balance
 `6,000,000`, and period `2,592,000`.
 
-The second operation reached Delay queue nonce `1` and the worker was paused
-before execution. The 2/2 veto could not be completed: the browser's legacy
-anonymous-key migration had overwritten the private key corresponding to Safe
-owner `0x35150E…a0dA1e`. The migration now refuses to overwrite an existing
-profile scope, with regression coverage, but an EVM private key cannot be
-recovered from its public address or old signatures. No veto hash or successful
-post-veto proposal is claimed for this treasury.
+The second operation was deliberately allowed to execute after the original
+2/2 council lost one browser-generated EVM key; its terminal Guard report
+released the relay. Proposal `7` then replaced owner `0x35150E…a0dA1e` with
+`0x1D693a…9FFceb`. Proposal `8` added
+`0x64f4F6…F501e8` with `addOwnerWithThreshold(..., 2)`. Direct Base reads
+after execution returned exactly three owners and threshold `2`.
+
+Proposal `9` queued a second owner replacement as the veto target. Two current
+Safe owners signed `Delay.setTxNonce(5)` in the console; transaction
+`0xa4f0…1890c` executed, and the worker classified the entry `Vetoed` before
+submitting the terminal Guard report. No `confirm_original` vote was used.
+Acceptance of a subsequent relay proposal is not yet claimed in this revision.
 
 | Real UAT transition | Transaction |
 |---|---|

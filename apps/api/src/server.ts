@@ -75,7 +75,7 @@ const mandates = new MandateService(
   env.BUDGET_TOKEN_ACCOUNT_ID,
   env.BASE_SEPOLIA_RPC_URL,
 );
-const governance = new GovernanceService(prisma, near);
+const governance = new GovernanceService(prisma, near, env.BASE_SEPOLIA_RPC_URL);
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService);
 const consoleData = new ConsoleDataService(

@@ -399,6 +399,20 @@ function testApp(options?: {
       args: {},
       deposit: "0",
     }),
+    swapOwnerProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Swap Safe owner",
+      args: {},
+      deposit: "0",
+    }),
+    addOwnerProposal: async () => ({
+      receiverId: "dao.testnet",
+      methodName: "add_proposal",
+      description: "Add Safe owner",
+      args: {},
+      deposit: "0",
+    }),
   };
   const app = createApp({
     near,

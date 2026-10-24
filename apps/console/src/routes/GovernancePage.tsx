@@ -10,7 +10,7 @@ import {
   type SafeBatch,
   type SafeBatchSignature,
 } from "../safe.js";
-import { nearAccounts, signDaoProposal, signDaoVote } from "../wallets.js";
+import { nearAccounts, readDaoProposalRpc, signDaoProposal, signDaoVote } from "../wallets.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 
 interface GovernanceOperation {
@@ -65,6 +65,9 @@ export function GovernancePage() {
     refetchInterval: 5_000,
   });
   const [signer, setSigner] = useState("");
+  const [lostOwner, setLostOwner] = useState("0x35150E37F032Fa3053fFEC849Ef7B392C7a0dA1e");
+  const [replacementOwner, setReplacementOwner] = useState("0x1D693a4425bf7eD10FE7775E2b65b072019FFceb");
+  const [thirdOwner, setThirdOwner] = useState("0x64f4F6D91B66e01A65e992B89719A6a1E6F501e8");
   const [hashes, setHashes] = useState<string[]>([]);
   const [vetoes, setVetoes] = useState<Record<string, VetoState>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -147,6 +150,52 @@ export function GovernancePage() {
     }
   }
 
+  async function proposeOwnerRecovery() {
+    if (!signer) throw new Error("Connect a council NEAR account first");
+    setBusy("swap-owner");
+    setError(null);
+    try {
+      const proposal = await api<{
+        receiverId: string;
+        args: Record<string, unknown>;
+        deposit: string;
+      }>("/v1/console/governance/swap-owner-proposal", {
+        method: "POST",
+        body: JSON.stringify({ oldOwner: lostOwner, newOwner: replacementOwner }),
+      });
+      const submitted = await signDaoProposal(signer, proposal);
+      setHashes((existing) => [...existing, submitted.transactionHash]);
+      await client.invalidateQueries({ queryKey: ["governance"] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function proposeThirdOwner() {
+    if (!signer) throw new Error("Connect a council NEAR account first");
+    setBusy("add-owner");
+    setError(null);
+    try {
+      const proposal = await api<{
+        receiverId: string;
+        args: Record<string, unknown>;
+        deposit: string;
+      }>("/v1/console/governance/add-owner-proposal", {
+        method: "POST",
+        body: JSON.stringify({ newOwner: thirdOwner }),
+      });
+      const submitted = await signDaoProposal(signer, proposal);
+      setHashes((existing) => [...existing, submitted.transactionHash]);
+      await client.invalidateQueries({ queryKey: ["governance"] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="page">
       <header className="page-head">
@@ -175,6 +224,30 @@ export function GovernancePage() {
               Use connected NEAR account
             </button>
           </div>
+      <Card title="Safe owner recovery through relay + Delay">
+        <p className="muted">Creates an unsigned DAO proposal. The relay must be idle; council votes remain required.</p>
+        <div className="row wrap">
+          <input aria-label="Lost Safe owner" value={lostOwner} onChange={(event) => setLostOwner(event.target.value)} />
+          <input aria-label="Replacement Safe owner" value={replacementOwner} onChange={(event) => setReplacementOwner(event.target.value)} />
+          <button
+            className="primary"
+            disabled={!signer || busy === "swap-owner" || Boolean(query.data?.relayActiveOperation)}
+            onClick={() => void proposeOwnerRecovery()}
+          >
+            Propose Safe.swapOwner
+          </button>
+        </div>
+        <div className="row wrap">
+          <input aria-label="Third Safe owner" value={thirdOwner} onChange={(event) => setThirdOwner(event.target.value)} />
+          <button
+            className="primary"
+            disabled={!signer || busy === "add-owner" || Boolean(query.data?.relayActiveOperation)}
+            onClick={() => void proposeThirdOwner()}
+          >
+            Propose add owner + threshold 2/3
+          </button>
+        </div>
+      </Card>
       <Card title="Governance operations">
         <PageState loading={query.isLoading} error={query.error} empty={query.data?.operations.length === 0}>
           <div className="stack">
@@ -270,7 +343,31 @@ export function GovernancePage() {
                   <td>
                     <button className="ghost" disabled={!signer} onClick={() => {
                       void signDaoVote(signer, query.data?.daoAccountId ?? "", proposal.id, proposal.kind)
-                        .then((hash) => setHashes((current) => [...current, hash]));
+                        .then(async (hash) => {
+                          const refreshed = await readDaoProposalRpc(
+                            query.data?.daoAccountId ?? "",
+                            proposal.id,
+                          );
+                          if (
+                            refreshed.state === "Executed" &&
+                            (
+                              proposal.description?.startsWith("Recover Safe owner ") ||
+                              proposal.description?.startsWith("Add Safe owner ")
+                            )
+                          ) {
+                            await api("/v1/console/governance/relay-operation", {
+                              method: "POST",
+                              body: JSON.stringify({
+                                proposalId: proposal.id,
+                                nearTransactionHash: hash,
+                                signerAccountId: signer,
+                              }),
+                            });
+                          }
+                          setHashes((current) => [...current, hash]);
+                          await client.invalidateQueries({ queryKey: ["governance"] });
+                        })
+                        .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
                     }}>Vote</button>
                   </td>
                 </tr>

@@ -25,20 +25,31 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
 
 ## 1. Organisation
 
-1. Démarrer la console avec `VITE_UAT_DEMO_MODE=1` et l'API avec
+1. Pour une répétition développeur uniquement, la console peut être démarrée
+   avec `VITE_UAT_DEMO_MODE=1` et l'API avec
    `UAT_DEMO_WALLETS_ENABLED=1`. Les deux flags restent désactivés par défaut.
-2. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
-3. Créer l'entreprise.
-4. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
+   **Cette répétition ne constitue jamais la preuve UAT finale.**
+2. Pour l'UAT finale, laisser ces flags désactivés : trois personnes distinctes
+   utilisent trois passkeys, trois comptes NEAR via Wallet Selector et trois
+   adresses EVM via MetaMask/Rabby. Aucune clé privée ne doit apparaître dans
+   `localStorage`.
+3. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
+4. Créer l'entreprise.
+5. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
    `pending` et ne comptent pas encore dans le council.
-5. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
+6. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
    passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
    EVM (EIP-191).
-6. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
+7. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
    créé ou financé.
 
-En mode normal, utiliser NEAR Wallet Selector et MetaMask/Rabby. Vérifier
-qu'aucune clé privée n'apparaît dans localStorage.
+Les commandes opérateur utilisent uniquement des signers chargés depuis le
+keychain. Ne jamais passer une clé privée en argument de CLI, afficher un
+fichier de clé ou imprimer une variable d'environnement secrète. `mandateos
+agent init` constitue l'exception fonctionnelle prévue : il écrit directement
+la clé agent dans `AGENT_KEY_PATH` avec le mode `0600` et n'affiche que la clé
+publique
+([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts)).
 
 Attendu : 3 membres prouvés, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour
 le fondateur. Ajouter une quatrième déclaration sans signer : elle doit rester

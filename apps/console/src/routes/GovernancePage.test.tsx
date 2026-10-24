@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   signSafeBatch: vi.fn(),
   executeSafeBatch: vi.fn(),
   nearAccounts: vi.fn(),
+  readDaoProposalRpc: vi.fn(),
   signDaoProposal: vi.fn(),
   signDaoVote: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock("../safe.js", async (importActual) => ({
 }));
 vi.mock("../wallets.js", () => ({
   nearAccounts: mocks.nearAccounts,
+  readDaoProposalRpc: mocks.readDaoProposalRpc,
   signDaoProposal: mocks.signDaoProposal,
   signDaoVote: mocks.signDaoVote,
 }));

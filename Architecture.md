@@ -140,6 +140,16 @@ L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path.
 | Relayer NEAR | Déployer les comptes sponsorisés, financer leur réserve gas, soumettre `report_status` et les récupérations `submit_signature` | N'obtient aucune clé sur Vault/relay/agent ; l'unique clé agent créée est celle fournie par le client et reste FunctionCall-only |
 | Gas wallet EVM | Signe uniquement l'appel permissionless `Delay.executeNextTx` préparé et checkpointé par le worker ; la diffusion des transactions brutes déjà signées utilise `eth_sendRawTransaction` sans cette clé | N'est ni owner Safe, ni module, ni membre Roles ; ne peut choisir ni cible, ni calldata, ni politique ([`apps/api/src/governance-base.ts`](./apps/api/src/governance-base.ts)) |
 
+Pour l'UAT CallOnly, le gas wallet observé est
+`0x37d679d9aE6dC2e14b662C3646aCd0d36B72E90d`. Il a soumis les appels
+permissionless `executeNextTx` des entrées Delay de cette trésorerie et avait
+aussi relayé le veto `0xcff3…527b` de l'UAT précédente. Ce second fait est un
+historique opérationnel, pas une autorité supplémentaire : `setTxNonce` avait
+déjà été autorisé par les signatures 2/3 du Safe, et le wallet n'est ni owner,
+ni module, ni membre Roles
+([`apps/api/src/governance-worker.ts`](./apps/api/src/governance-worker.ts),
+[`docs/api.md`](./docs/api.md)).
+
 Le provisionnement est implémenté par une seule transaction
 `CreateAccount → Transfer → AddKey(FunctionCall)` ; l'API et le navigateur
 relisent ensuite `view_access_key_list` et exigent exactement une clé conforme,

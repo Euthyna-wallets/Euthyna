@@ -167,6 +167,13 @@ const governanceExecutionSchema = z.object({
 const governanceUnblockSchema = z.object({
   opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
 });
+const governanceSwapOwnerSchema = z.object({
+  oldOwner: evmAddressSchema,
+  newOwner: evmAddressSchema,
+});
+const governanceAddOwnerSchema = z.object({
+  newOwner: evmAddressSchema,
+});
 const nearRpcProxySchema = z.object({
   jsonrpc: z.literal("2.0"),
   id: z.union([z.string(), z.number(), z.null()]),
@@ -581,6 +588,16 @@ export function createApp({
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, governanceUnblockSchema);
     return context.json(await governance.unblockProposal(consoleIdentity.organizationId, input.opId));
+  });
+  app.post("/v1/console/governance/swap-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceSwapOwnerSchema);
+    return context.json(await governance.swapOwnerProposal(consoleIdentity.organizationId, input));
+  });
+  app.post("/v1/console/governance/add-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceAddOwnerSchema);
+    return context.json(await governance.addOwnerProposal(consoleIdentity.organizationId, input));
   });
 
 

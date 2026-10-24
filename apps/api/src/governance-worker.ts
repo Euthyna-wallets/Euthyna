@@ -478,11 +478,16 @@ export class GovernanceWorker {
     if (delayState.entryHash.toLowerCase() !== expectedEntryHash.toLowerCase()) {
       throw new Error(`Delay entry hash ${delayState.entryHash} differs from expected ${expectedEntryHash}`);
     }
+    const checkpointedExecuteReceipt = job.executeTxHash
+      ? await this.base.receipt(job.executeTxHash as Hex)
+      : null;
     const execution = await this.base.findExecution({
       safe: getAddress(job.safeAddress),
       delay,
       ...operationInput,
-      fromBlock: queueReceipt.blockNumber,
+      fromBlock: checkpointedExecuteReceipt?.status === "success"
+        ? checkpointedExecuteReceipt.blockNumber
+        : queueReceipt.blockNumber,
     });
     if (execution) {
       const executionDepth = currentBlock >= execution.blockNumber
@@ -542,9 +547,6 @@ export class GovernanceWorker {
       throw new Error("Delay nonce advanced without matching execution or veto evidence");
     }
 
-    const checkpointedExecuteReceipt = job.executeTxHash
-      ? await this.base.receipt(job.executeTxHash as Hex)
-      : null;
     await this.store.update(job, {
       state: job.executeRawTransaction ? "Executing" : "Queued",
       txHash: hash,
@@ -567,10 +569,11 @@ export class GovernanceWorker {
     }
     if (delayState.currentTimestamp < delayState.createdAt + delayState.cooldown) {
       const remainingSeconds = delayState.createdAt + delayState.cooldown - delayState.currentTimestamp;
+      const cooldownWaitMs = Number(remainingSeconds) * 1_000;
       await this.store.update(job, {
         state: "Queued",
         lastAttemptAt: this.now(),
-        nextAttemptAt: new Date(this.now().getTime() + Number(remainingSeconds) * 1_000),
+        nextAttemptAt: new Date(this.now().getTime() + Math.min(cooldownWaitMs, this.config.pollIntervalMs)),
         lastError: null,
       });
       return;

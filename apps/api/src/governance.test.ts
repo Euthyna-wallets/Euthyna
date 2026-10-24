@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@mandateos/db";
 import { describe, expect, it } from "vitest";
+import { bytesToHex, decodeFunctionData, getAddress, type Address } from "viem";
+import { z } from "zod";
 
 import { GovernanceService } from "./governance.js";
 import type { NearClient } from "./near.js";
@@ -31,7 +33,28 @@ const operation: GovernanceOperation = {
   cancellation: null,
 };
 
-function fixture(proposalStatus = "Approved") {
+const proposalActionSchema = z.object({
+  kind: z.object({
+    FunctionCall: z.object({
+      actions: z.array(z.object({ args: z.string() })).min(1),
+    }),
+  }),
+});
+const relayArgsSchema = z.object({
+  target: z.string(),
+  data: z.string(),
+  operation: z.number(),
+});
+
+
+function fixture(
+  proposalStatus = "Approved",
+  activeOperation: number[] | null = operation.op_id,
+  owners: Address[] = [
+    getAddress("0x1111111111111111111111111111111111111111"),
+    getAddress("0x2222222222222222222222222222222222222222"),
+  ],
+) {
   let stored: Record<string, unknown> | null = null;
   const prisma = {
     treasury: {
@@ -40,6 +63,7 @@ function fixture(proposalStatus = "Approved") {
         organizationId: "org-1",
         daoAccountId: "dao.testnet",
         relayAccountId: "relay.testnet",
+        safeAddress: "0x3333333333333333333333333333333333333333",
       }),
     },
     member: { findFirst: async () => ({ id: "member-1" }) },
@@ -65,13 +89,16 @@ function fixture(proposalStatus = "Approved") {
       if (method === "get_proposal") {
         return { status: proposalStatus, description: "Batch Zodiac configuration [mandate:abc:zodiac]" };
       }
-      if (method === "active_operation") return operation.op_id;
+      if (method === "active_operation") return activeOperation;
       if (method === "get_operation") return operation;
       if (method === "client_id") return "acme";
       throw new Error(`unexpected view ${method}`);
     },
   } as unknown as NearClient;
-  return { service: new GovernanceService(prisma, near), stored: () => stored };
+  return {
+    service: new GovernanceService(prisma, near, "https://sepolia.base.org", async () => owners),
+    stored: () => stored,
+  };
 }
 
 describe("GovernanceService", () => {
@@ -108,13 +135,74 @@ describe("GovernanceService", () => {
       description: expect.stringContaining("Release terminal relay operation"),
       deposit: "100000000000000000000000",
     });
-    const action = (proposal.args.proposal as {
-      kind: { FunctionCall: { actions: { args: string }[] } };
-    }).kind.FunctionCall.actions[0]!;
-    expect(JSON.parse(Buffer.from(action.args, "base64").toString("utf8"))).toMatchObject({
+    const proposalBody = proposalActionSchema.parse(proposal.args.proposal);
+    const actionArgs = proposalBody.kind.FunctionCall.actions[0]!.args;
+    expect(JSON.parse(Buffer.from(actionArgs, "base64").toString("utf8"))).toMatchObject({
       op_id: Array(32).fill(1),
       tx_hash: Array(32).fill(7),
       mpc_signature: null,
     });
+  });
+
+  it("builds a relay proposal that swaps an existing Safe owner only while the relay is idle", async () => {
+    const oldOwner = getAddress("0x2222222222222222222222222222222222222222");
+    const newOwner = getAddress("0x4444444444444444444444444444444444444444");
+    const proposal = await fixture("Approved", null).service.swapOwnerProposal("org-1", {
+      oldOwner,
+      newOwner,
+    });
+    const proposalBody = proposalActionSchema.parse(proposal.args.proposal);
+    const actionArgs = proposalBody.kind.FunctionCall.actions[0]!.args;
+    const relayArgs = relayArgsSchema.parse(
+      JSON.parse(Buffer.from(actionArgs, "base64").toString("utf8")),
+    );
+    expect(bytesToHex(Buffer.from(relayArgs.target, "base64"))).toBe(
+      "0x3333333333333333333333333333333333333333",
+    );
+    const decoded = decodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "swapOwner",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "prevOwner", type: "address" },
+          { name: "oldOwner", type: "address" },
+          { name: "newOwner", type: "address" },
+        ],
+        outputs: [],
+      }] as const,
+      data: bytesToHex(Buffer.from(relayArgs.data, "base64")),
+    });
+    expect(decoded.args).toEqual([
+      getAddress("0x1111111111111111111111111111111111111111"),
+      oldOwner,
+      newOwner,
+    ]);
+    expect(relayArgs.operation).toBe(0);
+  });
+
+  it("builds a relay proposal that adds a third Safe owner with threshold two", async () => {
+    const newOwner = getAddress("0x4444444444444444444444444444444444444444");
+    const proposal = await fixture("Approved", null).service.addOwnerProposal("org-1", { newOwner });
+    const proposalBody = proposalActionSchema.parse(proposal.args.proposal);
+    const actionArgs = proposalBody.kind.FunctionCall.actions[0]!.args;
+    const relayArgs = relayArgsSchema.parse(
+      JSON.parse(Buffer.from(actionArgs, "base64").toString("utf8")),
+    );
+    const decoded = decodeFunctionData({
+      abi: [{
+        type: "function",
+        name: "addOwnerWithThreshold",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "owner", type: "address" },
+          { name: "_threshold", type: "uint256" },
+        ],
+        outputs: [],
+      }] as const,
+      data: bytesToHex(Buffer.from(relayArgs.data, "base64")),
+    });
+    expect(decoded.args).toEqual([newOwner, 2n]);
+    expect(relayArgs.operation).toBe(0);
   });
 });
