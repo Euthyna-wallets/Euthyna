@@ -39,7 +39,6 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
   it("claims an admin-declared member only after valid NEP-413 and EIP-191 proofs", async () => {
     const organizationId = randomUUID();
     const pendingUserId = randomUUID();
-    const claimantUserId = randomUUID();
     const memberId = randomUUID();
     const nearKey = KeyPair.fromRandom("ed25519");
     const nearPublicKey = nearKey.getPublicKey().toString();
@@ -49,11 +48,8 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
     await prisma.organization.create({
       data: { id: organizationId, name: "Proof Org", slug: `proof-${organizationId}`, createdAt: new Date() },
     });
-    await prisma.user.createMany({
-      data: [
-        { id: pendingUserId, name: "Pending", email: `pending-${pendingUserId}@members.mandateos.invalid`, emailVerified: false },
-        { id: claimantUserId, name: "Claimant", email: `claimant-${claimantUserId}@example.test`, emailVerified: false },
-      ],
+    await prisma.user.create({
+      data: { id: pendingUserId, name: "Ben", email: `ben-${pendingUserId}@acme.test`, emailVerified: true },
     });
     await prisma.member.create({
       data: {
@@ -74,7 +70,11 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
       }),
     } as unknown as NearClient;
     const service = new WalletProofService(prisma, near, "mandateos.testnet", 84532);
-    const challenge = await service.createChallenge(claimantUserId, {
+    const challenge = await service.createChallenge({
+      userId: pendingUserId,
+      email: `ben-${pendingUserId}@acme.test`,
+      emailVerified: true,
+    }, {
       memberId,
       nearAccountId,
       evmAddress: evm.address,
@@ -82,7 +82,7 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
     expect(challenge.message).toContain(`member_id: ${memberId}`);
     expect(challenge.message).toContain("evm_chain_id: 84532");
 
-    const result = await service.verify(claimantUserId, {
+    const result = await service.verify(pendingUserId, {
       challengeId: challenge.id,
       nearAccountId,
       nearPublicKey,
@@ -92,12 +92,14 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
     });
     expect(result).toEqual({ memberId, organizationId });
     await expect(prisma.member.findUnique({ where: { id: memberId } })).resolves.toMatchObject({
-      userId: claimantUserId,
+      userId: pendingUserId,
       walletProofClaimable: false,
       nearProofPublicKey: nearPublicKey,
       walletProofVerifiedAt: expect.any(Date),
+      walletProofApprovedAt: null,
+      walletProofApprovedBy: null,
     });
-    await expect(service.verify(claimantUserId, {
+    await expect(service.verify(pendingUserId, {
       challengeId: challenge.id,
       nearAccountId,
       nearPublicKey,
@@ -106,13 +108,17 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
       evmSignature: await evm.signMessage({ message: challenge.message }),
     })).rejects.toMatchObject({ code: "challenge_consumed" });
 
-    const secondChallenge = await service.createChallenge(claimantUserId, {
+    const secondChallenge = await service.createChallenge({
+      userId: pendingUserId,
+      email: `ben-${pendingUserId}@acme.test`,
+      emailVerified: true,
+    }, {
       memberId,
       nearAccountId,
       evmAddress: evm.address,
     });
     const otherEvm = privateKeyToAccount("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd");
-    await expect(service.verify(claimantUserId, {
+    await expect(service.verify(pendingUserId, {
       challengeId: secondChallenge.id,
       nearAccountId,
       nearPublicKey,
@@ -122,7 +128,114 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
     })).rejects.toMatchObject({ code: "evm_signer_mismatch" });
 
     await prisma.organization.delete({ where: { id: organizationId } });
-    await prisma.user.delete({ where: { id: claimantUserId } });
+    await prisma.user.delete({ where: { id: pendingUserId } });
+  });
+
+  it("returns 403 when Mallory tries to claim Ben's invited seat", async () => {
+    const organizationId = randomUUID();
+    const benUserId = randomUUID();
+    const malloryUserId = randomUUID();
+    const benEmail = `ben-${benUserId}@acme.test`;
+    const malloryEmail = `mallory-${malloryUserId}@evil.test`;
+    const memberId = randomUUID();
+    await prisma.organization.create({
+      data: { id: organizationId, name: "ACME", slug: `acme-${organizationId}`, createdAt: new Date() },
+    });
+    await prisma.user.createMany({
+      data: [
+        { id: benUserId, name: "Ben", email: benEmail, emailVerified: false },
+        { id: malloryUserId, name: "Mallory", email: malloryEmail, emailVerified: true },
+      ],
+    });
+    await prisma.member.create({
+      data: {
+        id: memberId,
+        organizationId,
+        userId: benUserId,
+        role: "member",
+        walletProofClaimable: true,
+        createdAt: new Date(),
+      },
+    });
+    const service = new WalletProofService(
+      prisma,
+      { getAccessKeys: async () => ({ keys: [] }) } as unknown as NearClient,
+      "mandateos.testnet",
+      84532,
+    );
+    const wallets = {
+      memberId,
+      nearAccountId: "mallory.testnet",
+      evmAddress: "0x0000000000000000000000000000000000000001",
+    };
+    await expect(service.createChallenge({
+      userId: malloryUserId,
+      email: malloryEmail,
+      emailVerified: true,
+    }, wallets)).rejects.toMatchObject({ status: 403, code: "invitation_email_mismatch" });
+    await expect(service.createChallenge({
+      userId: benUserId,
+      email: benEmail,
+      emailVerified: false,
+    }, wallets)).rejects.toMatchObject({ status: 403, code: "email_verification_required" });
+    await prisma.organization.delete({ where: { id: organizationId } });
+    await prisma.user.deleteMany({ where: { id: { in: [benUserId, malloryUserId] } } });
+  });
+
+  it("lets an invited member declare real wallets once from their own passkey session", async () => {
+    const organizationId = randomUUID();
+    const pendingUserId = randomUUID();
+    const memberId = randomUUID();
+    const nearKey = KeyPair.fromRandom("ed25519");
+    const nearPublicKey = nearKey.getPublicKey().toString();
+    const nearAccountId = `self-${randomUUID().slice(0, 8)}.testnet`;
+    const evm = privateKeyToAccount("0x2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    await prisma.organization.create({
+      data: { id: organizationId, name: "Self declaration", slug: `self-${organizationId}`, createdAt: new Date() },
+    });
+    await prisma.user.create({
+      data: { id: pendingUserId, name: "Invited", email: `ben-${pendingUserId}@acme.test`, emailVerified: true },
+    });
+    await prisma.member.create({
+      data: {
+        id: memberId,
+        organizationId,
+        userId: pendingUserId,
+        role: "member",
+        nearAccountId: null,
+        evmAddress: null,
+        walletProofClaimable: true,
+        createdAt: new Date(),
+      },
+    });
+    const near = {
+      getAccessKeys: async () => ({
+        keys: [{ public_key: nearPublicKey, access_key: { permission: "FullAccess" } }],
+      }),
+    } as unknown as NearClient;
+    const service = new WalletProofService(prisma, near, "mandateos.testnet", 84532);
+    const challenge = await service.createChallenge({
+      userId: pendingUserId,
+      email: `ben-${pendingUserId}@acme.test`,
+      emailVerified: true,
+    }, { memberId, nearAccountId, evmAddress: evm.address });
+    await service.verify(pendingUserId, {
+      challengeId: challenge.id,
+      nearAccountId,
+      nearPublicKey,
+      nearSignature: nearProof(challenge, nearKey),
+      evmAddress: evm.address,
+      evmSignature: await evm.signMessage({ message: challenge.message }),
+    });
+    await expect(prisma.member.findUnique({ where: { id: memberId } })).resolves.toMatchObject({
+      userId: pendingUserId,
+      nearAccountId,
+      evmAddress: evm.address,
+      walletProofClaimable: false,
+      walletProofVerifiedAt: expect.any(Date),
+      walletProofApprovedAt: null,
+    });
+    await prisma.organization.delete({ where: { id: organizationId } });
   });
 
   it("accepts an unfunded deterministic demo account only when the server flag is enabled", async () => {
@@ -138,7 +251,7 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
       data: { id: organizationId, name: "Demo Proof Org", slug: `demo-proof-${organizationId}`, createdAt: new Date() },
     });
     await prisma.user.create({
-      data: { id: userId, name: "Demo", email: `demo-${userId}@example.test`, emailVerified: false },
+      data: { id: userId, name: "Demo", email: `demo-${userId}@example.test`, emailVerified: true },
     });
     await prisma.member.create({
       data: {
@@ -153,7 +266,11 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
       getAccessKeys: async () => ({ keys: [] }),
     } as unknown as NearClient;
     const service = new WalletProofService(prisma, unavailableNear, "mandateos.testnet", 84532, true);
-    const challenge = await service.createChallenge(userId, { memberId, nearAccountId, evmAddress: evm.address });
+    const challenge = await service.createChallenge({
+      userId,
+      email: `demo-${userId}@example.test`,
+      emailVerified: true,
+    }, { memberId, nearAccountId, evmAddress: evm.address });
     await expect(service.verify(userId, {
       challengeId: challenge.id,
       nearAccountId,

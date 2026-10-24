@@ -269,6 +269,7 @@ interface TreasuryMember {
   nearAccountId: string | null;
   evmAddress: string | null;
   walletProofVerifiedAt: Date | null;
+  walletProofApprovedAt: Date | null;
 }
 
 const safeAbi = [
@@ -428,7 +429,11 @@ export class TreasuryService {
   async plan(organizationId: string, input: { environment: string; daoName: string; founderNearAccountId: string }): Promise<TreasuryPlan> {
     const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({
-      where: { organizationId, walletProofVerifiedAt: { not: null } },
+      where: {
+        organizationId,
+        walletProofVerifiedAt: { not: null },
+        walletProofApprovedAt: { not: null },
+      },
       orderBy: { createdAt: "asc" },
     })) as TreasuryMember[];
     if (members.length === 0) {
@@ -593,6 +598,7 @@ export class TreasuryService {
         id: memberId,
         organizationId,
         walletProofVerifiedAt: { not: null },
+        walletProofApprovedAt: { not: null },
       },
       select: { id: true },
     });
@@ -728,7 +734,11 @@ export class TreasuryService {
   ): Promise<VerifiedTreasury> {
     const environment = this.environment(input.environment);
     const members = (await this.prisma.member.findMany({
-      where: { organizationId, walletProofVerifiedAt: { not: null } },
+      where: {
+        organizationId,
+        walletProofVerifiedAt: { not: null },
+        walletProofApprovedAt: { not: null },
+      },
     })) as TreasuryMember[];
     if (members.length === 0) {
       throw new TreasuryError(409, "no_proven_members", "organization has no member with both wallet proofs");
@@ -814,7 +824,11 @@ export class TreasuryService {
   ): Promise<NearDeploymentConfirmationStatus> {
     const [members, confirmations] = await Promise.all([
       this.prisma.member.findMany({
-        where: { organizationId, walletProofVerifiedAt: { not: null } },
+        where: {
+          organizationId,
+          walletProofVerifiedAt: { not: null },
+          walletProofApprovedAt: { not: null },
+        },
         select: { id: true },
         orderBy: { createdAt: "asc" },
       }),

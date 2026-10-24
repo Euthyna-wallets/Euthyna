@@ -122,14 +122,26 @@ const evmAddressSchema = z
 
 const addMemberSchema = z.object({
   name: z.string().min(1).max(120),
-  nearAccountId: nearAccountSchema,
-  evmAddress: evmAddressSchema,
+  email: z.string().email().optional(),
+  nearAccountId: nearAccountSchema.optional(),
+  evmAddress: evmAddressSchema.optional(),
+}).refine((input) => Boolean(input.nearAccountId) === Boolean(input.evmAddress), {
+  message: "nearAccountId and evmAddress must be provided together",
 });
 
 const walletsSchema = z.object({
   nearAccountId: nearAccountSchema,
   evmAddress: evmAddressSchema,
 });
+const walletProofDecisionSchema = z.discriminatedUnion("decision", [
+  z.object({
+    decision: z.literal("approve"),
+    nearAccountId: nearAccountSchema,
+    evmAddress: evmAddressSchema,
+    walletProofVerifiedAt: z.string().datetime(),
+  }),
+  z.object({ decision: z.literal("reject") }),
+]);
 
 const treasuryPlanSchema = z.object({
   environment: z.string().min(1).default("uat"),
@@ -441,13 +453,23 @@ export function createApp({
     });
   });
 
+  app.get(
+    "/v1/profile/invitations/:memberId",
+    requirePasskey(auth, consoleLimiter),
+    async (context) => {
+      const identity = context.get("passkey");
+      const memberId = z.string().uuid().parse(context.req.param("memberId"));
+      return context.json(await walletProof.invitation(identity, memberId));
+    },
+  );
+
   app.post(
     "/v1/profile/wallet-proof/challenge",
     requirePasskey(auth, consoleLimiter),
     async (context) => {
       const identity = context.get("passkey");
       const input = await parseJson(context, walletProofChallengeSchema);
-      return context.json(await walletProof.createChallenge(identity.userId, input));
+      return context.json(await walletProof.createChallenge(identity, input));
     },
   );
 
@@ -956,6 +978,39 @@ export function createApp({
       metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
     });
     return context.json(member);
+  });
+  app.post("/v1/console/members/:id/wallet-proof-decision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const memberId = context.req.param("id");
+    if (!memberId) return context.json({ error: "member_not_found" }, 404);
+    const input = await parseJson(context, walletProofDecisionSchema);
+    try {
+      const member = await auth.decideMemberWalletProof(
+        consoleIdentity.organizationId,
+        memberId,
+        consoleIdentity.userId,
+        input,
+      );
+      if (!member) return context.json({ error: "member_not_found" }, 404);
+      await auth.recordAudit({
+        organizationId: consoleIdentity.organizationId,
+        actorType: "console",
+        actorId: consoleIdentity.userId,
+        action: `member.wallets_${input.decision}d`,
+        targetType: "member",
+        targetId: member.id,
+        metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
+      });
+      return context.json(member);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("own wallet proof")) return context.json({ error: "four_eyes_required", message }, 403);
+      if (message.includes("has not been verified")) return context.json({ error: "wallet_proof_missing", message }, 409);
+      if (message.includes("proof changed") || message.includes("snapshot is required")) {
+        return context.json({ error: "wallet_proof_changed", message }, 409);
+      }
+      throw error;
+    }
   });
 
   app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {

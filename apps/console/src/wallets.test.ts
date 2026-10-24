@@ -115,7 +115,7 @@ describe("DAO proposal tracking", () => {
       kind: { Vote: null },
     });
     await expect(readDaoProposalRpc("dao.testnet", 43)).resolves.toMatchObject({ state: "Failed" });
-    expect(DAO_VOTE_GAS).toBe("120000000000000");
+    expect(DAO_VOTE_GAS).toBe("200000000000000");
   });
 });
 

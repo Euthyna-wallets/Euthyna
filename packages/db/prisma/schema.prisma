@@ -143,6 +143,8 @@ model Member {
   evmAddress              String?
   walletProofClaimable    Boolean                          @default(false)
   walletProofVerifiedAt   DateTime?
+  walletProofApprovedAt   DateTime?
+  walletProofApprovedBy   String?
   walletProofMessage      String?
   nearProofPublicKey      String?
   nearProofSignature      String?

@@ -91,10 +91,12 @@ const mandates = new MandateService(
     maxFeePerGas: BigInt(env.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI),
     maxPriorityFeePerGas: BigInt(env.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI),
   },
+  BigInt(env.GOVERNANCE_MAX_FEE_FLOOR_WEI),
 );
 const governance = new GovernanceService(prisma, near, {
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
   gasEstimator,
+  governanceMaxFeeFloor: BigInt(env.GOVERNANCE_MAX_FEE_FLOOR_WEI),
 });
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService, gasEstimator);

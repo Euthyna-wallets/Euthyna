@@ -2,7 +2,7 @@ import { apiKey } from "@better-auth/api-key";
 import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { organization } from "better-auth/plugins/organization";
+import { emailOTP, organization } from "better-auth/plugins";
 import { jwtVerify, SignJWT } from "jose";
 import type { PrismaClient } from "@mandateos/db";
 
@@ -36,7 +36,7 @@ export interface MandateAuth {
 
 export type AuthEnvironment = Pick<
   Env,
-  "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID" | "CONSOLE_ORIGIN"
+  "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "PASSKEY_RP_ID" | "CONSOLE_ORIGIN" | "RESEND_API_KEY" | "AUTH_EMAIL_FROM"
 >;
 
 export function passkeyRelyingParty(env: AuthEnvironment) {
@@ -85,6 +85,31 @@ export function buildAuthOptions(
             if (typeof context !== "string") throw new Error("passkey registration context is required");
             return resolveRegistrationUser(context);
           },
+        },
+      }),
+      emailOTP({
+        expiresIn: 10 * 60,
+        allowedAttempts: 5,
+        storeOTP: "hashed",
+        overrideDefaultEmailVerification: true,
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          if (!env.RESEND_API_KEY || !env.AUTH_EMAIL_FROM) {
+            throw new Error("email OTP delivery is not configured");
+          }
+          const response = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${env.RESEND_API_KEY}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              from: env.AUTH_EMAIL_FROM,
+              to: [email],
+              subject: type === "email-verification" ? "Verify your MandateOS email" : "Your MandateOS code",
+              text: `Your MandateOS verification code is ${otp}. It expires in 10 minutes.`,
+            }),
+          });
+          if (!response.ok) throw new Error(`OTP email delivery failed with HTTP ${response.status}`);
         },
       }),
       organization(),

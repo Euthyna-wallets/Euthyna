@@ -8,7 +8,7 @@ import { baseSepolia, sepolia } from "viem/chains";
 
 import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
 import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet, selectDemoWalletScopeForAccounts } from "./lib/wallet-store.js";
-export const DAO_VOTE_GAS = "120000000000000";
+export const DAO_VOTE_GAS = "200000000000000";
 
 
 interface WalletAction {
@@ -679,12 +679,25 @@ export function evmWalletClient() {
   return createWalletClient({ chain: baseSepolia, transport: custom(window.ethereum) });
 }
 
+function parseEvmAccounts(value: unknown): Address[] {
+  if (!Array.isArray(value) || value.some((address) => typeof address !== "string")) {
+    throw new Error("EVM wallet returned an invalid account list");
+  }
+  return value.map((address) => getAddress(address));
+}
+
+export async function evmConnectedAccounts(): Promise<Address[]> {
+  if (demoWalletsEnabled()) return [generatedEvmAccount().address];
+  if (!window.ethereum) return [];
+  return parseEvmAccounts(await window.ethereum.request({ method: "eth_accounts" }));
+}
+
 export async function evmAccounts(): Promise<Address[]> {
   if (demoWalletsEnabled()) return [generatedEvmAccount().address];
   if (!window.ethereum) {
     throw new Error("Install or unlock MetaMask/Rabby to connect an EVM wallet");
   }
-  return (await window.ethereum.request({ method: "eth_requestAccounts" })) as Address[];
+  return parseEvmAccounts(await window.ethereum.request({ method: "eth_requestAccounts" }));
 }
 
 export async function switchToBaseSepolia(): Promise<void> {

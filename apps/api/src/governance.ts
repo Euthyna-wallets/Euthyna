@@ -66,6 +66,7 @@ export interface GovernanceProposalResult {
 export interface GovernanceServiceOptions {
   baseRpcUrl: string;
   gasEstimator: BaseGasQuoter;
+  governanceMaxFeeFloor: bigint;
   safeOwnersReader?: (safe: Address) => Promise<Address[]>;
 }
 
@@ -177,6 +178,7 @@ export class GovernanceService implements GovernanceGateway {
           organizationId,
           nearAccountId: input.signerAccountId,
           walletProofVerifiedAt: { not: null },
+          walletProofApprovedAt: { not: null },
         },
         select: { id: true },
       }),
@@ -370,6 +372,9 @@ export class GovernanceService implements GovernanceGateway {
         from: operation.treasury.govAddress,
         to: operation.treasury.govAddress,
         data: "0x",
+      }, {
+        baseFeeMultiplier: 10n,
+        maxFeeFloor: this.options.governanceMaxFeeFloor,
       });
     } catch (error) {
       const message = error instanceof BaseGasEstimationError ? error.message : String(error);
@@ -429,6 +434,9 @@ export class GovernanceService implements GovernanceGateway {
         from: input.govAddress,
         to: input.delayAddress,
         data: delayData,
+      }, {
+        baseFeeMultiplier: 10n,
+        maxFeeFloor: this.options.governanceMaxFeeFloor,
       });
       return {
         quote,

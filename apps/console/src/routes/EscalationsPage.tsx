@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../api.js";
 import { SecondaryButton } from "../components/SecondaryButton.js";
@@ -38,7 +39,7 @@ export function EscalationsPage() {
     <div className="page">
       <header className="page-head"><div><h1>Escalations</h1><p className="muted">Invoice vs registry. A human re-checks; rules are never overridden.</p></div></header>
       <Card title="Pending queue">
-        <PageState loading={query.isLoading} error={query.error} empty={rows.length === 0}>
+        <PageState loading={query.isLoading} error={query.error} empty={rows.length === 0} emptyContent={<div className="state empty-action">Nothing needs review. <Link className="button primary" to="/payments">View payments</Link></div>}>
           <table>
             <thead><tr><th>Op</th><th>Status</th><th>Reasons</th><th>Created</th><th /></tr></thead>
             <tbody>
@@ -78,8 +79,8 @@ function EscalationDetail({ escalation, onDecide, pending }: { escalation: Escal
       </table>
       <p className="notice">Call the supplier back at the number in the registry before changing anything.</p>
       <div className="row wrap">
-        <button className="primary" disabled={pending} onClick={() => onDecide({ id: escalation.id, decision: "approve" })}>Re-check</button>
-        <SecondaryButton disabled={pending} onClick={() => onDecide({ id: escalation.id, decision: "reject" })}>Reject</SecondaryButton>
+        <button className="primary" disabled={pending} title={pending ? "A review decision is being submitted" : "Re-check this payment against the approved supplier list"} onClick={() => onDecide({ id: escalation.id, decision: "approve" })}>Re-check</button>
+        <SecondaryButton disabled={pending} title={pending ? "A review decision is being submitted" : "Reject this payment"} onClick={() => onDecide({ id: escalation.id, decision: "reject" })}>Reject</SecondaryButton>
         <span className="muted small">Registry corrections use a separate four-eyes change.</span>
       </div>
     </Card>

@@ -130,6 +130,7 @@ function service(
         maxFeePerGas: 100_000_000_000n,
         maxPriorityFeePerGas: 10_000_000_000n,
       },
+      100_000_000n,
       () => 1_700_000_000n,
       async () => currentAllowance,
     ),
@@ -181,7 +182,18 @@ describe("MandateService.preview", () => {
     });
     expect(preview.agentStatus).toBe("ready");
     expect(preview.zodiac.calls).toHaveLength(4);
-    expect(preview.proposals.vaultRegisterAgent).not.toBeNull();
+    expect(preview.proposals.vaultRegisterAgent).toBeNull();
+    const vaultProposal = z.object({
+      kind: z.object({
+        FunctionCall: z.object({
+          actions: z.array(z.object({ method_name: z.string() })).length(2),
+        }),
+      }),
+    }).parse(preview.proposals.vaultSetRole.args.proposal);
+    expect(vaultProposal.kind.FunctionCall.actions.map((action) => action.method_name)).toEqual([
+      "set_role",
+      "register_agent",
+    ]);
     expect(preview.proposals.zodiacRelay).toMatchObject({
       args: {
         proposal: {

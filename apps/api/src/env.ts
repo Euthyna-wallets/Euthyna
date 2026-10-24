@@ -16,6 +16,8 @@ const schema = z.object({
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
   CONSOLE_ORIGIN: z.string().url().default("http://localhost:5173"),
   PASSKEY_RP_ID: z.string().min(1).optional(),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  AUTH_EMAIL_FROM: z.string().min(1).optional(),
   NEAR_SPONSOR_DAILY_WALLET_LIMIT: z.coerce.number().int().min(0).max(100).default(5),
   NEAR_SPONSOR_WALLET_AMOUNT_YOCTO: z.string().regex(/^\d+$/).default("500000000000000000000000"),
   UAT_DEMO_WALLETS_ENABLED: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
@@ -39,6 +41,7 @@ const schema = z.object({
   BASE_TX_GAS_LIMIT_CAP: z.string().regex(/^[1-9]\d*$/).default("300000"),
   BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000000"),
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
+  GOVERNANCE_MAX_FEE_FLOOR_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 
@@ -53,6 +56,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
   if (BigInt(parsed.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
     throw new Error("BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
+  }
+  if (BigInt(parsed.GOVERNANCE_MAX_FEE_FLOOR_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
+    throw new Error("GOVERNANCE_MAX_FEE_FLOOR_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
   }
   return {
     ...parsed,

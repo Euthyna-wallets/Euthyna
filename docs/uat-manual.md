@@ -4,8 +4,8 @@ Objectif : rejouer le parcours console sur **NEAR testnet + Base Sepolia**, sans
 clé privée côté serveur. Cocher dans l'ordre ; chaque étape indique le résultat
 attendu.
 
-> UAT hackathon : email identifiant + passkey créée directement. Aucun email
-> externe, aucun lien magique, aucun mot de passe.
+> UAT hackathon : passkey directe, sans mot de passe ni lien magique. L'email
+> n'est envoyé que pour l'OTP de dix minutes requis lors d'une invitation.
 
 ## 0. Pré-requis
 
@@ -34,14 +34,19 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
    adresses EVM via MetaMask/Rabby. Aucune clé privée ne doit apparaître dans
    `localStorage`.
 3. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
-4. Créer l'entreprise.
-5. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
-   `pending` et ne comptent pas encore dans le council.
+4. Dans la barre wallet globale, connecter une fois le compte NEAR et l'adresse
+   EVM du profil. Les adresses publiques sont mémorisées par utilisateur et
+   réutilisées pour chaque signature.
+5. Créer l'entreprise puis inviter Alice et Bob par email, sans saisir leurs
+   comptes.
 6. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
-   passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
-   EVM (EIP-191).
-7. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
-   créé ou financé.
+   passkey, saisit l'OTP envoyé à **l'adresse invitée**, connecte ses propres
+   wallets dans la barre globale, puis utilise **Sign** pour produire NEP-413 +
+   EIP-191. Une session dont l'email diffère doit recevoir `403`.
+7. Un autre administrateur contrôle les deux adresses et clique **Approve
+   wallets**. Le membre ne peut pas approuver sa propre preuve. Vérifier que
+   chaque ligne affiche `Approved`. L'assistant reprend automatiquement à la
+   première étape incomplète.
 
 Les commandes opérateur utilisent uniquement des signers chargés depuis le
 keychain. Ne jamais passer une clé privée en argument de CLI, afficher un
@@ -51,27 +56,29 @@ la clé agent dans `AGENT_KEY_PATH` avec le mode `0600` et n'affiche que la clé
 publique
 ([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts)).
 
-Attendu : 3 membres prouvés, 3 comptes NEAR, 3 adresses EVM, rôle `owner` pour
-le fondateur. Ajouter une quatrième déclaration sans signer : elle doit rester
-hors du plan et le seuil doit rester **2/3**.
+Attendu : 3 membres prouvés **et approuvés par un autre administrateur**, 3
+comptes NEAR, 3 adresses EVM, rôle `owner` pour le fondateur. Ajouter une
+quatrième déclaration sans signer : elle doit rester hors du plan et le seuil
+doit rester **2/3**.
 
 ## 2. Trésorerie
 
-1. Saisir le compte NEAR du fondateur, cliquer **Build plan**.
+1. La barre globale fournit automatiquement le compte NEAR du fondateur ;
+   cliquer **Build plan** sans le ressaisir.
 2. Vérifier la DAO `<slug>.factory-v2.mandateos.testnet`, les trois membres et le
    seuil absolu **2** affichés avant signature.
 3. Cocher la confirmation de policy et cliquer **Sign and create DAO**. En mode
    démo, l'API réserve le sponsoring journalier, crée/finance alors seulement le
    wallet client (0,5 NEAR), puis le navigateur signe et attache 0,25 NEAR.
 4. Cliquer **Read get_policy directly from NEAR RPC**, puis confirmer chaque
-   membre observé et le seuil. Vault/relay restent bloqués avant ces confirmations.
-5. **Deploy Vault + relay (MandateOS pays)**.
-6. Depuis la session de chaque membre prouvé, cliquer **Verify by direct RPC and
-   confirm as this member**. Vérifier les `code_hash`, zéro access key,
-   `owner_id`, MPC/path, chain, token, Guard/TTL et delay. Safe reste bloqué
-   jusqu'à 3/3 confirmations sur le même digest.
-7. Déployer Safe + modules, préparer le batch Safe, collecter deux signatures
-   et exécuter.
+   membre observé et le seuil. Les contrôles NEAR restent bloqués avant ces confirmations.
+5. **Deploy NEAR controls (MandateOS pays)**.
+6. Depuis la session de chaque membre approuvé, cliquer **Verify by direct RPC
+   and confirm as this member**. Vérifier dans **Advanced** les `code_hash`, zéro
+   access key, `owner_id`, MPC/path, chain, token, Guard/TTL et waiting period.
+   Le déploiement Base reste bloqué jusqu'à 3/3 confirmations sur le même digest.
+7. Cliquer **Deploy Base Treasury**, préparer **owner setup**, collecter deux
+   signatures et exécuter.
 8. Vérifier et enregistrer la Treasury. Le serveur doit aussi refuser
    `register` si une confirmation manque.
 

@@ -34,13 +34,20 @@ revoked agent fails closed twice: the API key is disabled and `agent.active` is
 and returns a signed, 10-minute registration context. The browser passes it to
 Better Auth's sessionless passkey ceremony. The server validates the context in
 `resolveUser`, creates the profile with `emailVerified=false`, stores the
-passkey and creates the session. It sends no email and stores no magic token or
-password; direct email/password routes return `404`.
+passkey and creates the session. It stores no password or magic token; direct
+email/password routes return `404`. Email delivery is used only when an invited
+member claims a seat: Better Auth's email-OTP plugin sends a ten-minute code
+through Resend, using `RESEND_API_KEY` and `AUTH_EMAIL_FROM`
+([`apps/api/src/auth.ts`](../apps/api/src/auth.ts),
+[`apps/api/src/env.ts`](../apps/api/src/env.ts)).
 
-The email is a profile identifier in the hackathon build, not a verified
-credential. Better Auth email-invitation acceptance therefore returns `403
-wallet_proof_required`; membership is claimed by proving both declared wallets.
-Console API identity requires an enrolled passkey.
+An invitation claim requires the authenticated session email to exactly match
+the normalized invited email and `emailVerified=true`; a different session gets
+`403 invitation_email_mismatch`. Better Auth email-invitation acceptance still
+returns `403 wallet_proof_required`, because council membership is completed by
+wallet proof plus a second administrator's approval
+([`apps/api/src/wallet-proof.ts`](../apps/api/src/wallet-proof.ts),
+[`apps/api/src/app.ts`](../apps/api/src/app.ts)).
 In explicit `VITE_UAT_DEMO_MODE=1`, only the NEAR/EVM transaction wallets are
 generated locally; the Better Auth passkey flow is unchanged. Outside demo,
 users connect through NEAR Wallet Selector and MetaMask/Rabby and no private key
@@ -298,19 +305,21 @@ All `/v1/console/*`, `/v1/profile/*` and `/v1/emergency/*` requests require
 
 ### `POST /v1/profile/wallet-proof/challenge`
 
-Requires a passkey session but not an existing organization membership. It
+Requires a passkey session but not an existing organization membership. The
+session email must be OTP-verified and exactly match the invited email. It then
 creates a one-time 10-minute challenge bound to the member id, organization,
 declared NEAR account, checksum EVM address, NEAR recipient and Base Sepolia
-chain id.
+chain id ([`apps/api/src/wallet-proof.ts`](../apps/api/src/wallet-proof.ts)).
 
 ### `POST /v1/profile/wallet-proof/verify`
 
 Verifies a NEP-413 signature, checks that its public key is currently a
 full-access key on the declared NEAR account, and recovers the EIP-191 signer.
 Both signatures cover the same domain-separated challenge. Successful
-verification consumes the challenge, stores both proofs and `verifiedAt`, and
-claims an admin-created pending membership for the authenticated passkey
-profile. Challenges cannot be replayed.
+verification consumes the challenge, stores both proofs and `verifiedAt`, clears
+any earlier four-eyes approval, and leaves the member outside the council until
+another administrator approves the exact wallet pair. Challenges cannot be
+replayed ([`apps/api/src/wallet-proof.ts`](../apps/api/src/wallet-proof.ts)).
 
 Normal mode requires the NEP-413 public key to be a current full-access key
 returned by NEAR RPC. Only with explicit `UAT_DEMO_WALLETS_ENABLED=1` may an
@@ -321,36 +330,53 @@ later create that exact account with that exact key.
 ### `GET /v1/console/members`
 
 Returns members of the session organization with their `nearAccountId`,
-`evmAddress`, `walletProofClaimable` and `walletProofVerifiedAt` state. Better
-Auth's own member listing does not expose these application-specific columns.
+`evmAddress`, `walletProofClaimable`, `walletProofVerifiedAt`,
+`walletProofApprovedAt` and approving administrator. Better Auth's own member
+listing does not expose these application-specific columns.
 
 ### `POST /v1/console/members`
 
-Admin only. Declares a pending wallet membership for the MVP. The declaration
-does not prove wallet control and is excluded from DAO council and Safe owners.
-The generated `/onboarding?member=<id>` claim link becomes effective only when
-the recipient signs the NEP-413 and EIP-191 challenge from a passkey session.
+Admin only. Creates a pending invitation from name + email; wallet fields are
+optional for backward compatibility. The invited member signs in with a passkey,
+verifies that exact email by OTP, connects NEAR and EVM once in the global wallet
+bar, and signs the dual-wallet challenge. The declaration has no authority and
+remains outside DAO/Safe until a different administrator approves both proven
+addresses.
 
 ```json
-{ "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
+{ "name": "Alice", "email": "alice@example.com" }
 ```
 
-Both fields accept a pasted wallet label: only the first token is kept and a
-trailing `(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is
-stored as `busyvideo615.testnet`. The EVM address is checksum-normalized.
+For legacy admin declarations, wallet fields still accept pasted labels: only
+the first token is kept and a trailing `(...)` suffix is stripped. The EVM
+address is checksum-normalized.
+
+### `POST /v1/console/members/:id/wallet-proof-decision`
+
+Admin only. Approval includes `nearAccountId`, `evmAddress` and
+`walletProofVerifiedAt` from the row the administrator reviewed. The database
+update matches that exact snapshot, so a concurrent replacement cannot inherit
+the approval. The member cannot approve their own proof. `reject` clears both
+signatures while retaining the public address declaration for re-verification.
+Treasury planning, sponsorship and governance signing only count members with
+both verified and approved wallets
+([`apps/api/src/auth-gateway.ts`](../apps/api/src/auth-gateway.ts),
+[`apps/api/src/treasury.ts`](../apps/api/src/treasury.ts),
+[`apps/api/src/governance.ts`](../apps/api/src/governance.ts)).
 
 ### `PATCH /v1/console/members/:id/wallets`
 
 Admin only. Replaces a declaration and clears every previous wallet proof,
-challenge and deployment confirmation. The member remains outside the council
-until both new signatures verify.
+four-eyes approval, challenge and deployment confirmation. The member remains
+outside the council until both new signatures verify and another administrator
+approves them.
 
 ### `POST /v1/console/treasury/plan`
 
 Available to every organization member so each signer can independently inspect
-the deterministic plan. Only members with a stored NEP-413 and EIP-191 proof
-appear in the DAO council and Safe owners. It never signs and never receives a
-private key.
+the deterministic plan. Only members with stored NEP-413 and EIP-191 proofs
+approved by a different administrator appear in the DAO council and Safe
+owners. It never signs and never receives a private key.
 The plan is rejected unless at least three proven members remain and the
 absolute threshold is strictly lower than the council size. Registration
 rechecks both liveness invariants against the direct `get_policy` result
@@ -491,9 +517,10 @@ The funding proposal follows Sputnik DAO 2.3.1's exact `Transfer` shape:
 
 The console discovers deterministic proposal descriptions through direct NEAR
 RPC, then reads every `get_proposal` status. Steps are strictly ordered:
-`set_role → register_agent → funding → Zodiac`; a step remains disabled until
-the previous status is `Approved` (displayed as **Executed**). `Expired`,
-`Rejected`, and other terminal failures display **Re-propose**
+combined Vault `set_role + register_agent` → funding → relay derivation →
+Zodiac. A step remains disabled until the previous status is `Approved`
+(displayed as **Executed**). `Expired`, `Rejected`, and other terminal failures
+display **Re-propose**
 ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
@@ -553,7 +580,8 @@ the registered Safe whose selector is `swapOwner` or
 Before returning any relay proposal, the API estimates the exact
 `0xGOV → Delay.execTransactionFromModule(...)` call. `gasLimit` is
 `ceil(eth_estimateGas × 1.30)`, priority fee is the median of the p50 rewards
-returned by `eth_feeHistory`, and `maxFeePerGas = 3 × baseFee + priority`.
+returned by `eth_feeHistory`, and governance uses
+`maxFeePerGas = max(10 × baseFee + priority, GOVERNANCE_MAX_FEE_FLOOR_WEI)`.
 Estimation failure rejects the proposal before voting. The quote includes the
 OP Stack L1 data fee and checks that `0xGOV` covers
 `gasLimit × maxFeePerGas + l1Fee`; insufficient funding is returned as a
@@ -561,8 +589,10 @@ blocking console warning.
 
 Environment values are ceilings only:
 `BASE_TX_GAS_LIMIT_CAP`, `BASE_TX_MAX_FEE_PER_GAS_CAP_WEI`, and
-`BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI`. Startup rejects a priority cap
-above the max-fee cap.
+`BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI`. The governance floor defaults to
+`100000000` wei. Startup rejects a priority cap above the max-fee cap or a
+governance floor above that cap. Agent payment quotes deliberately remain at
+`3 × baseFee + priority`.
 
 The governance job shares the payment worker lease. It recovers a missing MPC
 signature from that NEAR transaction, broadcasts the immutable 0xGOV
@@ -781,15 +811,16 @@ Measured execution gas:
 | final vote → `set_role` | Sandbox, Sputnik 2.3.1 | 8.708943134269 Tgas |
 | final vote → `register_agent` | Sandbox, Sputnik 2.3.1 | 8.809192150558 Tgas |
 | final vote → FT `Transfer` | Sandbox, Sputnik 2.3.1 | 13.089112041461 Tgas |
+| final vote → combined `set_role` + `register_agent` | Sandbox, Sputnik 2.3.1 | 11.234783578489 Tgas |
 | relay `propose` + mock MPC | Sandbox | 6.574015458889 Tgas |
 | final vote → relay `propose` + real MPC | NEAR testnet | 19.662169450795 Tgas |
 
 The relay action receives `60 Tgas`: above measured burn and enough to reserve
 its `15 Tgas` MPC receipt plus `20 Tgas` callback. Every browser
-`act_proposal` attaches `120 Tgas`: more than six times the measured 19.662
-Tgas worst case while avoiding an unnecessary 0.45 NEAR prepaid-balance
-requirement. It remains below testnet protocol version 88's
-`max_total_prepaid_gas = 1,000 Tgas`
+`act_proposal` attaches `200 Tgas`: the combined mandate decision reserves
+`50 Tgas` for `set_role` plus `50 Tgas` for `register_agent`, then leaves
+headroom for Sputnik execution and callbacks. It remains below testnet protocol
+version 88's `max_total_prepaid_gas = 1,000 Tgas`
 ([nearcore gas architecture](https://github.com/near/nearcore/blob/master/docs/architecture/how/gas.md),
 [`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs),
 [`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
@@ -849,6 +880,7 @@ Admin only. Verifies on-chain state before inserting `treasury`:
 
 - passkey sign-up / sign-in (`/api/auth/passkey/*`);
 - organizations and active organization (`/api/auth/organization/*`);
+- invitation email verification (`/api/auth/email-otp/*`);
 - sessions (`/api/auth/get-session`).
 
 There is no password credential. `POST /api/register/passkey-start` creates the

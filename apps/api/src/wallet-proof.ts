@@ -26,12 +26,27 @@ export interface WalletProofSubmission {
   evmSignature: string;
 }
 
+export interface WalletProofIdentity {
+  userId: string;
+  email: string;
+  emailVerified: boolean;
+}
+
+export interface WalletInvitationView {
+  memberId: string;
+  memberName: string;
+  role: string;
+  organizationName: string;
+  invitedEmail: string;
+}
+
 export interface WalletProofGateway {
   createChallenge(
-    userId: string,
+    identity: WalletProofIdentity,
     input: { memberId: string; nearAccountId: string; evmAddress: string },
   ): Promise<WalletProofChallengeView>;
   verify(userId: string, input: WalletProofSubmission): Promise<{ memberId: string; organizationId: string }>;
+  invitation(identity: WalletProofIdentity, memberId: string): Promise<WalletInvitationView>;
 }
 
 export class WalletProofError extends Error {
@@ -91,21 +106,53 @@ export class WalletProofService implements WalletProofGateway {
     private readonly allowDeterministicUnfundedWallets = false,
   ) {}
 
+  private assertInvitationIdentity(identity: WalletProofIdentity, invitedEmail: string): void {
+    if (!identity.emailVerified) {
+      throw new WalletProofError(403, "email_verification_required", "verify the invited email before claiming this seat");
+    }
+    if (identity.email.trim().toLowerCase() !== invitedEmail.trim().toLowerCase()) {
+      throw new WalletProofError(403, "invitation_email_mismatch", "session email does not match the invited member");
+    }
+  }
+
+  async invitation(identity: WalletProofIdentity, memberId: string): Promise<WalletInvitationView> {
+    const member = await this.prisma.member.findUnique({
+      where: { id: memberId },
+      include: { user: true, organization: true },
+    });
+    if (!member) throw new WalletProofError(404, "member_not_found", "member not found");
+    this.assertInvitationIdentity(identity, member.user.email);
+    return {
+      memberId: member.id,
+      memberName: member.user.name,
+      role: member.role,
+      organizationName: member.organization.name,
+      invitedEmail: member.user.email,
+    };
+  }
+
   async createChallenge(
-    userId: string,
+    identity: WalletProofIdentity,
     input: { memberId: string; nearAccountId: string; evmAddress: string },
   ): Promise<WalletProofChallengeView> {
-    const member = await this.prisma.member.findUnique({ where: { id: input.memberId } });
+    const member = await this.prisma.member.findUnique({
+      where: { id: input.memberId },
+      include: { user: true },
+    });
     if (!member) throw new WalletProofError(404, "member_not_found", "member not found");
-    if (member.userId !== userId && !member.walletProofClaimable) {
+    this.assertInvitationIdentity(identity, member.user.email);
+    if (member.userId !== identity.userId && !member.walletProofClaimable) {
       throw new WalletProofError(403, "member_not_claimable", "member cannot be claimed by this profile");
     }
 
     const evmAddress = getAddress(input.evmAddress);
-    if (member.walletProofClaimable) {
-      if (member.nearAccountId !== input.nearAccountId || getAddress(member.evmAddress ?? "") !== evmAddress) {
-        throw new WalletProofError(422, "declared_wallet_mismatch", "proof wallets do not match the admin declaration");
-      }
+    if (
+      member.walletProofClaimable &&
+      member.nearAccountId !== null &&
+      member.evmAddress !== null &&
+      (member.nearAccountId !== input.nearAccountId || getAddress(member.evmAddress) !== evmAddress)
+    ) {
+      throw new WalletProofError(422, "declared_wallet_mismatch", "proof wallets do not match the admin declaration");
     }
 
     const id = randomUUID();
@@ -130,7 +177,7 @@ export class WalletProofService implements WalletProofGateway {
         data: {
           id,
           memberId: member.id,
-          userId,
+          userId: identity.userId,
           nearAccountId: input.nearAccountId,
           evmAddress,
           message,
@@ -247,10 +294,12 @@ export class WalletProofService implements WalletProofGateway {
         where: { id: fresh.member.id },
         data: {
           userId,
-          nearAccountId: fresh.nearAccountId,
-          evmAddress: fresh.evmAddress,
+          nearAccountId: challenge.nearAccountId,
+          evmAddress: challenge.evmAddress,
           walletProofClaimable: false,
           walletProofVerifiedAt: new Date(),
+          walletProofApprovedAt: null,
+          walletProofApprovedBy: null,
           walletProofMessage: fresh.message,
           nearProofPublicKey: input.nearPublicKey,
           nearProofSignature: input.nearSignature,

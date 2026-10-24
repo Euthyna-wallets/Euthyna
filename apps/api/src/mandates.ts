@@ -136,6 +136,12 @@ function b64(bytes: Hex): string {
   return Buffer.from(bytes.slice(2), "hex").toString("base64");
 }
 
+function formatUsdc(amount: bigint): string {
+  const whole = amount / 1_000_000n;
+  const fraction = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return `${whole}${fraction ? `.${fraction}` : ""} USDC`;
+}
+
 const multiSendAbi = [{
   type: "function",
   name: "multiSend",
@@ -165,6 +171,7 @@ export class MandateService implements MandateGateway {
     private readonly baseRpcUrl: string,
     private readonly gasEstimator: BaseGasQuoter,
     private readonly agentGasCaps: BaseGasCaps,
+    private readonly governanceMaxFeeFloor: bigint,
     private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
     private readonly allowanceReader?: (chainId: number, roles: Address, key: Hex) => Promise<AllowanceState>,
   ) {}
@@ -270,6 +277,14 @@ export class MandateService implements MandateGateway {
     const allowanceBalance = allowanceExists && currentAllowance.balance < budget
       ? currentAllowance.balance
       : budget;
+    const allowanceBudgetBefore = currentAllowance.maxRefill;
+    if (allowanceBudgetBefore !== budget) {
+      diff.push({
+        field: "budget_per_period",
+        current: allowanceExists ? allowanceBudgetBefore.toString() : null,
+        next: budget.toString(),
+      });
+    }
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
     if (resolvedAgentAddress) {
@@ -319,8 +334,7 @@ export class MandateService implements MandateGateway {
       .update(JSON.stringify(value))
       .digest("hex")
       .slice(0, 12);
-    const setRoleDigest = stepDigest({ role: input.role, config });
-    const registerAgentDigest = stepDigest({ role: input.role, agent: input.agent ?? null });
+    const setRoleDigest = stepDigest({ role: input.role, config, agent: input.agent ?? null });
     const fundingDigest = stepDigest({
       role: input.role,
       amount: input.budget,
@@ -335,10 +349,10 @@ export class MandateService implements MandateGateway {
     const vaultSetRole: MandateProposal = {
       receiverId: treasury.daoAccountId,
       methodName: "add_proposal",
-      description: `DAO proposal: Vault.set_role(${input.role}) [mandate:${setRoleDigest}:set-role]`,
+      description: `DAO proposal: configure Vault mandate ${input.role} [mandate:${setRoleDigest}:set-role]`,
       args: {
         proposal: {
-          description: `Set mandate ${input.role} [mandate:${setRoleDigest}:set-role]`,
+          description: `Configure mandate and agent ${input.role} [mandate:${setRoleDigest}:set-role]`,
           kind: {
             FunctionCall: {
               receiver_id: treasury.vaultAccountId,
@@ -349,27 +363,8 @@ export class MandateService implements MandateGateway {
                   gas: "50000000000000",
                   deposit: "0",
                 },
-              ],
-            },
-          },
-        },
-      },
-      deposit: "100000000000000000000000",
-    };
-
-    const vaultRegisterAgent = input.agent
-      ? {
-          receiverId: treasury.daoAccountId,
-          methodName: "add_proposal",
-          description: `DAO proposal: Vault.register_agent(${input.agent.nearAccountId}) [mandate:${registerAgentDigest}:register-agent]`,
-          args: {
-            proposal: {
-              description: `Register agent ${input.agent.nearAccountId} as ${input.role} [mandate:${registerAgentDigest}:register-agent]`,
-              kind: {
-                FunctionCall: {
-                  receiver_id: treasury.vaultAccountId,
-                  actions: [
-                    {
+                ...(input.agent
+                  ? [{
                       method_name: "register_agent",
                       args: functionCallArgs({
                         agent: input.agent.nearAccountId,
@@ -378,15 +373,17 @@ export class MandateService implements MandateGateway {
                       }),
                       gas: "50000000000000",
                       deposit: "0",
-                    },
-                  ],
-                },
-              },
+                    }]
+                  : []),
+              ],
             },
           },
-          deposit: "100000000000000000000000",
-        }
-      : null;
+        },
+      },
+      deposit: "100000000000000000000000",
+    };
+
+    const vaultRegisterAgent: MandateProposal | null = null;
 
     const agentStatus = !input.agent || !storedAgent
       ? "no_agent"
@@ -417,6 +414,9 @@ export class MandateService implements MandateGateway {
           from: treasury.govAddress,
           to: treasury.delayAddress,
           data: delayData,
+        }, {
+          baseFeeMultiplier: 10n,
+          maxFeeFloor: this.governanceMaxFeeFloor,
         });
       } catch (error) {
         const message = error instanceof BaseGasEstimationError ? error.message : String(error);
@@ -556,6 +556,9 @@ export class MandateService implements MandateGateway {
           : []),
         ...(zodiacGas && !zodiacGas.sufficientBalance
           ? [`0xGOV needs ${zodiacGas.requiredBalance} wei but holds ${zodiacGas.senderBalance} wei`]
+          : []),
+        ...(allowanceExists && budget > allowanceBudgetBefore
+          ? [`Budget per period increases from ${formatUsdc(allowanceBudgetBefore)} to ${formatUsdc(budget)}.`]
           : []),
         "The server prepares proposals only. It never signs a DAO, Vault or Safe transaction.",
       ],

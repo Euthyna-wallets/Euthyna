@@ -20,6 +20,18 @@ vi.mock("../wallets.js", async (importActual) => ({
   findDaoProposalsRpc: mocks.findDaoProposalsRpc,
   nearAccounts: mocks.nearAccounts,
 }));
+vi.mock("../lib/wallet-context.js", () => ({
+  useWallets: () => ({
+    nearAccountId: "alice.testnet",
+    evmAddress: "0x1111111111111111111111111111111111111111",
+    nearConnected: true,
+    evmConnected: true,
+    connecting: null,
+    connectNear: vi.fn(),
+    connectEvm: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
 
 import { MandatePanel } from "./OnboardingPage.js";
 
@@ -32,7 +44,6 @@ const proposal = (description: string): MandateProposal => ({
 });
 
 const setRole = proposal("Set mandate researcher [mandate:abc:set-role]");
-const registerAgent = proposal("Register agent [mandate:abc:register-agent]");
 const funding = proposal("Fund researcher budget [mandate:abc:funding]");
 const relayDerive = proposal("Derive relay 0xGOV [mandate:abc:derive-relay]");
 const zodiac = proposal("Configure Zodiac [mandate:abc:zodiac-0]");
@@ -44,7 +55,7 @@ const preview: MandatePreview = {
   guard: {},
   diff: [],
   agentStatus: "ready",
-  proposals: { vaultSetRole: setRole, vaultRegisterAgent: registerAgent, funding, relayDerive, zodiacRelay: zodiac },
+  proposals: { vaultSetRole: setRole, vaultRegisterAgent: null, funding, relayDerive, zodiacRelay: zodiac },
   warnings: [],
 };
 const treasury = {
@@ -61,6 +72,7 @@ describe("MandatePanel ordered DAO execution", () => {
   it("keeps later steps disabled until the previous proposal is Executed on-chain", async () => {
     mocks.api.mockImplementation(async (path: string) => {
       if (path === "/v1/console/agents") return { agents: [] };
+      if (path === "/v1/console/registry") return { suppliers: [] };
       if (path === "/v1/console/treasury/budget-token") {
         return {
           environment: "uat",
@@ -90,17 +102,17 @@ describe("MandatePanel ordered DAO execution", () => {
 
     render(<MandatePanel treasury={treasury} preview={preview} onPreview={() => undefined} onError={() => undefined} />);
     await waitFor(() => expect(screen.getByText(/In progress · #7/)).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Use connected NEAR account" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Vote approve" }) as HTMLButtonElement).disabled).toBe(false));
 
     const proposeButtons = screen.getAllByRole("button", { name: "Propose" }) as HTMLButtonElement[];
-    expect(proposeButtons).toHaveLength(4);
+    expect(proposeButtons).toHaveLength(3);
     expect(proposeButtons.every((button) => button.disabled)).toBe(true);
-    expect(screen.getAllByText("Waiting for the previous proposal to be Executed on-chain.")).toHaveLength(4);
+    expect(screen.getAllByText("Waiting for the previous proposal to be Executed on-chain.")).toHaveLength(3);
   });
   it("offers Re-propose for a failed step without unlocking the next one", async () => {
     mocks.api.mockImplementation(async (path: string) => {
       if (path === "/v1/console/agents") return { agents: [] };
+      if (path === "/v1/console/registry") return { suppliers: [] };
       if (path === "/v1/console/treasury/budget-token") {
         return {
           environment: "uat",
@@ -130,7 +142,6 @@ describe("MandatePanel ordered DAO execution", () => {
 
     render(<MandatePanel treasury={treasury} preview={preview} onPreview={() => undefined} onError={() => undefined} />);
     await waitFor(() => expect(screen.getByText(/Failed · #8 · Rejected/)).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Use connected NEAR account" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Re-propose" }) as HTMLButtonElement).disabled).toBe(false));
     expect((screen.getAllByRole("button", { name: "Propose" })[0] as HTMLButtonElement).disabled).toBe(true);
   });

@@ -25,7 +25,8 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
     const organizationId = randomUUID();
     const authUserId = randomUUID();
     const agentId = randomUUID();
-    const accountId = proposedAgentAccountId("Compta Bot", "mandateos.testnet");
+    const agentName = `Compta ${agentId.slice(0, 8)}`;
+    const accountId = proposedAgentAccountId(agentName, "mandateos.testnet");
     const publicKey = "ed25519:11111111111111111111111111111111";
     const calls: unknown[] = [];
     const accessKey = {
@@ -55,7 +56,7 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
         id: agentId,
         organizationId,
         authUserId,
-        name: "Compta Bot",
+        name: agentName,
         role: "researcher",
         nearAccountId: accountId,
         nearPublicKey: publicKey,
@@ -67,7 +68,7 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
       prisma,
       near,
       "mandateos.testnet",
-      5,
+      100,
       "300000000000000000000000",
     );
     await expect(service.provision(organizationId, agentId)).resolves.toMatchObject({
@@ -95,6 +96,7 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
 
     const secondUserId = randomUUID();
     const secondAgentId = randomUUID();
+    const secondAgentName = `Second ${secondAgentId.slice(0, 8)}`;
     await prisma.user.create({
       data: { id: secondUserId, name: "Second Agent", email: `${secondUserId}@agents.mandateos.invalid`, emailVerified: true },
     });
@@ -103,9 +105,9 @@ describe.skipIf(!databaseUrl)("AgentProvisioningService against PostgreSQL", () 
         id: secondAgentId,
         organizationId,
         authUserId: secondUserId,
-        name: "Second Bot",
+        name: secondAgentName,
         role: "researcher",
-        nearAccountId: proposedAgentAccountId("Second Bot", "mandateos.testnet"),
+        nearAccountId: proposedAgentAccountId(secondAgentName, "mandateos.testnet"),
         nearPublicKey: "ed25519:22222222222222222222222222222222",
         vaultAccountId: "vault.testnet",
         mpcPath: "agents/researcher/base",

@@ -60,13 +60,14 @@ type TestMember = {
   nearAccountId: string | null;
   evmAddress: string | null;
   walletProofVerifiedAt: Date | null;
+  walletProofApprovedAt: Date | null;
 };
 
 const provedAt = new Date("2026-01-01T00:00:00.000Z");
 const members: TestMember[] = [
-  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111", walletProofVerifiedAt: provedAt },
-  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222", walletProofVerifiedAt: provedAt },
-  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333", walletProofVerifiedAt: provedAt },
+  { id: "m1", nearAccountId: "alice.testnet", evmAddress: "0x1111111111111111111111111111111111111111", walletProofVerifiedAt: provedAt, walletProofApprovedAt: provedAt },
+  { id: "m2", nearAccountId: "bob.testnet", evmAddress: "0x2222222222222222222222222222222222222222", walletProofVerifiedAt: provedAt, walletProofApprovedAt: provedAt },
+  { id: "m3", nearAccountId: "carol.testnet", evmAddress: "0x3333333333333333333333333333333333333333", walletProofVerifiedAt: provedAt, walletProofApprovedAt: provedAt },
 ];
 
 function fakePrisma(options?: {
@@ -78,9 +79,11 @@ function fakePrisma(options?: {
   const audits: unknown[] = [];
   const prisma = {
     member: {
-      findMany: async (args?: { where?: { walletProofVerifiedAt?: { not: null } } }) => {
+      findMany: async (args?: { where?: { walletProofVerifiedAt?: { not: null }; walletProofApprovedAt?: { not: null } } }) => {
         const configured = options?.members ?? members;
-        return args?.where?.walletProofVerifiedAt ? configured.filter((member) => member.walletProofVerifiedAt) : configured;
+        return args?.where?.walletProofApprovedAt
+          ? configured.filter((member) => member.walletProofVerifiedAt && member.walletProofApprovedAt)
+          : configured;
       },
       findFirst: async () => ({ id: "m1" }),
       update: async () => ({ id: "m1" }),
@@ -107,7 +110,7 @@ function fakePrisma(options?: {
     },
     treasuryDeploymentConfirmation: {
       findMany: async () => (options?.confirmedMemberIds ?? (options?.members ?? members)
-        .filter((member) => member.walletProofVerifiedAt)
+        .filter((member) => member.walletProofVerifiedAt && member.walletProofApprovedAt)
         .map((member) => member.id))
         .map((memberId) => ({ memberId })),
       upsert: async () => ({}),
@@ -274,6 +277,7 @@ describe("TreasuryService.plan", () => {
       nearAccountId: "mallory.testnet",
       evmAddress: "0x4444444444444444444444444444444444444444",
       walletProofVerifiedAt: null,
+      walletProofApprovedAt: null,
     };
     const { prisma } = fakePrisma({ members: [...members, pending] });
     const plan = await service(prisma).plan("org-1", {
@@ -284,6 +288,23 @@ describe("TreasuryService.plan", () => {
     expect(plan.council.map((member) => member.memberId)).toEqual(["m1", "m2", "m3"]);
     expect(plan.threshold).toBe(2);
   });
+  it("excludes a signed wallet proof until another admin approves it", async () => {
+    const waitingForApproval: TestMember = {
+      id: "m4",
+      nearAccountId: "ben.testnet",
+      evmAddress: "0x4444444444444444444444444444444444444444",
+      walletProofVerifiedAt: provedAt,
+      walletProofApprovedAt: null,
+    };
+    const { prisma } = fakePrisma({ members: [...members, waitingForApproval] });
+    const plan = await service(prisma).plan("org-1", {
+      environment: "uat",
+      daoName: "acme",
+      founderNearAccountId: "alice.testnet",
+    });
+    expect(plan.council.map((member) => member.memberId)).toEqual(["m1", "m2", "m3"]);
+  });
+
 });
 
 async function artifactHashes() {
