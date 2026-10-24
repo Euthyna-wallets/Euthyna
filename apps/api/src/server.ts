@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { prisma } from "@mandateos/db";
 import { AgentProvisioningService } from "./agent-provisioning.js";
+import { BaseGasEstimator } from "./base-gas.js";
 import { Guard } from "./guard.js";
 import { createApp } from "./app.js";
 import { createAuth } from "./auth.js";
@@ -23,6 +24,11 @@ const signer = new EnvKmsSigner(guardKey);
 const guard = new Guard(signer);
 const near = new NearClient(env);
 const relayer = createBaseRelayer(env, near, guard);
+const gasEstimator = BaseGasEstimator.fromRpc(env.BASE_SEPOLIA_RPC_URL, {
+  gasLimit: BigInt(env.BASE_TX_GAS_LIMIT_CAP),
+  maxFeePerGas: BigInt(env.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI),
+  maxPriorityFeePerGas: BigInt(env.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI),
+});
 const auth = new BetterAuthGateway(createAuth(env, prisma), prisma);
 const walletProof = new WalletProofService(
   prisma,
@@ -68,28 +74,30 @@ const treasury = new TreasuryService(prisma, near, signer, {
   vaultDepositYocto: "5000000000000000000000000",
   relayDepositYocto: "3500000000000000000000000",
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
+  baseGasCaps: {
+    gasLimit: env.BASE_TX_GAS_LIMIT_CAP,
+    maxFeePerGas: env.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI,
+    maxPriorityFeePerGas: env.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI,
+  },
 });
 const mandates = new MandateService(
   prisma,
   near,
   env.BUDGET_TOKEN_ACCOUNT_ID,
   env.BASE_SEPOLIA_RPC_URL,
+  gasEstimator,
   {
-    gasLimit: env.GOVERNANCE_PROPOSAL_GAS_LIMIT,
-    maxFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI,
-    maxPriorityFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI,
+    gasLimit: BigInt(env.BASE_TX_GAS_LIMIT_CAP),
+    maxFeePerGas: BigInt(env.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI),
+    maxPriorityFeePerGas: BigInt(env.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI),
   },
 );
 const governance = new GovernanceService(prisma, near, {
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
-  proposalGas: {
-    gasLimit: env.GOVERNANCE_PROPOSAL_GAS_LIMIT,
-    maxFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI,
-    maxPriorityFeePerGas: env.GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI,
-  },
+  gasEstimator,
 });
 const registryService = new RegistryService(prisma);
-const payments = new PaymentService(prisma, near, guard, registryService);
+const payments = new PaymentService(prisma, near, guard, registryService, gasEstimator);
 const consoleData = new ConsoleDataService(
   prisma,
   near,

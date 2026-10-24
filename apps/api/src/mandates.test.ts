@@ -27,12 +27,6 @@ const input: MandateInput = {
   periodDays: 30,
   recipients,
   token,
-  gas: {
-    gasLimit: "200000",
-    maxFeePerGas: "20000000000",
-    maxPriorityFeePerGas: "1000000000",
-    maxTotalFee: "30000000000000000",
-  },
 };
 const multiSendAbi = [{
   type: "function",
@@ -119,9 +113,22 @@ function service(
       "test-ft.testnet",
       "http://127.0.0.1:8545",
       {
-        gasLimit: "345678",
-        maxFeePerGas: "987654321",
-        maxPriorityFeePerGas: "123456789",
+        quote: async () => ({
+          gasLimit: 345_678n,
+          maxFeePerGas: 987_654_321n,
+          maxPriorityFeePerGas: 123_456_789n,
+          baseFeePerGas: 288_065_844n,
+          l1Fee: 10_000n,
+          senderBalance: 10n ** 18n,
+          requiredBalance: 341_563_786_899_638n,
+          sufficientBalance: true,
+        }),
+        currentBaseFee: async () => 288_065_844n,
+      },
+      {
+        gasLimit: 300_000n,
+        maxFeePerGas: 100_000_000_000n,
+        maxPriorityFeePerGas: 10_000_000_000n,
       },
       () => 1_700_000_000n,
       async () => currentAllowance,
@@ -138,6 +145,12 @@ describe("MandateService.preview", () => {
       enabled: true,
       max_per_tx: "5000000",
       allowed_recipients: [Array.from(Buffer.from(recipients[0]!.slice(2), "hex"))],
+    });
+    expect(preview.vault.config).toMatchObject({
+      gas_limit: "300000",
+      max_fee_per_gas: "100000000000",
+      max_priority_fee_per_gas: "10000000000",
+      max_total_fee: "30000000000000000",
     });
     expect(preview.diff).toContainEqual(expect.objectContaining({ field: "max_per_tx", current: null }));
     expect(preview.zodiac.calls).toHaveLength(3);

@@ -114,8 +114,14 @@ export interface GovernanceBaseGateway {
     data: Hex;
     operation: 0 | 1;
     fromBlock: bigint;
+    toBlock: bigint;
   }): Promise<EvidenceScanResult<DelayExecutionEvidence>>;
-  findVeto(delay: Address, entryNonce: bigint, fromBlock: bigint): Promise<EvidenceScanResult<DelayVetoEvidence>>;
+  findVeto(
+    delay: Address,
+    entryNonce: bigint,
+    fromBlock: bigint,
+    toBlock: bigint,
+  ): Promise<EvidenceScanResult<DelayVetoEvidence>>;
   prepareExecuteNextTx(input: {
     delay: Address;
     to: Address;
@@ -209,8 +215,9 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     data: Hex;
     operation: 0 | 1;
     fromBlock: bigint;
+    toBlock: bigint;
   }): Promise<EvidenceScanResult<DelayExecutionEvidence>> {
-    const latest = await this.publicClient.getBlockNumber();
+    const latest = input.toBlock;
     for (let fromBlock = input.fromBlock; fromBlock <= latest;) {
       const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
       const events = await this.publicClient.getLogs({
@@ -255,8 +262,8 @@ export class BaseGovernanceGateway implements GovernanceBaseGateway {
     delay: Address,
     entryNonce: bigint,
     initialBlock: bigint,
+    latest: bigint,
   ): Promise<EvidenceScanResult<DelayVetoEvidence>> {
-    const latest = await this.publicClient.getBlockNumber();
     for (let fromBlock = initialBlock; fromBlock <= latest;) {
       const toBlock = fromBlock + 199n < latest ? fromBlock + 199n : latest;
       const events = await this.publicClient.getLogs({

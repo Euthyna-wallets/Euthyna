@@ -36,9 +36,9 @@ const schema = z.object({
   WORKER_RETRY_MAX_MS: z.coerce.number().int().min(1_000).default(60_000),
   BASE_GAS_WALLET_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   BASE_GAS_WALLET_MIN_BALANCE_WEI: z.string().regex(/^\d+$/).default("5000000000000000"),
-  GOVERNANCE_PROPOSAL_GAS_LIMIT: z.string().regex(/^[1-9]\d*$/).default("200000"),
-  GOVERNANCE_PROPOSAL_MAX_FEE_PER_GAS_WEI: z.string().regex(/^[1-9]\d*$/).default("20000000000"),
-  GOVERNANCE_PROPOSAL_MAX_PRIORITY_FEE_PER_GAS_WEI: z.string().regex(/^[1-9]\d*$/).default("1000000000"),
+  BASE_TX_GAS_LIMIT_CAP: z.string().regex(/^[1-9]\d*$/).default("300000"),
+  BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000000"),
+  BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 
@@ -51,6 +51,9 @@ export type Env = Omit<ParsedEnv, "PASSKEY_RP_ID" | "NEAR_ACCOUNT_PARENT"> & {
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
+  if (BigInt(parsed.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
+    throw new Error("BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
+  }
   return {
     ...parsed,
     PASSKEY_RP_ID: parsed.PASSKEY_RP_ID ?? new URL(parsed.CONSOLE_ORIGIN).hostname,

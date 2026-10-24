@@ -11,6 +11,14 @@ import {
 import { createPublicClient, encodeFunctionData, getAddress, http, type Address, type Hex } from "viem";
 import { base, baseSepolia } from "viem/chains";
 
+import {
+  BaseGasEstimationError,
+  gasQuoteView,
+  type BaseGasQuote,
+  type BaseGasCaps,
+  type BaseGasQuoteView,
+  type BaseGasQuoter,
+} from "./base-gas.js";
 import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
 import { TreasuryError } from "./treasury.js";
@@ -23,12 +31,6 @@ export interface MandateInput {
   periodDays: number;
   recipients: Address[];
   token: Address;
-  gas: {
-    gasLimit: string;
-    maxFeePerGas: string;
-    maxPriorityFeePerGas: string;
-    maxTotalFee: string;
-  };
   agent?: {
     nearAccountId: string;
     mpcPath: string;
@@ -42,6 +44,8 @@ export interface MandateProposal {
   description: string;
   args: Record<string, unknown>;
   deposit: string;
+  gasQuote?: BaseGasQuoteView;
+  warnings?: string[];
 }
 export interface BudgetTokenAction {
   receiverId: string;
@@ -109,7 +113,7 @@ export interface MandateGateway {
   budgetTokenPlan(organizationId: string, amount: string): Promise<BudgetTokenPlan>;
 }
 
-function roleConfig(input: MandateInput, rolesModifier: Address, token: Address) {
+function roleConfig(input: MandateInput, rolesModifier: Address, token: Address, gasCaps: BaseGasCaps) {
   return {
     enabled: true,
     token: Array.from(Buffer.from(token.slice(2), "hex")),
@@ -117,10 +121,10 @@ function roleConfig(input: MandateInput, rolesModifier: Address, token: Address)
     role_key: null as number[] | null,
     allowed_recipients: input.recipients.map((recipient) => Array.from(Buffer.from(recipient.slice(2), "hex"))),
     max_per_tx: input.maxPerTx,
-    gas_limit: input.gas.gasLimit,
-    max_fee_per_gas: input.gas.maxFeePerGas,
-    max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
-    max_total_fee: input.gas.maxTotalFee,
+    gas_limit: gasCaps.gasLimit.toString(),
+    max_fee_per_gas: gasCaps.maxFeePerGas.toString(),
+    max_priority_fee_per_gas: gasCaps.maxPriorityFeePerGas.toString(),
+    max_total_fee: (gasCaps.gasLimit * gasCaps.maxFeePerGas).toString(),
   };
 }
 
@@ -139,6 +143,19 @@ const multiSendAbi = [{
   inputs: [{ name: "transactions", type: "bytes" }],
   outputs: [],
 }] as const;
+const delayModuleAbi = [{
+  type: "function",
+  name: "execTransactionFromModule",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+    { name: "operation", type: "uint8" },
+  ],
+  outputs: [{ type: "bool" }],
+}] as const;
+
 
 export class MandateService implements MandateGateway {
   constructor(
@@ -146,11 +163,8 @@ export class MandateService implements MandateGateway {
     private readonly near: NearClient,
     private readonly budgetTokenAccountId: string,
     private readonly baseRpcUrl: string,
-    private readonly proposalGas: {
-      gasLimit: string;
-      maxFeePerGas: string;
-      maxPriorityFeePerGas: string;
-    },
+    private readonly gasEstimator: BaseGasQuoter,
+    private readonly agentGasCaps: BaseGasCaps,
     private readonly nowSeconds: () => bigint = () => BigInt(Math.floor(Date.now() / 1_000)),
     private readonly allowanceReader?: (chainId: number, roles: Address, key: Hex) => Promise<AllowanceState>,
   ) {}
@@ -204,7 +218,7 @@ export class MandateService implements MandateGateway {
       recipients: input.recipients.map((recipient) => getAddress(recipient)),
     });
     const config = {
-      ...roleConfig(input, rolesModifier, token),
+      ...roleConfig(input, rolesModifier, token, this.agentGasCaps),
       role_key: Array.from(Buffer.from(compiled.roleKey.slice(2), "hex")),
     };
     let resolvedAgentAddress: Address | null = null;
@@ -391,6 +405,24 @@ export class MandateService implements MandateGateway {
       functionName: "multiSend",
       args: [multiSendTransactions],
     });
+    let zodiacGas: BaseGasQuote | null = null;
+    if (resolvedAgentAddress) {
+      const delayData = encodeFunctionData({
+        abi: delayModuleAbi,
+        functionName: "execTransactionFromModule",
+        args: [multiSendAddress, 0n, multiSendData, 1],
+      });
+      try {
+        zodiacGas = await this.gasEstimator.quote({
+          from: treasury.govAddress,
+          to: treasury.delayAddress,
+          data: delayData,
+        });
+      } catch (error) {
+        const message = error instanceof BaseGasEstimationError ? error.message : String(error);
+        throw new TreasuryError(422, "gas_estimation_failed", message);
+      }
+    }
     const zodiacDigest = stepDigest({
       role: input.role,
       agent: input.agent?.nearAccountId ?? null,
@@ -401,6 +433,13 @@ export class MandateService implements MandateGateway {
       recipients: input.recipients,
       budget: input.budget,
       periodDays: input.periodDays,
+      gas: zodiacGas
+        ? {
+            gasLimit: zodiacGas.gasLimit.toString(),
+            maxFeePerGas: zodiacGas.maxFeePerGas.toString(),
+            maxPriorityFeePerGas: zodiacGas.maxPriorityFeePerGas.toString(),
+          }
+        : null,
     });
     const relayDerive: MandateProposal = {
       receiverId: treasury.daoAccountId,
@@ -443,9 +482,9 @@ export class MandateService implements MandateGateway {
                       value: "0",
                       data: b64(multiSendData),
                       operation: 1,
-                      gas_limit: this.proposalGas.gasLimit,
-                      max_fee_per_gas: this.proposalGas.maxFeePerGas,
-                      max_priority_fee_per_gas: this.proposalGas.maxPriorityFeePerGas,
+                      gas_limit: zodiacGas!.gasLimit.toString(),
+                      max_fee_per_gas: zodiacGas!.maxFeePerGas.toString(),
+                      max_priority_fee_per_gas: zodiacGas!.maxPriorityFeePerGas.toString(),
                     }),
                     gas: "60000000000000",
                     deposit: "0",
@@ -455,6 +494,10 @@ export class MandateService implements MandateGateway {
             },
           },
           deposit: "100000000000000000000000",
+          gasQuote: gasQuoteView(zodiacGas!),
+          warnings: zodiacGas!.sufficientBalance
+            ? []
+            : [`0xGOV needs ${zodiacGas!.requiredBalance} wei but holds ${zodiacGas!.senderBalance} wei`],
         }
       : null;
 
@@ -510,6 +553,9 @@ export class MandateService implements MandateGateway {
       warnings: [
         ...(agentStatus === "needs_agent_address"
           ? ["The agent EVM address is derived only after the Vault add-key/derive step; Zodiac assignRoles stays pending."]
+          : []),
+        ...(zodiacGas && !zodiacGas.sufficientBalance
+          ? [`0xGOV needs ${zodiacGas.requiredBalance} wei but holds ${zodiacGas.senderBalance} wei`]
           : []),
         "The server prepares proposals only. It never signs a DAO, Vault or Safe transaction.",
       ],

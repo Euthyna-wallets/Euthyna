@@ -1,11 +1,51 @@
 import type { PrismaClient } from "@mandateos/db";
-import { bytesToHex } from "viem";
+import { bytesToHex, encodeFunctionData, getAddress, type Hex } from "viem";
+import { z } from "zod";
 
+import {
+  BaseGasEstimationError,
+  gasQuoteView,
+  type BaseGasQuote,
+  type BaseGasQuoter,
+} from "./base-gas.js";
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { Guard, GuardResult } from "./guard.js";
 import type { NearClient } from "./near.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import type { Registry, VaultOperation } from "./types.js";
 
+
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "to", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+  outputs: [{ type: "bool" }],
+}] as const;
+const rolesExecutionAbi = [{
+  type: "function",
+  name: "execTransactionWithRole",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+    { name: "operation", type: "uint8" },
+    { name: "roleKey", type: "bytes32" },
+    { name: "shouldRevert", type: "bool" },
+  ],
+  outputs: [{ type: "bool" }],
+}] as const;
+const roleGasSchema = z.object({
+  roles_modifier: z.array(z.number().int().min(0).max(255)).length(20),
+  role_key: z.array(z.number().int().min(0).max(255)).length(32),
+  gas_limit: z.string().regex(/^\d+$/),
+  max_fee_per_gas: z.string().regex(/^\d+$/),
+  max_priority_fee_per_gas: z.string().regex(/^\d+$/),
+});
 export type OperationStatus =
   | "Prepared"
   | "PossiblySigned"
@@ -69,7 +109,70 @@ export class PaymentService {
     private readonly near: NearClient,
     private readonly guard: Guard,
     private readonly registry: RegistryService,
+    private readonly gasEstimator: BaseGasQuoter,
   ) {}
+
+  async gasQuote(
+    organizationId: string,
+    agent: { nearAccountId: string; vaultAccountId: string; role: string },
+    input: { token: string; recipient: string; amount: string },
+  ) {
+    const treasury = await this.prisma.treasury.findFirst({
+      where: { organizationId, status: "active" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!treasury) throw new PaymentError(409, "treasury_missing", "active treasury not found");
+    const [rawRole, rawAgent] = await Promise.all([
+      this.near.viewFunction<unknown>(agent.vaultAccountId, "get_role", { role: agent.role }),
+      this.near.viewFunction<unknown>(agent.vaultAccountId, "get_agent", { agent: agent.nearAccountId }),
+    ]);
+    const role = roleGasSchema.parse(rawRole);
+    const agentAddress = onChainAgentEvmAddress(rawAgent);
+    if (!agentAddress) throw new PaymentError(409, "agent_address_missing", "agent 0xAAA is not derived");
+    const token = getAddress(input.token);
+    const recipient = getAddress(input.recipient);
+    const transferData = encodeFunctionData({
+      abi: erc20TransferAbi,
+      functionName: "transfer",
+      args: [recipient, BigInt(input.amount)],
+    });
+    const rolesData = encodeFunctionData({
+      abi: rolesExecutionAbi,
+      functionName: "execTransactionWithRole",
+      args: [
+        token,
+        0n,
+        transferData,
+        0,
+        bytesToHex(Uint8Array.from(role.role_key)),
+        true,
+      ],
+    });
+    let quote: BaseGasQuote;
+    try {
+      quote = await this.gasEstimator.quote({
+        from: agentAddress,
+        to: bytesToHex(Uint8Array.from(role.roles_modifier)),
+        data: rolesData,
+      });
+    } catch (error) {
+      const message = error instanceof BaseGasEstimationError ? error.message : String(error);
+      throw new PaymentError(422, "gas_estimation_failed", message);
+    }
+    if (
+      quote.gasLimit > BigInt(role.gas_limit) ||
+      quote.maxFeePerGas > BigInt(role.max_fee_per_gas) ||
+      quote.maxPriorityFeePerGas > BigInt(role.max_priority_fee_per_gas)
+    ) {
+      throw new PaymentError(422, "gas_quote_above_mandate", "dynamic Base gas quote exceeds the governed mandate caps");
+    }
+    return {
+      gas: gasQuoteView(quote),
+      warnings: quote.sufficientBalance
+        ? []
+        : [`Agent ${agentAddress} needs ${quote.requiredBalance} wei but holds ${quote.senderBalance} wei`],
+    };
+  }
 
   async pay(
     organizationId: string,

@@ -48,6 +48,11 @@ const config: TreasuryConfig = {
   vaultDepositYocto: "10000000000000000000000000",
   relayDepositYocto: "10000000000000000000000000",
   daoCreateDepositYocto: "10000000000000000000000000",
+  baseGasCaps: {
+    gasLimit: "300000",
+    maxFeePerGas: "100000000000",
+    maxPriorityFeePerGas: "10000000000",
+  },
 };
 
 type TestMember = {

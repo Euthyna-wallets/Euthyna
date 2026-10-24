@@ -31,6 +31,11 @@ export interface TreasuryConfig {
   vaultDepositYocto: string;
   relayDepositYocto: string;
   daoCreateDepositYocto: string;
+  baseGasCaps: {
+    gasLimit: string;
+    maxFeePerGas: string;
+    maxPriorityFeePerGas: string;
+  };
 }
 
 export interface NearAction {
@@ -518,10 +523,12 @@ export class TreasuryService {
       delay_address: Buffer.from(base.delayAddress.slice(2), "hex").toString("base64"),
       multisend_address: Buffer.from(base.multiSendCallOnlyAddress.slice(2), "hex").toString("base64"),
       guard_public_key: guardPublicKey,
-      max_gas_limit: "300000",
-      max_fee_per_gas: "100000000000",
-      max_priority_fee_per_gas: "10000000000",
-      max_total_fee: "30000000000000000",
+      max_gas_limit: this.config.baseGasCaps.gasLimit,
+      max_fee_per_gas: this.config.baseGasCaps.maxFeePerGas,
+      max_priority_fee_per_gas: this.config.baseGasCaps.maxPriorityFeePerGas,
+      max_total_fee: (
+        BigInt(this.config.baseGasCaps.gasLimit) * BigInt(this.config.baseGasCaps.maxFeePerGas)
+      ).toString(),
     };
 
     const nearDeployment = (accountId: string, artifact: Artifact, initArgs: Record<string, unknown>, depositYocto: string): NearContractPlan => ({

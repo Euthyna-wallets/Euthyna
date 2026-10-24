@@ -1540,12 +1540,6 @@ export function MandatePanel(props: {
       periodDays: Number(periodDays),
       recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
       token,
-      gas: {
-        gasLimit: "200000",
-        maxFeePerGas: "20000000000",
-        maxPriorityFeePerGas: "1000000000",
-        maxTotalFee: "30000000000000000",
-      },
       ...(agentAccount
         ? {
             agent: {
@@ -1675,7 +1669,7 @@ export function MandatePanel(props: {
             <span className="pill">agent: {props.preview.agentStatus}</span>
           </div>
           {props.preview.warnings.map((warning) => (
-            <div key={warning} className="alert success">{warning}</div>
+            <div key={warning} className="alert warning">{warning}</div>
           ))}
           <h3>Diff</h3>
           <table>
@@ -1710,6 +1704,7 @@ export function MandatePanel(props: {
               const description = onChainProposalDescription(proposal);
               const run = proposalRuns[description];
               const state = run?.state ?? "Not proposed";
+              const proposalWarnings = proposal.warnings ?? [];
               const previousDescription = index > 0
                 ? onChainProposalDescription(proposals[index - 1]!)
                 : null;
@@ -1736,10 +1731,13 @@ export function MandatePanel(props: {
                   {state === "Failed" || state === "Expired" ? (
                     <div className="alert error">Proposal {state.toLowerCase()}. Re-propose the same deterministic step.</div>
                   ) : null}
+                  {proposalWarnings.map((warning) => (
+                    <div key={warning} className="alert warning">{warning}</div>
+                  ))}
                   {state !== "Executed" ? (
                     <button
                       className="primary"
-                      disabled={!signerId || busy || !previousExecuted}
+                      disabled={!signerId || busy || !previousExecuted || proposalWarnings.length > 0}
                       onClick={() => {
                         void (async () => {
                           setBusy(true);
@@ -1772,14 +1770,12 @@ export function MandatePanel(props: {
                               setProposalHashes((current) => [...current, transactionHash]);
                             } else {
                               let proposalToSubmit = proposal;
+                              let submittedDescription = description;
                               if (props.preview?.proposals.zodiacRelay === proposal) {
                                 proposalToSubmit = await api<MandateProposal>("/v1/console/mandates/zodiac-proposal", {
                                   method: "POST",
                                   body: JSON.stringify(mandateInput()),
                                 });
-                                if (onChainProposalDescription(proposalToSubmit) !== description) {
-                                  throw new Error("materialized Zodiac proposal identity changed");
-                                }
                                 props.onPreview({
                                   ...props.preview,
                                   proposals: {
@@ -1787,6 +1783,11 @@ export function MandatePanel(props: {
                                     zodiacRelay: proposalToSubmit,
                                   },
                                 });
+                                submittedDescription = onChainProposalDescription(proposalToSubmit);
+                                const materializedWarnings = proposalToSubmit.warnings ?? [];
+                                if (materializedWarnings.length > 0) {
+                                  throw new Error(materializedWarnings.join(" "));
+                                }
                               }
                               const submitted = await signDaoProposal(signerId, proposalToSubmit);
                               const refreshed = await readDaoProposalRpc(
@@ -1795,7 +1796,7 @@ export function MandatePanel(props: {
                               );
                               setProposalRuns((current) => ({
                                 ...current,
-                                [description]: {
+                                [submittedDescription]: {
                                   ...refreshed,
                                   transactionHash: submitted.transactionHash,
                                 },

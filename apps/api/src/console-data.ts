@@ -25,6 +25,18 @@ function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item))) as T;
 }
 
+export function governancePricingStatus(
+  state: string,
+  maxFeePerGas: string | null,
+  baseFeePerGas: bigint | null,
+): { underpriced: boolean; displayState: string } {
+  const underpriced = maxFeePerGas !== null &&
+    baseFeePerGas !== null &&
+    baseFeePerGas > BigInt(maxFeePerGas) &&
+    ["PossiblySigned", "Broadcast", "CancellationReverted"].includes(state);
+  return { underpriced, displayState: underpriced ? "Underpriced" : state };
+}
+
 export class ConsoleDataService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -242,6 +254,7 @@ export class ConsoleDataService {
             });
         const cooldownEndsAt = createdAt === null ? null : createdAt + cooldown;
         const expiresAt = createdAt === null || expiration === 0n ? null : createdAt + cooldown + expiration;
+        const pricing = governancePricingStatus(operation.state, operation.maxFeePerGas, block.baseFeePerGas);
         return {
           ...operation,
           cooldownEndsAt,
@@ -249,6 +262,7 @@ export class ConsoleDataService {
           countdownSeconds: cooldownEndsAt === null || cooldownEndsAt <= block.timestamp
             ? "0"
             : (cooldownEndsAt - block.timestamp).toString(),
+          ...pricing,
         };
       }));
       return plain({
@@ -267,6 +281,7 @@ export class ConsoleDataService {
           expirationSeconds: expiration,
           safeThreshold,
           currentTimestamp: block.timestamp,
+          baseFeePerGas: block.baseFeePerGas,
         },
       });
     } catch (error) {
@@ -274,7 +289,11 @@ export class ConsoleDataService {
         daoAccountId: treasury.daoAccountId,
         treasury: plain(treasury),
         proposals: [],
-        operations: plain(operations),
+        operations: plain(operations.map((operation) => ({
+          ...operation,
+          underpriced: false,
+          displayState: operation.state,
+        }))),
         relayActiveOperation: null,
         delay: null,
         error: error instanceof Error ? error.message : String(error),

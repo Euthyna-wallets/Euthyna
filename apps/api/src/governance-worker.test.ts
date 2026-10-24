@@ -42,6 +42,7 @@ const roleKey = `0x${"55".repeat(32)}` as Hex;
 const allowanceKey = `0x${"66".repeat(32)}` as Hex;
 const queueHash = `0x${"77".repeat(32)}` as Hex;
 const executeHash = `0x${"88".repeat(32)}` as Hex;
+const cancellationHash = `0x${"89".repeat(32)}` as Hex;
 const now = new Date("2026-01-01T00:00:00.000Z");
 
 const multiSendAbi = [{
@@ -107,10 +108,15 @@ function job(overrides: Partial<GovernanceJobRecord> = {}): GovernanceJobRecord 
     state: "Queued",
     finalStatus: null,
     nearExecutionTxHash: "near-vote",
+    nearCancellationTxHash: null,
+    nearCancellationSignerId: null,
     nearExecutionSignerId: "alice.testnet",
     target: canonicalMultiSendCallOnlyAddress(84532),
     value: "0",
     data: `0x${Buffer.from(current.data).toString("hex")}`,
+    gasLimit: "300000",
+    maxFeePerGas: "20000000000",
+    maxPriorityFeePerGas: "1000000000",
     operation: 1,
     txHash: queueHash,
     receiptBlock: 10n,
@@ -123,6 +129,8 @@ function job(overrides: Partial<GovernanceJobRecord> = {}): GovernanceJobRecord 
     expirationSeconds: 604_800n,
     executeRawTransaction: null,
     executeTxHash: null,
+    cancellationTxHash: null,
+    cancellationReceiptBlock: null,
     executeReceiptBlock: null,
     attempts: 0,
     lastError: null,
@@ -166,6 +174,7 @@ class FakeNear implements GovernanceNearGateway {
 class FakeBase implements GovernanceBaseGateway {
   queueReceipt: GovernanceReceipt | null = { status: "success", blockNumber: 10n, logs: [] };
   executeReceipt: GovernanceReceipt | null = null;
+  cancellationReceipt: GovernanceReceipt | null = null;
   currentBlock = 20n;
   delay: DelayState = {
     txNonce: 0n,
@@ -182,23 +191,40 @@ class FakeBase implements GovernanceBaseGateway {
   execution: DelayExecutionEvidence | null = null;
   veto: DelayVetoEvidence | null = null;
   executionFromBlocks: bigint[] = [];
+  executionToBlocks: bigint[] = [];
   vetoFromBlocks: bigint[] = [];
-  rawTransactionHash(): Hex { return queueHash; }
+  rawTransactionHash(raw: number[] | null): Hex {
+    return raw?.[0] === 9 ? cancellationHash : queueHash;
+  }
   broadcastRaw(): Promise<Hex> { this.broadcasts += 1; return Promise.resolve(queueHash); }
   receipt(hash: Hex): Promise<GovernanceReceipt | null> {
-    return Promise.resolve(hash === queueHash ? this.queueReceipt : this.executeReceipt);
+    if (hash === queueHash) return Promise.resolve(this.queueReceipt);
+    if (hash === cancellationHash) return Promise.resolve(this.cancellationReceipt);
+    return Promise.resolve(this.executeReceipt);
   }
   blockNumber(): Promise<bigint> { return Promise.resolve(this.currentBlock); }
   delayState(): Promise<DelayState> { return Promise.resolve(this.delay); }
   expectedHash = entryHash;
   expectedDelayHash(): Hex { return this.expectedHash; }
-  findExecution(input: { fromBlock: bigint }): Promise<EvidenceScanResult<DelayExecutionEvidence>> {
+  findExecution(input: { fromBlock: bigint; toBlock: bigint }): Promise<EvidenceScanResult<DelayExecutionEvidence>> {
     this.executionFromBlocks.push(input.fromBlock);
-    return Promise.resolve({ evidence: this.execution, scannedThroughBlock: this.currentBlock });
+    this.executionToBlocks.push(input.toBlock);
+    const evidence = this.execution?.blockNumber !== undefined && this.execution.blockNumber <= input.toBlock
+      ? this.execution
+      : null;
+    return Promise.resolve({ evidence, scannedThroughBlock: input.toBlock });
   }
-  findVeto(_delay: Address, _entryNonce: bigint, fromBlock: bigint): Promise<EvidenceScanResult<DelayVetoEvidence>> {
+  findVeto(
+    _delay: Address,
+    _entryNonce: bigint,
+    fromBlock: bigint,
+    toBlock: bigint,
+  ): Promise<EvidenceScanResult<DelayVetoEvidence>> {
     this.vetoFromBlocks.push(fromBlock);
-    return Promise.resolve({ evidence: this.veto, scannedThroughBlock: this.currentBlock });
+    const evidence = this.veto?.blockNumber !== undefined && this.veto.blockNumber <= toBlock
+      ? this.veto
+      : null;
+    return Promise.resolve({ evidence, scannedThroughBlock: toBlock });
   }
   prepareExecuteNextTx(): Promise<PreparedDelayExecution> {
     this.prepared += 1;
@@ -285,6 +311,36 @@ describe("GovernanceWorker", () => {
     expect(test.base.broadcasts).toBe(1);
   });
 
+  it("broadcasts a signed same-nonce cancellation and releases the relay as Failed", async () => {
+    const test = harness({
+      state: "CancellationRequested",
+      nearCancellationTxHash: "near-cancellation-vote",
+      nearCancellationSignerId: "alice.testnet",
+    });
+    const current = operation();
+    current.cancellation = {
+      transaction: {
+        ...current.transaction,
+        to: Array(20).fill(9) as number[],
+        input: [],
+      },
+      tx_digest: Array(32).fill(9) as number[],
+      signature: { big_r: Array(33).fill(9), s: Array(32).fill(9) as number[], recovery_id: 0 },
+      signed_transaction: [9, 1, 2],
+      requested_at_block: 10,
+      request_count: 1,
+    };
+    test.near.current = current;
+    test.base.cancellationReceipt = { status: "success", blockNumber: 15n, logs: [] };
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Failed");
+    expect(test.store.current.cancellationTxHash).toBe(cancellationHash);
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Failed");
+    expect(test.near.reports).toBe(1);
+  });
+
   it("resumes after a crash following the on-chain relay report", async () => {
     const test = harness({
       state: "Reporting",
@@ -304,12 +360,55 @@ describe("GovernanceWorker", () => {
     await test.worker().tick();
     expect(test.base.prepared).toBe(0);
     expect(test.store.current.state).toBe("Queued");
-    expect(test.store.current.executionScannedThroughBlock).toBe(20n);
+    expect(test.store.current.executionScannedThroughBlock).toBe(15n);
     expect(test.store.current.nextAttemptAt).toEqual(new Date(now.getTime() + 1_000));
     test.base.currentBlock = 21n;
     await test.worker().tick();
-    expect(test.base.executionFromBlocks).toEqual([10n, 21n]);
-    expect(test.store.current.executionScannedThroughBlock).toBe(21n);
+    expect(test.base.executionFromBlocks).toEqual([10n, 16n]);
+    expect(test.base.executionToBlocks).toEqual([15n, 16n]);
+    expect(test.store.current.executionScannedThroughBlock).toBe(16n);
+  });
+
+
+  it("finds an execution that was inside the confirmation window on the next poll", async () => {
+    const test = harness();
+    test.base.delay.txNonce = 1n;
+    test.base.delay.currentTimestamp = 605_201n;
+    test.base.execution = {
+      transactionHash: `0x${"ac".repeat(32)}`,
+      blockNumber: 18n,
+      receipt: { status: "success", blockNumber: 18n, logs: [] },
+    };
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Queued");
+    expect(test.store.current.executionScannedThroughBlock).toBe(15n);
+    expect(test.store.current.finalStatus).toBeNull();
+
+    test.base.currentBlock = 23n;
+    await test.worker().tick();
+    expect(test.base.executionFromBlocks).toEqual([10n, 16n]);
+    expect(test.base.executionToBlocks).toEqual([15n, 18n]);
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Executed");
+  });
+  it("finds a veto that was inside the confirmation window on the next poll", async () => {
+    const test = harness();
+    test.base.delay.txNonce = 1n;
+    test.base.delay.currentTimestamp = 605_201n;
+    test.base.veto = {
+      transactionHash: `0x${"ad".repeat(32)}`,
+      blockNumber: 18n,
+    };
+    await test.worker().tick();
+    expect(test.store.current.state).toBe("Queued");
+    expect(test.store.current.finalStatus).toBeNull();
+    expect(test.store.current.vetoScannedThroughBlock).toBe(15n);
+
+    test.base.currentBlock = 23n;
+    await test.worker().tick();
+    expect(test.base.vetoFromBlocks).toEqual([10n, 16n]);
+    expect(test.store.current.state).toBe("Reporting");
+    expect(test.store.current.finalStatus).toBe("Vetoed");
   });
 
   it("reports a veto even when Roles already matches the proposed state", async () => {

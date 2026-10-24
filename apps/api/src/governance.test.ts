@@ -98,6 +98,27 @@ function daoProposal(
 }
 
 
+function daoCancellationProposal(opId: number[], status = "Approved") {
+  return {
+    status,
+    description: "Completely unrelated text",
+    kind: {
+      FunctionCall: {
+        receiver_id: "relay.testnet",
+        actions: [{
+          method_name: "cancel_nonce",
+          args: Buffer.from(JSON.stringify({
+            op_id: opId,
+            gas_limit: "345678",
+            max_fee_per_gas: "987654321",
+            max_priority_fee_per_gas: "123456789",
+          })).toString("base64"),
+        }],
+      },
+    },
+  };
+}
+
 function fixture(
   proposalStatus = "Approved",
   activeOperation: number[] | null = operation.op_id,
@@ -119,6 +140,8 @@ function fixture(
         safeAddress,
         rolesAddress,
         baseChainId: 84532,
+        delayAddress: "0x7777777777777777777777777777777777777777",
+        govAddress: "0x8888888888888888888888888888888888888888",
       }),
     },
     member: { findFirst: async () => ({ id: "member-1" }) },
@@ -133,9 +156,17 @@ function fixture(
         state: "Vetoed",
         relayAccountId: "relay.testnet",
         txHash: `0x${"07".repeat(32)}`,
+        maxFeePerGas: "1",
         treasury: {
           daoAccountId: "dao.testnet",
+          govAddress: "0x8888888888888888888888888888888888888888",
+          delayAddress: "0x7777777777777777777777777777777777777777",
         },
+      }),
+      update: async ({ data }: { data: Record<string, unknown> }) => ({
+        opId: `0x${"01".repeat(32)}`,
+        state: String(data.state ?? "CancellationRequested"),
+        ...data,
       }),
     },
   } as unknown as PrismaClient;
@@ -151,10 +182,18 @@ function fixture(
   return {
     service: new GovernanceService(prisma, near, {
       baseRpcUrl: "https://sepolia.base.org",
-      proposalGas: {
-        gasLimit: "345678",
-        maxFeePerGas: "987654321",
-        maxPriorityFeePerGas: "123456789",
+      gasEstimator: {
+        quote: async () => ({
+          gasLimit: 345_678n,
+          maxFeePerGas: 98_765_432_100n,
+          maxPriorityFeePerGas: 123_456_789n,
+          baseFeePerGas: 30_000_000_000n,
+          l1Fee: 10_000n,
+          senderBalance: 10n ** 18n,
+          requiredBalance: 98_765_432_100n * 345_678n + 10_000n,
+          sufficientBalance: true,
+        }),
+        currentBaseFee: async () => 30_000_000_000n,
       },
       safeOwnersReader: async () => owners,
     }),
@@ -224,6 +263,24 @@ describe("GovernanceService", () => {
         signerAccountId: "alice.testnet",
       })).rejects.toMatchObject({ code: "proposal_not_governance" });
   });
+  it("records a cancellation vote by decoded op_id without trusting its description", async () => {
+    const test = fixture(
+      "Approved",
+      operation.op_id,
+      undefined,
+      operation,
+      daoCancellationProposal(operation.op_id),
+    );
+    await expect(test.service.recordRelayExecution("org-1", {
+      proposalId: 9,
+      nearTransactionHash: "near-cancellation-vote",
+      signerAccountId: "alice.testnet",
+    })).resolves.toEqual({
+      opId: `0x${"01".repeat(32)}`,
+      state: "CancellationRequested",
+    });
+  });
+
   it("refuses to register a relay job before the DAO proposal executes", async () => {
     await expect(fixture("InProgress").service.recordRelayExecution("org-1", {
       proposalId: 7,
@@ -231,6 +288,20 @@ describe("GovernanceService", () => {
       signerAccountId: "alice.testnet",
     })).rejects.toMatchObject({ code: "proposal_not_executed" });
   });
+  it("builds a dynamically priced same-nonce cancellation for an underpriced relay operation", async () => {
+    const opId = `0x${"01".repeat(32)}`;
+    const proposal = await fixture().service.cancelUnderpricedProposal("org-1", opId);
+    const proposalBody = proposalActionSchema.parse(proposal.args.proposal);
+    const actionArgs = proposalBody.kind.FunctionCall.actions[0]!.args;
+    expect(JSON.parse(Buffer.from(actionArgs, "base64").toString("utf8"))).toMatchObject({
+      op_id: Array(32).fill(1),
+      gas_limit: "345678",
+      max_fee_per_gas: "98765432100",
+      max_priority_fee_per_gas: "123456789",
+    });
+    expect(proposal.gasQuote).toMatchObject({ sufficientBalance: true });
+  });
+
 
   it("builds a DAO confirm_original proposal only for the active terminal relay operation", async () => {
     const proposal = await fixture().service.unblockProposal("org-1", `0x${"01".repeat(32)}`);
@@ -286,7 +357,7 @@ describe("GovernanceService", () => {
     expect(relayArgs.operation).toBe(0);
     expect(relayArgs).toMatchObject({
       gas_limit: "345678",
-      max_fee_per_gas: "987654321",
+      max_fee_per_gas: "98765432100",
       max_priority_fee_per_gas: "123456789",
     });
   });
@@ -316,7 +387,7 @@ describe("GovernanceService", () => {
     expect(relayArgs.operation).toBe(0);
     expect(relayArgs).toMatchObject({
       gas_limit: "345678",
-      max_fee_per_gas: "987654321",
+      max_fee_per_gas: "98765432100",
       max_priority_fee_per_gas: "123456789",
     });
   });

@@ -19,6 +19,15 @@ describe("MandateMcpTools", () => {
       },
     };
     const api: AgentApiGateway = {
+      gasQuote: async () => ({
+        gas: {
+          gasLimit: "200000",
+          maxFeePerGas: "20000000000",
+          maxPriorityFeePerGas: "1000000000",
+          sufficientBalance: true,
+        },
+        warnings: [],
+      }),
       requestVisa: async () => ({ status: 200, body: { visa: { op_id: opId }, signature: "sig" } }),
       recordAuthorization: async () => ({}),
       recordCancellation: async () => {
@@ -33,9 +42,6 @@ describe("MandateMcpTools", () => {
       recipient: "0x2222222222222222222222222222222222222222",
       amount: "100",
       reference: "INV-1",
-      gasLimit: "200000",
-      maxFeePerGas: "20000000000",
-      maxPriorityFeePerGas: "1000000000",
     })).resolves.toMatchObject({ outcome: "authorized" });
     await expect(tools.status({ opId: `0x${"01".repeat(32)}` })).resolves.toEqual({ status: "Broadcast" });
     await expect(tools.cancel({

@@ -41,6 +41,20 @@ export interface PaymentIntent {
   max_fee_per_gas: string;
   max_priority_fee_per_gas: string;
 }
+export type PaymentRequest = Omit<
+  PaymentIntent,
+  "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas"
+> & Partial<Pick<PaymentIntent, "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas">>;
+
+export interface AgentGasQuote {
+  gas: {
+    gasLimit: string;
+    maxFeePerGas: string;
+    maxPriorityFeePerGas: string;
+    sufficientBalance: boolean;
+  };
+  warnings: string[];
+}
 
 export interface PreparedOperation {
   op_id: number[];
@@ -71,6 +85,7 @@ export interface VaultGateway {
 }
 
 export interface AgentApiGateway {
+  gasQuote(input: Pick<PaymentIntent, "token" | "recipient" | "amount">): Promise<AgentGasQuote>;
   requestVisa(opId: number[], invoice?: InvoiceContext): Promise<{ status: number; body: Record<string, unknown> }>;
   recordAuthorization(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>>;
   recordCancellation(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>>;
@@ -103,8 +118,28 @@ export class MandateAgentClient {
   ) {}
 
 
-  async pay(intent: PaymentIntent, invoice?: InvoiceContext): Promise<PayResult> {
-    const prepared = await this.vault.prepare(intent);
+  async pay(intent: PaymentRequest, invoice?: InvoiceContext): Promise<PayResult> {
+    let completeIntent: PaymentIntent;
+    if (intent.gas_limit && intent.max_fee_per_gas && intent.max_priority_fee_per_gas) {
+      completeIntent = {
+        ...intent,
+        gas_limit: intent.gas_limit,
+        max_fee_per_gas: intent.max_fee_per_gas,
+        max_priority_fee_per_gas: intent.max_priority_fee_per_gas,
+      };
+    } else {
+      const quote = await this.api.gasQuote(intent);
+      if (quote.warnings.length > 0 || !quote.gas.sufficientBalance) {
+        throw new Error(quote.warnings.join(" ") || "agent has insufficient Base gas balance");
+      }
+      completeIntent = {
+        ...intent,
+        gas_limit: quote.gas.gasLimit,
+        max_fee_per_gas: quote.gas.maxFeePerGas,
+        max_priority_fee_per_gas: quote.gas.maxPriorityFeePerGas,
+      };
+    }
+    const prepared = await this.vault.prepare(completeIntent);
     const opId = operationIdHex(prepared.op_id);
     const visaResponse = await this.api.requestVisa(prepared.op_id, invoice);
     if (visaResponse.status === 202) {
@@ -183,6 +218,40 @@ export class HttpAgentApi implements AgentApiGateway {
       method: "POST",
       body: JSON.stringify({ opId, ...(invoice ? { invoice } : {}) }),
     });
+  }
+
+  async gasQuote(input: Pick<PaymentIntent, "token" | "recipient" | "amount">): Promise<AgentGasQuote> {
+    const result = await this.request("/v1/operations/gas-quote", {
+      method: "POST",
+      body: JSON.stringify({
+        token: bytesToHex(Uint8Array.from(input.token)),
+        recipient: bytesToHex(Uint8Array.from(input.recipient)),
+        amount: input.amount,
+      }),
+    });
+    if (result.status !== 200) throw new Error(String(result.body.message ?? result.body.error ?? "gas quote failed"));
+    const gas = result.body.gas;
+    if (!gas || typeof gas !== "object") throw new Error("gas quote response is missing gas fields");
+    const warnings = Array.isArray(result.body.warnings)
+      ? result.body.warnings.filter((warning): warning is string => typeof warning === "string")
+      : [];
+    if (
+      !("gasLimit" in gas) ||
+      !("maxFeePerGas" in gas) ||
+      !("maxPriorityFeePerGas" in gas) ||
+      !("sufficientBalance" in gas)
+    ) {
+      throw new Error("gas quote response is incomplete");
+    }
+    return {
+      gas: {
+        gasLimit: String(gas.gasLimit),
+        maxFeePerGas: String(gas.maxFeePerGas),
+        maxPriorityFeePerGas: String(gas.maxPriorityFeePerGas),
+        sufficientBalance: gas.sufficientBalance === true,
+      },
+      warnings,
+    };
   }
 
   async recordAuthorization(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>> {

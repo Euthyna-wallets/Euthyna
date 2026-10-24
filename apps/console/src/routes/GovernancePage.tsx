@@ -17,9 +17,13 @@ interface GovernanceOperation {
   opId: string;
   proposalId: number | null;
   state: string;
+  displayState: string;
+  underpriced: boolean;
+  maxFeePerGas: string | null;
   txHash: string | null;
   queueNonce: string | null;
   executeTxHash: string | null;
+  cancellationTxHash: string | null;
   countdownSeconds: string;
   cooldownEndsAt: string | null;
   expiresAt: string | null;
@@ -40,11 +44,32 @@ interface Governance {
     expirationSeconds: string;
     safeThreshold: string;
     currentTimestamp: string;
+    baseFeePerGas: string | null;
   } | null;
   error?: string;
 }
 
 type VetoState = { batch: SafeBatch; signatures: SafeBatchSignature[] };
+
+interface GovernanceProposal {
+  receiverId: string;
+  args: Record<string, unknown>;
+  deposit: string;
+  warnings: string[];
+}
+
+function relayAction(kind: unknown, relayAccountId: string | undefined): "propose" | "cancel_nonce" | null {
+  if (!relayAccountId || !kind || typeof kind !== "object" || !("FunctionCall" in kind)) return null;
+  const functionCall = kind.FunctionCall;
+  if (!functionCall || typeof functionCall !== "object") return null;
+  if (!("receiver_id" in functionCall) || functionCall.receiver_id !== relayAccountId) return null;
+  if (!("actions" in functionCall) || !Array.isArray(functionCall.actions) || functionCall.actions.length !== 1) return null;
+  const action = functionCall.actions[0];
+  if (!action || typeof action !== "object" || !("method_name" in action)) return null;
+  return action.method_name === "propose" || action.method_name === "cancel_nonce"
+    ? action.method_name
+    : null;
+}
 
 function timelineState(operation: GovernanceOperation): Array<{ label: string; done: boolean }> {
   const terminal = ["Executed", "Vetoed", "Expired", "Failed", "Confirmed"].includes(operation.state);
@@ -155,14 +180,14 @@ export function GovernancePage() {
     setBusy("swap-owner");
     setError(null);
     try {
-      const proposal = await api<{
-        receiverId: string;
-        args: Record<string, unknown>;
-        deposit: string;
-      }>("/v1/console/governance/swap-owner-proposal", {
+      const proposal = await api<GovernanceProposal>("/v1/console/governance/swap-owner-proposal", {
         method: "POST",
         body: JSON.stringify({ oldOwner: lostOwner, newOwner: replacementOwner }),
       });
+      if (proposal.warnings.length > 0) {
+        setError(proposal.warnings.join(" "));
+        return;
+      }
       const submitted = await signDaoProposal(signer, proposal);
       setHashes((existing) => [...existing, submitted.transactionHash]);
       await client.invalidateQueries({ queryKey: ["governance"] });
@@ -178,14 +203,14 @@ export function GovernancePage() {
     setBusy("add-owner");
     setError(null);
     try {
-      const proposal = await api<{
-        receiverId: string;
-        args: Record<string, unknown>;
-        deposit: string;
-      }>("/v1/console/governance/add-owner-proposal", {
+      const proposal = await api<GovernanceProposal>("/v1/console/governance/add-owner-proposal", {
         method: "POST",
         body: JSON.stringify({ newOwner: thirdOwner }),
       });
+      if (proposal.warnings.length > 0) {
+        setError(proposal.warnings.join(" "));
+        return;
+      }
       const submitted = await signDaoProposal(signer, proposal);
       setHashes((existing) => [...existing, submitted.transactionHash]);
       await client.invalidateQueries({ queryKey: ["governance"] });
@@ -196,6 +221,29 @@ export function GovernancePage() {
     }
   }
 
+
+  async function proposeUnderpricedCancellation(operation: GovernanceOperation) {
+    if (!signer) throw new Error("Connect a council NEAR account first");
+    setBusy(`cancel-${operation.opId}`);
+    setError(null);
+    try {
+      const proposal = await api<GovernanceProposal>("/v1/console/governance/cancel-underpriced-proposal", {
+        method: "POST",
+        body: JSON.stringify({ opId: operation.opId }),
+      });
+      if (proposal.warnings.length > 0) {
+        setError(proposal.warnings.join(" "));
+        return;
+      }
+      const submitted = await signDaoProposal(signer, proposal);
+      setHashes((existing) => [...existing, submitted.transactionHash]);
+      await client.invalidateQueries({ queryKey: ["governance"] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
   return (
     <div className="page">
       <header className="page-head">
@@ -259,7 +307,7 @@ export function GovernancePage() {
                 <div className="step" key={operation.opId}>
                   <div className="row wrap">
                     <strong className="mono">{short(operation.opId)}</strong>
-                    <Status value={operation.state} />
+                    <Status value={operation.displayState} />
                     {operation.queueNonce !== null ? <span className="pill">Delay #{operation.queueNonce}</span> : null}
                     {operation.state === "Queued" ? <span className="pill">{operation.countdownSeconds}s remaining</span> : null}
                   </div>
@@ -272,7 +320,28 @@ export function GovernancePage() {
                   </div>
                   {operation.txHash ? <div className="mono small">queue tx {operation.txHash}</div> : null}
                   {operation.executeTxHash ? <div className="mono small">execute tx {operation.executeTxHash}</div> : null}
+                  {operation.cancellationTxHash ? <div className="mono small">cancellation tx {operation.cancellationTxHash}</div> : null}
                   {operation.lastError ? <div className="alert error">{operation.lastError}</div> : null}
+                  {operation.underpriced ? (
+                    <div className="alert warning">
+                      <strong>Underpriced</strong>
+                      <div>
+                        Current Base fee {query.data?.delay?.baseFeePerGas ?? "—"} exceeds transaction max fee {operation.maxFeePerGas ?? "—"}.
+                      </div>
+                      <button
+                        className="primary"
+                        disabled={!signer || busy === `cancel-${operation.opId}`}
+                        onClick={() => void proposeUnderpricedCancellation(operation)}
+                      >
+                        Propose cancellation
+                      </button>
+                    </div>
+                  ) : null}
+                  {operation.state === "Failed" && operation.cancellationTxHash ? (
+                    <div className="alert warning">
+                      Cancellation confirmed. <a href="/mandates">Re-propose with fresh gas fees</a>.
+                    </div>
+                  ) : null}
                   {vetoable ? (
                     <div className="row wrap">
                       {demoWalletsEnabled() && !veto ? (
@@ -350,10 +419,7 @@ export function GovernancePage() {
                           );
                           if (
                             refreshed.state === "Executed" &&
-                            (
-                              proposal.description?.startsWith("Recover Safe owner ") ||
-                              proposal.description?.startsWith("Add Safe owner ")
-                            )
+                            relayAction(proposal.kind, query.data?.treasury?.relayAccountId) !== null
                           ) {
                             await api("/v1/console/governance/relay-operation", {
                               method: "POST",

@@ -96,12 +96,6 @@ const mandateSchema = z.object({
   periodDays: z.number().int().min(1).max(365),
   recipients: z.array(addressSchema).min(1),
   token: addressSchema,
-  gas: z.object({
-    gasLimit: z.string().regex(/^\d+$/),
-    maxFeePerGas: z.string().regex(/^\d+$/),
-    maxPriorityFeePerGas: z.string().regex(/^\d+$/),
-    maxTotalFee: z.string().regex(/^\d+$/),
-  }),
   agent: z
     .object({
       nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
@@ -116,6 +110,11 @@ const nearAccountSchema = z
   .transform((value) => value.trim().split(/\s+/)[0]!.replace(/\(.*\)$/, ""))
   .pipe(z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/));
 
+const paymentGasQuoteSchema = z.object({
+  token: addressSchema,
+  recipient: addressSchema,
+  amount: z.string().regex(/^[1-9]\d*$/),
+});
 const evmAddressSchema = z
   .string()
   .transform((value) => value.trim().split(/\s+/)[0]!)
@@ -530,6 +529,12 @@ export function createApp({
     const result = await payments.pay(agent.organizationId, agent, input.opId, input.invoice);
     return context.json(result.body, result.status);
   });
+  app.post("/v1/operations/gas-quote", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const input = await parseJson(context, paymentGasQuoteSchema);
+    return context.json(await payments.gasQuote(agent.organizationId, agent, input));
+  });
+
 
   app.post("/v1/operations/:opId/authorization", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
@@ -608,6 +613,11 @@ export function createApp({
     const consoleIdentity = context.get("console");
     const input = await parseJson(context, governanceUnblockSchema);
     return context.json(await governance.unblockProposal(consoleIdentity.organizationId, input.opId));
+  });
+  app.post("/v1/console/governance/cancel-underpriced-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, governanceUnblockSchema);
+    return context.json(await governance.cancelUnderpricedProposal(consoleIdentity.organizationId, input.opId));
   });
   app.post("/v1/console/governance/swap-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");

@@ -53,6 +53,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
       data: "0x1234",
       operation: 1,
       fromBlock: 10n,
+      toBlock: 20n,
     })).resolves.toMatchObject({
       evidence: { transactionHash: executionHash, blockNumber: 20n },
       scannedThroughBlock: 20n,
@@ -71,6 +72,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
       data: "0xabcd",
       operation: 1,
       fromBlock: 10n,
+      toBlock: 20n,
     })).resolves.toEqual({ evidence: null, scannedThroughBlock: 20n });
   });
 
@@ -83,7 +85,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
     const readContract = vi.fn(async () => 0n);
     const base = gateway({ getBlockNumber: async () => 20n, getLogs, readContract });
 
-    await expect(base.findVeto(delay, 0n, 10n)).resolves.toEqual({
+    await expect(base.findVeto(delay, 0n, 10n, 20n)).resolves.toEqual({
       evidence: {
         transactionHash: vetoHash,
         blockNumber: 20n,
@@ -93,7 +95,7 @@ describe("BaseGovernanceGateway execution evidence", () => {
     expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ blockNumber: 19n }));
 
     readContract.mockResolvedValueOnce(1n);
-    await expect(base.findVeto(delay, 0n, 10n)).resolves.toEqual({
+    await expect(base.findVeto(delay, 0n, 10n, 20n)).resolves.toEqual({
       evidence: null,
       scannedThroughBlock: 20n,
     });
