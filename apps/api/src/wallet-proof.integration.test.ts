@@ -125,6 +125,62 @@ describe.skipIf(!databaseUrl)("wallet ownership proofs against PostgreSQL", () =
     await prisma.user.delete({ where: { id: claimantUserId } });
   });
 
+  it("lets an invited member declare real wallets once from their own passkey session", async () => {
+    const organizationId = randomUUID();
+    const pendingUserId = randomUUID();
+    const claimantUserId = randomUUID();
+    const memberId = randomUUID();
+    const nearKey = KeyPair.fromRandom("ed25519");
+    const nearPublicKey = nearKey.getPublicKey().toString();
+    const nearAccountId = `self-${randomUUID().slice(0, 8)}.testnet`;
+    const evm = privateKeyToAccount("0x2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    await prisma.organization.create({
+      data: { id: organizationId, name: "Self declaration", slug: `self-${organizationId}`, createdAt: new Date() },
+    });
+    await prisma.user.createMany({
+      data: [
+        { id: pendingUserId, name: "Invited", email: `pending-${pendingUserId}@example.test`, emailVerified: false },
+        { id: claimantUserId, name: "Claimant", email: `claimant-${claimantUserId}@example.test`, emailVerified: false },
+      ],
+    });
+    await prisma.member.create({
+      data: {
+        id: memberId,
+        organizationId,
+        userId: pendingUserId,
+        role: "member",
+        nearAccountId: null,
+        evmAddress: null,
+        walletProofClaimable: true,
+        createdAt: new Date(),
+      },
+    });
+    const near = {
+      getAccessKeys: async () => ({
+        keys: [{ public_key: nearPublicKey, access_key: { permission: "FullAccess" } }],
+      }),
+    } as unknown as NearClient;
+    const service = new WalletProofService(prisma, near, "mandateos.testnet", 84532);
+    const challenge = await service.createChallenge(claimantUserId, { memberId, nearAccountId, evmAddress: evm.address });
+    await service.verify(claimantUserId, {
+      challengeId: challenge.id,
+      nearAccountId,
+      nearPublicKey,
+      nearSignature: nearProof(challenge, nearKey),
+      evmAddress: evm.address,
+      evmSignature: await evm.signMessage({ message: challenge.message }),
+    });
+    await expect(prisma.member.findUnique({ where: { id: memberId } })).resolves.toMatchObject({
+      userId: claimantUserId,
+      nearAccountId,
+      evmAddress: evm.address,
+      walletProofClaimable: false,
+      walletProofVerifiedAt: expect.any(Date),
+    });
+    await prisma.organization.delete({ where: { id: organizationId } });
+    await prisma.user.delete({ where: { id: claimantUserId } });
+  });
+
   it("accepts an unfunded deterministic demo account only when the server flag is enabled", async () => {
     const organizationId = randomUUID();
     const userId = randomUUID();

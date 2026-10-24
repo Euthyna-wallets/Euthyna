@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { parseUnits } from "viem";
+import { KeyPair } from "near-api-js";
 
 import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
 import { demoWalletsEnabled, generatedNearPublicKey, selectDemoWalletScopeForAccounts, selectDemoWalletScopeForEvmAddress, setDemoWalletScope, setGeneratedNearAccountId } from "../lib/wallet-store.js";
 import { formatToken } from "../lib/format.js";
+import { useWallets } from "../lib/wallet-context.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -14,12 +17,8 @@ import { authClient } from "../auth.js";
 import {
   bridgeSepoliaEthToBase,
   createDao,
-  connectNearWallet,
   disableFactoryAutoUpdate,
-  evmAccounts,
   findDaoProposalsRpc,
-  evmWalletClient,
-  nearAccounts,
   readAgentAccessKeyRpc,
   readDaoPolicyRpc,
   readDaoProposalRpc,
@@ -72,6 +71,7 @@ function formatNear(yocto: bigint): string {
 
 export function OnboardingPage() {
   const session = authClient.useSession();
+  const wallets = useWallets();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -82,6 +82,12 @@ export function OnboardingPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [mandate, setMandate] = useState<MandatePreview | null>(null);
+  const [setupOverview, setSetupOverview] = useState<{
+    treasury: TreasuryView | null;
+    safeBalance: string | null;
+    agents: { total: number; active: number };
+    roleBudgets: Array<{ role: string }>;
+  } | null>(null);
   const [founderNear, setFounderNear] = useState("");
   const [passkeyReady, setPasskeyReady] = useState<boolean | null>(null);
   const claimMemberId = new URLSearchParams(window.location.search).get("member");
@@ -108,6 +114,10 @@ export function OnboardingPage() {
     setTreasury(result.treasury);
   }
 
+  async function refreshSetupOverview() {
+    setSetupOverview(await api("/v1/console/overview"));
+  }
+
   useEffect(() => {
     setDemoWalletScope(session.data?.user.id ?? null);
   }, [session.data?.user.id]);
@@ -132,8 +142,8 @@ export function OnboardingPage() {
   useEffect(() => {
     if (!signedIn || passkeyReady !== true) return;
     refreshOrganizations().catch((cause: unknown) => setError(String(cause)));
-    void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch(() => undefined);
-  }, [signedIn, passkeyReady]);
+    if (wallets.nearAccountId) setFounderNear(wallets.nearAccountId);
+  }, [signedIn, passkeyReady, wallets.nearAccountId]);
 
   useEffect(() => {
     if (!activeOrganization) return;
@@ -141,6 +151,7 @@ export function OnboardingPage() {
       await authClient.organization.setActive({ organizationId: activeOrganization.id }).catch(() => undefined);
       await refreshMembers(activeOrganization.id).catch((cause: unknown) => setError(String(cause)));
       await refreshTreasury().catch((cause: unknown) => setError(String(cause)));
+      await refreshSetupOverview().catch(() => undefined);
     })();
   }, [activeOrganization?.id]);
 
@@ -185,45 +196,18 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">MandateOS</div>
-        <div className="muted small">Company console</div>
-        <nav>
-          <a className="active" href="#onboarding">Onboarding</a>
-          <a href="#treasury">Treasury</a>
-          <a href="#agents">Agents</a>
-          <a href="#mandates">Mandates</a>
-        </nav>
-        <div className="spacer" />
-        <div className="small muted">{session.data?.user.email}</div>
-        <button
-          className="ghost"
-          disabled={Boolean(busy)}
-          onClick={() => void run("passkey", async () => {
-            const result = await authClient.passkey.addPasskey({
-              name: `MandateOS ${session.data?.user.email ?? "console"}`,
-            });
-            if (result.error) throw new Error(result.error.message ?? "Could not add passkey");
-            setNotice("Passkey added.");
-          })}
-        >
-          Add passkey
-        </button>
-        <button className="ghost" onClick={() => authClient.signOut()}>Sign out</button>
-      </aside>
-
-      <main>
-        <header>
-          <div>
-            <h1>{activeOrganization?.name ?? "Create your company"}</h1>
-            <p className="muted">Passkey identity, human council, no server key.</p>
-          </div>
-          <div className="row wrap">
-            <div className="pill">Base Sepolia · NEAR testnet</div>
-            {activeOrganization ? <a className="pill" href="/">Open console →</a> : null}
-          </div>
-        </header>
+    <div className="page onboarding-page">
+      <header className="page-head">
+        <div>
+          <span className="eyebrow">Guided company setup</span>
+          <h1>{activeOrganization?.name ?? "Create your company"}</h1>
+          <p className="muted">Resume at any time. Every signature stays in the connected member wallet.</p>
+        </div>
+        <div className="row wrap">
+          <div className="pill">Base Sepolia · NEAR testnet</div>
+          {activeOrganization ? <a className="pill" href="/">Overview →</a> : null}
+        </div>
+      </header>
         {demoWalletsEnabled() ? (
           <div className="alert error">
             UAT DEMO MODE — generated NEAR and EVM private keys are stored in this browser's
@@ -234,6 +218,14 @@ export function OnboardingPage() {
         {error ? <div className="alert error">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
 
+        <SetupProgress
+          companyReady={Boolean(activeOrganization)}
+          membersReady={members.filter((member) => member.walletProofVerifiedAt).length >= 3}
+          treasuryReady={treasury?.status === "active"}
+          funded={BigInt(setupOverview?.safeBalance ?? "0") > 0n}
+          agentReady={(setupOverview?.agents.total ?? 0) > 0}
+          mandateReady={(setupOverview?.roleBudgets.length ?? 0) > 0}
+        />
         <section id="onboarding" className="card">
           <h2>1. Company and members</h2>
           <OrganizationPanel
@@ -255,7 +247,7 @@ export function OnboardingPage() {
         </section>
 
         {activeOrganization ? (
-          <section className="card">
+          <section id="wallets" className="card">
             <h2>2. Member wallets</h2>
             <p className="muted">
               Each member proves the NEAR account that signs DAO proposals and the EVM address
@@ -271,24 +263,15 @@ export function OnboardingPage() {
         ) : null}
 
         {activeOrganization && !treasury ? (
-          <section className="card">
-            <h2>3. Treasury plan</h2>
+          <section id="treasury" className="card">
+            <h2>3–4. Deploy and fund treasury</h2>
             <p className="muted">
               The server builds unsigned transactions only. DAO, Vault, relay and Base transactions
               are signed in your wallets.
             </p>
-            <div className="row">
-              <input
-                placeholder="founder.testnet"
-                value={founderNear}
-                onChange={(event) => setFounderNear(event.target.value)}
-              />
-              <button
-                className="ghost"
-                onClick={() => void nearAccounts().then((accounts) => setFounderNear(accounts[0] ?? "")).catch((cause) => setError(String(cause)))}
-              >
-                Use generated NEAR account
-              </button>
+            <div className="wallet-signing-context">
+              <span>Founder NEAR wallet</span>
+              <strong>{founderNear || "Connect NEAR in the global wallet bar"}</strong>
             </div>
             <button
               className="primary"
@@ -360,7 +343,7 @@ export function OnboardingPage() {
 
         {treasury ? (
           <section id="agents" className="card">
-            <h2>4. Register an agent</h2>
+            <h2>5. Register an agent</h2>
             {treasury.status === "active" ? (
               <>
                 <AgentForm
@@ -368,6 +351,7 @@ export function OnboardingPage() {
                   onCreated={(createdKey) => {
                     setApiKey(createdKey);
                     setNotice("Agent created. The API key is shown once.");
+                    void refreshSetupOverview();
                   }}
                   onError={setError}
                 />
@@ -407,12 +391,45 @@ export function OnboardingPage() {
 
         {treasury?.status === "active" ? (
           <section id="mandates" className="card">
-            <h2>5. Agent mandate</h2>
+            <h2>6. First mandate</h2>
             <MandatePanel treasury={treasury} preview={mandate} onPreview={setMandate} onError={setError} />
           </section>
         ) : null}
-      </main>
     </div>
+  );
+}
+
+function SetupProgress(props: {
+  companyReady: boolean;
+  membersReady: boolean;
+  treasuryReady: boolean;
+  funded: boolean;
+  agentReady: boolean;
+  mandateReady: boolean;
+}) {
+  const steps = [
+    { label: "Company", ready: props.companyReady, href: "#onboarding" },
+    { label: "Members", ready: props.membersReady, href: "#wallets" },
+    { label: "Treasury", ready: props.treasuryReady, href: "#treasury" },
+    { label: "Fund", ready: props.funded, href: "#treasury" },
+    { label: "Agent", ready: props.agentReady, href: "#agents" },
+    { label: "Mandate", ready: props.mandateReady, href: "#mandates" },
+    { label: "Done", ready: props.mandateReady, href: "/" },
+  ];
+  const current = steps.findIndex((step) => !step.ready);
+  return (
+    <nav className="setup-progress" aria-label="Company setup progress">
+      {steps.map((step, index) => (
+        <a
+          key={step.label}
+          href={step.href}
+          className={`${step.ready ? "done" : ""} ${index === current ? "current" : ""}`}
+        >
+          <span>{step.ready ? "✓" : index + 1}</span>
+          {step.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -575,6 +592,7 @@ function OrganizationPanel(props: {
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [memberName, setMemberName] = useState("");
   const [memberNear, setMemberNear] = useState("");
+  const [memberEmail, setMemberEmail] = useState("");
   const [memberEvm, setMemberEvm] = useState("");
 
   return (
@@ -616,8 +634,8 @@ function OrganizationPanel(props: {
       {props.active ? (
         <div className="stack">
           <div className="muted small">
-            Pick an existing member to replace a wallet declaration, or add a pending member. Paste
-            accounts as copied from the wallet: <code>busyvideo615.testnet (*testnet)</code>.
+            Invite a new member by email. They sign in with their own passkey, connect both wallets
+            once in the global wallet bar, and prove control from their signing inbox.
           </div>
           <div className="row wrap">
             <select
@@ -644,11 +662,23 @@ function OrganizationPanel(props: {
               disabled={Boolean(selectedMemberId)}
               onChange={(event) => setMemberName(event.target.value)}
             />
-            <input placeholder="near.testnet" value={memberNear} onChange={(event) => setMemberNear(event.target.value)} />
-            <input placeholder="0x EVM address" value={memberEvm} onChange={(event) => setMemberEvm(event.target.value)} />
+            {!selectedMemberId ? (
+              <input
+                type="email"
+                placeholder="Member email"
+                value={memberEmail}
+                onChange={(event) => setMemberEmail(event.target.value)}
+              />
+            ) : null}
+            {selectedMemberId ? (
+              <>
+                <input placeholder="near.testnet" value={memberNear} onChange={(event) => setMemberNear(event.target.value)} />
+                <input placeholder="0x EVM address" value={memberEvm} onChange={(event) => setMemberEvm(event.target.value)} />
+              </>
+            ) : null}
             <button
               className="ghost"
-              disabled={!memberNear || !memberEvm || (!selectedMemberId && !memberName)}
+              disabled={selectedMemberId ? !memberNear || !memberEvm : !memberName || !memberEmail}
               onClick={() =>
                 void (async () => {
                   try {
@@ -660,11 +690,12 @@ function OrganizationPanel(props: {
                     } else {
                       await api("/v1/console/members", {
                         method: "POST",
-                        body: JSON.stringify({ name: memberName, nearAccountId: memberNear, evmAddress: memberEvm }),
+                        body: JSON.stringify({ name: memberName, email: memberEmail }),
                       });
                     }
                     setSelectedMemberId("");
                     setMemberName("");
+                    setMemberEmail("");
                     setMemberNear("");
                     setMemberEvm("");
                     await props.onMembersChanged();
@@ -674,7 +705,7 @@ function OrganizationPanel(props: {
                 })()
               }
             >
-              {selectedMemberId ? "Save member wallets" : "Add member"}
+              {selectedMemberId ? "Save member wallets" : "Invite member"}
             </button>
           </div>
         </div>
@@ -690,51 +721,34 @@ function WalletProofForm(props: {
   onVerified: () => Promise<void>;
   onError: (message: string) => void;
 }) {
-  const [nearAccountId, setNearAccountId] = useState(props.initialNear ?? "");
-  const [evmAddress, setEvmAddress] = useState(props.initialEvm ?? "");
+  const wallets = useWallets();
+  const [nearAccountId, setNearAccountId] = useState(props.initialNear ?? wallets.nearAccountId);
+  const [evmAddress, setEvmAddress] = useState(props.initialEvm ?? wallets.evmAddress);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (wallets.nearAccountId) setNearAccountId(wallets.nearAccountId);
+    if (wallets.evmAddress) setEvmAddress(wallets.evmAddress);
+  }, [wallets.nearAccountId, wallets.evmAddress]);
 
   return (
     <div className="stack">
       {error ? <div className="alert error">{error}</div> : null}
-      <div className="row">
-        <button
-          className="ghost"
-          disabled={busy}
-          onClick={() => void (async () => {
-            try {
-              const accounts = demoWalletsEnabled() ? await nearAccounts() : await connectNearWallet();
-              if (accounts[0]) setNearAccountId(accounts[0]);
-            } catch (cause) {
-              const message = cause instanceof Error ? cause.message : String(cause);
-              setError(message);
-              props.onError(message);
-            }
-          })()}
-        >
-          {demoWalletsEnabled() ? "Use generated NEAR account" : "Connect NEAR wallet"}
-        </button>
-        <button
-          className="ghost"
-          disabled={busy}
-          onClick={() => void evmAccounts()
-            .then((accounts) => setEvmAddress(accounts[0] ?? ""))
-            .catch((cause: unknown) => {
-              const message = String(cause);
-              setError(message);
-              props.onError(message);
-            })}
-        >
-          {demoWalletsEnabled() ? "Use generated EVM account" : "Connect MetaMask / Rabby"}
-        </button>
+      <div className="wallet-proof-grid">
+        <div className={wallets.nearConnected ? "wallet-proof connected" : "wallet-proof"}>
+          <span>NEAR signer</span>
+          <strong>{nearAccountId || "Connect in the wallet bar"}</strong>
+        </div>
+        <div className={wallets.evmConnected ? "wallet-proof connected" : "wallet-proof"}>
+          <span>Base owner</span>
+          <strong>{evmAddress ? short(evmAddress) : "Connect in the wallet bar"}</strong>
+        </div>
       </div>
       <div className="row">
-        <input placeholder="alice.testnet" value={nearAccountId} onChange={(event) => setNearAccountId(event.target.value)} />
-        <input placeholder="0x…" value={evmAddress} onChange={(event) => setEvmAddress(event.target.value)} />
         <button
           className="primary"
-          disabled={busy || !nearAccountId || !evmAddress}
+          disabled={busy || !nearAccountId || !evmAddress || !wallets.nearConnected || !wallets.evmConnected}
           onClick={() => void (async () => {
             setBusy(true);
             setError(null);
@@ -775,13 +789,15 @@ function WalletProofPanel(props: {
   onError: (message: string) => void;
 }) {
   return (
-    <div className="auth">
-      <div className="auth-card">
-        <div className="brand">MandateOS</div>
-        <h1>Accept wallet invitation</h1>
-        <p className="muted">Your passkey identifies your profile. Control of both declared wallets accepts the membership.</p>
-        <WalletProofForm {...props} />
-      </div>
+    <div className="page invitation-page">
+      <header className="page-head">
+        <div>
+          <span className="eyebrow">Member invitation</span>
+          <h1>Connect your wallets</h1>
+          <p className="muted">Your passkey identifies the profile. Both wallet signatures accept the membership.</p>
+        </div>
+      </header>
+      <section className="panel"><WalletProofForm {...props} /></section>
     </div>
   );
 }
@@ -886,6 +902,7 @@ function TreasuryWizard(props: {
   onError: (message: string) => void;
   onRegistered: (treasury: TreasuryView) => Promise<void>;
 }) {
+  const wallets = useWallets();
   const [signerId, setSignerId] = useState("");
   const [safeBatch, setSafeBatch] = useState<SafeBatch | null>(null);
   const [signatures, setSignatures] = useState<SafeBatchSignature[]>([]);
@@ -904,6 +921,10 @@ function TreasuryWizard(props: {
   const [observedPolicy, setObservedPolicy] = useState<DaoPolicyRpc | null>(null);
   const [confirmedMembers, setConfirmedMembers] = useState<string[]>([]);
   const [thresholdConfirmed, setThresholdConfirmed] = useState(false);
+
+  useEffect(() => {
+    setSignerId(wallets.nearAccountId);
+  }, [wallets.nearAccountId]);
 
   async function verifyDaoPolicy() {
     const policy = await readDaoPolicyRpc(props.plan.daoAccountId);
@@ -1065,14 +1086,11 @@ function TreasuryWizard(props: {
               I confirm this exact council and threshold before signing.
             </label>
           </div>
-          <div className="row">
-            <button
-              className="ghost"
-              onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}
-            >
-              Use founder NEAR account
-            </button>
-            <input placeholder="founder.testnet" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
+          <div className="wallet-signing-context">
+            <span>Founder signature</span>
+            <strong>{signerId || "Connect NEAR in the global wallet bar"}</strong>
+          </div>
+          <div className="row wrap">
             <button
               className="primary"
               disabled={
@@ -1266,7 +1284,17 @@ function TreasuryWizard(props: {
             Safe {short(props.plan.base.safeAddress)} · Roles {short(props.plan.base.rolesAddress)} · Delay{" "}
             {short(props.plan.base.delayAddress)} · 0xGOV {short(props.plan.govAddress)}
           </p>
+          {!demoWalletsEnabled() ? (
+            <div className="notice">
+              Before deployment, fund the connected Base owner for deployment gas and send at least
+              0.002 Base Sepolia ETH to <code>{props.plan.govAddress}</code>. Use the official
+              <a href="https://www.alchemy.com/faucets/base-sepolia" target="_blank" rel="noreferrer"> Base Sepolia faucet</a>.
+              Balances are checked again before each proposal.
+            </div>
+          ) : null}
           <div className="row wrap">
+            {demoWalletsEnabled() ? (
+              <>
             <button
               className="ghost"
               disabled={Boolean(props.busy)}
@@ -1298,6 +1326,8 @@ function TreasuryWizard(props: {
             >
               Fund 0xGOV with 0.002 ETH
             </button>
+              </>
+            ) : null}
             <button
               className="primary"
               disabled={Boolean(props.busy) || baseDeployed || !deploymentConfirmed}
@@ -1417,12 +1447,31 @@ function AgentForm(props: {
   const [nearPublicKey, setNearPublicKey] = useState("");
   const [role, setRole] = useState("researcher");
 
+  function generateAgentKey() {
+    const keyPair = KeyPair.fromRandom("ed25519");
+    const publicKey = keyPair.getPublicKey().toString();
+    setNearPublicKey(publicKey);
+    const file = {
+      networkId: "testnet",
+      accountId: "assigned-after-registration",
+      publicKey,
+      privateKey: keyPair.toString(),
+    };
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "mandateos-agent"}-key.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="stack">
       <div className="row wrap">
         <input placeholder="Agent name" value={name} onChange={(event) => setName(event.target.value)} />
         <input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} />
         <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
+        <button className="secondary" type="button" onClick={generateAgentKey}>Generate & download key</button>
         <button
           className="primary"
           onClick={() =>
@@ -1449,8 +1498,8 @@ function AgentForm(props: {
         </button>
       </div>
       <div className="muted small">
-        Run <code>mandateos agent init --name "{name || "Compta Bot"}"</code>, then paste only
-        the generated public key. MandateOS derives the account id and never receives the private key.
+        Generate the key in this browser or run <code>mandateos agent init --name "{name || "Compta Bot"}"</code>.
+        Only the public key is sent to MandateOS. Keep the downloaded private key file offline and never upload it.
       </div>
     </div>
   );
@@ -1479,6 +1528,15 @@ function onChainProposalKind(proposal: MandateProposal): unknown {
   return body.kind;
 }
 
+type MandateRegistry = {
+  suppliers: Array<{
+    id: string;
+    name: string;
+    wallets: Array<{ chainId: number; address: string }>;
+  }>;
+  contracts?: Array<{ supplierId: string; token: string; maxAmount: string; periodicity: string }>;
+};
+
 type ProposalRun = DaoProposalRpc & { transactionHash?: string };
 
 export function MandatePanel(props: {
@@ -1487,12 +1545,12 @@ export function MandatePanel(props: {
   onPreview: (preview: MandatePreview) => void;
   onError: (message: string) => void;
 }) {
+  const wallets = useWallets();
   const [role, setRole] = useState("researcher");
-  const [maxPerTx, setMaxPerTx] = useState("5000000");
-  const [budget, setBudget] = useState("6000000");
+  const [maxPerTx, setMaxPerTx] = useState("500");
+  const [budget, setBudget] = useState("5000");
   const [periodDays, setPeriodDays] = useState("30");
-  const [recipients, setRecipients] = useState("");
-  const [token, setToken] = useState("0x418A2b47911dE05e21688F7490195F5324B49474");
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [agentAccount, setAgentAccount] = useState("");
   const [signerId, setSignerId] = useState("");
   const [proposalHashes, setProposalHashes] = useState<string[]>([]);
@@ -1502,11 +1560,26 @@ export function MandatePanel(props: {
   const [proposalRuns, setProposalRuns] = useState<Record<string, ProposalRun>>({});
 
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [registry, setRegistry] = useState<MandateRegistry>({ suppliers: [], contracts: [] });
+  const budgetTokenAddress = registry.contracts?.[0]?.token ?? "";
   useEffect(() => {
-    void api<{ agents: AgentRow[] }>("/v1/console/agents")
-      .then((result) => setAgents(result.agents))
+    void Promise.all([
+      api<{ agents: AgentRow[] }>("/v1/console/agents"),
+      api<MandateRegistry>("/v1/console/registry"),
+    ])
+      .then(([agentResult, registryResult]) => {
+        setAgents(agentResult.agents);
+        setRegistry(registryResult);
+        if (agentResult.agents[0]) {
+          setAgentAccount((current) => current || agentResult.agents[0]!.nearAccountId);
+          setRole(agentResult.agents[0].role);
+        }
+      })
       .catch((cause: unknown) => props.onError(String(cause)));
   }, []);
+  useEffect(() => {
+    setSignerId(wallets.nearAccountId);
+  }, [wallets.nearAccountId]);
   async function refreshBudgetToken() {
     setBudgetTokenStatus(await api<BudgetTokenStatus>("/v1/console/treasury/budget-token"));
   }
@@ -1532,14 +1605,18 @@ export function MandatePanel(props: {
     };
   }, [props.preview, props.treasury.daoAccountId]);
   function mandateInput() {
+    const selectedSuppliers = registry.suppliers.filter((supplier) => selectedSupplierIds.includes(supplier.id));
+    const recipients = selectedSuppliers.flatMap((supplier) =>
+      supplier.wallets.filter((wallet) => wallet.chainId === 84532).map((wallet) => wallet.address)
+    );
     return {
       role,
       operations: ["pay"],
-      maxPerTx,
-      budget,
+      maxPerTx: parseUnits(maxPerTx || "0", 6).toString(),
+      budget: parseUnits(budget || "0", 6).toString(),
       periodDays: Number(periodDays),
-      recipients: recipients.split(",").map((value) => value.trim()).filter(Boolean),
-      token,
+      recipients,
+      token: budgetTokenAddress,
       ...(agentAccount
         ? {
             agent: {
@@ -1557,41 +1634,85 @@ export function MandatePanel(props: {
   return (
     <div className="stack">
       <p className="muted">
-        One YAML-like mandate compiles into three locks. The preview is deterministic; the server
-        prepares unsigned Trezu proposals and never signs.
+        Define the business mandate. MandateOS converts USDC values to six-decimal on-chain amounts and prepares unsigned DAO proposals.
       </p>
-      <div className="row wrap">
-        <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
-        <input placeholder="max per tx" value={maxPerTx} onChange={(event) => setMaxPerTx(event.target.value)} />
-        <input placeholder="budget" value={budget} onChange={(event) => setBudget(event.target.value)} />
-        <input placeholder="period days" value={periodDays} onChange={(event) => setPeriodDays(event.target.value)} />
+      <div className="business-form">
+        <label>
+          Agent
+          <select
+            value={agentAccount}
+            onChange={(event) => {
+              const accountId = event.target.value;
+              setAgentAccount(accountId);
+              const selected = agents.find((agent) => agent.nearAccountId === accountId);
+              if (selected) setRole(selected.role);
+            }}
+          >
+            {agents.length === 0 ? <option value="">Create an agent first</option> : null}
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.nearAccountId}>
+                {agent.name} · {agent.evmAddress ?? "0xAAA pending"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Role name
+          <input aria-label="Role name" value={role} onChange={(event) => setRole(event.target.value)} />
+        </label>
+        <label>
+          Maximum per payment (USDC)
+          <input aria-label="Maximum per payment in USDC" inputMode="decimal" value={maxPerTx} onChange={(event) => setMaxPerTx(event.target.value)} />
+        </label>
+        <label>
+          Monthly budget (USDC)
+          <input aria-label="Monthly budget in USDC" inputMode="decimal" value={budget} onChange={(event) => setBudget(event.target.value)} />
+        </label>
+        <label>
+          Period
+          <select value={periodDays} onChange={(event) => setPeriodDays(event.target.value)}>
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </label>
       </div>
-      <input placeholder="recipient 0x…, comma separated" value={recipients} onChange={(event) => setRecipients(event.target.value)} />
-      <input placeholder="token 0x…" value={token} onChange={(event) => setToken(event.target.value)} />
-      <div className="row wrap">
-        <select
-          value={agentAccount}
-          onChange={(event) => {
-            const accountId = event.target.value;
-            setAgentAccount(accountId);
-            const selected = agents.find((agent) => agent.nearAccountId === accountId);
-            if (selected) setRole(selected.role);
-          }}
-        >
-          <option value="">No agent</option>
-          {agents.map((agent) => (
-            <option key={agent.id} value={agent.nearAccountId}>
-              {agent.name} · {agent.evmAddress ?? "0xAAA not derived"}
-            </option>
-          ))}
-        </select>
+      <fieldset className="supplier-picker">
+        <legend>Allowed suppliers</legend>
+        {registry.suppliers.map((supplier) => {
+          const payable = supplier.wallets.some((wallet) => wallet.chainId === 84532);
+          return (
+            <label key={supplier.id} className={!payable ? "disabled" : ""}>
+              <input
+                type="checkbox"
+                disabled={!payable}
+                checked={selectedSupplierIds.includes(supplier.id)}
+                onChange={(event) => setSelectedSupplierIds((current) =>
+                  event.target.checked
+                    ? [...current, supplier.id]
+                    : current.filter((id) => id !== supplier.id)
+                )}
+              />
+              <span><strong>{supplier.name}</strong><small>{payable ? "Base wallet registered" : "No Base wallet"}</small></span>
+            </label>
+          );
+        })}
+        {registry.suppliers.length === 0 ? <div className="state">Add and approve a supplier in Settings first.</div> : null}
+      </fieldset>
+      <div className="mandate-summary">
+        <strong>Mandate summary</strong>
+        <p>
+          {agents.find((agent) => agent.nearAccountId === agentAccount)?.name ?? "The selected agent"} can pay {registry.suppliers
+            .filter((supplier) => selectedSupplierIds.includes(supplier.id))
+            .map((supplier) => supplier.name)
+            .join(", ") || "selected suppliers"} up to {maxPerTx || "0"} USDC per payment and {budget || "0"} USDC every {periodDays} days.
+        </p>
       </div>
-      <div className="row">
-        <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
-        <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
-          Use connected NEAR account
-        </button>
+      <div className="wallet-signing-context">
+        <span>DAO signatures</span>
+        <strong>{signerId || "Connect a NEAR wallet in the global wallet bar"}</strong>
       </div>
+      {demoWalletsEnabled() ? (
       <div className="step">
         <h3>Budget token (UAT)</h3>
         <p className="muted small">
@@ -1621,7 +1742,7 @@ export function MandatePanel(props: {
               try {
                 const plan = await api<BudgetTokenPlan>("/v1/console/treasury/budget-token/plan", {
                   method: "POST",
-                  body: JSON.stringify({ amount: budget }),
+                  body: JSON.stringify({ amount: parseUnits(budget || "0", 6).toString() }),
                 });
                 const hashes = await signNearFunctionCalls(signerId, plan.actions);
                 setBudgetTokenHashes(hashes);
@@ -1638,9 +1759,10 @@ export function MandatePanel(props: {
         </button>
         {budgetTokenHashes.length > 0 ? <pre>{budgetTokenHashes.join("\n")}</pre> : null}
       </div>
+      ) : null}
       <button
         className="primary"
-        disabled={busy}
+        disabled={busy || !agentAccount || selectedSupplierIds.length === 0 || !budgetTokenAddress}
         onClick={() => {
           void (async () => {
             setBusy(true);
@@ -1658,7 +1780,7 @@ export function MandatePanel(props: {
           })();
         }}
       >
-        {busy ? "Compiling…" : "Preview mandate"}
+        {busy ? "Compiling…" : "Review mandate"}
       </button>
 
       {props.preview ? (

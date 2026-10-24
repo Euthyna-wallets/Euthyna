@@ -98,7 +98,7 @@ export interface AuthGateway {
   listMembers(organizationId: string): Promise<MemberView[]>;
   addMember(
     organizationId: string,
-    input: { name: string; nearAccountId: string; evmAddress: string },
+    input: { name: string; email?: string | undefined; nearAccountId?: string | undefined; evmAddress?: string | undefined },
   ): Promise<MemberView>;
   setMemberWallets(
     organizationId: string,
@@ -391,7 +391,7 @@ export class BetterAuthGateway implements AuthGateway {
 
   async addMember(
     organizationId: string,
-    input: { name: string; nearAccountId: string; evmAddress: string },
+    input: { name: string; email?: string | undefined; nearAccountId?: string | undefined; evmAddress?: string | undefined },
   ): Promise<MemberView> {
     const userId = randomUUID();
     const memberId = randomUUID();
@@ -400,7 +400,7 @@ export class BetterAuthGateway implements AuthGateway {
         data: {
           id: userId,
           name: input.name,
-          email: `member-${userId}@members.mandateos.invalid`,
+          email: input.email?.trim().toLowerCase() ?? `member-${userId}@members.mandateos.invalid`,
           emailVerified: false,
         },
       }),
@@ -410,8 +410,8 @@ export class BetterAuthGateway implements AuthGateway {
           organizationId,
           userId,
           role: "member",
-          nearAccountId: input.nearAccountId,
-          evmAddress: getAddress(input.evmAddress),
+          nearAccountId: input.nearAccountId ?? null,
+          evmAddress: input.evmAddress ? getAddress(input.evmAddress) : null,
           walletProofClaimable: true,
           createdAt: new Date(),
         },

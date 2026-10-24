@@ -122,8 +122,11 @@ const evmAddressSchema = z
 
 const addMemberSchema = z.object({
   name: z.string().min(1).max(120),
-  nearAccountId: nearAccountSchema,
-  evmAddress: evmAddressSchema,
+  email: z.string().email().optional(),
+  nearAccountId: nearAccountSchema.optional(),
+  evmAddress: evmAddressSchema.optional(),
+}).refine((input) => Boolean(input.nearAccountId) === Boolean(input.evmAddress), {
+  message: "nearAccountId and evmAddress must be provided together",
 });
 
 const walletsSchema = z.object({

@@ -39,6 +39,7 @@ const schema = z.object({
   BASE_TX_GAS_LIMIT_CAP: z.string().regex(/^[1-9]\d*$/).default("300000"),
   BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000000"),
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
+  GOVERNANCE_MAX_FEE_FLOOR_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
 });
 
@@ -53,6 +54,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
   if (BigInt(parsed.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
     throw new Error("BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
+  }
+  if (BigInt(parsed.GOVERNANCE_MAX_FEE_FLOOR_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
+    throw new Error("GOVERNANCE_MAX_FEE_FLOOR_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
   }
   return {
     ...parsed,

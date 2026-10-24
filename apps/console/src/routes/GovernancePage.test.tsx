@@ -33,6 +33,18 @@ vi.mock("../wallets.js", () => ({
 vi.mock("../lib/wallet-store.js", () => ({
   demoWalletsEnabled: () => false,
 }));
+vi.mock("../lib/wallet-context.js", () => ({
+  useWallets: () => ({
+    nearAccountId: "alice.testnet",
+    evmAddress: "",
+    nearConnected: true,
+    evmConnected: false,
+    connecting: null,
+    connectNear: vi.fn(),
+    connectEvm: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
 
 import { GovernancePage } from "./GovernancePage.js";
 
@@ -156,7 +168,6 @@ describe("GovernancePage", () => {
     render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
 
     await waitFor(() => expect(screen.getByText("Underpriced", { selector: "strong" })).toBeTruthy());
-    fireEvent.change(screen.getByPlaceholderText("your NEAR account"), { target: { value: "alice.testnet" } });
     fireEvent.click(screen.getByRole("button", { name: "Propose cancellation" }));
     await waitFor(() => expect(mocks.signDaoProposal).toHaveBeenCalledWith(
       "alice.testnet",
@@ -182,7 +193,6 @@ describe("GovernancePage", () => {
     render(<QueryClientProvider client={client}><GovernancePage /></QueryClientProvider>);
 
     await waitFor(() => expect(screen.getByText("Relay blocked by this terminal operation.")).toBeTruthy());
-    fireEvent.change(screen.getByPlaceholderText("your NEAR account"), { target: { value: "alice.testnet" } });
     fireEvent.click(screen.getByRole("button", { name: "Propose relay unblock" }));
     await waitFor(() => expect(mocks.signDaoProposal).toHaveBeenCalledWith(
       "alice.testnet",

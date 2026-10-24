@@ -25,9 +25,19 @@ describe("Base gas cap configuration", () => {
       ...required,
       BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: "10",
       BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: "10",
+      GOVERNANCE_MAX_FEE_FLOOR_WEI: "10",
     })).toMatchObject({
       BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: "10",
       BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: "10",
     });
+  });
+
+  it("rejects a governance floor above the max fee cap", () => {
+    expect(() => loadEnv({
+      ...required,
+      BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: "10",
+      BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: "1",
+      GOVERNANCE_MAX_FEE_FLOOR_WEI: "11",
+    })).toThrow("GOVERNANCE_MAX_FEE_FLOOR_WEI");
   });
 });

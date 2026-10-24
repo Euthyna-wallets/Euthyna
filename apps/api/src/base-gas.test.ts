@@ -42,6 +42,17 @@ describe("BaseGasEstimator", () => {
     });
   });
 
+  it("uses a 10x multiplier and floor for long-lived governance votes", async () => {
+    const estimator = new BaseGasEstimator(gateway(), { ...caps, maxFeePerGas: 1_000n });
+    await expect(estimator.quote(
+      { from: sender, to: target, data: "0x1234" },
+      { baseFeeMultiplier: 10n, maxFeeFloor: 200n },
+    )).resolves.toMatchObject({
+      maxFeePerGas: 200n,
+      maxPriorityFeePerGas: 3n,
+    });
+  });
+
   it("reports an insufficient sender balance including the Base L1 fee", async () => {
     const estimator = new BaseGasEstimator(gateway({ balance: async () => 4_339n }), caps);
     await expect(estimator.quote({ from: sender, to: target, data: "0x1234" }))

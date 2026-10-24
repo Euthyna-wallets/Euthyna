@@ -102,10 +102,13 @@ export class WalletProofService implements WalletProofGateway {
     }
 
     const evmAddress = getAddress(input.evmAddress);
-    if (member.walletProofClaimable) {
-      if (member.nearAccountId !== input.nearAccountId || getAddress(member.evmAddress ?? "") !== evmAddress) {
-        throw new WalletProofError(422, "declared_wallet_mismatch", "proof wallets do not match the admin declaration");
-      }
+    if (
+      member.walletProofClaimable &&
+      member.nearAccountId !== null &&
+      member.evmAddress !== null &&
+      (member.nearAccountId !== input.nearAccountId || getAddress(member.evmAddress) !== evmAddress)
+    ) {
+      throw new WalletProofError(422, "declared_wallet_mismatch", "proof wallets do not match the admin declaration");
     }
 
     const id = randomUUID();
@@ -247,8 +250,8 @@ export class WalletProofService implements WalletProofGateway {
         where: { id: fresh.member.id },
         data: {
           userId,
-          nearAccountId: fresh.nearAccountId,
-          evmAddress: fresh.evmAddress,
+          nearAccountId: challenge.nearAccountId,
+          evmAddress: challenge.evmAddress,
           walletProofClaimable: false,
           walletProofVerifiedAt: new Date(),
           walletProofMessage: fresh.message,

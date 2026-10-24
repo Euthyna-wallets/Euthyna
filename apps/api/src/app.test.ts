@@ -636,6 +636,17 @@ describe("members", () => {
     expect(await response.json()).toMatchObject({ nearAccountId: "alice.testnet", name: "Alice" });
   });
 
+  it("invites a member by email without requiring wallet re-entry by the founder", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/members", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ name: "Bob", email: "bob@example.test" }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ name: "Bob" });
+  });
+
   it("normalizes annotated wallet values", async () => {
     const { app } = testApp();
     const response = await app.request("/v1/console/members", {

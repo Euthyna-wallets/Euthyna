@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 
 import { authClient } from "./auth.js";
 import { Layout } from "./components/Layout.js";
@@ -15,9 +15,11 @@ import { OverviewPage } from "./routes/OverviewPage.js";
 import { PaymentDetailPage } from "./routes/PaymentDetailPage.js";
 import { PaymentsPage } from "./routes/PaymentsPage.js";
 import { SuppliersPage } from "./routes/SuppliersPage.js";
+import { SettingsPage } from "./routes/SettingsPage.js";
 
 function Gate() {
   const session = authClient.useSession();
+  const location = useLocation();
   const organizations = useQuery({
     queryKey: ["organizations"],
     queryFn: async () => (await authClient.organization.list()).data as Array<{ id: string }> | null,
@@ -27,7 +29,9 @@ function Gate() {
   if (!session.data) return <SignIn />;
   if (organizations.isLoading) return <div className="state">Loading organization…</div>;
   if (organizations.error) return <div className="state error">Error: {organizations.error.message}</div>;
-  if (!organizations.data?.length) return <Navigate to="/onboarding" replace />;
+  if (!organizations.data?.length && location.pathname !== "/onboarding") {
+    return <Navigate to="/onboarding" replace />;
+  }
   return <Outlet />;
 }
 
@@ -36,18 +40,19 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/onboarding" element={<OnboardingPage />} />
           <Route element={<Gate />}>
             <Route element={<Layout />}>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/agents/:id" element={<AgentDetailPage />} />
+              <Route path="/mandate" element={<MandatePage />} />
               <Route path="/payments" element={<PaymentsPage />} />
               <Route path="/payments/:opId" element={<PaymentDetailPage />} />
-              <Route path="/escalations" element={<EscalationsPage />} />
-              <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/governance" element={<GovernancePage />} />
-              <Route path="/mandate" element={<MandatePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/suppliers" element={<SuppliersPage />} />
+              <Route path="/escalations" element={<EscalationsPage />} />
+              <Route path="/onboarding" element={<OnboardingPage />} />
             </Route>
           </Route>
         </Routes>

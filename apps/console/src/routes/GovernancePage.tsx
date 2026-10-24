@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api, type TreasuryView } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
@@ -10,8 +10,10 @@ import {
   type SafeBatch,
   type SafeBatchSignature,
 } from "../safe.js";
-import { nearAccounts, readDaoProposalRpc, signDaoProposal, signDaoVote } from "../wallets.js";
+import { readDaoProposalRpc, signDaoProposal, signDaoVote } from "../wallets.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
+import { approvalCount, proposalEffect, relayAction } from "../lib/governance-view.js";
+import { useWallets } from "../lib/wallet-context.js";
 
 interface GovernanceOperation {
   opId: string;
@@ -58,18 +60,6 @@ interface GovernanceProposal {
   warnings: string[];
 }
 
-function relayAction(kind: unknown, relayAccountId: string | undefined): "propose" | "cancel_nonce" | null {
-  if (!relayAccountId || !kind || typeof kind !== "object" || !("FunctionCall" in kind)) return null;
-  const functionCall = kind.FunctionCall;
-  if (!functionCall || typeof functionCall !== "object") return null;
-  if (!("receiver_id" in functionCall) || functionCall.receiver_id !== relayAccountId) return null;
-  if (!("actions" in functionCall) || !Array.isArray(functionCall.actions) || functionCall.actions.length !== 1) return null;
-  const action = functionCall.actions[0];
-  if (!action || typeof action !== "object" || !("method_name" in action)) return null;
-  return action.method_name === "propose" || action.method_name === "cancel_nonce"
-    ? action.method_name
-    : null;
-}
 
 function timelineState(operation: GovernanceOperation): Array<{ label: string; done: boolean }> {
   const terminal = ["Executed", "Vetoed", "Expired", "Failed", "Confirmed"].includes(operation.state);
@@ -83,6 +73,7 @@ function timelineState(operation: GovernanceOperation): Array<{ label: string; d
 }
 
 export function GovernancePage() {
+  const wallets = useWallets();
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["governance"],
@@ -97,6 +88,11 @@ export function GovernancePage() {
   const [vetoes, setVetoes] = useState<Record<string, VetoState>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const showAdvanced = demoWalletsEnabled() || new URLSearchParams(window.location.search).get("advanced") === "1";
+
+  useEffect(() => {
+    setSigner(wallets.nearAccountId);
+  }, [wallets.nearAccountId]);
 
   async function prepareVeto(operation: GovernanceOperation): Promise<VetoState> {
     const treasury = query.data?.treasury;
@@ -266,12 +262,11 @@ export function GovernancePage() {
           </table>
         ) : <div className="state">No Delay information.</div>}
       </Card>
-          <div className="row">
-            <input placeholder="your NEAR account" value={signer} onChange={(event) => setSigner(event.target.value)} />
-            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSigner(accounts[0] ?? ""))}>
-              Use connected NEAR account
-            </button>
-          </div>
+      <div className="wallet-signing-context">
+        <span>DAO signatures</span>
+        <strong>{signer || "Connect a NEAR wallet in the global wallet bar"}</strong>
+      </div>
+      {showAdvanced ? (
       <Card title="Safe owner recovery through relay + Delay">
         <p className="muted">Creates an unsigned DAO proposal. The relay must be idle; council votes remain required.</p>
         <div className="row wrap">
@@ -296,6 +291,7 @@ export function GovernancePage() {
           </button>
         </div>
       </Card>
+      ) : null}
       <Card title="Governance operations">
         <PageState loading={query.isLoading} error={query.error} empty={query.data?.operations.length === 0}>
           <div className="stack">
@@ -401,16 +397,26 @@ export function GovernancePage() {
       <Card title="DAO proposals">
         <PageState loading={query.isLoading} error={query.error} empty={query.data?.proposals.length === 0}>
           <table>
-            <thead><tr><th>ID</th><th>Description</th><th>Status</th><th>Votes</th><th /></tr></thead>
+            <thead><tr><th>Proposal</th><th>Effect</th><th>Status</th><th>Approvals</th><th /></tr></thead>
             <tbody>
-              {(query.data?.proposals ?? []).map((proposal) => (
+              {(query.data?.proposals ?? []).map((proposal) => {
+                const approvals = approvalCount(proposal.votes);
+                const threshold = Number(query.data?.delay?.safeThreshold ?? 2);
+                const alreadyVoted = Boolean(signer && proposal.votes?.[signer]);
+                return (
                 <tr key={proposal.id}>
-                  <td>{proposal.id}</td>
-                  <td>{proposal.description ?? "—"}</td>
-                  <td>{String(proposal.status ?? "—")}</td>
-                  <td className="mono small">{JSON.stringify(proposal.votes ?? {})}</td>
+                  <td>#{proposal.id}</td>
                   <td>
-                    <button className="ghost" disabled={!signer} onClick={() => {
+                    <strong>{proposalEffect({ ...proposal, relayAccountId: query.data?.treasury?.relayAccountId })}</strong>
+                    <details><summary>Technical details</summary><code>{proposal.description ?? "—"}</code></details>
+                  </td>
+                  <td><Status value={String(proposal.status ?? "Unknown")} /></td>
+                  <td>{approvals}/{threshold} approvals</td>
+                  <td>
+                    <button
+                      className="primary"
+                      disabled={!signer || alreadyVoted || proposal.status !== "InProgress"}
+                      onClick={() => {
                       void signDaoVote(signer, query.data?.daoAccountId ?? "", proposal.id, proposal.kind)
                         .then(async (hash) => {
                           const refreshed = await readDaoProposalRpc(
@@ -434,10 +440,14 @@ export function GovernancePage() {
                           await client.invalidateQueries({ queryKey: ["governance"] });
                         })
                         .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
-                    }}>Vote</button>
+                      }}
+                    >
+                      {alreadyVoted ? "Signed" : "Approve"}
+                    </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {hashes.length ? <pre>{hashes.join("\n")}</pre> : null}

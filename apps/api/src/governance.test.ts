@@ -195,6 +195,7 @@ function fixture(
         }),
         currentBaseFee: async () => 30_000_000_000n,
       },
+      governanceMaxFeeFloor: 100_000_000n,
       safeOwnersReader: async () => owners,
     }),
     stored: () => stored,

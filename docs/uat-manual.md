@@ -34,14 +34,17 @@ MetaMask : ajouter le réseau Base Sepolia (chain id `84532`, RPC
    adresses EVM via MetaMask/Rabby. Aucune clé privée ne doit apparaître dans
    `localStorage`.
 3. Ouvrir `http://localhost:5173`, saisir nom + email et créer la passkey.
-4. Créer l'entreprise.
-5. Ajouter Alice et Bob avec leurs comptes NEAR/EVM publics. Ils apparaissent
-   `pending` et ne comptent pas encore dans le council.
+4. Dans la barre wallet globale, connecter une fois le compte NEAR et l'adresse
+   EVM du profil. Les adresses publiques sont mémorisées par utilisateur et
+   réutilisées pour chaque signature.
+5. Créer l'entreprise puis inviter Alice et Bob par email, sans saisir leurs
+   comptes.
 6. Chaque membre ouvre son lien `/onboarding?member=<id>`, se connecte avec sa
-   passkey, puis signe le même défi avec son wallet NEAR (NEP-413) et son wallet
-   EVM (EIP-191).
-7. Vérifier que chaque ligne affiche `proved`. Aucun compte NEAR n'est encore
-   créé ou financé.
+   passkey, connecte ses propres wallets dans la barre globale, puis utilise sa
+   boîte **À signer** pour produire NEP-413 + EIP-191.
+7. Vérifier que chaque ligne affiche `proved`. L'assistant conserve sa
+   progression à partir de l'état serveur/on-chain et reprend à la première
+   étape incomplète.
 
 Les commandes opérateur utilisent uniquement des signers chargés depuis le
 keychain. Ne jamais passer une clé privée en argument de CLI, afficher un
@@ -57,7 +60,8 @@ hors du plan et le seuil doit rester **2/3**.
 
 ## 2. Trésorerie
 
-1. Saisir le compte NEAR du fondateur, cliquer **Build plan**.
+1. La barre globale fournit automatiquement le compte NEAR du fondateur ;
+   cliquer **Build plan** sans le ressaisir.
 2. Vérifier la DAO `<slug>.factory-v2.mandateos.testnet`, les trois membres et le
    seuil absolu **2** affichés avant signature.
 3. Cocher la confirmation de policy et cliquer **Sign and create DAO**. En mode

@@ -118,8 +118,16 @@ class ViemBaseGasGateway implements BaseGasGateway {
 
 export class BaseGasEstimationError extends Error {}
 
+export interface BaseGasQuoteOptions {
+  baseFeeMultiplier?: bigint;
+  maxFeeFloor?: bigint;
+}
+
 export interface BaseGasQuoter {
-  quote(input: { from: string; to: string; data: Hex; value?: bigint }): Promise<BaseGasQuote>;
+  quote(
+    input: { from: string; to: string; data: Hex; value?: bigint },
+    options?: BaseGasQuoteOptions,
+  ): Promise<BaseGasQuote>;
   currentBaseFee(): Promise<bigint>;
 }
 
@@ -137,7 +145,10 @@ export class BaseGasEstimator implements BaseGasQuoter {
     return new BaseGasEstimator(new ViemBaseGasGateway(rpcUrl), caps);
   }
 
-  async quote(input: { from: string; to: string; data: Hex; value?: bigint }): Promise<BaseGasQuote> {
+  async quote(
+    input: { from: string; to: string; data: Hex; value?: bigint },
+    options: BaseGasQuoteOptions = {},
+  ): Promise<BaseGasQuote> {
     const transaction = {
       from: getAddress(input.from),
       to: getAddress(input.to),
@@ -160,7 +171,11 @@ export class BaseGasEstimator implements BaseGasQuoter {
     }
     const rewards = [...history.rewards].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
     const maxPriorityFeePerGas = rewards[Math.floor(rewards.length / 2)]!;
-    const maxFeePerGas = 3n * baseFeePerGas + maxPriorityFeePerGas;
+    const feeMultiplier = options.baseFeeMultiplier ?? 3n;
+    const computedMaxFee = feeMultiplier * baseFeePerGas + maxPriorityFeePerGas;
+    const maxFeePerGas = options.maxFeeFloor !== undefined && options.maxFeeFloor > computedMaxFee
+      ? options.maxFeeFloor
+      : computedMaxFee;
     const gasLimit = (estimatedGas * 130n + 99n) / 100n;
     if (gasLimit > this.caps.gasLimit) {
       throw new BaseGasEstimationError(`estimated gas ${gasLimit} exceeds cap ${this.caps.gasLimit}`);

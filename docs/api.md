@@ -326,18 +326,19 @@ Auth's own member listing does not expose these application-specific columns.
 
 ### `POST /v1/console/members`
 
-Admin only. Declares a pending wallet membership for the MVP. The declaration
-does not prove wallet control and is excluded from DAO council and Safe owners.
-The generated `/onboarding?member=<id>` claim link becomes effective only when
-the recipient signs the NEP-413 and EIP-191 challenge from a passkey session.
+Admin only. Creates a pending invitation from name + email; wallet fields are
+optional for backward compatibility. The invited member signs in with their own
+passkey, connects NEAR and EVM once in the global wallet bar, and the first
+valid dual-wallet challenge stores those public addresses. The declaration has
+no authority and remains outside DAO/Safe until both signatures verify.
 
 ```json
-{ "name": "Alice", "nearAccountId": "alice.testnet", "evmAddress": "0x..." }
+{ "name": "Alice", "email": "alice@example.com" }
 ```
 
-Both fields accept a pasted wallet label: only the first token is kept and a
-trailing `(...)` suffix is stripped, so `busyvideo615.testnet (*testnet)` is
-stored as `busyvideo615.testnet`. The EVM address is checksum-normalized.
+For legacy admin declarations, wallet fields still accept pasted labels: only
+the first token is kept and a trailing `(...)` suffix is stripped. The EVM
+address is checksum-normalized.
 
 ### `PATCH /v1/console/members/:id/wallets`
 
@@ -491,9 +492,10 @@ The funding proposal follows Sputnik DAO 2.3.1's exact `Transfer` shape:
 
 The console discovers deterministic proposal descriptions through direct NEAR
 RPC, then reads every `get_proposal` status. Steps are strictly ordered:
-`set_role → register_agent → funding → Zodiac`; a step remains disabled until
-the previous status is `Approved` (displayed as **Executed**). `Expired`,
-`Rejected`, and other terminal failures display **Re-propose**
+combined Vault `set_role + register_agent` → funding → relay derivation →
+Zodiac. A step remains disabled until the previous status is `Approved`
+(displayed as **Executed**). `Expired`, `Rejected`, and other terminal failures
+display **Re-propose**
 ([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
 [`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
 
@@ -553,7 +555,8 @@ the registered Safe whose selector is `swapOwner` or
 Before returning any relay proposal, the API estimates the exact
 `0xGOV → Delay.execTransactionFromModule(...)` call. `gasLimit` is
 `ceil(eth_estimateGas × 1.30)`, priority fee is the median of the p50 rewards
-returned by `eth_feeHistory`, and `maxFeePerGas = 3 × baseFee + priority`.
+returned by `eth_feeHistory`, and governance uses
+`maxFeePerGas = max(10 × baseFee + priority, GOVERNANCE_MAX_FEE_FLOOR_WEI)`.
 Estimation failure rejects the proposal before voting. The quote includes the
 OP Stack L1 data fee and checks that `0xGOV` covers
 `gasLimit × maxFeePerGas + l1Fee`; insufficient funding is returned as a
@@ -561,8 +564,10 @@ blocking console warning.
 
 Environment values are ceilings only:
 `BASE_TX_GAS_LIMIT_CAP`, `BASE_TX_MAX_FEE_PER_GAS_CAP_WEI`, and
-`BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI`. Startup rejects a priority cap
-above the max-fee cap.
+`BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI`. The governance floor defaults to
+`100000000` wei. Startup rejects a priority cap above the max-fee cap or a
+governance floor above that cap. Agent payment quotes deliberately remain at
+`3 × baseFee + priority`.
 
 The governance job shares the payment worker lease. It recovers a missing MPC
 signature from that NEAR transaction, broadcasts the immutable 0xGOV
