@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Hex } from "viem";
 
 import {
@@ -63,6 +63,7 @@ function record(overrides: Partial<WorkerOperationRecord> = {}): WorkerOperation
     opId,
     agentId: "agent-1",
     agentNearAccountId: "agent.testnet",
+    agentEvmAddress: null,
     vaultAccountId: "vault.testnet",
     reference: "INV-1",
     state: "PossiblySigned",
@@ -85,6 +86,7 @@ class FakeStore implements WorkerStore {
   leased = true;
   released: string[] = [];
   updates: WorkerOperationUpdate[] = [];
+  syncedAgentAddresses: string[] = [];
 
   constructor(readonly operation: WorkerOperationRecord) {}
 
@@ -103,6 +105,11 @@ class FakeStore implements WorkerStore {
     return Promise.resolve();
   }
 
+  syncAgentEvmAddress(_operation: WorkerOperationRecord, evmAddress: string): Promise<void> {
+    this.syncedAgentAddresses.push(evmAddress);
+    return Promise.resolve();
+  }
+
   releaseReference(_operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired"): Promise<void> {
     this.released.push(terminalState);
     this.operation.state = terminalState;
@@ -118,8 +125,13 @@ class FakeNear implements WorkerNearGateway {
   cancellationFees: Array<{ gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> = [];
   reportFailsAfterCommit = false;
   status: import("./near.js").NearTransactionStatus = {};
+  agentState: Record<string, unknown> = { active: false };
+  gasBalanceYocto = "100000000000000000000000";
 
   constructor(public operation: VaultOperation) {}
+  getAccount(): Promise<{ amount: string }> {
+    return Promise.resolve({ amount: this.gasBalanceYocto });
+  }
 
   getOperation(): Promise<VaultOperation> {
     return Promise.resolve(this.operation);
@@ -183,7 +195,7 @@ class FakeNear implements WorkerNearGateway {
 
   viewFunction<T>(_accountId: string, methodName: string): Promise<T> {
     if (methodName === "is_paused") return Promise.resolve(true as T);
-    if (methodName === "get_agent") return Promise.resolve({ active: false } as T);
+    if (methodName === "get_agent") return Promise.resolve(this.agentState as T);
     if (methodName === "get_role") {
       return Promise.resolve({
         config: {
@@ -230,6 +242,7 @@ const config: WorkerConfig = {
   retryBaseMs: 100,
   retryMaxMs: 10_000,
   cancellationSenderAccountId: "mandateos.testnet",
+  agentGasLowYocto: "50000000000000000000000",
 };
 
 function harness(overrides: Partial<VaultOperation> = {}) {
@@ -334,6 +347,13 @@ describe("OperationWorker", () => {
     expect(test.base.broadcasts).toEqual([[2, 1]]);
   });
 
+
+  it("synchronizes the derived 0xAAA while processing an operation", async () => {
+    const test = harness();
+    test.near.agentState = { active: true, evm_address: Array(20).fill(0x11) };
+    await test.createWorker().tick();
+    expect(test.store.syncedAgentAddresses).toEqual(["0x1111111111111111111111111111111111111111"]);
+  });
   it("requests and broadcasts a same-nonce cancellation, then releases only after on-chain confirmation", async () => {
     const test = harness({ signature: null, signed_transaction: null });
     test.near.blockHeight = 20;
@@ -370,6 +390,16 @@ describe("OperationWorker", () => {
     test.advance(1_000);
     await test.createWorker().tick();
     expect(test.store.released).toEqual(["Cancelled"]);
+  });
+
+  it("warns without blocking when the agent NEAR gas balance is low", async () => {
+    const test = harness();
+    test.near.gasBalanceYocto = "10000000000000000000000";
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await test.createWorker().tick();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"agent.gas_balance_low\""));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("send a simple NEAR transfer to agent.testnet"));
+    warning.mockRestore();
   });
 
   it("expires Prepared operations and releases their references", async () => {

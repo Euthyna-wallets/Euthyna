@@ -130,9 +130,38 @@ Safe accepte les signatures ECDSA `(r, s, v)` de ses owners humains 2/3 ([format
 | Safe ACME | Security council owner 2/3 | Détient les USDC ; owner de Roles et du Delay ; avatar/target des deux modules |
 | `0xINT` | Adresse dérivée de `(compte Vault, path Intents)` | Compte NEAR Intents dédié en Phase 2 ; aucune clé enregistrée |
 
-Une function-call key NEAR peut être limitée à un receiver et à une liste de méthodes ; elle ne donne pas un accès complet au compte ([documentation access keys][near-access-keys]). Le script ACME crée chaque clé agent côté client, n'envoie au service que la clé publique, puis limite la clé à `prepare`, `authorize` et `expire`.
+Une function-call key NEAR peut être limitée à un receiver et à une liste de méthodes ; elle ne donne pas un accès complet au compte ([documentation access keys][near-access-keys]). `mandateos agent init` génère la clé localement ; le relayer crée ensuite `<slug>-agent.<parent>` avec une unique clé limitée au Vault et à `prepare`, `authorize`, `cancel_nonce`, `request_derived_public_key` ([`packages/sdk/src/cli.ts`](./packages/sdk/src/cli.ts), [`apps/api/src/near.ts`](./apps/api/src/near.ts)). Son allowance est illimitée (`null`) afin que l'unique clé ne devienne pas inutilisable après épuisement d'une allowance finie ; la dépense reste bornée par le solde libre du compte. Ces quatre méthodes reçoivent un dépôt nul ; le Vault paie lui-même le yoctoNEAR de ses appels MPC.
 
 L'adresse dérivée dépend de l'identité du compte appelant le MPC et du path. Un agent qui appelle le MPC depuis son propre compte obtient donc une adresse différente de `0xAAA`, non assignée au rôle Zodiac ([Chain Signatures][chain-signatures]).
+
+## Server keys
+
+| Clé serveur | Périmètre autorisé | Incapacité structurelle |
+|---|---|---|
+| Guard ed25519 | Signer les visas et rapports sur des objets déjà engagés par le Vault | Ne peut ni appeler le Safe, ni choisir une transaction, ni dépasser Vault/Zodiac |
+| Relayer NEAR | Déployer les comptes sponsorisés, financer leur réserve gas, soumettre `report_status` et les récupérations `submit_signature` | N'obtient aucune clé sur Vault/relay/agent ; l'unique clé agent créée est celle fournie par le client et reste FunctionCall-only |
+| Gas wallet EVM | **Non introduit dans PR A** ; réservé au bloc C pour diffuser une tx déjà signée et appeler `Delay.executeNextTx` permissionless | Ne devra avoir aucun rôle Safe/Zodiac et aucune capacité de modification de policy |
+
+Le provisionnement est implémenté par une seule transaction
+`CreateAccount → Transfer → AddKey(FunctionCall)` ; l'API et le navigateur
+relisent ensuite `view_access_key_list` et exigent exactement une clé conforme,
+avec `allowance = null`
+([`apps/api/src/agent-provisioning.ts`](./apps/api/src/agent-provisioning.ts),
+[`apps/console/src/wallets.ts`](./apps/console/src/wallets.ts)). La fiche agent
+et le worker alertent sous `NEAR_AGENT_GAS_LOW_YOCTO` ; la résolution est un
+simple transfert NEAR au compte existant, sans changer sa clé
+([`apps/api/src/console-data.ts`](./apps/api/src/console-data.ts),
+[`apps/api/src/operation-worker.ts`](./apps/api/src/operation-worker.ts)).
+
+Après `set_role` puis `register_agent`, le SDK lit `get_agent`. Il appelle
+`request_derived_public_key` une seule fois si `evm_address` est vide, puis
+attend le callback avant `prepare`. Le test Sandbox sans dépôt a mesuré
+`6.306 Tgas`. Les mesures testnet sont `3.144851013726 Tgas` pour `prepare` et
+`14.311476888041 Tgas` pour `authorize`; le SDK attache respectivement `10` et
+`50 Tgas`, car `authorize` réserve aussi `15 Tgas` pour le MPC et `20 Tgas`
+pour son callback ([`packages/sdk/src/index.ts`](./packages/sdk/src/index.ts),
+[`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs),
+[`docs/api.md`](./docs/api.md)).
 
 ## Modèle multi-client et coût NEAR
 

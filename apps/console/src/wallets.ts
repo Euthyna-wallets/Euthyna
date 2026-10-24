@@ -6,8 +6,10 @@ import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
 import { createPublicClient, createWalletClient, custom, getAddress, http, type Address, type EIP1193Provider, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
 
-import type { NearAction, TreasuryPlan } from "./api.js";
+import type { BudgetTokenPlan, NearAction, TreasuryPlan } from "./api.js";
 import { demoWalletsEnabled, generatedEvmAccount, generatedNearWallet } from "./lib/wallet-store.js";
+export const DAO_VOTE_GAS = "450000000000000";
+
 
 interface WalletAction {
   type: string;
@@ -20,7 +22,7 @@ interface E2eNearWallet {
     signerId: string;
     receiverId: string;
     actions: WalletAction[];
-  }): Promise<{ transaction_outcome: { id: string } }>;
+  }): Promise<{ transaction_outcome: { id: string }; status?: { SuccessValue?: string } }>;
   signAndSendTransactions(input: {
     transactions: Array<{ signerId: string; receiverId: string; actions: WalletAction[] }>;
   }): Promise<Array<{ transaction_outcome: { id: string } }>>;
@@ -124,6 +126,14 @@ export async function nearAccounts(): Promise<string[]> {
   const selector = await nearSelector();
   return selector.store.getState().accounts.map((account) => account.accountId);
 }
+async function transactionWallet(): Promise<E2eNearWallet> {
+  const injected = e2eNear();
+  if (injected) return injected;
+  if (demoWalletsEnabled()) return generatedNear();
+  // Wallet Selector exposes the same transaction methods; the local interface also covers the E2E signer.
+  return (await nearSelector()).wallet() as unknown as E2eNearWallet;
+}
+
 
 export type WalletProofChallenge = {
   id: string;
@@ -295,34 +305,142 @@ export type DaoPolicyRpc = {
   factoryId: string | null;
 };
 
-async function nearRpc<T>(params: Record<string, unknown>): Promise<T> {
+async function nearRpcMethod<T>(method: string, params: unknown): Promise<T> {
   const response = await fetch(import.meta.env.VITE_NEAR_RPC_URL ?? "https://rpc.testnet.near.org", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "mandateos-browser",
-      method: "query",
-      params: { finality: "final", ...params },
-    }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos-browser", method, params }),
   });
   if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
   const payload = await response.json() as { result?: T; error?: { message?: string } };
-  if (payload.error) throw new Error(payload.error.message ?? "NEAR RPC query failed");
+  if (payload.error) throw new Error(payload.error.message ?? `NEAR RPC ${method} failed`);
   if (payload.result === undefined) throw new Error("NEAR RPC result missing");
   return payload.result;
 }
 
-async function nearView<T>(accountId: string, methodName: string): Promise<T> {
+async function nearRpc<T>(params: Record<string, unknown>): Promise<T> {
+  return nearRpcMethod<T>("query", { finality: "final", ...params });
+}
+
+async function nearView<T>(
+  accountId: string,
+  methodName: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
   const result = await nearRpc<{ result?: number[]; error?: string }>({
     request_type: "call_function",
     account_id: accountId,
     method_name: methodName,
-    args_base64: "e30=",
+    args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
   });
   if (result.error) throw new Error(result.error);
   if (!result.result) throw new Error("NEAR RPC view result missing");
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(result.result))) as T;
+}
+
+export type DaoProposalRpcState = "Not proposed" | "In progress" | "Executed" | "Failed" | "Expired";
+
+export type DaoProposalRpc = {
+  id: number;
+  description: string;
+  state: DaoProposalRpcState;
+  rawStatus: string;
+};
+
+function proposalState(status: string): DaoProposalRpcState {
+  if (status === "Approved") return "Executed";
+  if (status === "Expired") return "Expired";
+  if (status === "InProgress") return "In progress";
+  return "Failed";
+}
+
+export async function readDaoProposalRpc(daoAccountId: string, proposalId: number): Promise<DaoProposalRpc> {
+  const proposal = await nearView<{ id: number; description: string; status: string }>(
+    daoAccountId,
+    "get_proposal",
+    { id: proposalId },
+  );
+  return {
+    id: proposal.id,
+    description: proposal.description,
+    state: proposalState(proposal.status),
+    rawStatus: proposal.status,
+  };
+}
+
+export async function findDaoProposalsRpc(
+  daoAccountId: string,
+  descriptions: string[],
+): Promise<Record<string, DaoProposalRpc>> {
+  const lastProposalId = await nearView<number>(daoAccountId, "get_last_proposal_id");
+  const proposals = await nearView<Array<{ id: number; description: string; status: string }>>(
+    daoAccountId,
+    "get_proposals",
+    { from_index: Math.max(0, lastProposalId - 100), limit: 100 },
+  );
+  const expected = new Set(descriptions);
+  const matches: Record<string, DaoProposalRpc> = {};
+  for (const proposal of proposals) {
+    if (!expected.has(proposal.description)) continue;
+    matches[proposal.description] = {
+      id: proposal.id,
+      description: proposal.description,
+      state: proposalState(proposal.status),
+      rawStatus: proposal.status,
+    };
+  }
+  return matches;
+}
+
+export async function findDaoProposalRpc(
+  daoAccountId: string,
+  description: string,
+): Promise<DaoProposalRpc | null> {
+  const proposals = await findDaoProposalsRpc(daoAccountId, [description]);
+  return proposals[description] ?? null;
+}
+
+export type AgentAccessKeyRpcAttestation = {
+  valid: boolean;
+  checks: Array<{ label: string; expected: string; actual: string; ok: boolean }>;
+};
+
+export async function readAgentAccessKeyRpc(input: {
+  accountId: string;
+  publicKey: string;
+  vaultAccountId: string;
+  methodNames: string[];
+  allowanceYocto: null;
+}): Promise<AgentAccessKeyRpcAttestation> {
+  const result = await nearRpc<{ keys: unknown[] }>({
+    request_type: "view_access_key_list",
+    account_id: input.accountId,
+  });
+  const entry = result.keys.length === 1 && result.keys[0] && typeof result.keys[0] === "object"
+    ? result.keys[0] as { public_key?: unknown; access_key?: { permission?: unknown } }
+    : null;
+  const permission = entry?.access_key?.permission;
+  const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
+    ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
+    : null;
+  const methods = Array.isArray(functionCall?.method_names)
+    ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
+    : [];
+  const values: Array<[string, unknown, unknown]> = [
+    ["Access key count", 1, result.keys.length],
+    ["Public key", input.publicKey, entry?.public_key ?? null],
+    ["Permission", "FunctionCall", functionCall ? "FunctionCall" : permission === "FullAccess" ? "FullAccess" : "unknown"],
+    ["Receiver", input.vaultAccountId, functionCall?.receiver_id ?? null],
+    ["Methods", JSON.stringify([...input.methodNames].sort()), JSON.stringify(methods)],
+    ["Allowance", input.allowanceYocto, functionCall?.allowance ?? null],
+  ];
+  const checks = values.map(([label, expected, actual]) => ({
+    label,
+    expected: String(expected),
+    actual: String(actual),
+    ok: String(actual) === String(expected),
+  }));
+  return { valid: checks.every((check) => check.ok), checks };
 }
 
 export async function readDaoPolicyRpc(daoAccountId: string): Promise<DaoPolicyRpc> {
@@ -555,59 +673,95 @@ export async function waitForEvmTransaction(hash: Hex): Promise<void> {
 }
 
 
+export async function signNearFunctionCalls(
+  signerId: string,
+  calls: BudgetTokenPlan["actions"],
+): Promise<string[]> {
+  const wallet = await transactionWallet();
+  const hashes: string[] = [];
+  for (const call of calls) {
+    const outcome = await wallet.signAndSendTransaction({
+      signerId,
+      receiverId: call.receiverId,
+      actions: [{
+        type: "FunctionCall",
+        params: {
+          methodName: call.methodName,
+          args: call.args,
+          gas: call.gas,
+          deposit: call.deposit,
+        },
+      }],
+    });
+    hashes.push(outcome.transaction_outcome.id);
+  }
+  return hashes;
+}
+
+function decodeProposalId(successValue: string | undefined): number | null {
+  if (!successValue) return null;
+  const value = JSON.parse(Buffer.from(successValue, "base64").toString("utf8")) as unknown;
+  return Number.isInteger(value) ? Number(value) : null;
+}
+
+async function proposalIdFromTransaction(transactionHash: string, signerId: string): Promise<number> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const outcome = await nearRpcMethod<{ status?: { SuccessValue?: string } }>(
+        "tx",
+        [transactionHash, signerId],
+      );
+      const proposalId = decodeProposalId(outcome.status?.SuccessValue);
+      if (proposalId !== null) return proposalId;
+    } catch (cause) {
+      if (attempt === 9) throw cause;
+    }
+    const wait = Promise.withResolvers<void>();
+    setTimeout(wait.resolve, 1_000);
+    await wait.promise;
+  }
+  throw new Error("DAO proposal id was not returned by NEAR RPC");
+}
+
 export async function signDaoProposal(
   signerId: string,
   proposal: { receiverId: string; args: Record<string, unknown>; deposit: string },
-): Promise<string> {
-  const injected = e2eNear();
-  if (injected) {
-    const outcome = await injected.signAndSendTransaction({
-      signerId,
-      receiverId: proposal.receiverId,
-      actions: [
-        {
-          type: "FunctionCall",
-          params: {
-            methodName: "add_proposal",
-            args: proposal.args,
-            gas: "150000000000000",
-            deposit: proposal.deposit,
-          },
-        },
-      ],
-    });
-    return outcome.transaction_outcome.id;
-  }
-  const generated = await generatedNear();
-  const outcome = await generated.signAndSendTransaction({
+): Promise<{ transactionHash: string; proposalId: number }> {
+  const wallet = await transactionWallet();
+  const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: proposal.receiverId,
-    actions: [{ type: "FunctionCall", params: { methodName: "add_proposal", args: proposal.args, gas: "150000000000000", deposit: proposal.deposit } }],
+    actions: [{
+      type: "FunctionCall",
+      params: {
+        methodName: "add_proposal",
+        args: proposal.args,
+        gas: "150000000000000",
+        deposit: proposal.deposit,
+      },
+    }],
   });
-  return outcome.transaction_outcome.id;
+  const transactionHash = outcome.transaction_outcome.id;
+  const proposalId =
+    decodeProposalId(outcome.status?.SuccessValue) ??
+    await proposalIdFromTransaction(transactionHash, signerId);
+  return { transactionHash, proposalId };
 }
 
-
 export async function signDaoVote(signerId: string, daoAccountId: string, proposalId: number): Promise<string> {
-  const injected = e2eNear();
-  if (injected) {
-    const outcome = await injected.signAndSendTransaction({
-      signerId,
-      receiverId: daoAccountId,
-      actions: [
-        {
-          type: "FunctionCall",
-          params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" },
-        },
-      ],
-    });
-    return outcome.transaction_outcome.id;
-  }
-  const generated = await generatedNear();
-  const outcome = await generated.signAndSendTransaction({
+  const wallet = await transactionWallet();
+  const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: daoAccountId,
-    actions: [{ type: "FunctionCall", params: { methodName: "act_proposal", args: { id: proposalId, action: "VoteApprove" }, gas: "100000000000000", deposit: "0" } }],
+    actions: [{
+      type: "FunctionCall",
+      params: {
+        methodName: "act_proposal",
+        args: { id: proposalId, action: "VoteApprove" },
+        gas: DAO_VOTE_GAS,
+        deposit: "0",
+      },
+    }],
   });
   return outcome.transaction_outcome.id;
 }

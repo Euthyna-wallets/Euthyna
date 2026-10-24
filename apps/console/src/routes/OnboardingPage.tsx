@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { API_BASE, api, explorerBase, explorerNear, type MandatePreview, type TreasuryPlan, type TreasuryView } from "../api.js";
+import { API_BASE, api, explorerBase, explorerNear, type BudgetTokenPlan, type BudgetTokenStatus, type MandatePreview, type MandateProposal, type TreasuryPlan, type TreasuryView } from "../api.js";
 import { demoWalletsEnabled, generatedNearPublicKey, setGeneratedNearAccountId } from "../lib/wallet-store.js";
+import { formatToken } from "../lib/format.js";
 import {
   buildSafeBatch,
   executeSafeBatch,
@@ -15,16 +16,23 @@ import {
   connectNearWallet,
   disableFactoryAutoUpdate,
   evmAccounts,
+  findDaoProposalsRpc,
   evmWalletClient,
   nearAccounts,
+  readAgentAccessKeyRpc,
   readDaoPolicyRpc,
+  readDaoProposalRpc,
   readNearDeploymentRpc,
   sendEvmTransaction,
   signDaoProposal,
+  signDaoVote,
+  signNearFunctionCalls,
   signNearTransactions,
   signWalletProofChallenge,
   waitForEvmTransaction,
   type DaoPolicyRpc,
+  type DaoProposalRpc,
+  type AgentAccessKeyRpcAttestation,
   type NearDeploymentRpcAttestation,
   type WalletProofChallenge,
 } from "../wallets.js";
@@ -328,7 +336,7 @@ export function OnboardingPage() {
                   onError={setError}
                 />
                 {apiKey ? <pre className="secret">{apiKey}</pre> : null}
-                <AgentList treasury={treasury} onError={setError} />
+                <AgentList key={apiKey ?? "agents"} treasury={treasury} onError={setError} />
               </>
             ) : (
               <>
@@ -1273,7 +1281,6 @@ function AgentForm(props: {
   onError: (message: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [nearAccountId, setNearAccountId] = useState("");
   const [nearPublicKey, setNearPublicKey] = useState("");
   const [role, setRole] = useState("researcher");
 
@@ -1281,7 +1288,6 @@ function AgentForm(props: {
     <div className="stack">
       <div className="row wrap">
         <input placeholder="Agent name" value={name} onChange={(event) => setName(event.target.value)} />
-        <input placeholder="agent.testnet" value={nearAccountId} onChange={(event) => setNearAccountId(event.target.value)} />
         <input placeholder="ed25519:…" value={nearPublicKey} onChange={(event) => setNearPublicKey(event.target.value)} />
         <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
         <button
@@ -1294,7 +1300,6 @@ function AgentForm(props: {
                   body: JSON.stringify({
                     name,
                     role,
-                    nearAccountId,
                     nearPublicKey,
                     vaultAccountId: props.treasury.vaultAccountId,
                     mpcPath: `agents/${role}/base`,
@@ -1311,12 +1316,30 @@ function AgentForm(props: {
         </button>
       </div>
       <div className="muted small">
-        The agent's NEAR function-call private key stays in the SDK/MCP client. Only the public key is sent.
+        Run <code>mandateos agent init --name "{name || "Compta Bot"}"</code>, then paste only
+        the generated public key. MandateOS derives the account id and never receives the private key.
       </div>
     </div>
   );
 }
 
+
+function orderedMandateProposals(preview: MandatePreview): MandateProposal[] {
+  return [
+    preview.proposals.vaultSetRole,
+    preview.proposals.vaultRegisterAgent,
+    preview.proposals.funding,
+    ...preview.proposals.zodiacRelay,
+  ].filter((proposal): proposal is MandateProposal => proposal !== null);
+}
+
+function onChainProposalDescription(proposal: MandateProposal): string {
+  const value = (proposal.args.proposal as { description?: unknown } | undefined)?.description;
+  if (typeof value !== "string") throw new Error("DAO proposal description missing");
+  return value;
+}
+
+type ProposalRun = DaoProposalRpc & { transactionHash?: string };
 
 export function MandatePanel(props: {
   treasury: TreasuryView;
@@ -1331,10 +1354,48 @@ export function MandatePanel(props: {
   const [recipients, setRecipients] = useState("");
   const [token, setToken] = useState("0x418A2b47911dE05e21688F7490195F5324B49474");
   const [agentAccount, setAgentAccount] = useState("");
-  const [agentEvm, setAgentEvm] = useState("");
   const [signerId, setSignerId] = useState("");
   const [proposalHashes, setProposalHashes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [budgetTokenStatus, setBudgetTokenStatus] = useState<BudgetTokenStatus | null>(null);
+  const [budgetTokenHashes, setBudgetTokenHashes] = useState<string[]>([]);
+  const [proposalRuns, setProposalRuns] = useState<Record<string, ProposalRun>>({});
+
+  const [agents, setAgents] = useState<AgentRow[]>([]);
+  useEffect(() => {
+    void api<{ agents: AgentRow[] }>("/v1/console/agents")
+      .then((result) => setAgents(result.agents))
+      .catch((cause: unknown) => props.onError(String(cause)));
+  }, []);
+  async function refreshBudgetToken() {
+    setBudgetTokenStatus(await api<BudgetTokenStatus>("/v1/console/treasury/budget-token"));
+  }
+
+  useEffect(() => {
+    void refreshBudgetToken().catch((cause: unknown) => props.onError(String(cause)));
+  }, [props.treasury.daoAccountId]);
+  useEffect(() => {
+    if (!props.preview) {
+      setProposalRuns({});
+      return undefined;
+    }
+    let cancelled = false;
+    const descriptions = orderedMandateProposals(props.preview).map(onChainProposalDescription);
+    const refresh = async () => {
+      const runs = await findDaoProposalsRpc(props.treasury.daoAccountId, descriptions);
+      if (!cancelled) setProposalRuns(runs);
+    };
+    void refresh().catch((cause: unknown) => props.onError(String(cause)));
+    const interval = window.setInterval(() => {
+      void refresh().catch((cause: unknown) => props.onError(String(cause)));
+    }, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [props.preview, props.treasury.daoAccountId]);
+
+
 
   return (
     <div className="stack">
@@ -1351,8 +1412,70 @@ export function MandatePanel(props: {
       <input placeholder="recipient 0x…, comma separated" value={recipients} onChange={(event) => setRecipients(event.target.value)} />
       <input placeholder="token 0x…" value={token} onChange={(event) => setToken(event.target.value)} />
       <div className="row wrap">
-        <input placeholder="agent near account (optional)" value={agentAccount} onChange={(event) => setAgentAccount(event.target.value)} />
-        <input placeholder="agent EVM address (optional)" value={agentEvm} onChange={(event) => setAgentEvm(event.target.value)} />
+        <select
+          value={agentAccount}
+          onChange={(event) => {
+            const accountId = event.target.value;
+            setAgentAccount(accountId);
+            const selected = agents.find((agent) => agent.nearAccountId === accountId);
+            if (selected) setRole(selected.role);
+          }}
+        >
+          <option value="">No agent</option>
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.nearAccountId}>
+              {agent.name} · {agent.evmAddress ?? "0xAAA not derived"}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="row">
+        <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
+        <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
+          Use connected NEAR account
+        </button>
+      </div>
+      <div className="step">
+        <h3>Budget token (UAT)</h3>
+        <p className="muted small">
+          Test token only. Register the DAO and Vault for FT storage, then mint the mandate budget to the DAO.
+        </p>
+        {budgetTokenStatus ? (
+          <table>
+            <tbody>
+              <tr><td>Token</td><td className="mono">{budgetTokenStatus.tokenAccountId}</td></tr>
+              <tr><td>Decimals</td><td>{budgetTokenStatus.decimals} (USDC-compatible)</td></tr>
+              <tr><td>DAO storage</td><td>{budgetTokenStatus.daoStorageRegistered ? "registered" : "required"}</td></tr>
+              <tr><td>Vault storage</td><td>{budgetTokenStatus.vaultStorageRegistered ? "registered" : "required"}</td></tr>
+              <tr><td>DAO balance</td><td>{formatToken(budgetTokenStatus.daoBalance, budgetTokenStatus.decimals, budgetTokenStatus.symbol)}</td></tr>
+            </tbody>
+          </table>
+        ) : <div className="state">Reading test-token state…</div>}
+        <button
+          className="primary"
+          disabled={!signerId || busy || budgetTokenStatus?.decimals !== 6}
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                const plan = await api<BudgetTokenPlan>("/v1/console/treasury/budget-token/plan", {
+                  method: "POST",
+                  body: JSON.stringify({ amount: budget }),
+                });
+                const hashes = await signNearFunctionCalls(signerId, plan.actions);
+                setBudgetTokenHashes(hashes);
+                await refreshBudgetToken();
+              } catch (cause) {
+                props.onError(cause instanceof Error ? cause.message : String(cause));
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        >
+          Register storage and mint test budget
+        </button>
+        {budgetTokenHashes.length > 0 ? <pre>{budgetTokenHashes.join("\n")}</pre> : null}
       </div>
       <button
         className="primary"
@@ -1382,7 +1505,6 @@ export function MandatePanel(props: {
                         agent: {
                           nearAccountId: agentAccount,
                           mpcPath: `agents/${role}/base`,
-                          ...(agentEvm ? { evmAddress: agentEvm } : {}),
                         },
                       }
                     : {}),
@@ -1437,45 +1559,87 @@ export function MandatePanel(props: {
               <pre>{JSON.stringify(props.preview.guard, null, 2)}</pre>
             </div>
           </div>
-          <h3>Unsigned proposals</h3>
-          <div className="row">
-            <input placeholder="your NEAR council account" value={signerId} onChange={(event) => setSignerId(event.target.value)} />
-            <button className="ghost" onClick={() => void nearAccounts().then((accounts) => setSignerId(accounts[0] ?? "")).catch((cause) => props.onError(String(cause)))}>
-              Use connected NEAR account
-            </button>
-          </div>
+          <h3>Ordered DAO execution</h3>
           <div className="stack">
-            {[
-              props.preview.proposals.vaultSetRole,
-              props.preview.proposals.vaultRegisterAgent,
-              props.preview.proposals.funding,
-              ...props.preview.proposals.zodiacRelay,
-            ]
-              .filter((proposal): proposal is NonNullable<typeof proposal> => Boolean(proposal))
-              .map((proposal, index) => (
-                <div key={`${proposal.description}-${index}`} className="row">
-                  <span>{proposal.description}</span>
-                  <button
-                    className="primary"
-                    disabled={!signerId || busy}
-                    onClick={() => {
-                      void (async () => {
-                        setBusy(true);
-                        try {
-                          const hash = await signDaoProposal(signerId, proposal);
-                          setProposalHashes((current) => [...current, hash]);
-                        } catch (cause) {
-                          props.onError(cause instanceof Error ? cause.message : String(cause));
-                        } finally {
-                          setBusy(false);
-                        }
-                      })();
-                    }}
-                  >
-                    Sign with NEAR wallet
-                  </button>
+            {orderedMandateProposals(props.preview).map((proposal, index, proposals) => {
+              const description = onChainProposalDescription(proposal);
+              const run = proposalRuns[description];
+              const state = run?.state ?? "Not proposed";
+              const previousDescription = index > 0
+                ? onChainProposalDescription(proposals[index - 1]!)
+                : null;
+              const previousExecuted =
+                previousDescription === null ||
+                proposalRuns[previousDescription]?.state === "Executed";
+              const action =
+                state === "In progress"
+                  ? "Vote approve"
+                  : state === "Failed" || state === "Expired"
+                    ? "Re-propose"
+                    : "Propose";
+              return (
+                <div key={description} className="step">
+                  <div className="row wrap">
+                    <strong>{index + 1}. {proposal.description}</strong>
+                    <span className="pill">
+                      {state}{run ? ` · #${run.id} · ${run.rawStatus}` : ""}
+                    </span>
+                  </div>
+                  {!previousExecuted ? (
+                    <div className="muted small">Waiting for the previous proposal to be Executed on-chain.</div>
+                  ) : null}
+                  {state === "Failed" || state === "Expired" ? (
+                    <div className="alert error">Proposal {state.toLowerCase()}. Re-propose the same deterministic step.</div>
+                  ) : null}
+                  {state !== "Executed" ? (
+                    <button
+                      className="primary"
+                      disabled={!signerId || busy || !previousExecuted}
+                      onClick={() => {
+                        void (async () => {
+                          setBusy(true);
+                          try {
+                            if (state === "In progress" && run) {
+                              const transactionHash = await signDaoVote(
+                                signerId,
+                                props.treasury.daoAccountId,
+                                run.id,
+                              );
+                              const refreshed = await readDaoProposalRpc(props.treasury.daoAccountId, run.id);
+                              setProposalRuns((current) => ({
+                                ...current,
+                                [description]: { ...refreshed, transactionHash },
+                              }));
+                              setProposalHashes((current) => [...current, transactionHash]);
+                            } else {
+                              const submitted = await signDaoProposal(signerId, proposal);
+                              const refreshed = await readDaoProposalRpc(
+                                props.treasury.daoAccountId,
+                                submitted.proposalId,
+                              );
+                              setProposalRuns((current) => ({
+                                ...current,
+                                [description]: {
+                                  ...refreshed,
+                                  transactionHash: submitted.transactionHash,
+                                },
+                              }));
+                              setProposalHashes((current) => [...current, submitted.transactionHash]);
+                            }
+                          } catch (cause) {
+                            props.onError(cause instanceof Error ? cause.message : String(cause));
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      {action}
+                    </button>
+                  ) : null}
                 </div>
-              ))}
+              );
+            })}
           </div>
           {proposalHashes.length ? (
             <details>
@@ -1483,7 +1647,6 @@ export function MandatePanel(props: {
               <pre>{proposalHashes.join("\n")}</pre>
             </details>
           ) : null}
-          <pre>{JSON.stringify(props.preview.proposals, null, 2)}</pre>
         </>
       ) : null}
     </div>
@@ -1496,18 +1659,49 @@ type AgentRow = {
   name: string;
   role: string;
   nearAccountId: string;
+  nearPublicKey: string;
   evmAddress: string | null;
   active: boolean;
+};
+
+type AgentProvisioningView = {
+  status: string;
+  transactionHash: string | null;
+  confirmedAt?: string | null;
+  attestation: {
+    valid: boolean;
+    expected: {
+      accountId: string;
+      publicKey: string;
+      vaultAccountId: string;
+      methodNames: string[];
+      allowanceYocto: null;
+    };
+  } | null;
 };
 
 function AgentList(props: { treasury: TreasuryView; onError: (message: string) => void }) {
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [provisioning, setProvisioning] = useState<{
+    agentId: string;
+    server: AgentProvisioningView;
+    browser: AgentAccessKeyRpcAttestation;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
     const result = await api<{ agents: AgentRow[] }>("/v1/console/agents");
     setAgents(result.agents);
+  }
+
+  async function provision(agent: AgentRow) {
+    const server = await api<AgentProvisioningView>(`/v1/console/agents/${agent.id}/provision`, {
+      method: "POST",
+    });
+    if (!server.attestation) throw new Error("server access-key attestation missing");
+    const browser = await readAgentAccessKeyRpc(server.attestation.expected);
+    setProvisioning({ agentId: agent.id, server, browser });
   }
 
   useEffect(() => {
@@ -1521,40 +1715,104 @@ function AgentList(props: { treasury: TreasuryView; onError: (message: string) =
         <button className="ghost" onClick={() => void load().catch((cause) => props.onError(String(cause)))}>Refresh</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>EVM</th><th>Status</th><th /></tr></thead>
+        <thead><tr><th>Name</th><th>Role</th><th>NEAR</th><th>0xAAA</th><th>Status</th><th /></tr></thead>
         <tbody>
           {agents.map((agent) => (
             <tr key={agent.id}>
               <td>{agent.name}</td>
               <td>{agent.role}</td>
               <td>{agent.nearAccountId}</td>
-              <td>{agent.evmAddress ? short(agent.evmAddress) : "—"}</td>
+              <td>{agent.evmAddress ? short(agent.evmAddress) : "derive after register_agent"}</td>
               <td>{agent.active ? "active" : "revoked"}</td>
               <td>
-                <button
-                  className="ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        const result = await api<Record<string, unknown>>(`/v1/console/agents/${agent.id}`);
-                        setDetail(result);
-                      } catch (cause) {
-                        props.onError(cause instanceof Error ? cause.message : String(cause));
-                      } finally {
-                        setBusy(false);
-                      }
-                    })();
-                  }}
-                >
-                  On-chain state
-                </button>
+                <div className="row wrap">
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          await provision(agent);
+                        } catch (cause) {
+                          props.onError(cause instanceof Error ? cause.message : String(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Provision
+                  </button>
+                  <button
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          const result = await api<Record<string, unknown>>(`/v1/console/agents/${agent.id}`);
+                          setDetail(result);
+                          await load();
+                        } catch (cause) {
+                          props.onError(cause instanceof Error ? cause.message : String(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    On-chain state
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {provisioning ? (
+        <div className="stack">
+          <h3>Direct RPC access-key attestation</h3>
+          <table>
+            <thead><tr><th>Check</th><th>Expected</th><th>Observed</th><th>Status</th></tr></thead>
+            <tbody>
+              {provisioning.browser.checks.map((check) => (
+                <tr key={check.label}>
+                  <td>{check.label}</td>
+                  <td><code>{short(check.expected)}</code></td>
+                  <td><code>{short(check.actual)}</code></td>
+                  <td>{check.ok ? "match" : "MISMATCH"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button
+            className="primary"
+            disabled={busy || !provisioning.browser.valid}
+            onClick={() => {
+              void (async () => {
+                setBusy(true);
+                try {
+                  const confirmed = await api<AgentProvisioningView>(
+                    `/v1/console/agents/${provisioning.agentId}/provision-confirm`,
+                    { method: "POST" },
+                  );
+                  setProvisioning((current) => current ? ({ ...current, server: confirmed }) : current);
+                } catch (cause) {
+                  props.onError(cause instanceof Error ? cause.message : String(cause));
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            }}
+          >
+            Confirm restricted FunctionCall key
+          </button>
+          {provisioning.server.status === "confirmed" ? (
+            <div className="alert success">Agent provisioning confirmed by the admin.</div>
+          ) : null}
+        </div>
+      ) : null}
       {detail ? <pre>{JSON.stringify(detail, null, 2)}</pre> : null}
     </div>
   );

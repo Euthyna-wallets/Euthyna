@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 import type { PrismaClient } from "@mandateos/db";
 import { compilePaymentPermission, rolesAbi, type FlatCondition } from "@mandateos/deployer";
 import { encodeFunctionData, getAddress, type Address, type Hex } from "viem";
 
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { NearClient } from "./near.js";
 import { TreasuryError } from "./treasury.js";
 
@@ -33,6 +36,33 @@ export interface MandateProposal {
   args: Record<string, unknown>;
   deposit: string;
 }
+export interface BudgetTokenAction {
+  receiverId: string;
+  methodName: "storage_deposit" | "mint";
+  args: Record<string, unknown>;
+  gas: string;
+  deposit: string;
+  description: string;
+}
+
+export interface BudgetTokenStatus {
+  environment: string;
+  tokenAccountId: string;
+  symbol: string;
+  decimals: number;
+  daoAccountId: string;
+  vaultAccountId: string;
+  daoStorageRegistered: boolean;
+  vaultStorageRegistered: boolean;
+  daoBalance: string;
+  storageDepositYocto: string;
+}
+
+export interface BudgetTokenPlan {
+  status: BudgetTokenStatus;
+  actions: BudgetTokenAction[];
+}
+
 
 export interface MandatePreview {
   roleKey: Hex;
@@ -58,6 +88,8 @@ export interface MandatePreview {
 
 export interface MandateGateway {
   preview(organizationId: string, input: MandateInput): Promise<MandatePreview>;
+  budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus>;
+  budgetTokenPlan(organizationId: string, amount: string): Promise<BudgetTokenPlan>;
 }
 
 function roleConfig(input: MandateInput, rolesModifier: Address, token: Address) {
@@ -87,6 +119,7 @@ export class MandateService implements MandateGateway {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
+    private readonly budgetTokenAccountId = "test-ft.testnet",
   ) {}
 
   async preview(organizationId: string, input: MandateInput): Promise<MandatePreview> {
@@ -113,6 +146,7 @@ export class MandateService implements MandateGateway {
       throw new TreasuryError(409, "treasury_not_active", "treasury is pending DAO hardening");
     }
 
+    await this.assertBudgetTokenDecimals();
     const rolesModifier = getAddress(treasury.rolesAddress);
     const token = getAddress(input.token);
     const compiled = compilePaymentPermission({
@@ -124,6 +158,33 @@ export class MandateService implements MandateGateway {
       ...roleConfig(input, rolesModifier, token),
       role_key: Array.from(Buffer.from(compiled.roleKey.slice(2), "hex")),
     };
+    let resolvedAgentAddress: Address | null = null;
+    let storedAgent: { id: string; evmAddress: string | null } | null = null;
+    if (input.agent) {
+      storedAgent = await this.prisma.agent.findFirst({
+        where: { organizationId, nearAccountId: input.agent.nearAccountId, active: true },
+        select: { id: true, evmAddress: true },
+      });
+      if (storedAgent) {
+        const onChainAgent = await this.near.viewFunction<unknown>(
+          treasury.vaultAccountId,
+          "get_agent",
+          { agent: input.agent.nearAccountId },
+        );
+        const derivedAddress = onChainAgentEvmAddress(onChainAgent);
+        if (derivedAddress) {
+          resolvedAgentAddress = derivedAddress;
+          if (derivedAddress !== storedAgent.evmAddress) {
+            await this.prisma.agent.update({
+              where: { id: storedAgent.id },
+              data: { evmAddress: derivedAddress },
+            });
+          }
+        } else if (storedAgent.evmAddress) {
+          resolvedAgentAddress = getAddress(storedAgent.evmAddress);
+        }
+      }
+    }
     const current = await this.near.viewFunction<unknown>(treasury.vaultAccountId, "get_role", { role: input.role });
     const currentConfig =
       current && typeof current === "object" && "config" in current
@@ -142,15 +203,15 @@ export class MandateService implements MandateGateway {
       .map(([field, before, after]) => ({ field: String(field), current: before ?? null, next: after }));
 
     const zodiacCalls: Array<{ to: Address; data: Hex; description: string }> = [];
-    if (input.agent?.evmAddress) {
+    if (resolvedAgentAddress) {
       zodiacCalls.push({
         to: rolesModifier,
         data: encodeFunctionData({
           abi: rolesAbi,
           functionName: "assignRoles",
-          args: [input.agent.evmAddress, [compiled.roleKey], [true]],
+          args: [resolvedAgentAddress, [compiled.roleKey], [true]],
         }),
-        description: `Assign role ${input.role} to ${input.agent.evmAddress}`,
+        description: `Assign role ${input.role} to ${resolvedAgentAddress}`,
       });
     }
     zodiacCalls.push(
@@ -178,14 +239,26 @@ export class MandateService implements MandateGateway {
         description: `Set allowance ${input.budget} for ${input.role}`,
       },
     );
+    const stepDigest = (value: unknown) => createHash("sha256")
+      .update(JSON.stringify(value))
+      .digest("hex")
+      .slice(0, 12);
+    const setRoleDigest = stepDigest({ role: input.role, config });
+    const registerAgentDigest = stepDigest({ role: input.role, agent: input.agent ?? null });
+    const fundingDigest = stepDigest({
+      role: input.role,
+      amount: input.budget,
+      tokenId: this.budgetTokenAccountId,
+    });
+
 
     const vaultSetRole: MandateProposal = {
       receiverId: treasury.daoAccountId,
       methodName: "add_proposal",
-      description: `DAO proposal: Vault.set_role(${input.role})`,
+      description: `DAO proposal: Vault.set_role(${input.role}) [mandate:${setRoleDigest}:set-role]`,
       args: {
         proposal: {
-          description: `Set mandate ${input.role}`,
+          description: `Set mandate ${input.role} [mandate:${setRoleDigest}:set-role]`,
           kind: {
             FunctionCall: {
               receiver_id: treasury.vaultAccountId,
@@ -208,10 +281,10 @@ export class MandateService implements MandateGateway {
       ? {
           receiverId: treasury.daoAccountId,
           methodName: "add_proposal",
-          description: `DAO proposal: Vault.register_agent(${input.agent.nearAccountId})`,
+          description: `DAO proposal: Vault.register_agent(${input.agent.nearAccountId}) [mandate:${registerAgentDigest}:register-agent]`,
           args: {
             proposal: {
-              description: `Register agent ${input.agent.nearAccountId} as ${input.role}`,
+              description: `Register agent ${input.agent.nearAccountId} as ${input.role} [mandate:${registerAgentDigest}:register-agent]`,
               kind: {
                 FunctionCall: {
                   receiver_id: treasury.vaultAccountId,
@@ -235,13 +308,13 @@ export class MandateService implements MandateGateway {
         }
       : null;
 
-    const zodiacRelay: MandateProposal[] = zodiacCalls.map((call) => ({
+    const zodiacRelay: MandateProposal[] = zodiacCalls.map((call, index) => ({
       receiverId: treasury.daoAccountId,
       methodName: "add_proposal",
-      description: `DAO proposal: relay ${call.description}`,
+      description: `DAO proposal: relay ${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
       args: {
         proposal: {
-          description: call.description,
+          description: `${call.description} [mandate:${stepDigest({ to: call.to, data: call.data })}:zodiac-${index}]`,
           kind: {
             FunctionCall: {
               receiver_id: treasury.relayAccountId,
@@ -256,7 +329,7 @@ export class MandateService implements MandateGateway {
                     max_fee_per_gas: input.gas.maxFeePerGas,
                     max_priority_fee_per_gas: input.gas.maxPriorityFeePerGas,
                   }),
-                  gas: "300000000000000",
+                  gas: "60000000000000",
                   deposit: "0",
                 },
               ],
@@ -267,9 +340,9 @@ export class MandateService implements MandateGateway {
       deposit: "100000000000000000000000",
     }));
 
-    const agentStatus = !input.agent
+    const agentStatus = !input.agent || !storedAgent
       ? "no_agent"
-      : input.agent.evmAddress
+      : resolvedAgentAddress
         ? "ready"
         : "needs_agent_address";
 
@@ -303,15 +376,16 @@ export class MandateService implements MandateGateway {
             : {
                 receiverId: treasury.daoAccountId,
                 methodName: "add_proposal",
-                description: `DAO proposal: fund ${input.role} budget`,
+                description: `DAO proposal: fund ${input.role} budget [mandate:${fundingDigest}:funding]`,
                 args: {
                   proposal: {
-                    description: `Fund ${input.role} budget`,
+                    description: `Fund ${input.role} budget [mandate:${fundingDigest}:funding]`,
                     kind: {
                       Transfer: {
+                        token_id: this.budgetTokenAccountId,
                         receiver_id: treasury.vaultAccountId,
                         amount: input.budget,
-                        msg: JSON.stringify({ role: input.role, config }),
+                        msg: JSON.stringify({ role: input.role }),
                       },
                     },
                   },
@@ -328,4 +402,94 @@ export class MandateService implements MandateGateway {
       ],
     };
   }
+  async budgetTokenStatus(organizationId: string): Promise<BudgetTokenStatus> {
+    const treasury = await this.prisma.treasury.findUnique({
+      where: { organizationId_environment: { organizationId, environment: "uat" } },
+    });
+    if (!treasury) throw new TreasuryError(409, "treasury_missing", "register a treasury first");
+    if (treasury.environment !== "uat") {
+      throw new TreasuryError(400, "budget_mint_uat_only", "test budget token preparation is UAT-only");
+    }
+    const metadata = await this.assertBudgetTokenDecimals();
+    const [bounds, daoStorage, vaultStorage, daoBalance] = await Promise.all([
+      this.near.viewFunction<{ min: string }>(this.budgetTokenAccountId, "storage_balance_bounds"),
+      this.near.viewFunction<unknown>(this.budgetTokenAccountId, "storage_balance_of", {
+        account_id: treasury.daoAccountId,
+      }),
+      this.near.viewFunction<unknown>(this.budgetTokenAccountId, "storage_balance_of", {
+        account_id: treasury.vaultAccountId,
+      }),
+      this.near.viewFunction<string>(this.budgetTokenAccountId, "ft_balance_of", {
+        account_id: treasury.daoAccountId,
+      }),
+    ]);
+    return {
+      environment: treasury.environment,
+      tokenAccountId: this.budgetTokenAccountId,
+      symbol: metadata.symbol,
+      decimals: metadata.decimals,
+      daoAccountId: treasury.daoAccountId,
+      vaultAccountId: treasury.vaultAccountId,
+      daoStorageRegistered: daoStorage !== null,
+      vaultStorageRegistered: vaultStorage !== null,
+      daoBalance,
+      storageDepositYocto: bounds.min,
+    };
+  }
+
+  async budgetTokenPlan(organizationId: string, amount: string): Promise<BudgetTokenPlan> {
+    if (!/^[1-9]\d*$/.test(amount)) {
+      throw new TreasuryError(400, "invalid_budget_mint_amount", "mint amount must be a positive integer");
+    }
+    const status = await this.budgetTokenStatus(organizationId);
+    const actions: BudgetTokenAction[] = [];
+    if (!status.daoStorageRegistered) {
+      actions.push({
+        receiverId: status.tokenAccountId,
+        methodName: "storage_deposit",
+        args: { account_id: status.daoAccountId, registration_only: true },
+        gas: "30000000000000",
+        deposit: status.storageDepositYocto,
+        description: `Register DAO ${status.daoAccountId} on ${status.symbol}`,
+      });
+    }
+    if (!status.vaultStorageRegistered) {
+      actions.push({
+        receiverId: status.tokenAccountId,
+        methodName: "storage_deposit",
+        args: { account_id: status.vaultAccountId, registration_only: true },
+        gas: "30000000000000",
+        deposit: status.storageDepositYocto,
+        description: `Register Vault ${status.vaultAccountId} on ${status.symbol}`,
+      });
+    }
+    actions.push({
+      receiverId: status.tokenAccountId,
+      methodName: "mint",
+      args: { account_id: status.daoAccountId, amount },
+      gas: "30000000000000",
+      deposit: "0",
+      description: `Mint ${amount} ${status.symbol} to DAO (UAT test token)`,
+    });
+    return { status, actions };
+  }
+
+  private async assertBudgetTokenDecimals(): Promise<{ symbol: string; decimals: number }> {
+    const metadata = await this.near.viewFunction<{ symbol?: unknown; decimals?: unknown }>(
+      this.budgetTokenAccountId,
+      "ft_metadata",
+    );
+    if (metadata.decimals !== 6) {
+      throw new TreasuryError(
+        422,
+        "budget_token_decimals_mismatch",
+        `budget token ${this.budgetTokenAccountId} must use 6 decimals`,
+      );
+    }
+    return {
+      symbol: typeof metadata.symbol === "string" ? metadata.symbol : this.budgetTokenAccountId,
+      decimals: metadata.decimals,
+    };
+  }
+
 }

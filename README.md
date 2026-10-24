@@ -12,7 +12,7 @@ MandateOS assigns each agent a role, a budget, permitted assets, approved destin
 
 AI agents can prepare invoices, rebalance assets and move funds across chains. Giving such an agent a wallet key makes its prompt, dependencies and runtime part of the treasury security boundary. A prompt injection, compromised dependency or leaked credential can then become an unrestricted signing capability.
 
-MandateOS moves the limits outside the agent. The agent receives an API identity and a NEAR function-call key restricted to its client's Vault. The client generates that key locally. The agent never receives an EVM key. NEAR function-call keys can restrict a key to named methods on one receiver contract ([NEAR access keys][near-access-keys]).
+MandateOS moves the limits outside the agent. The agent receives an API identity and a NEAR function-call key restricted to its client's Vault. `mandateos agent init` generates that key locally; the relayer provisions the proposed account with no full-access key. The agent never receives an EVM key. NEAR function-call keys can restrict a key to named methods on one receiver contract ([NEAR access keys][near-access-keys]).
 
 ## A mandate
 
@@ -82,7 +82,7 @@ The current repository contains:
 - `apps/api` agent payments: `POST /v1/operations/pay` issues a visa/escalation/refusal, then the leased `worker.ts` recovers missed MPC callbacks, broadcasts exact raw transactions, follows receipts, sends `report_status`, requests governed same-nonce cancellation and releases references only after terminal Vault state;
 - `apps/api` agent detail: `/v1/console/agents/:id` merges the stored agent with the Vault `get_agent` / `next_evm_nonce` state shown in the console;
 - `apps/console`: normal signing through NEAR Wallet Selector and MetaMask/Rabby; explicit UAT demo mode may generate test-only keys in localStorage and displays a warning banner;
-- `packages/sdk`: client-side agent key storage and `prepare → visa → authorize`, automatic authorization-hash registration, status polling and agent-authorized `cancel_nonce`;
+- `packages/sdk`: `mandateos agent init`, local `0600` ed25519 key storage, Vault registration and one-shot `0xAAA` derivation, then `prepare → visa → authorize`, automatic authorization-hash registration, status polling and agent-authorized `cancel_nonce`;
 - `packages/mcp`: stdio MCP server exposing `pay`, `status` and `cancel` over the SDK;
 - `apps/demo-agent`: OpenAI-compatible LLM adapter wired to MCP, with nominal, changed-details, prompt-injection and direct-bypass scenarios;
 - `packages/deployer`: viem deployment/configuration scripts for Safe 1.4.1, Roles 2.1.1, Delay 1.1.1, governance wiring and veto, plus the browser-agnostic `buildBaseTreasuryPlan` encoder;
@@ -92,7 +92,7 @@ The current repository contains:
 - [`docs/api.md`](./docs/api.md): console and agent authentication, routes, errors, audit rows and local setup;
 - [`deployments/near-testnet.json`](./deployments/near-testnet.json) and [`deployments/base-sepolia.json`](./deployments/base-sepolia.json): observed addresses, policies and transaction hashes.
 
-Phase 1 payment and governance demos run on NEAR testnet + Base Sepolia. Founder-wallet setup sponsorship is implemented with a daily cap; NEP-366 agent-call sponsorship, the SDK/MCP agent, Phase 2 Intents and production hardening remain roadmap.
+Phase 1 payment, governance and MCP/LLM demos run on NEAR testnet + Base Sepolia. Founder-wallet and agent-account setup sponsorship are implemented under one daily cap; Phase 2 Intents and production hardening remain roadmap.
 
 ## Architecture target
 
@@ -245,6 +245,14 @@ pnpm --filter @mandateos/api worker
 
 Human accounts register directly with email + passkey from a signed 10-minute context; email/password is disabled and no email is sent. The email stays unverified in the hackathon build. Better Auth email invitations are blocked; a `/onboarding?member=<id>` wallet invitation is claimed only after valid NEP-413 and EIP-191 proofs. Agent credentials are per-agent API keys in `x-api-key`.
 
+Initialize an agent key locally; only copy the printed public key into the
+console:
+
+```bash
+pnpm --filter @mandateos/sdk build
+node packages/sdk/dist/cli.js agent init --name \"Compta Bot\"
+```
+
 Run the console in another terminal:
 
 ```bash
@@ -308,6 +316,7 @@ The current UAT uses the security-corrected Vault and Base Sepolia chain ID `845
 | ACME Vault | `vault-v4.mandateos-root-20261021.testnet` | — |
 | Test FT | `test-ft-v4.mandateos-root-20261021.testnet` | — |
 | Agent | `agent-v4.mandateos-root-20261021.testnet` | `0x10EdE0F3C618321919934Fd63df173DD37F037Af` |
+| Restricted-key provisioning proof | [`pr-a-unlimited-1761142000-agent.mandateos.testnet`](https://testnet.nearblocks.io/address/pr-a-unlimited-1761142000-agent.mandateos.testnet) · [tx](https://testnet.nearblocks.io/txns/FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw) · unlimited (`null`) FC allowance | — |
 | MPC signer | `v1.signer-prod.testnet` | — |
 | Safe 1.4.1 | — | `0x19C06E5bfCd7C31c71508f14df2f1C70d9D199cD` |
 | Operational Roles 2.1.1 | — | `0x7178555779097cAE1BA20C5D7ED7205708a5ed40` |

@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { proposedAgentAccountId } from "@mandateos/sdk";
 import { Hono, type Context, type Next } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
+import { AgentProvisioningError, type AgentProvisioningService } from "./agent-provisioning.js";
+import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity, PasskeyIdentity } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
 import type { NearClient } from "./near.js";
@@ -32,7 +35,7 @@ const cancellationSchema = requestSchema.extend({
 const createAgentSchema = z.object({
   name: z.string().min(1).max(80),
   role: z.string().min(1).max(80),
-  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
+  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/).optional(),
   nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
   vaultAccountId: z.string().min(2).max(64),
   mpcPath: z.string().min(1).max(200),
@@ -157,6 +160,10 @@ const nearSponsorshipSchema = z.object({
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
   nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
 });
+const budgetTokenPlanSchema = z.object({
+  amount: z.string().regex(/^[1-9]\d*$/),
+});
+
 
 const walletProofChallengeSchema = z.object({
   memberId: z.string().uuid(),
@@ -202,6 +209,7 @@ export interface AppDependencies {
   relayer: BaseRelayer;
   auth: AuthGateway;
   walletProof: WalletProofGateway;
+  agentProvisioning: AgentProvisioningService;
   treasury: TreasuryGateway;
   mandates: MandateGateway;
   registry: RegistryService;
@@ -316,6 +324,7 @@ export function createApp({
   relayer,
   auth,
   walletProof,
+  agentProvisioning,
   treasury,
   mandates,
   registry: registryService,
@@ -329,6 +338,7 @@ export function createApp({
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
+  const agentProvisionLimiter = new MemoryRateLimiter(10, 60 * 60_000);
   const registrationIpLimiter = new MemoryRateLimiter(5, 15 * 60_000);
   const registrationEmailLimiter = new MemoryRateLimiter(3, 60 * 60_000);
   app.use(
@@ -657,6 +667,17 @@ export function createApp({
     });
     return context.json(preview);
   });
+  app.get("/v1/console/treasury/budget-token", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    return context.json(await mandates.budgetTokenStatus(consoleIdentity.organizationId));
+  });
+
+  app.post("/v1/console/treasury/budget-token/plan", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, budgetTokenPlanSchema);
+    return context.json(await mandates.budgetTokenPlan(consoleIdentity.organizationId, input.amount));
+  });
+
 
   app.get("/v1/console/treasury", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
@@ -854,21 +875,71 @@ export function createApp({
     return context.json({ members: await auth.listMembers(consoleIdentity.organizationId) });
   });
 
+  app.post("/v1/console/agents/:id/provision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const agentId = z.string().uuid().parse(context.req.param("id"));
+    if (!agentProvisionLimiter.allow(`agent-provision:${consoleIdentity.organizationId}:${consoleIdentity.userId}`)) {
+      return context.json({ error: "agent_provision_rate_limited" }, 429);
+    }
+    const provisioned = await agentProvisioning.provision(consoleIdentity.organizationId, agentId);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "agent.provisioned",
+      targetType: "agent",
+      targetId: agentId,
+      metadata: { transactionHash: provisioned.transactionHash, status: provisioned.status },
+    });
+    return context.json(provisioned, provisioned.transactionHash ? 201 : 200);
+  });
+
+  app.get("/v1/console/agents/:id/provision", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const agentId = z.string().uuid().parse(context.req.param("id"));
+    return context.json(await agentProvisioning.status(consoleIdentity.organizationId, agentId));
+  });
+
+  app.post("/v1/console/agents/:id/provision-confirm", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const agentId = z.string().uuid().parse(context.req.param("id"));
+    const confirmed = await agentProvisioning.confirm(consoleIdentity.organizationId, agentId);
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "agent.provisioning_confirmed",
+      targetType: "agent",
+      targetId: agentId,
+      metadata: { confirmedAt: confirmed.confirmedAt?.toISOString() ?? null },
+    });
+    return context.json(confirmed);
+  });
+
   app.get("/v1/console/agents/:id", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const parsedId = agentIdSchema.safeParse(context.req.param());
     if (!parsedId.success) throw new HTTPException(400, { message: parsedId.error.message });
-    const agent = await auth.getAgent(consoleIdentity.organizationId, parsedId.data.id);
+    let agent = await auth.getAgent(consoleIdentity.organizationId, parsedId.data.id);
     if (!agent) return context.json({ error: "agent_not_found" }, 404);
     const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
     let onChain: unknown = { status: "no_treasury" };
     if (currentTreasury) {
       try {
+        const chainAgent = await near.viewFunction<unknown>(currentTreasury.vaultAccountId, "get_agent", {
+          agent: agent.nearAccountId,
+        });
+        const derivedAddress = onChainAgentEvmAddress(chainAgent);
+        if (derivedAddress && derivedAddress !== agent.evmAddress) {
+          agent = await auth.setAgentEvmAddress(
+            consoleIdentity.organizationId,
+            agent.id,
+            derivedAddress,
+          ) ?? agent;
+        }
         onChain = {
           status: "ok",
-          agent: await near.viewFunction<unknown>(currentTreasury.vaultAccountId, "get_agent", {
-            agent: agent.nearAccountId,
-          }),
+          agent: chainAgent,
           nextEvmNonce: await near.viewFunction<number>(currentTreasury.vaultAccountId, "next_evm_nonce", {
             agent: agent.nearAccountId,
           }),
@@ -895,9 +966,18 @@ export function createApp({
       );
     }
     const input = await parseJson(context, createAgentSchema);
+    const expectedAccountId = proposedAgentAccountId(input.name, nearParentAccount);
+    if (input.nearAccountId && input.nearAccountId !== expectedAccountId) {
+      return context.json({ error: "agent_account_mismatch", expectedAccountId }, 422);
+    }
     const created = await auth.createAgent({
       organizationId: consoleIdentity.organizationId,
-      ...input,
+      name: input.name,
+      role: input.role,
+      nearAccountId: expectedAccountId,
+      nearPublicKey: input.nearPublicKey,
+      vaultAccountId: input.vaultAccountId,
+      mpcPath: input.mpcPath,
     });
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
@@ -962,6 +1042,9 @@ export function createApp({
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof WalletProofError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof AgentProvisioningError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof RegistryError) {

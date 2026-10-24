@@ -1,6 +1,7 @@
 mod common;
 
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use near_workspaces::types::{Gas, NearToken};
 use serde_json::{Value, json};
 use serial_test::serial;
@@ -169,23 +170,62 @@ async fn expired_proposal_cannot_execute() -> Result<()> {
 #[serial]
 async fn vote_approve_execution_gas_is_measured() -> Result<()> {
     let fixture = setup().await?;
-    let kind = set_role_kind(&fixture.vault, "gas-role");
-    let proposal_id = add_proposal(&fixture, &fixture.council[0], kind.clone()).await?;
 
-    vote(&fixture, &fixture.council[0], proposal_id, kind.clone())
+    let set_role = set_role_kind(&fixture.vault, "gas-role");
+    let set_role_id = add_proposal(&fixture, &fixture.council[0], set_role.clone()).await?;
+    vote(&fixture, &fixture.council[0], set_role_id, set_role.clone())
         .await?
         .into_result()?;
-    let outcome = vote(&fixture, &fixture.council[1], proposal_id, kind).await?;
-    let gas_burnt = outcome.total_gas_burnt.as_gas();
-    outcome.into_result()?;
+    let set_role_outcome = vote(&fixture, &fixture.council[1], set_role_id, set_role).await?;
+    let set_role_gas = set_role_outcome.total_gas_burnt.as_gas();
+    set_role_outcome.into_result()?;
 
-    println!("DAO_SPIKE_VOTE_APPROVE_GAS={gas_burnt}");
+    let register_agent = json!({
+        "FunctionCall": {
+            "receiver_id": fixture.vault.id(),
+            "actions": [{
+                "method_name": "register_agent",
+                "args": STANDARD.encode(serde_json::to_vec(&json!({
+                    "agent": fixture.outsider.id(),
+                    "role": "gas-role",
+                    "mpc_path": "agents/gas-role/base"
+                }))?),
+                "deposit": "0",
+                "gas": Gas::from_tgas(50).as_gas().to_string()
+            }]
+        }
+    });
+    let register_id = add_proposal(&fixture, &fixture.council[0], register_agent.clone()).await?;
+    vote(
+        &fixture,
+        &fixture.council[0],
+        register_id,
+        register_agent.clone(),
+    )
+    .await?
+    .into_result()?;
+    let register_outcome = vote(&fixture, &fixture.council[1], register_id, register_agent).await?;
+    let register_gas = register_outcome.total_gas_burnt.as_gas();
+    register_outcome.into_result()?;
+
+    let transfer = transfer_kind(&fixture.ft, &fixture.vault, "gas-role", false);
+    let transfer_id = add_proposal(&fixture, &fixture.council[0], transfer.clone()).await?;
+    vote(&fixture, &fixture.council[0], transfer_id, transfer.clone())
+        .await?
+        .into_result()?;
+    let transfer_outcome = vote(&fixture, &fixture.council[1], transfer_id, transfer).await?;
+    let transfer_gas = transfer_outcome.total_gas_burnt.as_gas();
+    transfer_outcome.into_result()?;
+
     println!(
-        "DAO_SPIKE_VOTE_APPROVE_GAS_TGAS={:.3}",
-        gas_burnt as f64 / 1_000_000_000_000_f64
+        "MANDATEOS_DAO_VOTE_GAS={}",
+        serde_json::to_string(&json!({
+            "set_role": set_role_gas,
+            "register_agent": register_gas,
+            "transfer": transfer_gas
+        }))?
     );
-    assert!(gas_burnt > 0);
-    assert!(get_role(&fixture, "gas-role").await?.is_some());
+    assert!(set_role_gas > 0 && register_gas > 0 && transfer_gas > 0);
     Ok(())
 }
 

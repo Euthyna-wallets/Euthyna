@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "mandateos": "./dist/cli.js"
+  },
   "scripts": {
+    "agent:init": "tsx src/cli.ts agent init",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -14,6 +18,7 @@
     "viem": "^2.30.6"
   },
   "devDependencies": {
+    "tsx": "^4.19.4",
     "vitest": "^3.2.3"
   },
   "main": "./dist/index.js",

@@ -49,6 +49,9 @@ function gatewayFixture(options?: { member?: boolean; existingToday?: number }) 
         return row;
       },
     },
+    agentProvisioning: {
+      count: async () => 0,
+    },
     $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
   } as unknown as PrismaClient;
   return { gateway: new BetterAuthGateway({} as MandateAuth, prisma), records };

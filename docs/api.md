@@ -14,7 +14,8 @@ Rate limits: `/api/register/passkey-start` permits 5 requests per remote IP per
 15 minutes and 3 requests per normalized email per hour. Agent API keys allow
 60 requests/minute; the HTTP layer adds 120 requests/minute per agent and 600
 requests/minute per organization. Registration counters are in-memory per API
-instance; wallet sponsorship caps are durable PostgreSQL rows.
+instance; wallet and agent-account sponsorship share one durable PostgreSQL
+daily cap.
 
 Console sessions and agent credentials are disjoint: an agent key on a console route
 returns `401`, and a console cookie on an agent route returns `401`. Every console
@@ -77,23 +78,73 @@ curl -sS http://localhost:3000/v1/console/agents -H "Cookie: $SESSION_COOKIE"
 
 ### `POST /v1/console/agents`
 
-Creates an agent and a per-agent API key. The key is returned once and never stored
-in clear. The request body:
+Creates the off-chain agent identity and one-time API key. The admin supplies
+the name, role and public ed25519 key printed by `mandateos agent init`; the
+server derives `<slug>-agent.<NEAR_ACCOUNT_PARENT>`. The private key never
+leaves `AGENT_KEY_PATH` ([`packages/sdk/src/cli.ts`](../packages/sdk/src/cli.ts),
+[`packages/sdk/src/index.ts`](../packages/sdk/src/index.ts)).
 
 ```json
 {
-  "name": "Research agent",
+  "name": "Compta Bot",
   "role": "researcher",
-  "nearAccountId": "agent-v5.example.testnet",
   "nearPublicKey": "ed25519:...",
-  "vaultAccountId": "vault-v4.example.testnet",
+  "vaultAccountId": "acme-v.mandateos.testnet",
   "mpcPath": "agents/researcher/base"
 }
 ```
 
-The client generates the NEAR function-call key pair locally and sends only
-`nearPublicKey`. The server stores the public key and returns the API key. Signed
-`add_key` / `revoke_agent` proposals are produced by the role compiler (backend D).
+### `POST /v1/console/agents/:id/provision`
+
+Admin only, 10 requests/hour per admin and subject to the shared durable daily
+NEAR sponsorship cap. The relayer emits one transaction containing
+`CreateAccount`, `Transfer` (`NEAR_AGENT_GAS_RESERVE_YOCTO`, default 0.3 NEAR)
+and one `AddKey`. That key is FunctionCall-only, has unlimited gas allowance
+(`allowance = null`), receiver = Vault, and exactly `prepare`, `authorize`,
+`cancel_nonce`, `request_derived_public_key`. No full-access key is added. The
+account balance therefore bounds gas spend without making the only key
+permanently unusable when a finite allowance reaches zero
+([`apps/api/src/agent-provisioning.ts`](../apps/api/src/agent-provisioning.ts),
+[`apps/api/src/near.ts`](../apps/api/src/near.ts)).
+
+`GET /v1/console/agents/:id/provision` returns the server observation.
+`POST /v1/console/agents/:id/provision-confirm` repeats the RPC attestation and
+stores the admin confirmation. The browser independently calls
+`view_access_key_list` and requires `allowance = null` before confirmation
+([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
+
+Observed testnet integration (the reserve was overridden to `0.02 NEAR` for
+this isolated proof; UAT default remains `0.3 NEAR`):
+
+- account `pr-a-unlimited-1761142000-agent.mandateos.testnet`;
+- transaction
+  [`FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw`](https://testnet.nearblocks.io/txns/FQBV3EDzq2pTPdEgprKbJR6Rw9H6ECKoPVgzJnmizbAw);
+- finalized block `274271995`;
+- exactly one key, `FunctionCall`, `allowance = null`, receiver
+  `vault-v4.mandateos-root-20261021.testnet`, and the four documented methods;
+- local key file permission observed as `0600`.
+
+`request_derived_public_key` requires no attached deposit. Its focused Sandbox
+run burnt `6.306 Tgas`; the SDK attaches `50 Tgas` to cover the MPC call and
+callback ([`contracts/tests/tests/vault_operations.rs`](../contracts/tests/tests/vault_operations.rs)).
+On NEAR testnet, `prepare` burnt `3.144851013726 Tgas`
+([tx](https://testnet.nearblocks.io/txns/2K8YMFDYFBFocSDZWSf1aRPq15w3n6giuA3XKuVGwjK3))
+and `authorize` burnt `14.311476888041 Tgas`
+([tx](https://testnet.nearblocks.io/txns/GgU8kFUeypkLjAuB9mQED1TULhqvW1NBSy5KF6dvKWWZ)).
+The SDK attaches `10 Tgas` to `prepare` and `50 Tgas` to `authorize`; the latter
+must also reserve the Vault's `15 Tgas` MPC receipt and `20 Tgas` callback
+([`packages/sdk/src/index.ts`](../packages/sdk/src/index.ts),
+[`contracts/vault/src/lib.rs`](../contracts/vault/src/lib.rs)).
+
+The API and payment worker compare the agent account balance with
+`NEAR_AGENT_GAS_LOW_YOCTO` (default `0.05 NEAR`). A low balance does not block a
+payment attempt: recharge the existing account with a simple NEAR transfer;
+do not replace or add a key
+([`apps/api/src/console-data.ts`](../apps/api/src/console-data.ts),
+[`apps/api/src/operation-worker.ts`](../apps/api/src/operation-worker.ts)).
+
+![Agent restricted-key attestation](./console/agent-provisioning.webp)
+![Agent low gas balance alert](./console/agent-gas-low.webp)
 
 ### `POST /v1/console/agents/:id/revoke`
 
@@ -381,6 +432,29 @@ immutable-hash, keyless MandateOS factory.
 Returns the stored agent plus its on-chain Vault state (`get_agent`,
 `next_evm_nonce`). The console lists agents and shows this state per agent.
 
+### `GET /v1/console/treasury/budget-token`
+
+Returns the configured FT metadata, DAO/Vault storage registration and DAO
+balance. `ft_metadata.decimals` must equal USDC's `6`; any other value is
+rejected. `POST /v1/console/treasury/budget-token/plan` accepts a positive
+integer `amount` and returns unsigned `storage_deposit` calls for missing DAO or
+Vault registrations followed by `mint` to the DAO. The browser submits these
+calls with the connected member wallet. `mint` is exposed only by the UAT
+`test-ft`; production must configure a real six-decimal FT and obtain funds
+through that token's normal issuance or transfer path
+([`contracts/test-ft/src/lib.rs`](../contracts/test-ft/src/lib.rs),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+Testnet metadata and repeatable minting were deployed in
+[`7BUDD5yePCzWd86Tx3cuTV15xUmCUfcTHbkCbeZS2DVj`](https://testnet.nearblocks.io/txns/7BUDD5yePCzWd86Tx3cuTV15xUmCUfcTHbkCbeZS2DVj):
+`TestUSDC`, `6` decimals, code hash
+`D169mWBjhe8vYDYo4tjXVQoM8PNEQ1CQcPcaWa4mJCg1`. Two subsequent mints to the
+already-registered DAO passed in
+[`45g1nd…`](https://testnet.nearblocks.io/txns/45g1ndvpzkVsq7pRUPondccgXGLAVQH6Y3hWB9VEqgEN)
+and [`FPAYYB…`](https://testnet.nearblocks.io/txns/FPAYYBoaHrfdwpj1w7GFhcQQg9gv5Zk949zQs8RFwRjn)
+([`deployments/near-testnet.json`](../deployments/near-testnet.json)).
+
 ### `POST /v1/console/mandates/preview`
 
 Compiles one role into the three locks and returns a diff plus unsigned proposals:
@@ -391,6 +465,48 @@ Compiles one role into the three locks and returns a diff plus unsigned proposal
 - Guard policy snapshot;
 - DAO `add_proposal` payloads for the Vault, funding and relay calls. The console
   signs each proposal with the member's NEAR wallet; the server never signs.
+
+The funding proposal follows Sputnik DAO 2.3.1's exact `Transfer` shape:
+`token_id`, `receiver_id`, `amount`, `msg`. `token_id` is
+`BUDGET_TOKEN_ACCOUNT_ID`; omitting it is invalid
+([immutable upstream `ProposalKind::Transfer`](https://github.com/near-daos/sputnik-dao-contract/blob/317ea4fb1/sputnikdao2/src/proposals.rs),
+[`apps/api/src/mandates.test.ts`](../apps/api/src/mandates.test.ts)).
+
+The console discovers deterministic proposal descriptions through direct NEAR
+RPC, then reads every `get_proposal` status. Steps are strictly ordered:
+`set_role → register_agent → funding → Zodiac`; a step remains disabled until
+the previous status is `Approved` (displayed as **Executed**). `Expired`,
+`Rejected`, and other terminal failures display **Re-propose**
+([`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts),
+[`apps/console/src/routes/OnboardingPage.tsx`](../apps/console/src/routes/OnboardingPage.tsx)).
+
+Measured execution gas:
+
+| Executed action | Environment | Burnt gas |
+|---|---|---:|
+| final vote → `set_role` | Sandbox, Sputnik 2.3.1 | 8.708943134269 Tgas |
+| final vote → `register_agent` | Sandbox, Sputnik 2.3.1 | 8.809192150558 Tgas |
+| final vote → FT `Transfer` | Sandbox, Sputnik 2.3.1 | 13.089112041461 Tgas |
+| relay `propose` + mock MPC | Sandbox | 6.574015458889 Tgas |
+| final vote → relay `propose` + real MPC | NEAR testnet | 19.662169450795 Tgas |
+
+The relay action receives `60 Tgas`: above measured burn and enough to reserve
+its `15 Tgas` MPC receipt plus `20 Tgas` callback. Every browser
+`act_proposal` attaches `450 Tgas`, below testnet protocol version 88's
+`max_total_prepaid_gas = 1,000 Tgas`
+([nearcore gas architecture](https://github.com/near/nearcore/blob/master/docs/architecture/how/gas.md),
+[`contracts/governance-relay/src/lib.rs`](../contracts/governance-relay/src/lib.rs),
+[`apps/api/src/mandates.ts`](../apps/api/src/mandates.ts),
+[`apps/console/src/wallets.ts`](../apps/console/src/wallets.ts)).
+The real-MPC final vote passed in proposal `26`,
+[`5ypaNTsPnJbiKBT67MRwuPhoeQJ4b4f2ZAg4F7VHmeaj`](https://testnet.nearblocks.io/txns/5ypaNTsPnJbiKBT67MRwuPhoeQJ4b4f2ZAg4F7VHmeaj);
+proposal `27` then closed the measurement operation through the DAO rescue path
+in [`HbDvWUB2DtwBPc1vT9tpCHUd7G36Grt4D4zC3GFEbZRJ`](https://testnet.nearblocks.io/txns/HbDvWUB2DtwBPc1vT9tpCHUd7G36Grt4D4zC3GFEbZRJ).
+Sandbox measurements are reproduced by
+[`contracts/tests/tests/dao_governance.rs`](../contracts/tests/tests/dao_governance.rs)
+and [`contracts/tests/tests/governance_relay.rs`](../contracts/tests/tests/governance_relay.rs).
+
+![Budget token and ordered proposal execution](./console/mandate-ordered-proposals.webp)
 
 `swap`/`bridge` are rejected until Phase 2. `maxPerTx` must not exceed the budget.
 
