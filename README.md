@@ -43,7 +43,7 @@ sequenceDiagram
   G-->>A: exact ed25519 visa
   A->>O: authorize(op_id, visa)
   opt amount above threshold
-    O->>O: waiting period + member co-signature
+    O->>O: waiting period + human co-signer role
     W->>O: execute_queued_operation(op_id)
   end
   O->>M: sign direct EIP-1559 transaction
@@ -97,13 +97,13 @@ Complete elapsed periods refill the balance up to `max_refill`. A prepared opera
 
 ### Waiting periods and veto
 
-Every rule change is queued on NEAR. The DAO can queue; anyone can execute after the waiting period; one stored council account can veto one exact queue entry.
+Every rule change is queued on NEAR. The DAO can queue; anyone can execute after the waiting period; one stored council account can veto one exact queue entry. A council member may pause immediately; only the DAO can unpause.
 
 Operations above a role threshold are also queued before MPC signing. This matters: a veto happens before a raw, broadcastable EVM transaction exists. Vetoing one operation does not advance or clear another chain wallet's queue.
 
 ### Co-signature and velocity
 
-A separate active member of the same role must call `co_sign` above the configured threshold. Velocity accounting reserves risk value during preparation and charges it only after confirmed execution.
+A distinct active **human** member of the role named by `co_signer_role` must call `co_sign` above the configured threshold. An agent or a member of the operation role cannot approve its peer's operation. Velocity accounting reserves risk value during preparation and charges it only after confirmed execution.
 
 ### Nonces and gas
 
@@ -163,20 +163,20 @@ pnpm --filter @mandateos/deployer fund:omniroles
 
 3. The runner waits for `OMNIROLES_MIN_GAS_WEI` and the requested TestUSDC amount, then prepares, authorizes, broadcasts, confirms, and reports the payment. It prints one `OMNIROLES_BASE_PAYMENT` JSON object containing every NEAR and Base transaction hash.
 
-Observed direct Base Sepolia payment:
+Observed jury UAT using the exact artifact in [`deployments/omniroles-base-sepolia.json`](./deployments/omniroles-base-sepolia.json):
 
-- wallet: [`0x371c…a629`](https://sepolia.basescan.org/address/0x371c60b0D191f2b23D7fE087860f99cf9A7ca629);
-- payment: [`0x6ca3…84b1`](https://sepolia.basescan.org/tx/0x6ca3c097b610797af47555da8c32ddb520df38329637ebde489c16e4728684b1);
-- effect: direct `TestUSDC.transfer` of `1.000000` token to the configured supplier.
-
-The first runner revision misread `cast publish` receipt JSON after the successful Base execution, so it did not submit the terminal NEAR report. [`deploy_omniroles_testnet.rs`](./contracts/tests/examples/deploy_omniroles_testnet.rs) now handles both hash and receipt output. The repository claims the Base payment proof, not a terminal `report_status`, in [`deployments/omniroles-base-sepolia.json`](./deployments/omniroles-base-sepolia.json).
+- Sputnik owner: [`omni-92860380.factory-v2.mandateos.testnet`](https://testnet.nearblocks.io/address/omni-92860380.factory-v2.mandateos.testnet), with a distinct three-account council and threshold 2;
+- keyless Vault: [`omni-vault-92860380…testnet`](https://testnet.nearblocks.io/address/omni-vault-92860380.dev-20261024164616-35109844835097.testnet), `rule_delay_ns = 300_000_000_000`, zero access keys, deployed code hash equal to the repository artifact;
+- derived wallet: [`0x8cb6…aB81`](https://sepolia.basescan.org/address/0x8cb6e51ee112e848fc24d76030a54a160f1bab81);
+- payment: [`0x2318…bd2d`](https://sepolia.basescan.org/tx/0x23183aac4f3744879dce974b2636e7fdce84781b64ad58bcf3ab4cae1fe9bd2d), a direct `TestUSDC.transfer` of `1.000000` token;
+- terminal `Confirmed` report: [`CUMv…NniY`](https://testnet.nearblocks.io/txns/CUMv4QHQwU2tr3GVJr3TRLtmrtRonQGPGvBaxxhXNniY).
 
 See [`.env.example`](./.env.example) for variable names. Never use faucet rotation or IP rotation.
 
 ## Security boundaries
 
 - The server has no MPC or EVM fund-moving key.
-- Guard can sign only business visas and terminal reports; it cannot construct an MPC signature.
+- Guard uses separate ed25519 keys for business visas and terminal reports. Each key rotates only through a delayed rule change; neither can construct an MPC signature.
 - Worker broadcasts exact raw bytes already signed by MPC.
 - Unknown condition trees and unknown allowance-bearing calldata fail closed.
 - Rule/allowance replacement is blocked while reservations are active.

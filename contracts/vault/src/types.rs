@@ -37,6 +37,7 @@ pub struct RoleConfig {
     pub operation_delay_threshold: Option<U128>,
     pub operation_delay_ns: u64,
     pub co_sign_threshold: Option<U128>,
+    pub co_signer_role: Option<String>,
     pub velocity: Option<VelocityConfig>,
     pub gas_limit: U128,
     pub max_fee_per_gas: U128,
@@ -71,11 +72,19 @@ pub(crate) struct MembershipKey {
     pub member: AccountId,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub enum MembershipKind {
+    Human,
+    Agent,
+}
+
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
 pub struct Membership {
     pub role: String,
     pub member: AccountId,
+    pub kind: MembershipKind,
     pub starts_at_ns: U64,
     pub ends_at_ns: Option<U64>,
     pub max_uses: Option<u64>,
@@ -220,6 +229,7 @@ pub enum RuleChange {
     GrantMembership {
         role: String,
         member: AccountId,
+        kind: MembershipKind,
         starts_at_ns: U64,
         ends_at_ns: Option<U64>,
         max_uses: Option<u64>,
@@ -238,8 +248,11 @@ pub enum RuleChange {
     SetCouncil {
         members: Vec<AccountId>,
     },
-    SetGuardPublicKey {
-        guard_public_key: Vec<u8>,
+    SetVisaPublicKey {
+        visa_public_key: Vec<u8>,
+    },
+    SetStatusPublicKey {
+        status_public_key: Vec<u8>,
     },
     SetVersions {
         policy_version: u64,

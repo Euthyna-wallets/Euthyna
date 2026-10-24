@@ -12,10 +12,10 @@ use near_sdk::{
 
 use conditions::EvaluationContext;
 pub use types::{
-    Allowance, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa, Membership, MpcSignature,
-    Operation, OperationRequest, OperationState, Permission, QueuedRuleChange, RoleConfig,
-    RoleView, RuleChange, RuleChangeState, SignedStatusReport, StatusKind, StatusReport,
-    VelocityConfig, VelocityState,
+    Allowance, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa, Membership,
+    MembershipKind, MpcSignature, Operation, OperationRequest, OperationState, Permission,
+    QueuedRuleChange, RoleConfig, RoleView, RuleChange, RuleChangeState, SignedStatusReport,
+    StatusKind, StatusReport, VelocityConfig, VelocityState,
 };
 use types::{
     AllowanceKey, MembershipKey, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId,
@@ -57,7 +57,8 @@ pub struct Vault {
     client_id: String,
     owner_id: AccountId,
     mpc_contract_id: AccountId,
-    guard_public_key: [u8; 32],
+    visa_public_key: [u8; 32],
+    status_public_key: [u8; 32],
     policy_version: u64,
     registry_version: u64,
     operation_ttl_ns: u64,
@@ -88,7 +89,8 @@ impl Vault {
         client_id: String,
         owner_id: AccountId,
         mpc_contract_id: AccountId,
-        guard_public_key: Base64VecU8,
+        visa_public_key: Base64VecU8,
+        status_public_key: Base64VecU8,
         policy_version: u64,
         registry_version: u64,
         operation_ttl_ns: u64,
@@ -101,15 +103,20 @@ impl Vault {
         require!(rule_delay_ns > 0, "ERR_ZERO_RULE_DELAY");
         require!(rule_expiration_ns > rule_delay_ns, "ERR_RULE_EXPIRATION");
         Self::validate_council(&council);
-        let guard_public_key: [u8; 32] = guard_public_key
+        let visa_public_key: [u8; 32] = visa_public_key
             .0
             .try_into()
-            .unwrap_or_else(|_| env::panic_str("ERR_GUARD_KEY_LENGTH"));
+            .unwrap_or_else(|_| env::panic_str("ERR_VISA_KEY_LENGTH"));
+        let status_public_key: [u8; 32] = status_public_key
+            .0
+            .try_into()
+            .unwrap_or_else(|_| env::panic_str("ERR_STATUS_KEY_LENGTH"));
         Self {
             client_id,
             owner_id,
             mpc_contract_id,
-            guard_public_key,
+            visa_public_key,
+            status_public_key,
             policy_version,
             registry_version,
             operation_ttl_ns,
@@ -145,8 +152,12 @@ impl Vault {
         self.mpc_contract_id.clone()
     }
 
-    pub fn guard_public_key(&self) -> Base64VecU8 {
-        Base64VecU8(self.guard_public_key.to_vec())
+    pub fn visa_public_key(&self) -> Base64VecU8 {
+        Base64VecU8(self.visa_public_key.to_vec())
+    }
+
+    pub fn status_public_key(&self) -> Base64VecU8 {
+        Base64VecU8(self.status_public_key.to_vec())
     }
 
     pub fn policy_version(&self) -> u64 {
@@ -352,7 +363,11 @@ impl Vault {
     }
 
     pub fn pause(&mut self) {
-        self.assert_owner();
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == self.owner_id || self.council.contains(&caller),
+            "ERR_OWNER_OR_COUNCIL"
+        );
         self.paused = true;
     }
 
@@ -489,14 +504,36 @@ impl Vault {
         require!(operation.cosigned_by.is_none(), "ERR_ALREADY_COSIGNED");
         let cosigner = env::predecessor_account_id();
         require!(cosigner != operation.member, "ERR_SELF_COSIGN");
+        let now = env::block_timestamp();
+        if let Some(operation_membership) = self.memberships.get(&MembershipKey {
+            role: operation.role.clone(),
+            member: cosigner.clone(),
+        }) {
+            let active_in_operation_role = operation_membership.active
+                && now >= operation_membership.starts_at_ns.0
+                && operation_membership
+                    .ends_at_ns
+                    .is_none_or(|end| now <= end.0);
+            require!(!active_in_operation_role, "ERR_COSIGNER_IN_OPERATION_ROLE");
+        }
+        let co_signer_role = self
+            .roles
+            .get(&operation.role)
+            .and_then(|role| role.config.co_signer_role.clone())
+            .expect("ERR_COSIGNER_ROLE_NOT_CONFIGURED");
+        require!(co_signer_role != operation.role, "ERR_COSIGNER_ROLE_SAME");
         let membership = self
             .memberships
             .get(&MembershipKey {
-                role: operation.role.clone(),
+                role: co_signer_role,
                 member: cosigner.clone(),
             })
             .expect("ERR_COSIGNER_MEMBERSHIP");
-        Self::assert_membership_available(membership, env::block_timestamp());
+        require!(
+            membership.kind == MembershipKind::Human,
+            "ERR_COSIGNER_NOT_HUMAN"
+        );
+        Self::assert_membership_available(membership, now);
         operation.cosigned_by = Some(cosigner.clone());
         self.operations.insert(op_id, operation);
         env::log_str(&format!(
@@ -861,7 +898,7 @@ impl Vault {
             .try_into()
             .unwrap_or_else(|_| env::panic_str("ERR_REPORT_SIGNATURE_LENGTH"));
         require!(
-            env::ed25519_verify(&signature, &message, &self.guard_public_key),
+            env::ed25519_verify(&signature, &message, &self.status_public_key),
             "ERR_REPORT_SIGNATURE"
         );
         if let Some(signature) = mpc_signature {
@@ -1207,6 +1244,7 @@ impl Vault {
             RuleChange::GrantMembership {
                 role,
                 member,
+                kind,
                 starts_at_ns,
                 ends_at_ns,
                 max_uses,
@@ -1229,6 +1267,7 @@ impl Vault {
                     Membership {
                         role,
                         member,
+                        kind,
                         starts_at_ns,
                         ends_at_ns,
                         max_uses,
@@ -1276,10 +1315,15 @@ impl Vault {
                 Self::validate_council(&members);
                 self.council = members;
             }
-            RuleChange::SetGuardPublicKey { guard_public_key } => {
-                self.guard_public_key = guard_public_key
+            RuleChange::SetVisaPublicKey { visa_public_key } => {
+                self.visa_public_key = visa_public_key
                     .try_into()
-                    .unwrap_or_else(|_| env::panic_str("ERR_GUARD_KEY_LENGTH"));
+                    .unwrap_or_else(|_| env::panic_str("ERR_VISA_KEY_LENGTH"));
+            }
+            RuleChange::SetStatusPublicKey { status_public_key } => {
+                self.status_public_key = status_public_key
+                    .try_into()
+                    .unwrap_or_else(|_| env::panic_str("ERR_STATUS_KEY_LENGTH"));
             }
             RuleChange::SetVersions {
                 policy_version,
@@ -1295,13 +1339,20 @@ impl Vault {
         match change {
             RuleChange::SetRole { role, config } => {
                 require!(!role.is_empty(), "ERR_EMPTY_ROLE");
-                require!(!config.permissions.is_empty(), "ERR_EMPTY_PERMISSIONS");
                 require!(
                     config.max_priority_fee_per_gas.0 <= config.max_fee_per_gas.0,
                     "ERR_PRIORITY_ABOVE_MAX_FEE"
                 );
                 if config.operation_delay_threshold.is_some() {
                     require!(config.operation_delay_ns > 0, "ERR_ZERO_OPERATION_DELAY");
+                }
+                require!(
+                    config.co_sign_threshold.is_some() == config.co_signer_role.is_some(),
+                    "ERR_COSIGNER_ROLE_THRESHOLD_PAIR"
+                );
+                if let Some(co_signer_role) = &config.co_signer_role {
+                    require!(!co_signer_role.is_empty(), "ERR_EMPTY_COSIGNER_ROLE");
+                    require!(co_signer_role != role, "ERR_COSIGNER_ROLE_SAME");
                 }
                 if let Some(velocity) = &config.velocity {
                     require!(velocity.limit.0 > 0, "ERR_ZERO_VELOCITY_LIMIT");
@@ -1327,8 +1378,11 @@ impl Vault {
                 refill, period_ns, ..
             } => require!(refill.0 == 0 || *period_ns > 0, "ERR_ZERO_ALLOWANCE_PERIOD"),
             RuleChange::SetCouncil { members } => Self::validate_council(members),
-            RuleChange::SetGuardPublicKey { guard_public_key } => {
-                require!(guard_public_key.len() == 32, "ERR_GUARD_KEY_LENGTH")
+            RuleChange::SetVisaPublicKey { visa_public_key } => {
+                require!(visa_public_key.len() == 32, "ERR_VISA_KEY_LENGTH")
+            }
+            RuleChange::SetStatusPublicKey { status_public_key } => {
+                require!(status_public_key.len() == 32, "ERR_STATUS_KEY_LENGTH")
             }
             RuleChange::RemoveRole { .. }
             | RuleChange::RevokeMembership { .. }
@@ -1416,7 +1470,7 @@ impl Vault {
         message.extend_from_slice(VISA_DOMAIN);
         message.extend_from_slice(&to_vec(visa).expect("ERR_VISA_SERIALIZATION"));
         require!(
-            env::ed25519_verify(&signature, &message, &self.guard_public_key),
+            env::ed25519_verify(&signature, &message, &self.visa_public_key),
             "ERR_VISA_SIGNATURE"
         );
     }

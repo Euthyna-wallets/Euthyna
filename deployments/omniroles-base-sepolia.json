@@ -1,12 +1,31 @@
 {
   "network": "base-sepolia",
   "chainId": 84532,
-  "status": "direct-payment-executed",
+  "status": "direct-payment-confirmed",
   "vaultArtifact": {
-    "sha256": "418698a680503afb7173e20c89e2f6cefb3ca07e66237b64e4e1611098288826",
-    "sha256Base58": "5QnYCpX13uC3LM4SJJonm8UDSBrkuMqMnQzfVGWzcbBs"
+    "sha256": "5f6cf15aeeb8b7935ba4e2cb95bf49a6d86c857f73e3247e452b906ed634fc1b",
+    "sha256Base58": "7RW5gy6yYHWZyype9B1xEKcb81ZWDKEQfMAXq16cYgsc",
+    "deployedCodeHash": "7RW5gy6yYHWZyype9B1xEKcb81ZWDKEQfMAXq16cYgsc"
   },
-  "wallet": "0x371c60b0D191f2b23D7fE087860f99cf9A7ca629",
+  "governance": {
+    "dao": "omni-92860380.factory-v2.mandateos.testnet",
+    "ownerId": "omni-92860380.factory-v2.mandateos.testnet",
+    "council": [
+      "omni-c1-92860380.dev-20261024164616-35109844835097.testnet",
+      "omni-c2-92860380.dev-20261024164616-35109844835097.testnet",
+      "omni-c3-92860380.dev-20261024164616-35109844835097.testnet"
+    ],
+    "threshold": 2,
+    "ruleDelayNs": "300000000000"
+  },
+  "vault": {
+    "accountId": "omni-vault-92860380.dev-20261024164616-35109844835097.testnet",
+    "accessKeyCount": 0,
+    "visaPublicKeyBase64": "s7HIcDLM52xQoqA0rDusOw7izA0GB7C1sWeqrrS011M=",
+    "statusPublicKeyBase64": "NeEszXM+QPZTHU6Y/mQehsveoIOegP22Z4TLc+McgX4=",
+    "guardKeysDistinct": true
+  },
+  "wallet": "0x8cb6e51ee112e848fc24d76030a54a160f1bab81",
   "token": {
     "name": "TestUSDC",
     "address": "0x418A2b47911dE05e21688F7490195F5324B49474",
@@ -15,18 +34,50 @@
   "payment": {
     "recipient": "0xa7BE833AD5422421204198E47C04516B0026F9B6",
     "amount": "1000000",
-    "transactionHash": "0x6ca3c097b610797af47555da8c32ddb520df38329637ebde489c16e4728684b1",
-    "blockNumber": "0x2f5f6ad",
+    "transactionHash": "0x23183aac4f3744879dce974b2636e7fdce84781b64ad58bcf3ab4cae1fe9bd2d",
+    "blockNumber": "0x2f64a5f",
     "status": "success",
     "execution": "direct ERC20.transfer from the MPC-derived OmniRoles wallet"
   },
   "funding": {
-    "ethereumSepoliaBridgeTransactionHash": "0xbc5691e5358bfc2f12b139d247d91728bef87ee877f9a8a383a737a65f73cd18",
-    "baseEthFundingTransactionHash": "0x8d977ed8c746431192b9814997de4f76d852777118306020297118ea7557bd9e",
-    "baseTokenFundingTransactionHash": "0x3efa9225e5f7209caeed25630d30f38afe6118ed7c2dbfee42e8f58f63092236"
+    "baseEthFundingTransactionHash": "0x8f2830dafda5510fc29b9a9d5c36148b7b3dd6713ee7feadfffba3007b0f59b0",
+    "baseTokenFundingTransactionHash": "0x50a3fcb8a9b4c4fc05f4581711910483200d2df889119a4d2a468491c007fe46"
+  },
+  "nearTransactions": {
+    "daoCreate": "8jhwPJ5dcmn5aZueX9r487DbS1kyd4yUeT5GMEfCTs2o",
+    "vaultDeploy": "DjbHnyVj5mfbuhdpJ21YGqZGPd3yVVBMq57ad88axXS5",
+    "vaultInit": "DNa6T4WGi31jC6j7bVc1o7xJJVH3oNZbzb5RC8RrTbU8",
+    "vaultAccessRemovalTransactionHash": "5oX896jb3foWxmegTdHxrEptkYKEhSiCTpgvwvjsGF2k",
+    "walletDerivation": {
+      "proposal": "8YZ4X6wZuVcqVTUMBpWFnxNSsHQd8AQn2LyjvEiQRPvx",
+      "firstApproval": "FQVQ4aA5H1fn6PkKuUoreNSpyLUwRT6YDbCsJrWVkcwi",
+      "secondApprovalAndExecution": "GfPfHvxcme93RmYQ2GAjoChdtxtLCeQp1tMWeutdELUN"
+    },
+    "roleRule": {
+      "proposal": "2u35HfXwQHj5UmsZcUx8TghCvgBKCPAaCTNC7Weu7Noh",
+      "firstApproval": "GxGu2asoCQM5XZvRAAKhPADXxesQYZtZYTRU36h7DUY5",
+      "secondApprovalAndQueue": "4jsQScbt5J6qUDd5K6zFNDzFhV35CvZK7LxmPkxHSwsn",
+      "delayedExecution": "4v66mvCasaQ3kpX9VL2Y5Ve4JpYiGhHECc4GQ4vcpXhE"
+    },
+    "membershipRule": {
+      "proposal": "GSMoepEHLdGRYv7TvKPmDZG83DqrUDXZtPtRpb96kEye",
+      "firstApproval": "7XFpW91cpAENH2mea7SUgohb9TCgKnrELEaxvBGCQnPH",
+      "secondApprovalAndQueue": "4n4mWANWmXsipCnYF4G9RnGnAvNY38xWk5JUsuCj8kMy",
+      "delayedExecution": "BWRGH1PQwATfqrZPYPiPbjCdzZzi9vDNy27BqoiPhffL"
+    },
+    "allowanceRule": {
+      "proposal": "59p4PARvCAZq3t7ceRvQQb9H2YGrwAwEdorBajrvtX7a",
+      "firstApproval": "9fzAKbuvvW7k62ihKLBVJYdN9tehQntYQ7WQ3tNeYnQg",
+      "secondApprovalAndQueue": "AcL8yrGmxCbb4KYsD4xJRceFLg3MtAz1WEZo6efpbRGM",
+      "delayedExecution": "7QcMgHmrbmM7xyrM1T6kpdaYCVdDoPoR1ghPrE5V8Jsg"
+    },
+    "prepare": "2jEU9KFgHiy6mkGQ9BjV2UpVaukpuyQKdVowtQnXEJHJ",
+    "authorize": "GJzpvJzFcN84Jrvwq3MCy51WZB7s4WdmtYsvJNf4kpA2",
+    "reportStatus": "CUMv4QHQwU2tr3GVJr3TRLtmrtRonQGPGvBaxxhXNniY"
   },
   "nearTerminalReport": {
-    "status": "not-recorded",
-    "reason": "The first runner version parsed cast publish output as a hash after Base execution. The committed runner now accepts cast receipt JSON and submits report_status. This manifest claims the observed Base payment only."
+    "operationId": "b5d38ec7c59a063e5e812d6b71cbceabdf4e04a95cd9760fb260baa60263505b",
+    "status": "Confirmed",
+    "transactionHash": "CUMv4QHQwU2tr3GVJr3TRLtmrtRonQGPGvBaxxhXNniY"
   }
 }

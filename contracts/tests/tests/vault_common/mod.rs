@@ -38,6 +38,7 @@ pub struct Fixture {
     pub outsider: Account,
     pub vault: Contract,
     pub guard: SigningKey,
+    pub status_guard: SigningKey,
 }
 
 #[derive(BorshSerialize)]
@@ -94,6 +95,7 @@ pub async fn setup() -> Result<Fixture> {
     let vault = worker.dev_deploy(VAULT_WASM).await?;
     let mpc = worker.dev_deploy(MOCK_MPC_WASM).await?;
     let guard = SigningKey::from_bytes(&[7u8; 32]);
+    let status_guard = SigningKey::from_bytes(&[8u8; 32]);
 
     mpc.call("new")
         .args_json(json!({"public_key": MPC_PUBLIC_KEY}))
@@ -106,7 +108,8 @@ pub async fn setup() -> Result<Fixture> {
             "client_id": CLIENT_ID,
             "owner_id": owner.id(),
             "mpc_contract_id": mpc.id(),
-            "guard_public_key": STANDARD.encode(guard.verifying_key().to_bytes()),
+            "visa_public_key": STANDARD.encode(guard.verifying_key().to_bytes()),
+            "status_public_key": STANDARD.encode(status_guard.verifying_key().to_bytes()),
             "policy_version": POLICY_VERSION,
             "registry_version": REGISTRY_VERSION,
             "operation_ttl_ns": OPERATION_TTL_NS,
@@ -143,9 +146,20 @@ pub async fn setup() -> Result<Fixture> {
         &worker,
         &vault,
         json!({
+            "SetRole": {"role": "approver", "config": approver_role_config()}
+        }),
+    )
+    .await?;
+    apply_rule_change(
+        &owner,
+        &outsider,
+        &worker,
+        &vault,
+        json!({
             "GrantMembership": {
                 "role": ROLE,
                 "member": agent.id(),
+                "kind": "Agent",
                 "starts_at_ns": "0",
                 "ends_at_ns": null,
                 "max_uses": 10
@@ -160,8 +174,9 @@ pub async fn setup() -> Result<Fixture> {
         &vault,
         json!({
             "GrantMembership": {
-                "role": ROLE,
+                "role": "approver",
                 "member": cosigner.id(),
+                "kind": "Human",
                 "starts_at_ns": "0",
                 "ends_at_ns": null,
                 "max_uses": null
@@ -207,6 +222,7 @@ pub async fn setup() -> Result<Fixture> {
         outsider,
         vault,
         guard,
+        status_guard,
     })
 }
 
@@ -223,11 +239,28 @@ pub fn role_config() -> Value {
         "operation_delay_threshold": MAX_PER_OPERATION.to_string(),
         "operation_delay_ns": 5_000_000_000u64,
         "co_sign_threshold": "300",
+        "co_signer_role": "approver",
         "velocity": {"limit": "800", "window_ns": 60_000_000_000u64},
         "gas_limit": "300000",
         "max_fee_per_gas": "100000000000",
         "max_priority_fee_per_gas": "10000000000",
         "max_total_fee": "30000000000000000"
+    })
+}
+
+pub fn approver_role_config() -> Value {
+    json!({
+        "enabled": true,
+        "permissions": [],
+        "operation_delay_threshold": null,
+        "operation_delay_ns": 0,
+        "co_sign_threshold": null,
+        "co_signer_role": null,
+        "velocity": null,
+        "gas_limit": "21000",
+        "max_fee_per_gas": "100000000000",
+        "max_priority_fee_per_gas": "10000000000",
+        "max_total_fee": "2100000000000000"
     })
 }
 
@@ -340,7 +373,7 @@ pub fn status_report(
     };
     let mut message = b"mandateos:status:v1".to_vec();
     message.extend_from_slice(&borsh::to_vec(&report).expect("report serializes"));
-    let signature = fixture.guard.sign(&message);
+    let signature = fixture.status_guard.sign(&message);
     json!({
         "signed_report": {
             "report": {

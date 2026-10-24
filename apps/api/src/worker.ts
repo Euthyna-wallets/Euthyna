@@ -12,10 +12,13 @@ import { OperationWorker, PrismaWorkerStore } from "./operation-worker.js";
 import { createBaseRelayer } from "./relayer.js";
 
 const env = loadEnv();
-const signer = new EnvKmsSigner(
-  Uint8Array.from(Buffer.from(env.GUARD_ED25519_PRIVATE_KEY_BASE64, "base64")),
+const visaSigner = new EnvKmsSigner(
+  Uint8Array.from(Buffer.from(env.GUARD_VISA_ED25519_PRIVATE_KEY_BASE64, "base64")),
 );
-const guard = new Guard(signer);
+const statusSigner = new EnvKmsSigner(
+  Uint8Array.from(Buffer.from(env.GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64, "base64")),
+);
+const guard = new Guard(visaSigner, statusSigner);
 const near = new NearClient(env);
 const base = createBaseRelayer(env, near, guard);
 const governance = env.BASE_GAS_WALLET_PRIVATE_KEY

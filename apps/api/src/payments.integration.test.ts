@@ -146,7 +146,10 @@ describe.skipIf(!databaseUrl)("PaymentService concurrency", () => {
     });
     await prisma.registryVersion.create({ data: { organizationId, version: 1 } });
     const registry = new RegistryService(prisma);
-    const guard = new Guard(new EnvKmsSigner(new Uint8Array(32).fill(7)));
+    const guard = new Guard(
+      new EnvKmsSigner(new Uint8Array(32).fill(7)),
+      new EnvKmsSigner(new Uint8Array(32).fill(8)),
+    );
     currentOperation = operation(`0x${"11".repeat(32)}`, "INV-CONCURRENT");
     const near = {
       getOperation: async () => currentOperation,

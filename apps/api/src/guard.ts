@@ -15,7 +15,10 @@ export interface GuardApproval {
 export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: "escalate" }>;
 
 export class Guard {
-  constructor(private readonly signer: KmsSigner) {}
+  constructor(
+    private readonly visaSigner: KmsSigner,
+    private readonly statusSigner: KmsSigner,
+  ) {}
 
   async approve(operation: VaultOperation, registry: Registry): Promise<GuardResult> {
     if (operation.state !== "Prepared") {
@@ -39,7 +42,7 @@ export class Guard {
       visa_nonce: randomSafeNonce(),
       expires_at_ns: operation.expires_at_ns,
     };
-    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.signer);
+    const signature = await signDomainPayload("mandateos:visa:v1", serializeVisa(visa), this.visaSigner);
     return {
       decision: "approve",
       vendorId: decision.vendorId,
@@ -85,7 +88,7 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:status:v1",
       serializeStatusReport(report),
-      this.signer,
+      this.statusSigner,
     );
     return { report, signature };
   }
@@ -111,7 +114,7 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:relay-status:v1",
       serializeRelayStatusReport(report),
-      this.signer,
+      this.statusSigner,
     );
     return { report, signature };
   }

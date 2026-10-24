@@ -3,6 +3,7 @@ mod vault_common;
 use std::time::Duration;
 
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use near_workspaces::types::Gas;
 use serde_json::{Value, json};
 use serial_test::serial;
@@ -85,6 +86,7 @@ async fn executes_arbitrary_contract_calls_without_safe_or_zodiac() -> Result<()
         "allowance_key": null
     }]);
     config["co_sign_threshold"] = Value::Null;
+    config["co_signer_role"] = Value::Null;
     config["operation_delay_threshold"] = Value::Null;
     config["velocity"] = Value::Null;
     apply_rule_change(
@@ -191,6 +193,7 @@ async fn enforces_time_and_usage_bounded_memberships_and_self_renouncement() -> 
         json!({"GrantMembership": {
             "role": ROLE,
             "member": fixture.outsider.id(),
+            "kind": "Agent",
             "starts_at_ns": now.saturating_add(30_000_000_000).to_string(),
             "ends_at_ns": now.saturating_add(60_000_000_000).to_string(),
             "max_uses": 1
@@ -208,7 +211,7 @@ async fn enforces_time_and_usage_bounded_memberships_and_self_renouncement() -> 
     fixture
         .cosigner
         .call(fixture.vault.id(), "renounce_role")
-        .args_json(json!({"role": ROLE}))
+        .args_json(json!({"role": "approver"}))
         .transact()
         .await?
         .into_result()?;
@@ -367,6 +370,98 @@ async fn requires_cosignature_and_delays_high_value_operations_before_mpc() -> R
 
 #[tokio::test]
 #[serial]
+async fn rejects_operation_role_agents_and_nonhuman_approver_members_as_cosigners() -> Result<()> {
+    let fixture = setup().await?;
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"GrantMembership": {
+            "role": ROLE,
+            "member": fixture.outsider.id(),
+            "kind": "Agent",
+            "starts_at_ns": "0",
+            "ends_at_ns": null,
+            "max_uses": null
+        }}),
+    )
+    .await?;
+    let first = prepare(&fixture, "COSIGN-AGENT-ROLE", MAX_PER_OPERATION + 100).await?;
+    let same_role = fixture
+        .outsider
+        .call(fixture.vault.id(), "co_sign")
+        .args_json(json!({"op_id": first["op_id"]}))
+        .transact()
+        .await?;
+    assert_failure_contains(&same_role, "ERR_COSIGNER_IN_OPERATION_ROLE");
+    fixture
+        .agent
+        .call(fixture.vault.id(), "cancel_prepared")
+        .args_json(json!({"op_id": first["op_id"]}))
+        .transact()
+        .await?
+        .into_result()?;
+    let nonhuman_approver = fixture.worker.dev_create_account().await?;
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"GrantMembership": {
+            "role": "approver",
+            "member": nonhuman_approver.id(),
+            "kind": "Agent",
+            "starts_at_ns": "0",
+            "ends_at_ns": null,
+            "max_uses": null
+        }}),
+    )
+    .await?;
+    let second = prepare(&fixture, "COSIGN-NONHUMAN", MAX_PER_OPERATION + 100).await?;
+    let nonhuman = nonhuman_approver
+        .call(fixture.vault.id(), "co_sign")
+        .args_json(json!({"op_id": second["op_id"]}))
+        .transact()
+        .await?;
+    assert_failure_contains(&nonhuman, "ERR_COSIGNER_NOT_HUMAN");
+    fixture
+        .agent
+        .call(fixture.vault.id(), "cancel_prepared")
+        .args_json(json!({"op_id": second["op_id"]}))
+        .transact()
+        .await?
+        .into_result()?;
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"GrantMembership": {
+            "role": ROLE,
+            "member": fixture.cosigner.id(),
+            "kind": "Human",
+            "starts_at_ns": "0",
+            "ends_at_ns": null,
+            "max_uses": null
+        }}),
+    )
+    .await?;
+    let third = prepare(&fixture, "COSIGN-DUAL-ROLE", MAX_PER_OPERATION + 100).await?;
+    let dual_role = fixture
+        .cosigner
+        .call(fixture.vault.id(), "co_sign")
+        .args_json(json!({"op_id": third["op_id"]}))
+        .transact()
+        .await?;
+    assert_failure_contains(&dual_role, "ERR_COSIGNER_IN_OPERATION_ROLE");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn council_veto_releases_one_delayed_operation_and_wallet_queue() -> Result<()> {
     let fixture = setup().await?;
     let operation = prepare(&fixture, "VETO-1", MAX_PER_OPERATION + 100).await?;
@@ -505,6 +600,91 @@ async fn failed_execution_releases_policy_reservations_but_consumes_wallet_nonce
     );
     let next = prepare(&fixture, "FAILED-2", 100).await?;
     assert_eq!(next["evm_nonce"], 1);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn council_can_pause_but_only_owner_can_unpause() -> Result<()> {
+    let fixture = setup().await?;
+    let outsider = fixture
+        .outsider
+        .call(fixture.vault.id(), "pause")
+        .transact()
+        .await?;
+    assert_failure_contains(&outsider, "ERR_OWNER_OR_COUNCIL");
+    fixture
+        .council
+        .call(fixture.vault.id(), "pause")
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(fixture.vault.view("is_paused").await?.json::<bool>()?);
+    let council_unpause = fixture
+        .council
+        .call(fixture.vault.id(), "unpause")
+        .transact()
+        .await?;
+    assert_failure_contains(&council_unpause, "ERR_OWNER_ONLY");
+    fixture
+        .owner
+        .call(fixture.vault.id(), "unpause")
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(!fixture.vault.view("is_paused").await?.json::<bool>()?);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn rotates_distinct_visa_and_status_keys_only_through_delayed_rules() -> Result<()> {
+    let fixture = setup().await?;
+    let initial_visa: String = fixture.vault.view("visa_public_key").await?.json()?;
+    let initial_status: String = fixture.vault.view("status_public_key").await?.json()?;
+    assert_ne!(initial_visa, initial_status);
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"SetVisaPublicKey": {"visa_public_key": vec![9u8; 32]}}),
+    )
+    .await?;
+    assert_eq!(
+        fixture
+            .vault
+            .view("visa_public_key")
+            .await?
+            .json::<String>()?,
+        STANDARD.encode([9u8; 32])
+    );
+    assert_eq!(
+        fixture
+            .vault
+            .view("status_public_key")
+            .await?
+            .json::<String>()?,
+        initial_status
+    );
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"SetStatusPublicKey": {"status_public_key": vec![10u8; 32]}}),
+    )
+    .await?;
+    assert_eq!(
+        fixture
+            .vault
+            .view("status_public_key")
+            .await?
+            .json::<String>()?,
+        STANDARD.encode([10u8; 32])
+    );
     Ok(())
 }
 

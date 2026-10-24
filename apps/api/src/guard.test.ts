@@ -9,6 +9,16 @@ import type { GovernanceOperation, Registry, VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
 const recipient = "0x1111111111111111111111111111111111111111" as const;
+const visaPrivateKey = Uint8Array.from({ length: 32 }, () => 7);
+const statusPrivateKey = Uint8Array.from({ length: 32 }, () => 8);
+
+function testGuard(): Guard {
+  return new Guard(
+    new EnvKmsSigner(visaPrivateKey),
+    new EnvKmsSigner(statusPrivateKey),
+  );
+}
+
 const erc20TransferAbi = [{
   type: "function",
   name: "transfer",
@@ -89,8 +99,8 @@ function operationFor(target: `0x${string}` = recipient): VaultOperation {
 
 describe("Guard exact rules", () => {
   it("signs the exact prepared transaction and produces a verifiable domain-separated visa", async () => {
-    const privateKey = Uint8Array.from({ length: 32 }, () => 7);
-    const guard = new Guard(new EnvKmsSigner(privateKey));
+    const privateKey = visaPrivateKey;
+    const guard = testGuard();
     const result = await guard.approve(operationFor(), registry);
     expect(result.decision).toBe("approve");
     if (result.decision !== "approve") throw new Error("expected approval");
@@ -108,14 +118,14 @@ describe("Guard exact rules", () => {
   });
 
   it("Guard refuses an uncovered recipient and emits no visa", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const result = await guard.approve(operationFor("0x2222222222222222222222222222222222222222"), registry);
     expect(result).toEqual({ decision: "escalate", reasons: ["recipient not registered"] });
     expect("approval" in result).toBe(false);
   });
 
   it("escalates when the persisted digest no longer matches the transaction", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const operation = operationFor();
     operation.tx_digest[0] = (operation.tx_digest[0] ?? 0) ^ 1;
     const result = await guard.approve(operation, registry);
@@ -126,7 +136,7 @@ describe("Guard exact rules", () => {
   });
 
   it("refuses to confirm a hash other than the stored raw transaction hash", async () => {
-    const guard = new Guard(new EnvKmsSigner(Uint8Array.from({ length: 32 }, () => 7)));
+    const guard = testGuard();
     const operation = operationFor();
     operation.state = "PossiblySigned";
     operation.signed_transaction = [0x02, 0x01, 0x02];
@@ -135,8 +145,8 @@ describe("Guard exact rules", () => {
     ).rejects.toThrow("receipt hash does not match the stored signed transaction");
   });
   it("signs relay confirmations under the relay-only domain", async () => {
-    const privateKey = Uint8Array.from({ length: 32 }, () => 7);
-    const guard = new Guard(new EnvKmsSigner(privateKey));
+    const privateKey = statusPrivateKey;
+    const guard = testGuard();
     const operation: GovernanceOperation = {
       op_id: Array(32).fill(4) as number[],
       proposer: "dao.testnet",

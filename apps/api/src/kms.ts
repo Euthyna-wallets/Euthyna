@@ -13,7 +13,7 @@ export interface KmsSigner {
 export class EnvKmsSigner implements KmsSigner {
   constructor(private readonly privateKey: Uint8Array) {
     if (privateKey.length !== 32) {
-      throw new Error("GUARD_ED25519_PRIVATE_KEY_BASE64 must decode to 32 bytes");
+      throw new Error("Guard ed25519 private key must decode to 32 bytes");
     }
   }
 

@@ -47,7 +47,7 @@ sequenceDiagram
 | Sputnik DAO | Logical `owner_id`; can only queue policy changes | None |
 | OmniRoles vault | Policy state, allowance accounting, wallet nonce, MPC requests | No access key after deployment |
 | Agent or human member | Function-call key limited to `prepare`, `authorize`, `cancel_nonce`, `renounce_role` | None |
-| Guard | Business-data visa and terminal receipt report | One ed25519 service key; cannot produce MPC signatures |
+| Guard | Business-data visas and terminal receipt reports | Separate ed25519 visa/status keys; neither can produce MPC signatures |
 | Worker / relayer | Broadcasts exact raw transactions and calls permissionless queue execution | No fund-moving key |
 | ACME Base wallet | Holds TestUSDC and a small ETH gas balance | MPC-derived; no private key exists |
 
@@ -65,12 +65,14 @@ The future paymaster is tracked in issue #39. Until then the derived Base wallet
 8. A role or allowance with active reservations cannot be replaced.
 9. Rule changes never apply immediately: the DAO queues them, anyone executes after the waiting period, and one council account may veto exactly one entry.
 10. Operations above `operation_delay_threshold` are not signed until their waiting period ends. A targeted council veto releases only that operation.
-11. Operations above `co_sign_threshold` require a different active member of the same role to co-sign.
+11. Operations above `co_sign_threshold` require an active **human** member of the distinct `co_signer_role`; agents and members of the operation role cannot co-sign.
 12. The wallet nonce advances only when OmniRoles commits to an MPC signing request. A vetoed or expired pre-signature operation does not consume it.
 13. Once a raw transaction may exist, cancellation uses a higher-fee transaction with the same wallet nonce.
 14. Guard visas bind `client_id`, operation, digest, member, role, reference, policy versions, nonce, and expiry. Replay is rejected.
 15. Terminal reports bind the hash of the exact stored raw transaction. `Confirmed` consumes reservations; `Failed` releases policy spend but keeps the wallet nonce consumed.
 16. Non-empty condition trees fail closed until `contracts/omniroles-conditions` is integrated.
+17. A council member may pause immediately during an incident. Only the DAO owner can unpause.
+18. Visa and status keys are separate and can rotate only through delayed `RuleChange` entries.
 
 These invariants are implemented in [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs) and exercised by [`contracts/tests/tests/vault_operations.rs`](./contracts/tests/tests/vault_operations.rs) and [`contracts/tests/tests/dao_governance.rs`](./contracts/tests/tests/dao_governance.rs).
 
@@ -84,6 +86,7 @@ A role contains:
 - EVM permissions;
 - high-value waiting-period threshold and duration;
 - co-signature threshold;
+- distinct human `co_signer_role`;
 - velocity limit/window;
 - EIP-1559 gas caps.
 
@@ -132,7 +135,7 @@ stateDiagram-v2
   Queued --> Expired: expiration elapsed
 ```
 
-`SetRole`, `RemoveRole`, `GrantMembership`, `RevokeMembership`, `SetAllowance`, `SetCouncil`, `SetGuardPublicKey`, and `SetVersions` all use this queue.
+`SetRole`, `RemoveRole`, `GrantMembership`, `RevokeMembership`, `SetAllowance`, `SetCouncil`, `SetVisaPublicKey`, `SetStatusPublicKey`, and `SetVersions` all use this queue.
 
 ### Operations
 
@@ -184,11 +187,14 @@ DAO sandbox tests prove:
 Task 1a deployment attests:
 
 - keyless OmniRoles account and code hash;
-- `owner_id`, MPC account, Guard key, policy versions;
+- `owner_id`, MPC account, separate visa/status Guard keys, policy versions;
 - council accounts;
 - operation TTL, rule delay, and rule expiration;
 - derived Base wallet path, public key, address, and nonce;
+- zero access keys after initialization;
 - wallet ETH/TestUSDC balances before the first payment.
+
+The jury run recorded in [`deployments/omniroles-base-sepolia.json`](./deployments/omniroles-base-sepolia.json) uses a Sputnik DAO owner, three distinct council accounts, a 300-second rule delay, zero Vault access keys, separate Guard keys, a direct Base payment, and a terminal `Confirmed` report.
 
 The old Safe, Roles, Delay, governance-relay, owner-signature batch, and `0xGOV` attestations are obsolete. Console removal occurs in issue #40 task 2; they are not evidence for an OmniRoles deployment.
 
@@ -196,7 +202,7 @@ The old Safe, Roles, Delay, governance-relay, owner-signature batch, and `0xGOV`
 
 | Block | Status |
 |---|---|
-| Issue #37 invitation binding + four-eyes wallet approval | Implemented in PR #36; awaiting user validation/merge |
+| Issue #37 invitation binding + four-eyes wallet approval | Merged in PR #36 |
 | Issue #40 task 1a contract, SDK boundary, tests | This branch |
 | Issue #40 task 1b condition engine | Parallel branch owned separately; this branch does not touch it |
 | Issue #40 task 2 console/deployment cutover | Next PR after task 1a validation |

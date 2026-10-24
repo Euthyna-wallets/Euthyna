@@ -23,7 +23,8 @@ describe("console passkey origin", () => {
 
   it("derives rpID from CONSOLE_ORIGIN when PASSKEY_RP_ID is absent", () => {
     const env = loadEnv({
-      GUARD_ED25519_PRIVATE_KEY_BASE64: "unused",
+      GUARD_VISA_ED25519_PRIVATE_KEY_BASE64: "unused-visa",
+      GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64: "unused-status",
       NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
       NEAR_RELAYER_PRIVATE_KEY: "ed25519:unused",
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
