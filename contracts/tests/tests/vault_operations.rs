@@ -874,3 +874,54 @@ async fn lists_rule_changes_newest_first() -> Result<()> {
     assert_eq!(older[0]["queue_id"], all[1]["queue_id"]);
     Ok(())
 }
+
+#[tokio::test]
+#[serial]
+async fn refusal_comes_from_the_closest_permission() -> Result<()> {
+    let fixture = setup().await?;
+    let mut config = role_config();
+    let unrelated_target = [0x77u8; 20];
+    let unrelated = json!({
+        "chain_id": CHAIN_ID,
+        "target": unrelated_target,
+        "selector": null,
+        "conditions": [],
+        "allow_value": false
+    });
+    config["permissions"]
+        .as_array_mut()
+        .expect("permissions")
+        .push(unrelated);
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"SetRole": {"role": ROLE, "config": config}}),
+    )
+    .await?;
+    let mut other = request("CLOSEST-1", 100);
+    other["calldata"] = json!(erc20_transfer([0x99; 20], 100));
+    let checked: Value = fixture
+        .vault
+        .view("check_operation")
+        .args_json(json!({"role": ROLE, "member": fixture.agent.id(), "request": other.clone()}))
+        .await?
+        .json()?;
+    assert!(
+        checked["reason"]
+            .as_str()
+            .unwrap()
+            .contains("parameterNotAllowed"),
+        "{checked}"
+    );
+    let refused = fixture
+        .agent
+        .call(fixture.vault.id(), "prepare")
+        .args_json(json!({"role": ROLE, "request": other}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&refused, "parameterNotAllowed");
+    Ok(())
+}

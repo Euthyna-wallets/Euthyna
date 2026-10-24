@@ -320,7 +320,7 @@ impl Vault {
                         wallet_busy: wallet.active_operation.is_some(),
                     };
                 }
-                Err(reason) => refusal = reason,
+                Err(reason) => refusal = Self::closer_refusal(refusal, reason),
             }
         }
         refuse(&format!("ERR_PERMISSION_DENIED:{refusal}"))
@@ -527,7 +527,7 @@ impl Vault {
                     matched = Some((index, consumptions));
                     break;
                 }
-                Err(reason) => refusal = reason,
+                Err(reason) => refusal = Self::closer_refusal(refusal, reason),
             }
         }
         let (permission_index, consumptions) =
@@ -1553,6 +1553,24 @@ impl Vault {
             RuleChange::RemoveRole { .. }
             | RuleChange::RevokeMembership { .. }
             | RuleChange::SetVersions { .. } => {}
+        }
+    }
+
+    /// Keep the refusal of the permission that came closest to matching: a
+    /// condition failure on the right contract and function explains more than
+    /// "target not allowed" from an unrelated permission.
+    fn closer_refusal(current: String, candidate: String) -> String {
+        let rank = |reason: &str| match reason {
+            "NoPermission" => 0,
+            "TargetNotAllowed" => 1,
+            "FunctionNotAllowed" => 2,
+            "SendNotAllowed" => 3,
+            _ => 4,
+        };
+        if rank(&candidate) >= rank(&current) {
+            candidate
+        } else {
+            current
         }
     }
 
