@@ -10,12 +10,13 @@ use near_sdk::{
     ext_contract, near, require,
 };
 
-use conditions::EvaluationContext;
+use conditions::{EvaluationContext, ReservedAllowances};
+use omniroles_conditions::Consumption;
 pub use types::{
-    Allowance, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa, Membership,
-    MembershipKind, MpcSignature, Operation, OperationRequest, OperationState, Permission,
-    QueuedRuleChange, RoleConfig, RoleView, RuleChange, RuleChangeState, SignedStatusReport,
-    StatusKind, StatusReport, VelocityConfig, VelocityState,
+    Allowance, AllowanceConsumption, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa,
+    Membership, MembershipKind, MpcSignature, Operation, OperationRequest, OperationState,
+    Permission, QueuedRuleChange, RoleConfig, RoleView, RuleChange, RuleChangeState,
+    SignedStatusReport, StatusKind, StatusReport, VelocityConfig, VelocityState,
 };
 use types::{
     AllowanceKey, MembershipKey, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId,
@@ -402,19 +403,25 @@ impl Vault {
             .expect("ERR_MEMBERSHIP_NOT_FOUND");
         Self::assert_membership_available(&membership, now);
 
-        let (permission_index, permission) = role_state
-            .config
-            .permissions
-            .iter()
-            .enumerate()
-            .find(|(_, permission)| {
-                self.permission_matches(permission, &request, &member, &role, wallet_address, now)
-            })
-            .unwrap_or_else(|| env::panic_str("ERR_PERMISSION_DENIED"));
+        // First permission whose target, selector, value option and conditions
+        // all accept the call. The refusal of the last candidate is reported.
+        let mut refusal = String::from("NoPermission");
+        let mut matched = None;
+        for (index, permission) in role_state.config.permissions.iter().enumerate() {
+            match self.check_permission(permission, &request, &member, &role, wallet_address, now) {
+                Ok(consumptions) => {
+                    matched = Some((index, consumptions));
+                    break;
+                }
+                Err(reason) => refusal = reason,
+            }
+        }
+        let (permission_index, consumptions) =
+            matched.unwrap_or_else(|| env::panic_str(&format!("ERR_PERMISSION_DENIED:{refusal}")));
 
-        let allowance_key = permission.allowance_key;
-        self.reserve_allowance(allowance_key, &request, now);
-        self.reserve_velocity(&role, &role_state.config, &request, now);
+        let consumptions = self.reserve_allowances(&consumptions, &request, now);
+        let measured_value = Self::measured_value(&request, &consumptions);
+        self.reserve_velocity(&role, &role_state.config, &request, measured_value, now);
         self.reserve_membership_use(&membership_key);
 
         let reference_key = ReferenceKey {
@@ -429,7 +436,7 @@ impl Vault {
         let nonce = wallet.next_nonce;
         let (transaction, tx_digest) = evm::build_transaction(&role_state.config, nonce, &request);
         let op_id = self.next_operation_id(&member, request.chain_id);
-        let risk_value = Self::risk_value(&request);
+        let risk_value = Self::threshold_value(measured_value);
         let execute_after_ns = role_state
             .config
             .operation_delay_threshold
@@ -454,7 +461,8 @@ impl Vault {
             permission_index: permission_index
                 .try_into()
                 .unwrap_or_else(|_| env::panic_str("ERR_PERMISSION_INDEX")),
-            allowance_key,
+            consumptions,
+            measured_value: measured_value.map(U128),
             policy_version: self.policy_version,
             registry_version: self.registry_version,
             evm_nonce: nonce,
@@ -560,11 +568,9 @@ impl Vault {
             "ERR_OPERATION_EXPIRED"
         );
         let role = self.roles.get(&operation.role).expect("ERR_ROLE_NOT_FOUND");
-        if role
-            .config
-            .co_sign_threshold
-            .is_some_and(|threshold| Self::risk_value(&operation.request) > threshold.0)
-        {
+        if role.config.co_sign_threshold.is_some_and(|threshold| {
+            Self::threshold_value(operation.measured_value.map(|value| value.0)) > threshold.0
+        }) {
             require!(operation.cosigned_by.is_some(), "ERR_COSIGN_REQUIRED");
         }
         self.verify_visa(&operation, &approval);
@@ -991,7 +997,7 @@ impl Vault {
             )
     }
 
-    fn permission_matches(
+    fn check_permission(
         &self,
         permission: &Permission,
         request: &OperationRequest,
@@ -999,14 +1005,17 @@ impl Vault {
         role: &str,
         wallet: [u8; 20],
         now: u64,
-    ) -> bool {
+    ) -> Result<Vec<Consumption>, String> {
         if permission.chain_id != request.chain_id || permission.target != request.target {
-            return false;
+            return Err("TargetNotAllowed".into());
         }
         if let Some(selector) = permission.selector {
             if request.calldata.get(..4) != Some(selector.as_slice()) {
-                return false;
+                return Err("FunctionNotAllowed".into());
             }
+        }
+        if request.value.0 > 0 && !permission.allow_value {
+            return Err("SendNotAllowed".into());
         }
         let context = EvaluationContext {
             member,
@@ -1017,57 +1026,90 @@ impl Vault {
             value: request.value.0,
             block_timestamp_ns: now,
         };
-        match conditions::evaluate(&permission.conditions, &request.calldata, &context) {
-            Ok(result) => result,
-            Err(conditions::EvaluationError::EngineUnavailable) => {
-                env::panic_str("ERR_CONDITION_ENGINE_UNAVAILABLE")
-            }
-        }
+        let allowances = ReservedAllowances {
+            allowances: &self.allowances,
+            now,
+        };
+        conditions::evaluate(
+            &permission.conditions,
+            &request.calldata,
+            &context,
+            &allowances,
+        )
+        .map_err(|status| {
+            near_sdk::serde_json::to_string(&status).unwrap_or_else(|_| format!("{status:?}"))
+        })
     }
 
-    fn reserve_allowance(
+    /// Reserve what the conditions consumed. The caller-declared
+    /// `allowance_amount` must equal the amount the engine measured.
+    fn reserve_allowances(
         &mut self,
-        allowance_key: Option<AllowanceKey>,
+        consumptions: &[Consumption],
         request: &OperationRequest,
         now: u64,
-    ) {
-        let Some(key) = allowance_key else {
-            require!(
-                request.allowance_amount.0 == 0,
-                "ERR_UNEXPECTED_ALLOWANCE_AMOUNT"
+    ) -> Vec<AllowanceConsumption> {
+        let mut declared = 0u128;
+        let mut reserved = Vec::with_capacity(consumptions.len());
+        for consumption in consumptions {
+            let key: AllowanceKey = consumption
+                .key
+                .as_slice()
+                .try_into()
+                .unwrap_or_else(|_| env::panic_str("ERR_ALLOWANCE_KEY"));
+            let allowance = self
+                .allowances
+                .get_mut(&key)
+                .expect("ERR_ALLOWANCE_NOT_FOUND");
+            Self::refill_allowance(allowance, now);
+            let available = allowance.balance.0.saturating_sub(allowance.reserved.0);
+            require!(consumption.consumed <= available, "ERR_ALLOWANCE_EXCEEDED");
+            allowance.reserved = U128(
+                allowance
+                    .reserved
+                    .0
+                    .checked_add(consumption.consumed)
+                    .unwrap_or_else(|| env::panic_str("ERR_ALLOWANCE_OVERFLOW")),
             );
-            return;
-        };
-        if request.calldata.is_empty() {
-            require!(
-                request.allowance_amount.0 == request.value.0,
-                "ERR_ETHER_ALLOWANCE_AMOUNT"
-            );
-        } else if let Some((_recipient, amount)) = evm::decode_erc20_transfer(&request.calldata) {
-            require!(
-                request.allowance_amount.0 == amount,
-                "ERR_TOKEN_ALLOWANCE_AMOUNT"
-            );
-        } else {
-            require!(false, "ERR_ALLOWANCE_REQUIRES_CONDITION_ENGINE");
+            if !consumption.calls_only {
+                declared = declared
+                    .checked_add(consumption.consumed)
+                    .unwrap_or_else(|| env::panic_str("ERR_ALLOWANCE_OVERFLOW"));
+            }
+            reserved.push(AllowanceConsumption {
+                key,
+                amount: U128(consumption.consumed),
+                calls_only: consumption.calls_only,
+            });
         }
-        let allowance = self
-            .allowances
-            .get_mut(&key)
-            .expect("ERR_ALLOWANCE_NOT_FOUND");
-        Self::refill_allowance(allowance, now);
-        let available = allowance.balance.0.saturating_sub(allowance.reserved.0);
         require!(
-            request.allowance_amount.0 <= available,
-            "ERR_ALLOWANCE_EXCEEDED"
+            request.allowance_amount.0 == declared,
+            "ERR_ALLOWANCE_AMOUNT_MISMATCH"
         );
-        allowance.reserved = U128(
-            allowance
-                .reserved
-                .0
-                .checked_add(request.allowance_amount.0)
-                .unwrap_or_else(|| env::panic_str("ERR_ALLOWANCE_OVERFLOW")),
-        );
+        reserved
+    }
+
+    /// Largest value the vault can measure: native value or an amount charged
+    /// to an allowance. `None` when the permission measures nothing.
+    fn measured_value(
+        request: &OperationRequest,
+        consumptions: &[AllowanceConsumption],
+    ) -> Option<u128> {
+        let charged = consumptions
+            .iter()
+            .filter(|consumption| !consumption.calls_only)
+            .map(|consumption| consumption.amount.0)
+            .max();
+        if request.value.0 == 0 && charged.is_none() {
+            return None;
+        }
+        Some(charged.unwrap_or(0).max(request.value.0))
+    }
+
+    /// Value compared with delay and co-signature thresholds. An operation the
+    /// vault cannot measure is treated as above every threshold (fail safe).
+    fn threshold_value(measured_value: Option<u128>) -> u128 {
+        measured_value.unwrap_or(u128::MAX)
     }
 
     fn reserve_velocity(
@@ -1075,6 +1117,7 @@ impl Vault {
         role: &str,
         config: &RoleConfig,
         request: &OperationRequest,
+        measured_value: Option<u128>,
         now: u64,
     ) {
         let Some(limit) = &config.velocity else {
@@ -1099,7 +1142,7 @@ impl Vault {
             state.spent = U128(0);
             state.reserved = U128(0);
         }
-        let risk = Self::risk_value(request);
+        let risk = measured_value.unwrap_or(0);
         let used = state
             .spent
             .0
@@ -1166,16 +1209,16 @@ impl Vault {
         if !rollback {
             membership.used_uses = membership.used_uses.saturating_add(1);
         }
-        if let Some(key) = operation.allowance_key {
+        for consumption in &operation.consumptions {
             let allowance = self
                 .allowances
-                .get_mut(&key)
+                .get_mut(&consumption.key)
                 .expect("ERR_ALLOWANCE_NOT_FOUND");
             allowance.reserved = U128(
                 allowance
                     .reserved
                     .0
-                    .checked_sub(operation.request.allowance_amount.0)
+                    .checked_sub(consumption.amount.0)
                     .unwrap_or_else(|| env::panic_str("ERR_ALLOWANCE_RESERVATION")),
             );
             if !rollback {
@@ -1183,7 +1226,7 @@ impl Vault {
                     allowance
                         .balance
                         .0
-                        .checked_sub(operation.request.allowance_amount.0)
+                        .checked_sub(consumption.amount.0)
                         .unwrap_or_else(|| env::panic_str("ERR_ALLOWANCE_BALANCE")),
                 );
             }
@@ -1193,7 +1236,7 @@ impl Vault {
             chain_id: operation.request.chain_id,
         };
         if let Some(velocity) = self.velocities.get_mut(&velocity_key) {
-            let risk = Self::risk_value(&operation.request);
+            let risk = operation.measured_value.map_or(0, |value| value.0);
             velocity.reserved = U128(
                 velocity
                     .reserved
@@ -1358,6 +1401,15 @@ impl Vault {
                     require!(velocity.limit.0 > 0, "ERR_ZERO_VELOCITY_LIMIT");
                     require!(velocity.window_ns > 0, "ERR_ZERO_VELOCITY_WINDOW");
                 }
+                // Condition trees are checked when the rule is queued, so the
+                // DAO votes only on trees the engine can evaluate.
+                for permission in &config.permissions {
+                    if !permission.conditions.is_empty() {
+                        if let Err(error) = omniroles_conditions::validate(&permission.conditions) {
+                            env::panic_str(&format!("ERR_INVALID_CONDITIONS:{error:?}"));
+                        }
+                    }
+                }
             }
             RuleChange::GrantMembership {
                 starts_at_ns,
@@ -1431,10 +1483,6 @@ impl Vault {
             .timestamp_ns
             .0
             .saturating_add(periods.saturating_mul(allowance.period_ns)));
-    }
-
-    fn risk_value(request: &OperationRequest) -> u128 {
-        request.allowance_amount.0.max(request.value.0)
     }
 
     fn verify_visa(&self, operation: &Operation, approval: &GuardApproval) {

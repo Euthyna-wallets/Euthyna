@@ -1,5 +1,6 @@
 use near_sdk::json_types::{Base64VecU8, U64, U128};
 use near_sdk::{AccountId, near};
+use omniroles_conditions::ConditionFlat;
 use serde::{Deserialize, Serialize};
 
 pub type OperationId = [u8; 32];
@@ -16,10 +17,25 @@ pub struct Permission {
     /// `None` allows any function on the target. A selector requires at least
     /// four calldata bytes and an exact match.
     pub selector: Option<[u8; 4]>,
-    /// Flattened Roles-compatible condition bytes. Empty means unconditional.
-    pub conditions: Vec<u8>,
-    /// Optional shared cross-chain allowance charged by `allowance_amount`.
-    pub allowance_key: Option<AllowanceKey>,
+    /// Zodiac Roles v3 condition tree, flattened (`{parent, paramType,
+    /// operator, compValue}`), evaluated by `omniroles-conditions` on the exact
+    /// calldata and value. Empty means unconditional. Allowances are charged
+    /// by `WithinAllowance` / `CallWithinAllowance` nodes, so the amount always
+    /// comes from the transaction itself, never from the caller.
+    pub conditions: Vec<ConditionFlat>,
+    /// Native value (ETH) may be sent with the call. Default: no.
+    #[serde(default)]
+    pub allow_value: bool,
+}
+
+/// Amount charged to one allowance by an operation.
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct AllowanceConsumption {
+    pub key: AllowanceKey,
+    pub amount: U128,
+    /// `true` when the allowance counts calls (`CallWithinAllowance`).
+    pub calls_only: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -198,7 +214,12 @@ pub struct Operation {
     pub role: String,
     pub request: OperationRequest,
     pub permission_index: u32,
-    pub allowance_key: Option<AllowanceKey>,
+    /// Allowances charged by the matched permission's conditions.
+    pub consumptions: Vec<AllowanceConsumption>,
+    /// Largest value the operation moves, as measured by the vault: native
+    /// value or an amount charged to an allowance. `None` when nothing in the
+    /// permission measures it; delay and co-signature thresholds then apply.
+    pub measured_value: Option<U128>,
     pub policy_version: u64,
     pub registry_version: u64,
     pub evm_nonce: u64,

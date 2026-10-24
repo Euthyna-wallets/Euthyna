@@ -1,11 +1,15 @@
 use near_sdk::AccountId;
+use near_sdk::store::LookupMap;
+use omniroles_conditions::{
+    Allowance as EngineAllowance, AllowanceSource, ConditionFlat, Consumption, Context, Status,
+};
 
-use crate::types::EvmAddress;
+use crate::Vault;
+use crate::types::{Allowance, AllowanceKey, EvmAddress};
 
-/// Stable boundary between the OmniRoles vault and the condition engine built in
-/// `contracts/omniroles-conditions`. The boundary intentionally contains only
-/// primitive, chain-independent values so the evaluator crate can be integrated
-/// without coupling it to vault storage.
+/// Boundary between the OmniRoles vault and the condition engine
+/// (`contracts/omniroles-conditions`). Only primitive, chain-independent values
+/// cross it, so the engine stays independent of vault storage.
 #[derive(Clone, Debug)]
 pub(crate) struct EvaluationContext<'a> {
     pub member: &'a AccountId,
@@ -17,33 +21,53 @@ pub(crate) struct EvaluationContext<'a> {
     pub block_timestamp_ns: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EvaluationError {
-    EngineUnavailable,
+/// Allowances as the engine sees them: refilled up to `now`, minus what pending
+/// operations already reserved. The engine never accrues them itself (period 0).
+pub(crate) struct ReservedAllowances<'a> {
+    pub allowances: &'a LookupMap<AllowanceKey, Allowance>,
+    pub now: u64,
 }
 
-/// Evaluates a flattened Roles-compatible condition tree against raw calldata.
-///
-/// Task 1a supports unconditional permissions only. Non-empty condition trees
-/// fail closed until task 1b wires `omniroles-conditions::evaluate` here. This is
-/// a security boundary, not a permissive placeholder.
+impl AllowanceSource for ReservedAllowances<'_> {
+    fn allowance(&self, key: &[u8; 32]) -> Option<EngineAllowance> {
+        let mut allowance = self.allowances.get(key)?.clone();
+        Vault::refill_allowance(&mut allowance, self.now);
+        Some(EngineAllowance {
+            refill: 0,
+            max_refill: 0,
+            period: 0,
+            balance: allowance.balance.0.saturating_sub(allowance.reserved.0),
+            timestamp: 0,
+        })
+    }
+}
+
+/// Evaluate a flattened Roles-compatible condition tree on the exact calldata
+/// and value. Empty conditions are unconditional. On success, returns the
+/// allowance consumptions the vault must reserve.
 pub(crate) fn evaluate(
-    conditions: &[u8],
-    _calldata: &[u8],
+    conditions: &[ConditionFlat],
+    calldata: &[u8],
     context: &EvaluationContext<'_>,
-) -> Result<bool, EvaluationError> {
+    allowances: &dyn AllowanceSource,
+) -> Result<Vec<Consumption>, Status> {
     let _ = (
         context.member,
         context.role,
         context.chain_id,
-        context.wallet,
         context.target,
-        context.value,
-        context.block_timestamp_ns,
     );
     if conditions.is_empty() {
-        Ok(true)
-    } else {
-        Err(EvaluationError::EngineUnavailable)
+        return Ok(Vec::new());
     }
+    omniroles_conditions::evaluate(
+        conditions,
+        &Context {
+            calldata,
+            value: context.value,
+            avatar: context.wallet,
+            now: context.block_timestamp_ns,
+            allowances,
+        },
+    )
 }

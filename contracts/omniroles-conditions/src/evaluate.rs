@@ -232,11 +232,11 @@ impl<'t, 'c> Evaluator<'t, 'c> {
                     node: id,
                     key: hex_key(&key),
                 })?;
-                self.consume(id, key, amount)
+                self.consume(id, key, amount, false)
             }
             Operator::CallWithinAllowance => {
                 let key = allowance_key(node)?;
-                self.consume(id, key, 1)
+                self.consume(id, key, 1, true)
             }
             _ => Err(Status::ConditionsInvalid),
         }
@@ -251,7 +251,13 @@ impl<'t, 'c> Evaluator<'t, 'c> {
         }
     }
 
-    fn consume(&mut self, node: u16, key: [u8; 32], amount: u128) -> Result<(), Status> {
+    fn consume(
+        &mut self,
+        node: u16,
+        key: [u8; 32],
+        amount: u128,
+        calls: bool,
+    ) -> Result<(), Status> {
         let position = match self.consumptions.iter().position(|entry| entry.key == key) {
             Some(position) => position,
             None => {
@@ -267,11 +273,13 @@ impl<'t, 'c> Evaluator<'t, 'c> {
                     balance,
                     timestamp,
                     consumed: 0,
+                    calls_only: calls,
                 });
                 self.consumptions.len() - 1
             }
         };
         let entry = &mut self.consumptions[position];
+        entry.calls_only &= calls;
         match entry.consumed.checked_add(amount) {
             Some(total) if total <= entry.balance => {
                 entry.consumed = total;

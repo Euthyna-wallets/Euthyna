@@ -135,8 +135,12 @@ pub fn role_config() -> Value {
             "chain_id": CHAIN_ID,
             "target": TOKEN,
             "selector": [0xa9, 0x05, 0x9c, 0xbb],
-            "conditions": [],
-            "allowance_key": ALLOWANCE_KEY
+            "conditions": [
+                {"parent": 0, "paramType": 5, "operator": 5, "compValue": "0x"},
+                {"parent": 0, "paramType": 1, "operator": 0, "compValue": "0x"},
+                {"parent": 0, "paramType": 1, "operator": 28, "compValue": format!("0x{}", hex::encode(ALLOWANCE_KEY))}
+            ],
+            "allow_value": false
         }],
         "operation_delay_threshold": "5000000",
         "operation_delay_ns": 300_000_000_000u64,
