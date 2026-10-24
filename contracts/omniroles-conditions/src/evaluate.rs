@@ -157,6 +157,19 @@ impl<'t, 'c> Evaluator<'t, 'c> {
                     Encoding::Static => *abi::word(present(region)?, 0)?,
                     Encoding::EtherValue => abi::u128_word(self.context.value),
                     Encoding::Dynamic => keccak(abi::dynamic_bytes(present(region)?)?),
+                    Encoding::Array => {
+                        // keccak256(length || elements), elements static.
+                        let Layout::Array(element) = &node.layout else {
+                            return Err(Status::ConditionsInvalid);
+                        };
+                        let region = present(region)?;
+                        let length = abi::word_usize(region, 0)?;
+                        let size = length
+                            .checked_mul(element.head_size())
+                            .and_then(|items| items.checked_add(32))
+                            .ok_or(Status::CalldataOutOfBounds)?;
+                        keccak(region.get(..size).ok_or(Status::CalldataOutOfBounds)?)
+                    }
                     Encoding::Tuple => {
                         let size = node.layout.head_size();
                         keccak(
