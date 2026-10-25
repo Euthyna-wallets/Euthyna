@@ -315,3 +315,4 @@ tr.allowed td { background: #f4fbf9; }
 button.block { width: 100%; min-height: 44px; font-size: 15px; }
 .auth-error { margin: 14px 0 0; overflow-wrap: anywhere; }
 .auth-foot { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #1f2731; font-size: 13px; color: #8b97a7; line-height: 1.5; }
+.role-steps { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }

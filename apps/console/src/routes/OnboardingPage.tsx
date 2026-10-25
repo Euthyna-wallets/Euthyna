@@ -152,11 +152,15 @@ export function OnboardingPage() {
           {stage === "role" ? (
             <section className="card empty-action">
               <div>
-                <h2>Create the first role</h2>
+                <h2>Say what {activeAgents[0]?.name ?? "the agent"} may do</h2>
                 <p className="muted">
-                  Pick what {activeAgents[0]?.name ?? "the agent"} may do: pay registered suppliers, swap on Uniswap, with a budget.
-                  Members vote, and it applies after the veto window.
+                  A role lists what the agent may do with company funds. Everything else is refused by the vault.
                 </p>
+                <ol className="small muted role-steps">
+                  <li>Name the role <span className="mono">{activeAgents[0]?.role ?? "treasury"}</span> (the name the agent uses) and add what it allows: pay registered suppliers, or swap on Uniswap, each with a budget.</li>
+                  <li>Preview, then submit it to the members' vote.</li>
+                  <li>Members approve it in Decisions; it applies after the veto window.</li>
+                </ol>
               </div>
               <Link className="button primary" to={`/roles?new=1&role=${encodeURIComponent(activeAgents[0]?.role ?? "treasury")}`}>Build the role</Link>
             </section>
