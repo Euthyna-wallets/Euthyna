@@ -22,24 +22,13 @@ body {
 code, pre, .mono { font-family: "IBM Plex Mono", monospace; }
 a { color: var(--accent-2); }
 .shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
-.sidebar {
-  background: var(--bg);
-  border-right: 1px solid var(--border);
-  padding: 28px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
 .brand { font-weight: 600; letter-spacing: 0.04em; font-size: 20px; }
-.sidebar nav { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
-.sidebar nav a { color: var(--muted); text-decoration: none; padding: 8px 10px; border-radius: 8px; }
-.sidebar nav a.active, .sidebar nav a:hover { background: var(--surface); color: var(--fg); }
 .spacer { flex: 1; }
 main { padding: 34px 40px 80px; max-width: 1100px; }
 header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; }
-h2 { margin: 0 0 12px; font-size: 20px; }
-h3 { margin: 0 0 8px; font-size: 16px; }
+h1:where(:not(.nws-modal-wrapper *)) { margin: 0 0 6px; font-size: 30px; font-weight: 600; }
+h2:where(:not(.nws-modal-wrapper *)) { margin: 0 0 12px; font-size: 20px; }
+h3:where(:not(.nws-modal-wrapper *)) { margin: 0 0 8px; font-size: 16px; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 .pill { border: 1px solid var(--border); padding: 6px 12px; border-radius: 999px; color: var(--muted); font-size: 13px; }
@@ -53,7 +42,7 @@ h3 { margin: 0 0 8px; font-size: 16px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .row { display: flex; gap: 10px; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
-input {
+input:where(:not(.nws-modal-wrapper *)) {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--fg);
@@ -62,8 +51,9 @@ input {
   font: inherit;
   min-width: 180px;
 }
-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
-button {
+label:where(:not(.nws-modal-wrapper *)) { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+/* Element styles stay out of the wallet selector modal (:where keeps specificity unchanged). */
+button:where(:not(.nws-modal-wrapper *)) {
   font: inherit;
   border-radius: 8px;
   padding: 9px 14px;
@@ -72,7 +62,7 @@ button {
   color: var(--fg);
   cursor: pointer;
 }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:where(:not(.nws-modal-wrapper *)):disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-2); }
 button.ghost { background: transparent; }
