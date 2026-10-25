@@ -1,7 +1,7 @@
 # Shares
 
 A MandateOS company can sell shares. Holders vote with them in the company's
-Sputnik DAO and receive a cut of the revenue the company shares.
+Sputnik DAO. Revenue goes to the holders who vote.
 
 ## What it is
 
@@ -14,10 +14,28 @@ change it, MandateOS included. It does four things:
 | Token | NEP-141 with 0 decimals: 1 unit = 1 share. Fixed supply. |
 | Sale | `buy()` at a fixed price in NEAR. The proceeds go to the DAO account. Unsold shares earn nothing and do not vote. |
 | Votes | The contract is the DAO's staking contract. `lock(n)` delegates n shares as votes; `unlock(n)` takes them back. |
-| Revenue | `deposit_revenue()` shares NEAR. One NEP-141 token is shared too: through `ft_transfer_call`, or through `sync_revenue()` after a plain transfer (a bridge). Every share held earns the same, locked or not. `claim()` pays both. |
+| Revenue | By epoch, for voters only (below). NEAR through `deposit_revenue()`; one NEP-141 token through `ft_transfer_call`, or `sync_revenue()` after a plain transfer (a bridge). `claim()` pays both. |
 
 After `unlock`, shares stay frozen for twice the proposal period. They can
 neither move nor vote again before the proposal they voted on is over.
+
+## Revenue goes to voters
+
+Time is cut into epochs: 1 hour on testnet, 7 days in production
+(`OMNIROLES_SHARES_EPOCH_SECONDS`, fixed per contract).
+
+1. Revenue that arrives during epoch N belongs to epoch N.
+2. Only shares locked **since the start of N, and still locked at its end** count. Locking during N counts from N+1; unlocking during N loses those shares' part of N.
+3. During N+1, a holder who voted on **at least one proposal submitted in N** calls `prove_vote(proposal_id)`. The contract reads the proposal in the DAO and checks the vote is there.
+4. From N+2, epoch N's revenue is split among the provers, pro rata of their locked shares. The part of those who did not vote goes to those who did.
+5. If nobody proved a vote, epoch N's revenue moves to the current epoch.
+
+Sputnik stores who voted but not each voter's weight, so the weight is the
+shares locked during the whole epoch, as this contract records them.
+
+A vote counts whatever it says: rejecting counts as much as approving. Anyone
+holding locked shares can submit a proposal (bond 0.1 NEAR), which lets
+holders vote in an otherwise quiet epoch.
 
 ## Who decides what
 
@@ -50,15 +68,27 @@ When the members change, the new policy keeps the shareholders role.
 
 - **NEAR held by the DAO** (for example sale proceeds): **Shares → Propose to
   share it** creates a `FunctionCall` to `deposit_revenue`, paid from the DAO.
+  It goes to the epoch in which the proposal executes.
 - **Base ETH bridged by Omni Bridge** arrives on NEAR as
   `base.omnidep.testnet` (`OMNIROLES_SHARES_REVENUE_TOKEN`). Send it to the
   shares account and anyone can call **Split bridged revenue**. A holder
   registers once on the token (`storage_deposit`) to claim it; until then the
   payment fails and stays owed.
 
-## Proof on testnet (2026-10-25)
+## Tests
 
-Script: a DAO with three members, then the shares contract, then holders.
+`contracts/tests/tests/shares.rs`, NEAR sandbox, 60-second epochs:
+
+- only the voter earns, and gets the whole epoch (the non-voter's part included);
+- two voters split pro rata (600 / 300 shares: 6 and 3 NEAR, 600 and 300 tokens); shares locked during the epoch do not count;
+- with no voter, the revenue moves to the current epoch;
+- a token payment to an unregistered holder fails and stays owed.
+
+## First version on testnet (2026-10-25)
+
+This run used the first version of the contract, where every share earned
+revenue. The epoch version has not run on testnet yet. Script: a DAO with
+three members, then the shares contract, then holders.
 
 | Step | Result | Transaction |
 | --- | --- | --- |

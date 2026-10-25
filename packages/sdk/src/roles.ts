@@ -518,6 +518,8 @@ export type SharesConfig = {
   /** Price of one share, in yoctoNEAR. */
   pricePerShareYocto: string;
   unlockPeriodNs: string;
+  /** Revenue is split by epoch among the holders who voted: 1 hour on testnet, 7 days in production. */
+  epochNs: string;
   revenueToken: string | null;
   allocations: Array<[string, number]>;
 };
@@ -535,6 +537,7 @@ export function sharesInitArgs(daoAccountId: string, config: SharesConfig) {
     total_supply: String(config.totalSupply),
     price_per_share: config.pricePerShareYocto,
     unlock_period_ns: config.unlockPeriodNs,
+    epoch_ns: config.epochNs,
     revenue_token: config.revenueToken,
     allocations: config.allocations.map(([account, amount]) => [account, String(amount)]),
   };
@@ -602,7 +605,10 @@ export function describeSharesProposal(kind: unknown, sharesAccountId: string | 
   }
   const call = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; deposit: string }> } })?.FunctionCall;
   if (call && sharesAccountId && call.receiver_id === sharesAccountId && call.actions?.length === 1 && call.actions[0]?.method_name === "deposit_revenue") {
-    return { title: `Share ${formatNear(call.actions[0].deposit)} with shareholders`, details: ["paid from the DAO account", "split pro rata over every share held"] };
+    return {
+      title: `Share ${formatNear(call.actions[0].deposit)} with shareholders`,
+      details: ["paid from the DAO account", "goes to this epoch's revenue: split among the holders who vote, pro rata of their locked shares"],
+    };
   }
   return null;
 }

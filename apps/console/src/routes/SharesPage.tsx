@@ -60,8 +60,9 @@ export function SharesPage() {
           <span className="eyebrow">Collective ownership</span>
           <h1>Shares</h1>
           <p className="muted">
-            Anyone with a NEAR wallet can buy shares. Locked shares vote on company calls and transfers, and every
-            share earns its part of the revenue the company shares. Members keep their two-thirds vote and their veto.
+            Anyone with a NEAR wallet can buy shares. Locked shares vote on company calls and transfers. Revenue is
+            split by epoch among the holders who voted: the part of those who did not goes to those who did. Members
+            keep their two-thirds vote and their veto.
           </p>
         </div>
       </header>
@@ -143,6 +144,10 @@ function SharesDashboard(props: {
       await signContractCall(me, data.accountId, method, args, { deposit });
       return `${method} sent.`;
     });
+  const epochEnds = new Date(Number(BigInt(info.current_epoch_ends_ns) / 1_000_000n));
+  const epochLength = Number(BigInt(info.epoch_ns) / 1_000_000_000n);
+  const epochLabel = epochLength % 86_400 === 0 ? `${epochLength / 86_400} days` : epochLength % 3_600 === 0 ? `${epochLength / 3_600} h` : `${Math.round(epochLength / 60)} min`;
+  const lastVote = data.me?.lastEpochVote ?? null;
   const buyDeposit = () => {
     const count = BigInt(buyCount || "0");
     return (count * BigInt(info.price_per_share) + (holder ? 0n : BigInt(REGISTRATION_FEE))).toString();
@@ -174,6 +179,24 @@ function SharesDashboard(props: {
         ) : null}
       </Card>
 
+      <Card title={`Revenue for voters · epoch ${info.current_epoch} (${epochLabel})`}>
+        <div className="metric-grid">
+          <div><span className="eyebrow">This epoch</span><strong>{formatNear(info.current.near)}</strong>
+            {token && info.current.token !== "0" ? <span className="small muted"> + {tokenAmount(info.current.token)}</span> : null}
+            <span className="small muted">ends {epochEnds.toLocaleString()}</span>
+          </div>
+          <div><span className="eyebrow">Last epoch</span><strong>{formatNear(info.last.near)}</strong>
+            {token && info.last.token !== "0" ? <span className="small muted"> + {tokenAmount(info.last.token)}</span> : null}
+            <span className="small muted">{info.last.voted_shares} locked shares proved a vote so far</span>
+          </div>
+        </div>
+        <p className="small muted">
+          To earn an epoch's revenue: keep shares locked the whole epoch and vote on at least one proposal submitted in it.
+          During the next epoch, prove that vote. The epoch after, the revenue is split among the provers.
+          With no voter, it moves to the current epoch.
+        </p>
+      </Card>
+
       <Card title={me ? `Your shares · ${short(me, 18)}` : "Your shares"}>
         {holder ? (
           <div className="metric-grid">
@@ -187,6 +210,28 @@ function SharesDashboard(props: {
             </div>
           </div>
         ) : <p className="muted">You hold no share yet.</p>}
+        {holder ? (
+          <div className="stack">
+            <p className="small">
+              {holder.steady_now !== "0"
+                ? `${holder.steady_now} shares count for this epoch: vote on a proposal before ${epochEnds.toLocaleString()}.`
+                : "No share counts for this epoch: shares locked now count from the next one."}
+            </p>
+            {holder.provable_last_epoch !== "0" ? (
+              lastVote !== null ? (
+                <div className="row wrap">
+                  <span className="small">You voted on proposal #{lastVote} during the last epoch.</span>
+                  <button className="primary" disabled={!me || Boolean(busy)} onClick={() => void call("prove", "prove_vote", { proposal_id: lastVote })}>
+                    {busy === "prove" ? "Signing…" : `Prove it for ${holder.provable_last_epoch} shares`}
+                  </button>
+                </div>
+              ) : <p className="small muted">You did not vote during the last epoch: its revenue goes to the holders who did.</p>
+            ) : null}
+            {holder.proofs.filter((proof) => proof.verified).map((proof) => (
+              <p key={proof.epoch} className="small muted">✓ Vote proved for epoch {proof.epoch} ({proof.shares} shares): claimable from epoch {proof.epoch + 2}.</p>
+            ))}
+          </div>
+        ) : null}
         <div className="row wrap">
           <label className="inline">Buy<input inputMode="numeric" value={buyCount} onChange={(event) => setBuyCount(event.target.value)} />shares</label>
           <button className="primary" disabled={!me || Boolean(busy) || info.unsold === "0"} onClick={() => void call("buy", "buy", {}, buyDeposit())}>
@@ -214,7 +259,7 @@ function SharesDashboard(props: {
 
       <Card title="Share revenue">
         <SentenceList items={[
-          { title: "NEAR from the DAO account", details: ["members or shareholders vote it", "split over every share held, locked or not"] },
+          { title: "NEAR from the DAO account", details: ["members or shareholders vote it", "goes to this epoch's voters"] },
           ...(token ? [{ title: `${token.symbol} (${token.accountId}) sent to ${data.accountId}`, details: ["for example Base ETH sent by Omni Bridge", "anyone can trigger the split once it arrived"] }] : []),
         ]} />
         <div className="row wrap">

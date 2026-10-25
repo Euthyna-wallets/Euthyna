@@ -41,7 +41,9 @@ const schema = z.object({
   ETHEREUM_SEPOLIA_RPC_URL: z.string().url().default("https://ethereum-sepolia-rpc.publicnode.com"),
   OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
   OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("8000000000000000000000000"),
-  OMNIROLES_SHARES_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2600000000000000000000000"),
+  OMNIROLES_SHARES_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2900000000000000000000000"),
+  /** Revenue epoch of new shares contracts. Default: 1 hour on testnet, 7 days elsewhere. */
+  OMNIROLES_SHARES_EPOCH_SECONDS: z.coerce.number().int().positive().optional(),
   /** NEP-141 shared as revenue next to NEAR. Default: Base Sepolia ETH bridged by Omni Bridge. */
   OMNIROLES_SHARES_REVENUE_TOKEN: z.string().default("base.omnidep.testnet"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),

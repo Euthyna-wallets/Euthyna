@@ -120,7 +120,14 @@ export type ActivityItem = {
 
 export type Activity = { operations: OnchainOperation[]; integrity: WalletIntegrity[]; requests: ActivityItem[] };
 
+export type SharesEpoch = { near: string; token: string; voted_shares: string };
+
 export type SharesInfo = {
+  epoch_ns: string;
+  current_epoch: number;
+  current_epoch_ends_ns: string;
+  current: SharesEpoch;
+  last: SharesEpoch;
   dao_id: string;
   name: string;
   symbol: string;
@@ -141,6 +148,9 @@ export type SharesHolder = {
   transferable: string;
   claimable_near: string;
   claimable_token: string;
+  steady_now: string;
+  provable_last_epoch: string;
+  proofs: Array<{ epoch: number; shares: string; verified: boolean }>;
 };
 
 export type SharesView =
@@ -155,7 +165,7 @@ export type SharesView =
     votesCounted: boolean;
     shareholdersVote: boolean;
     lockedTotal: string;
-    me: null | { accountId: string; holder: SharesHolder | null; votes: string };
+    me: null | { accountId: string; holder: SharesHolder | null; votes: string; lastEpochVote: number | null };
   };
 
 export type SharesDraft = {

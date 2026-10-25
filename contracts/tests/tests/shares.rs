@@ -1,5 +1,5 @@
-//! Shares: sale, votes in the Sputnik DAO, revenue sharing in NEAR and in a
-//! token, and the freeze that stops one share from voting twice.
+//! Shares: sale, votes in the Sputnik DAO, the freeze that stops one share
+//! from voting twice, and revenue by epoch for the holders who voted.
 
 use anyhow::Result;
 use near_workspaces::network::Sandbox;
@@ -15,6 +15,7 @@ const FT_WASM: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../r
 
 const PROPOSAL_PERIOD_NS: u64 = 30_000_000_000;
 const UNLOCK_PERIOD_NS: u64 = 60_000_000_000;
+const EPOCH_NS: u64 = 60_000_000_000;
 const PRICE: NearToken = NearToken::from_millinear(100);
 const BOND: NearToken = NearToken::from_millinear(100);
 
@@ -82,6 +83,7 @@ async fn setup() -> Result<Fixture> {
             "total_supply": "1000",
             "price_per_share": PRICE.as_yoctonear().to_string(),
             "unlock_period_ns": UNLOCK_PERIOD_NS.to_string(),
+            "epoch_ns": EPOCH_NS.to_string(),
             "revenue_token": usdc.id(),
             "allocations": [[founder.id(), "100"]]
         }))
@@ -275,94 +277,157 @@ async fn unlocked_shares_cannot_vote_twice() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[serial]
-async fn revenue_is_shared_pro_rata_in_near_and_in_the_token() -> Result<()> {
-    let fixture = setup().await?;
-    // Founder 100 (allocated), Alice 600, Bob 300: 1000 shares held.
-    buy(&fixture, &fixture.alice, NearToken::from_millinear(60_010)).await?.into_result()?;
-    buy(&fixture, &fixture.bob, NearToken::from_millinear(30_010)).await?.into_result()?;
-    assert!(lock(&fixture, &fixture.alice, 600, "lock").await?);
+async fn epoch(fixture: &Fixture) -> Result<u64> {
+    let info: Value = fixture.shares.view("info").await?.json()?;
+    Ok(info["current_epoch"].as_u64().unwrap_or_default())
+}
 
-    // 10 NEAR of revenue: locked or not, every share earns the same.
+async fn advance_to_epoch(fixture: &Fixture, target: u64) -> Result<()> {
+    while epoch(fixture).await? < target {
+        fixture.worker.fast_forward(10).await?;
+    }
+    Ok(())
+}
+
+async fn deposit(fixture: &Fixture, near: u128) -> Result<()> {
     fixture
         .carol
         .call(fixture.shares.id(), "deposit_revenue")
-        .deposit(NearToken::from_near(10))
+        .deposit(NearToken::from_near(near))
         .transact()
         .await?
         .into_result()?;
-    assert_eq!(holder(&fixture, &fixture.alice).await?["claimable_near"], NearToken::from_near(6).as_yoctonear().to_string());
-    assert_eq!(holder(&fixture, &fixture.bob).await?["claimable_near"], NearToken::from_near(3).as_yoctonear().to_string());
-    assert_eq!(holder(&fixture, &fixture.founder).await?["claimable_near"], NearToken::from_near(1).as_yoctonear().to_string());
+    Ok(())
+}
 
-    // Token revenue: 1000 with ft_transfer_call, then 500 with a plain transfer (a bridge).
-    fixture.usdc.call("mint").args_json(json!({"account_id": fixture.carol.id(), "amount": "1500"})).transact().await?.into_result()?;
+async fn prove(fixture: &Fixture, holder: &Account, proposal: u64) -> Result<ExecutionFinalResult> {
+    Ok(holder
+        .call(fixture.shares.id(), "prove_vote")
+        .args_json(json!({"proposal_id": proposal}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?)
+}
+
+/// Alice 600 and Bob 300 locked before epoch 1 starts; Carol holds 100 unlocked.
+/// The sale is then over: 100 founder shares + 900 sold.
+async fn holders_locked_for_epoch_one(fixture: &Fixture) -> Result<()> {
+    buy(fixture, &fixture.alice, NearToken::from_millinear(60_010)).await?.into_result()?;
+    buy(fixture, &fixture.bob, NearToken::from_millinear(30_010)).await?.into_result()?;
+    // Carol gets the founder's 100 shares.
+    fixture.carol.call(fixture.shares.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(10)).transact().await?.into_result()?;
+    fixture
+        .founder
+        .call(fixture.shares.id(), "ft_transfer")
+        .args_json(json!({"receiver_id": fixture.carol.id(), "amount": "100"}))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(lock(fixture, &fixture.alice, 600, "lock").await?);
+    assert!(lock(fixture, &fixture.bob, 300, "lock").await?);
+    advance_to_epoch(fixture, 1).await
+}
+
+fn transfer_kind(fixture: &Fixture) -> Value {
+    json!({"Transfer": {"token_id": "", "receiver_id": fixture.carol.id(), "amount": NearToken::from_millinear(10).as_yoctonear().to_string()}})
+}
+
+fn near(value: &Value) -> u128 {
+    value.as_str().unwrap_or_default().parse().unwrap_or_default()
+}
+
+#[tokio::test]
+#[serial]
+async fn only_voters_earn_and_the_non_voters_part_goes_to_them() -> Result<()> {
+    let fixture = setup().await?;
+    holders_locked_for_epoch_one(&fixture).await?;
+    // Epoch 1: a proposal, Alice votes, Bob does not. 9 NEAR of revenue.
+    let kind = transfer_kind(&fixture);
+    let id = add_proposal(&fixture, &fixture.alice, kind.clone()).await?;
+    act(&fixture, &fixture.alice, id, "VoteApprove", kind).await?.into_result()?;
+    deposit(&fixture, 9).await?;
+
+    // Epoch 2: proof window for epoch 1.
+    advance_to_epoch(&fixture, 2).await?;
+    assert!(prove(&fixture, &fixture.alice, id).await?.into_result()?.json::<bool>()?);
+    assert!(!prove(&fixture, &fixture.bob, id).await?.into_result()?.json::<bool>()?, "Bob did not vote");
+    assert_failure(&prove(&fixture, &fixture.carol, id).await?, "ERR_NO_SHARES_LOCKED_LAST_EPOCH");
+    assert_failure(&prove(&fixture, &fixture.alice, id).await?, "ERR_ALREADY_PROVED");
+    assert_eq!(holder(&fixture, &fixture.alice).await?["claimable_near"], "0", "final only after the window");
+
+    // Epoch 3: Alice was the only voter, she gets the whole 9 NEAR.
+    advance_to_epoch(&fixture, 3).await?;
+    assert_eq!(near(&holder(&fixture, &fixture.alice).await?["claimable_near"]), NearToken::from_near(9).as_yoctonear());
+    assert_eq!(holder(&fixture, &fixture.bob).await?["claimable_near"], "0");
+    let before = fixture.alice.view_account().await?.balance;
+    fixture.alice.call(fixture.shares.id(), "claim").gas(Gas::from_tgas(150)).transact().await?.into_result()?;
+    assert!(fixture.alice.view_account().await?.balance.as_yoctonear() > before.as_yoctonear() + NearToken::from_millinear(8_900).as_yoctonear());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn voters_split_pro_rata_and_late_lockers_do_not_count() -> Result<()> {
+    let fixture = setup().await?;
+    holders_locked_for_epoch_one(&fixture).await?;
+    // Dave-like late locker: Carol locks during epoch 1 and votes.
+    assert!(lock(&fixture, &fixture.carol, 100, "lock").await?);
+    let kind = transfer_kind(&fixture);
+    let id = add_proposal(&fixture, &fixture.bob, kind.clone()).await?;
+    act(&fixture, &fixture.bob, id, "VoteReject", kind.clone()).await?.into_result()?;
+    act(&fixture, &fixture.carol, id, "VoteReject", kind.clone()).await?.into_result()?;
+    act(&fixture, &fixture.alice, id, "VoteApprove", kind).await?.into_result()?;
+    deposit(&fixture, 9).await?;
+    // Token revenue too, sent with a plain transfer (a bridge) then counted.
+    fixture.usdc.call("mint").args_json(json!({"account_id": fixture.carol.id(), "amount": "900"})).transact().await?.into_result()?;
     fixture.usdc.call("mint").args_json(json!({"account_id": fixture.shares.id(), "amount": "0"})).transact().await?.into_result()?;
     fixture
         .carol
-        .call(fixture.usdc.id(), "ft_transfer_call")
-        .args_json(json!({"receiver_id": fixture.shares.id(), "amount": "1000", "msg": ""}))
-        .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?
-        .into_result()?;
-    fixture
-        .carol
         .call(fixture.usdc.id(), "ft_transfer")
-        .args_json(json!({"receiver_id": fixture.shares.id(), "amount": "500"}))
+        .args_json(json!({"receiver_id": fixture.shares.id(), "amount": "900"}))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
         .into_result()?;
-    let synced: String = fixture
-        .carol
-        .call(fixture.shares.id(), "sync_revenue")
-        .gas(Gas::from_tgas(100))
-        .transact()
-        .await?
-        .into_result()?
-        .json()?;
-    assert_eq!(synced, "500");
-    assert_eq!(holder(&fixture, &fixture.alice).await?["claimable_token"], "900");
-    assert_eq!(holder(&fixture, &fixture.bob).await?["claimable_token"], "450");
+    let synced: String = fixture.carol.call(fixture.shares.id(), "sync_revenue").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    assert_eq!(synced, "900");
 
-    // Shares bought after the revenue earn nothing from it.
-    fixture.carol.call(fixture.shares.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(10)).transact().await?.into_result()?;
-    fixture
-        .bob
-        .call(fixture.shares.id(), "ft_transfer")
-        .args_json(json!({"receiver_id": fixture.carol.id(), "amount": "300"}))
-        .deposit(NearToken::from_yoctonear(1))
-        .transact()
-        .await?
-        .into_result()?;
-    assert_eq!(holder(&fixture, &fixture.carol).await?["claimable_token"], "0");
-    assert_eq!(holder(&fixture, &fixture.bob).await?["claimable_token"], "450");
+    advance_to_epoch(&fixture, 2).await?;
+    assert!(prove(&fixture, &fixture.alice, id).await?.into_result()?.json::<bool>()?);
+    assert!(prove(&fixture, &fixture.bob, id).await?.into_result()?.json::<bool>()?);
+    assert_failure(&prove(&fixture, &fixture.carol, id).await?, "ERR_NO_SHARES_LOCKED_LAST_EPOCH");
+    let last: Value = fixture.shares.view("info").await?.json::<Value>()?["last"].clone();
+    assert_eq!(last["voted_shares"], "900");
 
-    // Bob is not registered on the token: the payment fails and stays owed.
-    let before = fixture.bob.view_account().await?.balance;
+    advance_to_epoch(&fixture, 3).await?;
+    assert_eq!(near(&holder(&fixture, &fixture.alice).await?["claimable_near"]), NearToken::from_near(6).as_yoctonear());
+    assert_eq!(near(&holder(&fixture, &fixture.bob).await?["claimable_near"]), NearToken::from_near(3).as_yoctonear());
+    assert_eq!(holder(&fixture, &fixture.alice).await?["claimable_token"], "600");
+
+    // Bob is not registered on the token: his token payment fails and stays owed.
     fixture.bob.call(fixture.shares.id(), "claim").gas(Gas::from_tgas(150)).transact().await?.into_result()?;
-    assert!(fixture.bob.view_account().await?.balance > before, "NEAR revenue paid");
     let bob = holder(&fixture, &fixture.bob).await?;
     assert_eq!(bob["claimable_near"], "0");
-    assert_eq!(bob["claimable_token"], "450");
-    fixture
-        .bob
-        .call(fixture.usdc.id(), "storage_deposit")
-        .args_json(json!({}))
-        .deposit(NearToken::from_millinear(10))
-        .transact()
-        .await?
-        .into_result()?;
+    assert_eq!(bob["claimable_token"], "300");
+    fixture.bob.call(fixture.usdc.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(10)).transact().await?.into_result()?;
     fixture.bob.call(fixture.shares.id(), "claim").gas(Gas::from_tgas(150)).transact().await?.into_result()?;
     let balance: String = fixture.usdc.view("ft_balance_of").args_json(json!({"account_id": fixture.bob.id()})).await?.json()?;
-    assert_eq!(balance, "450");
-    assert_eq!(holder(&fixture, &fixture.bob).await?["claimable_token"], "0");
+    assert_eq!(balance, "300");
+    Ok(())
+}
 
-    // Nothing new arrived: a second sync shares nothing.
-    let synced: String = fixture.carol.call(fixture.shares.id(), "sync_revenue").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
-    assert_eq!(synced, "0");
+#[tokio::test]
+#[serial]
+async fn without_voters_revenue_moves_to_the_current_epoch() -> Result<()> {
+    let fixture = setup().await?;
+    holders_locked_for_epoch_one(&fixture).await?;
+    deposit(&fixture, 4).await?; // epoch 1, nobody votes
+    advance_to_epoch(&fixture, 3).await?;
+    deposit(&fixture, 1).await?; // settles epoch 1 into epoch 3
+    let info: Value = fixture.shares.view("info").await?.json()?;
+    assert_eq!(near(&info["current"]["near"]), NearToken::from_near(5).as_yoctonear());
+    let epoch_one: Value = fixture.shares.view("epoch_of").args_json(json!({"epoch": 1})).await?.json()?;
+    assert_eq!(epoch_one["near"], "0");
     Ok(())
 }

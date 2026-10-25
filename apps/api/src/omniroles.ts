@@ -69,6 +69,8 @@ export interface OmniRolesConfig {
   vaultDepositYocto: string;
   /** Funds the shares account: contract storage (~2.2 NEAR) and holder registrations. */
   sharesDepositYocto?: string;
+  /** Revenue epoch of new shares contracts, in seconds. */
+  sharesEpochSeconds?: number;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
   sharesRevenueToken?: string | null;
   baseRpcUrl: string;
@@ -205,7 +207,14 @@ type LedgerOperation = DaoOperation & { member: string; role: string; signed_tra
 /** Most recent operations the activity page looks up on chain. */
 const ACTIVITY_LIMIT = 30;
 
+type EpochView = { near: string; token: string; voted_shares: string };
+
 type SharesInfoView = {
+  epoch_ns: string;
+  current_epoch: number;
+  current_epoch_ends_ns: string;
+  current: EpochView;
+  last: EpochView;
   dao_id: string;
   name: string;
   symbol: string;
@@ -226,6 +235,9 @@ type SharesHolderView = {
   transferable: string;
   claimable_near: string;
   claimable_token: string;
+  steady_now: string;
+  provable_last_epoch: string;
+  proofs: Array<{ epoch: number; shares: string; verified: boolean }>;
 };
 
 export type SharesDraft = {
@@ -456,6 +468,7 @@ export class OmniRolesService {
         accountId: viewer,
         holder: await this.view<SharesHolderView | null>(accountId, "holder_of", { account_id: viewer }),
         votes: await this.view<string>(treasury.daoAccountId, "delegation_balance_of", { account_id: viewer }).catch(() => "0"),
+        lastEpochVote: await this.lastEpochVote(treasury.daoAccountId, viewer, info),
       }
       : null;
     const revenueToken = info.revenue_token
@@ -478,6 +491,24 @@ export class OmniRolesService {
   }
 
   /**
+   * A proposal submitted during the last epoch that the viewer voted on: what
+   * `prove_vote` needs. Null when there is none.
+   */
+  private async lastEpochVote(daoAccountId: string, viewer: string, info: SharesInfoView): Promise<number | null> {
+    if (info.current_epoch === 0) return null;
+    const end = BigInt(info.current_epoch_ends_ns) - BigInt(info.epoch_ns);
+    const start = end - BigInt(info.epoch_ns);
+    const lastId = await this.view<number>(daoAccountId, "get_last_proposal_id");
+    if (lastId === 0) return null;
+    const proposals = await this.view<DaoProposal[]>(daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 100), limit: 100 });
+    const voted = proposals.find((proposal) => {
+      const submitted = BigInt(proposal.submission_time);
+      return submitted >= start && submitted < end && viewer in proposal.votes;
+    });
+    return voted?.id ?? null;
+  }
+
+  /**
    * Deploys the shares contract on an account with no access key, then returns
    * the two votes that turn it on. Nothing changes for the company until the
    * members approve them.
@@ -495,6 +526,7 @@ export class OmniRolesService {
         pricePerShareYocto: parseNear(input.priceNear),
         // Longer than a proposal: unlocked shares cannot vote twice on one proposal.
         unlockPeriodNs: (BigInt(this.config.proposalPeriodNs) * 2n).toString(),
+        epochNs: (BigInt(this.config.sharesEpochSeconds ?? 3600) * 1_000_000_000n).toString(),
         revenueToken: this.config.sharesRevenueToken ?? null,
         allocations: input.allocations.map((allocation) => [allocation.accountId, allocation.shares]),
       });
@@ -510,7 +542,7 @@ export class OmniRolesService {
     // No AddKey action: nobody can sign for the shares account.
     const transaction = await this.near.executeActions(accountId, [
       { type: "CreateAccount" },
-      { type: "Transfer", depositYocto: this.config.sharesDepositYocto ?? "2600000000000000000000000" },
+      { type: "Transfer", depositYocto: this.config.sharesDepositYocto ?? "2900000000000000000000000" },
       { type: "DeployContract", codeBase64: artifact.base64 },
       { type: "FunctionCall", methodName: "new", args: initArgs, gasTgas: 50 },
     ]);

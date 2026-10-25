@@ -5,8 +5,16 @@
 //! - a sale at a fixed price in NEAR, the proceeds going to the company DAO;
 //! - the Sputnik staking contract of the DAO: a holder locks shares to vote,
 //!   and the DAO counts locked shares as votes (`TokenWeight`);
-//! - revenue sharing: NEAR, or one NEP-141 token (for example bridged from
-//!   Base), split pro rata over every share held, locked or not.
+//! - revenue sharing by epoch, for voters only: NEAR, or one NEP-141 token
+//!   (for example bridged from Base).
+//!
+//! Revenue that arrives during epoch N goes to the holders who, during N,
+//! kept shares locked the whole epoch and voted on at least one proposal
+//! submitted in N. During epoch N+1 each of them proves one vote
+//! (`prove_vote`); the contract reads the vote in the DAO. From N+2 on, the
+//! epoch's revenue is split between the provers, pro rata of their locked
+//! shares: the share of those who did not vote goes to those who did. With no
+//! prover, the revenue moves to the current epoch.
 //!
 //! Unlocked shares stay frozen for `unlock_period_ns`. It must be longer than
 //! the DAO's proposal period, so shares cannot vote twice on one proposal.
@@ -21,19 +29,39 @@ use near_sdk::{
     PromiseOrValue, env, ext_contract, near, require,
 };
 
-/// Precision of the per-share accumulators.
-const SCALE: u128 = 1_000_000;
 /// Paid once per holder: account entry here and delegation entry in the DAO.
 const REGISTRATION_FEE: NearToken = NearToken::from_millinear(10);
 const GAS_DAO_CALL: Gas = Gas::from_tgas(15);
 const GAS_CALLBACK: Gas = Gas::from_tgas(15);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_FT_BALANCE: Gas = Gas::from_tgas(10);
+const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
+const GAS_PROOF_CALLBACK: Gas = Gas::from_tgas(20);
 
 #[derive(BorshStorageKey)]
 #[near]
 enum StorageKey {
     Holders,
+    Epochs,
+}
+
+/// Revenue of one epoch, and the locked shares of the holders who proved a vote.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Default)]
+pub struct Epoch {
+    pub near: U128,
+    pub token: U128,
+    pub voted_shares: U128,
+}
+
+/// A vote proved for an epoch: `shares` locked during the whole epoch.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Proof {
+    pub epoch: u64,
+    pub shares: U128,
+    /// False while the DAO is being read.
+    pub verified: bool,
 }
 
 #[near(serializers = [borsh])]
@@ -46,9 +74,14 @@ struct Holder {
     cooling: u128,
     cooling_until_ns: u64,
     delegation_registered: bool,
-    near_paid_per_share: u128,
+    /// Epoch `steady` counts for; `steady` = shares locked since its start.
+    epoch: u64,
+    steady: u128,
+    /// The same for the epoch before `epoch`: what a vote proof uses.
+    previous_epoch: u64,
+    previous_steady: u128,
+    proofs: Vec<Proof>,
     near_owed: u128,
-    token_paid_per_share: u128,
     token_owed: u128,
 }
 
@@ -64,8 +97,11 @@ pub struct Shares {
     unlock_period_ns: u64,
     revenue_token: Option<AccountId>,
     holders: LookupMap<AccountId, Holder>,
-    near_per_share: u128,
-    token_per_share: u128,
+    genesis_ns: u64,
+    epoch_ns: u64,
+    epochs: LookupMap<u64, Epoch>,
+    /// Epochs with revenue not settled yet (oldest first): checked for voters once over.
+    funded_epochs: Vec<u64>,
     near_distributed: u128,
     token_distributed: u128,
     /// Revenue token balance this contract accounts for (owed + dust).
@@ -82,6 +118,11 @@ pub struct HolderView {
     pub transferable: U128,
     pub claimable_near: U128,
     pub claimable_token: U128,
+    /// Shares locked since the start of the current epoch: what counts if you vote now.
+    pub steady_now: U128,
+    /// Shares that can prove a vote for the last epoch (0 if none, or already proved).
+    pub provable_last_epoch: U128,
+    pub proofs: Vec<Proof>,
 }
 
 #[near(serializers = [json])]
@@ -96,6 +137,11 @@ pub struct SharesInfo {
     pub revenue_token: Option<AccountId>,
     pub near_distributed: U128,
     pub token_distributed: U128,
+    pub epoch_ns: U64,
+    pub current_epoch: u64,
+    pub current_epoch_ends_ns: U64,
+    pub current: Epoch,
+    pub last: Epoch,
 }
 
 #[near(serializers = [json])]
@@ -129,6 +175,12 @@ trait SputnikDelegation {
     fn undelegate(&mut self, account_id: AccountId, amount: U128) -> (U128, U128, U128);
 }
 
+#[ext_contract(ext_dao_view)]
+#[allow(dead_code)]
+trait SputnikProposals {
+    fn get_proposal(&self, id: u64) -> near_sdk::serde_json::Value;
+}
+
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
 trait FungibleToken {
@@ -143,6 +195,7 @@ trait Callbacks {
     fn on_undelegate(&mut self, account_id: AccountId, amount: U128, previous_until_ns: U64);
     fn on_token_claim(&mut self, account_id: AccountId, amount: U128);
     fn on_token_balance(&mut self);
+    fn on_proposal(&mut self, account_id: AccountId, epoch: u64, proposal_id: u64);
 }
 
 /// `a * b / c`, still exact (rounded down) when `a * b` does not fit in 128 bits.
@@ -174,10 +227,12 @@ impl Shares {
         total_supply: U128,
         price_per_share: U128,
         unlock_period_ns: U64,
+        epoch_ns: U64,
         revenue_token: Option<AccountId>,
         allocations: Vec<(AccountId, U128)>,
     ) -> Self {
         require!(total_supply.0 > 0, "ERR_ZERO_SUPPLY");
+        require!(epoch_ns.0 > 0, "ERR_ZERO_EPOCH");
         require!(price_per_share.0 > 0, "ERR_ZERO_PRICE");
         require!(unlock_period_ns.0 > 0, "ERR_ZERO_UNLOCK_PERIOD");
         let mut contract = Self {
@@ -190,8 +245,10 @@ impl Shares {
             unlock_period_ns: unlock_period_ns.0,
             revenue_token,
             holders: LookupMap::new(StorageKey::Holders),
-            near_per_share: 0,
-            token_per_share: 0,
+            genesis_ns: env::block_timestamp(),
+            epoch_ns: epoch_ns.0,
+            epochs: LookupMap::new(StorageKey::Epochs),
+            funded_epochs: Vec::new(),
             near_distributed: 0,
             token_distributed: 0,
             token_accounted: 0,
@@ -200,7 +257,7 @@ impl Shares {
         for (account_id, amount) in allocations {
             require!(amount.0 <= contract.unsold, "ERR_ALLOCATIONS_EXCEED_SUPPLY");
             contract.unsold -= amount.0;
-            let mut holder = contract.holders.get(&account_id).cloned().unwrap_or_default();
+            let mut holder = contract.holders.get(&account_id).cloned().unwrap_or_else(|| contract.new_holder());
             holder.balance += amount.0;
             contract.holders.insert(account_id.clone(), holder);
             event("ft_mint", format!(r#"{{"owner_id":"{account_id}","amount":"{}"}}"#, amount.0));
@@ -221,7 +278,7 @@ impl Shares {
             None => {
                 require!(deposit > REGISTRATION_FEE.as_yoctonear(), "ERR_DEPOSIT_BELOW_REGISTRATION_FEE");
                 deposit -= REGISTRATION_FEE.as_yoctonear();
-                self.settled(Holder::default())
+                self.new_holder()
             }
         };
         let count = std::cmp::min(deposit / self.price_per_share, self.unsold);
@@ -276,6 +333,8 @@ impl Shares {
         Self::expire_cooling(&mut holder);
         let previous_until_ns = holder.cooling_until_ns;
         holder.locked -= amount.0;
+        // Unlocking during an epoch loses those shares' part of it.
+        holder.steady = holder.steady.min(holder.locked);
         holder.cooling += amount.0;
         holder.cooling_until_ns = env::block_timestamp().saturating_add(self.unlock_period_ns);
         self.holders.insert(account_id.clone(), holder);
@@ -302,6 +361,7 @@ impl Shares {
         }
         let mut holder = self.holder(&account_id);
         holder.locked = holder.locked.saturating_sub(amount.0);
+        holder.steady = holder.steady.min(holder.locked);
         if registered_now {
             holder.delegation_registered = false;
         }
@@ -332,22 +392,20 @@ impl Shares {
 
     // ----- Revenue sharing -----
 
-    /// Shares the attached NEAR over every share held.
+    /// Revenue in NEAR, for the voters of the current epoch.
     #[payable]
     pub fn deposit_revenue(&mut self) {
         let amount = env::attached_deposit().as_yoctonear();
         require!(amount > 0, "ERR_ZERO_AMOUNT");
-        let held = self.held();
-        require!(held > 0, "ERR_NO_HOLDER");
-        self.near_per_share += mul_div(amount, SCALE, held);
+        self.add_revenue(amount, 0);
         self.near_distributed += amount;
-        env::log_str(&format!("MANDATEOS_REVENUE:near:{amount}"));
+        env::log_str(&format!("MANDATEOS_REVENUE:near:{amount}:epoch:{}", self.current_epoch()));
     }
 
-    /// Revenue token sent with `ft_transfer_call`: shared at once.
+    /// Revenue token sent with `ft_transfer_call`, for the voters of the current epoch.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
         let _ = (sender_id, msg);
-        if self.revenue_token.as_ref() != Some(&env::predecessor_account_id()) || self.held() == 0 {
+        if self.revenue_token.as_ref() != Some(&env::predecessor_account_id()) {
             return PromiseOrValue::Value(amount);
         }
         self.token_accounted += amount.0;
@@ -356,7 +414,7 @@ impl Shares {
     }
 
     /// Revenue token sent with a plain `ft_transfer` (a bridge, for example):
-    /// anyone can call this to share what arrived since the last time.
+    /// anyone can call this to count what arrived since the last time.
     pub fn sync_revenue(&mut self) -> Promise {
         let token = self.revenue_token.clone().expect("ERR_NO_REVENUE_TOKEN");
         require!(self.token_claims_in_flight == 0, "ERR_CLAIM_IN_FLIGHT");
@@ -369,7 +427,7 @@ impl Shares {
     #[private]
     pub fn on_token_balance(&mut self, #[callback_result] balance: Result<U128, PromiseError>) -> U128 {
         let Ok(balance) = balance else { return U128(0) };
-        if self.token_claims_in_flight > 0 || self.held() == 0 {
+        if self.token_claims_in_flight > 0 {
             return U128(0);
         }
         let arrived = balance.0.saturating_sub(self.token_accounted);
@@ -378,6 +436,63 @@ impl Shares {
             self.share_token(arrived);
         }
         U128(arrived)
+    }
+
+    /// During epoch N+1, proves a vote on a proposal submitted in epoch N. The
+    /// shares locked during the whole epoch N then earn their part of its revenue.
+    pub fn prove_vote(&mut self, proposal_id: u64) -> Promise {
+        let account_id = env::predecessor_account_id();
+        let current = self.current_epoch();
+        require!(current > 0, "ERR_NO_PAST_EPOCH");
+        let epoch = current - 1;
+        let mut holder = self.holder(&account_id);
+        require!(holder.previous_epoch == epoch && holder.previous_steady > 0, "ERR_NO_SHARES_LOCKED_LAST_EPOCH");
+        require!(!holder.proofs.iter().any(|proof| proof.epoch == epoch), "ERR_ALREADY_PROVED");
+        holder.proofs.push(Proof { epoch, shares: U128(holder.previous_steady), verified: false });
+        self.holders.insert(account_id.clone(), holder);
+        ext_dao_view::ext(self.dao_id.clone())
+            .with_static_gas(GAS_DAO_VIEW)
+            .get_proposal(proposal_id)
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_PROOF_CALLBACK)
+                    .on_proposal(account_id, epoch, proposal_id),
+            )
+    }
+
+    #[private]
+    pub fn on_proposal(
+        &mut self,
+        account_id: AccountId,
+        epoch: u64,
+        proposal_id: u64,
+        #[callback_result] proposal: Result<near_sdk::serde_json::Value, PromiseError>,
+    ) -> bool {
+        let start = self.genesis_ns + epoch * self.epoch_ns;
+        let valid = proposal.ok().is_some_and(|proposal| {
+            let submitted: u64 = proposal["submission_time"].as_str().and_then(|value| value.parse().ok()).unwrap_or(0);
+            proposal["id"].as_u64() == Some(proposal_id)
+                && proposal["votes"].get(account_id.as_str()).is_some()
+                && submitted >= start
+                && submitted < start + self.epoch_ns
+        });
+        // The proof window is epoch N+1: after it, the split of N is final.
+        let in_time = self.current_epoch() == epoch + 1;
+        let mut holder = self.holders.get(&account_id).cloned().expect("ERR_NOT_A_HOLDER");
+        let index = holder.proofs.iter().position(|proof| proof.epoch == epoch && !proof.verified);
+        let Some(index) = index else { return false };
+        if valid && in_time {
+            holder.proofs[index].verified = true;
+            let shares = holder.proofs[index].shares.0;
+            let mut record = self.epochs.get(&epoch).cloned().unwrap_or_default();
+            record.voted_shares = U128(record.voted_shares.0 + shares);
+            self.epochs.insert(epoch, record);
+            env::log_str(&format!("MANDATEOS_VOTE_PROVED:{account_id}:epoch:{epoch}:proposal:{proposal_id}:shares:{shares}"));
+        } else {
+            holder.proofs.remove(index);
+        }
+        self.holders.insert(account_id, holder);
+        valid && in_time
     }
 
     /// Pays the caller everything owed: NEAR, then the revenue token.
@@ -481,7 +596,7 @@ impl Shares {
             }
         } else {
             require!(deposit >= REGISTRATION_FEE, "ERR_DEPOSIT_BELOW_REGISTRATION_FEE");
-            let holder = self.settled(Holder::default());
+            let holder = self.new_holder();
             self.holders.insert(account_id.clone(), holder);
             let refund = deposit.saturating_sub(REGISTRATION_FEE);
             if !refund.is_zero() {
@@ -515,7 +630,20 @@ impl Shares {
             revenue_token: self.revenue_token.clone(),
             near_distributed: U128(self.near_distributed),
             token_distributed: U128(self.token_distributed),
+            epoch_ns: U64(self.epoch_ns),
+            current_epoch: self.current_epoch(),
+            current_epoch_ends_ns: U64(self.genesis_ns + (self.current_epoch() + 1) * self.epoch_ns),
+            current: self.epochs.get(&self.current_epoch()).cloned().unwrap_or_default(),
+            last: if self.current_epoch() > 0 {
+                self.epochs.get(&(self.current_epoch() - 1)).cloned().unwrap_or_default()
+            } else {
+                Epoch::default()
+            },
         }
+    }
+
+    pub fn epoch_of(&self, epoch: u64) -> Epoch {
+        self.epochs.get(&epoch).cloned().unwrap_or_default()
     }
 
     pub fn holder_of(&self, account_id: AccountId) -> Option<HolderView> {
@@ -529,20 +657,79 @@ impl Shares {
             transferable: U128(self.transferable(&holder)),
             claimable_near: U128(holder.near_owed),
             claimable_token: U128(holder.token_owed),
+            steady_now: U128(holder.steady),
+            provable_last_epoch: U128(
+                if self.current_epoch() > 0
+                    && holder.previous_epoch == self.current_epoch() - 1
+                    && !holder.proofs.iter().any(|proof| proof.epoch == holder.previous_epoch)
+                {
+                    holder.previous_steady
+                } else {
+                    0
+                },
+            ),
+            proofs: holder.proofs.clone(),
         })
     }
 
     // ----- Internals -----
 
-    /// Shares in holders' hands: the unsold ones earn nothing.
-    fn held(&self) -> u128 {
-        self.total_supply - self.unsold
+    fn current_epoch(&self) -> u64 {
+        (env::block_timestamp() - self.genesis_ns) / self.epoch_ns
+    }
+
+    fn new_holder(&self) -> Holder {
+        let epoch = self.current_epoch();
+        Holder { epoch, previous_epoch: epoch.saturating_sub(1), ..Holder::default() }
     }
 
     fn share_token(&mut self, amount: u128) {
-        self.token_per_share += mul_div(amount, SCALE, self.held());
+        self.add_revenue(0, amount);
         self.token_distributed += amount;
-        env::log_str(&format!("MANDATEOS_REVENUE:token:{amount}"));
+        env::log_str(&format!("MANDATEOS_REVENUE:token:{amount}:epoch:{}", self.current_epoch()));
+    }
+
+    fn add_revenue(&mut self, near: u128, token: u128) {
+        self.settle_epochs();
+        let current = self.current_epoch();
+        let mut record = self.epochs.get(&current).cloned().unwrap_or_default();
+        record.near = U128(record.near.0 + near);
+        record.token = U128(record.token.0 + token);
+        self.epochs.insert(current, record);
+        if !self.funded_epochs.contains(&current) {
+            self.funded_epochs.push(current);
+        }
+    }
+
+    /// Epochs whose proof window closed: kept for their voters, or moved to the
+    /// current epoch when nobody voted.
+    fn settle_epochs(&mut self) {
+        let current = self.current_epoch();
+        let mut moved = (0u128, 0u128);
+        let mut keep = Vec::new();
+        for epoch in std::mem::take(&mut self.funded_epochs) {
+            if epoch + 2 > current {
+                keep.push(epoch);
+                continue;
+            }
+            let record = self.epochs.get(&epoch).cloned().unwrap_or_default();
+            if record.voted_shares.0 == 0 {
+                moved.0 += record.near.0;
+                moved.1 += record.token.0;
+                self.epochs.insert(epoch, Epoch::default());
+                env::log_str(&format!("MANDATEOS_REVENUE_MOVED:from:{epoch}:to:{current}"));
+            }
+        }
+        self.funded_epochs = keep;
+        if moved != (0, 0) {
+            let mut record = self.epochs.get(&current).cloned().unwrap_or_default();
+            record.near = U128(record.near.0 + moved.0);
+            record.token = U128(record.token.0 + moved.1);
+            self.epochs.insert(current, record);
+            if !self.funded_epochs.contains(&current) {
+                self.funded_epochs.push(current);
+            }
+        }
     }
 
     fn holder(&self, account_id: &AccountId) -> Holder {
@@ -550,12 +737,34 @@ impl Shares {
         self.settled(holder)
     }
 
-    /// Moves what the holder earned since the last update into what is owed.
+    /// Brings the holder to the current epoch and pays the final epochs it proved.
     fn settled(&self, mut holder: Holder) -> Holder {
-        holder.near_owed += mul_div(holder.balance, self.near_per_share - holder.near_paid_per_share, SCALE);
-        holder.near_paid_per_share = self.near_per_share;
-        holder.token_owed += mul_div(holder.balance, self.token_per_share - holder.token_paid_per_share, SCALE);
-        holder.token_paid_per_share = self.token_per_share;
+        let current = self.current_epoch();
+        if holder.epoch < current {
+            if holder.epoch + 1 == current {
+                holder.previous_epoch = holder.epoch;
+                holder.previous_steady = holder.steady;
+            } else {
+                // Nothing changed during the epochs in between.
+                holder.previous_epoch = current - 1;
+                holder.previous_steady = holder.locked;
+            }
+            holder.epoch = current;
+            holder.steady = holder.locked;
+        }
+        let mut pending = Vec::new();
+        for proof in std::mem::take(&mut holder.proofs) {
+            if proof.verified && proof.epoch + 2 <= current {
+                let record = self.epochs.get(&proof.epoch).cloned().unwrap_or_default();
+                if record.voted_shares.0 > 0 {
+                    holder.near_owed += mul_div(record.near.0, proof.shares.0, record.voted_shares.0);
+                    holder.token_owed += mul_div(record.token.0, proof.shares.0, record.voted_shares.0);
+                }
+            } else if proof.verified || proof.epoch + 1 == current {
+                pending.push(proof);
+            }
+        }
+        holder.proofs = pending;
         holder
     }
 

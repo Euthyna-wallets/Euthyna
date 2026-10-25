@@ -182,8 +182,8 @@ See [`.env.example`](./.env.example) for variable names. Never use faucet rotati
 ## Shares
 
 A company can sell shares on NEAR. Shareholders vote with their locked shares
-on company calls and transfers in the Sputnik DAO, and receive the revenue the
-company shares, in NEAR or in Base ETH bridged by Omni Bridge. Members keep
+on company calls and transfers in the Sputnik DAO. Revenue (NEAR, or Base ETH
+bridged by Omni Bridge) is split by epoch among the holders who voted. Members keep
 their two-thirds vote and their veto on vault changes. See
 [docs/shares.md](./docs/shares.md).
 

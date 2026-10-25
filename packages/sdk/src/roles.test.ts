@@ -262,7 +262,7 @@ describe("shares governance", () => {
   });
 
   it("checks the init arguments", () => {
-    const base = { name: "Acme", symbol: "ACME", totalSupply: 1000, pricePerShareYocto: parseNear("0.1"), unlockPeriodNs: "1", revenueToken: null, allocations: [["a.testnet", 100]] as Array<[string, number]> };
+    const base = { name: "Acme", symbol: "ACME", totalSupply: 1000, pricePerShareYocto: parseNear("0.1"), unlockPeriodNs: "1", epochNs: "3600000000000", revenueToken: null, allocations: [["a.testnet", 100]] as Array<[string, number]> };
     expect(sharesInitArgs("dao.testnet", base).allocations).toEqual([["a.testnet", "100"]]);
     expect(() => sharesInitArgs("dao.testnet", { ...base, symbol: "acme" })).toThrow();
     expect(() => sharesInitArgs("dao.testnet", { ...base, allocations: [["a.testnet", 1001]] })).toThrow();
