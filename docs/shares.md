@@ -84,11 +84,29 @@ When the members change, the new policy keeps the shareholders role.
 - with no voter, the revenue moves to the current epoch;
 - a token payment to an unregistered holder fails and stays owed.
 
+## Proof on testnet: revenue for voters (2026-10-25)
+
+10-minute epochs, 5-minute proposals. DAO `epochs-1qz7s.factory-v2.mandateos.testnet`,
+shares `epochs-1qz7s.mandateos-e2e-mvms3m2m.testnet` (0 access keys,
+`FyaBEyahVLh6aK32ch2cxCSekMDRUk3HjtsPziohujHU`).
+
+| Epoch | Step | Result | Transaction |
+| --- | --- | --- | --- |
+| 0 | Members vote `SetStakingContract` and the shareholders role | Approved | `BqKhxz7i5u7eLqCvo4M7rn7rJUM4n4TY9ss3AsgNesNR`, `BnpCn4duSgrdZ4rNXQukZHwyUC2CFLeLg2nK9313SEa4` |
+| 0 | Alice 300, Bob 200, Carol 100 buy and lock | 600 locked | `DkgojDdWtUUpNi91RXwCyRAhajptYZKzANALAsbr63ra` (Alice's lock) |
+| 1 | Proposal #2: Alice and Bob vote, Carol does not | Approved | `HHDsbhQVwqo3WiGG2chXjHMCsYNVPRzdMFVGCxJmEhNr`, `2eqiYahyU74BDSsmiubcDxE8icEkS9UgwAkpnEe7N28k` |
+| 1 | 0.1 NEAR of revenue; 0.0004 bridged ETH counted | epoch 1 holds both | `4K81dDnV8Qx8xkv5VqkYDxWr8vEGBijLZLcbACtsGbH8`, `7YrQVSkCXGNvNjXY27pNMqNhA9SJAdJjkYbq5yUZTeQD` |
+| 2 | Alice and Bob prove their vote; Carol tries | 500 shares proved; Carol refused | `FARYxNNVVDff9VoyiJfjUvv2njeaMJ3VetdB3y5Nr56y`, `GSGfhsi7rWj6w6N4tjKXvg29iYntQPufu7DB7kaeWErn`, `5MKWRWqg9wDZAePj6V13fk8maGcyPUWmhqVmZvXF4Yha` |
+| 3 | Split | Alice 0.06 NEAR + 0.00024 ETH, Bob 0.04 + 0.00016, Carol 0 | |
+| 3 | Alice claims | paid both, her ETH balance +0.00024 | `DnHzYkokrL3UM7mzwhLkAo68WBDjBAZLQwZvmQdt57nD` |
+
+Carol held 100 of the 600 locked shares but did not vote: her part went to
+Alice and Bob (split over 500 shares, not 600).
+
 ## First version on testnet (2026-10-25)
 
 This run used the first version of the contract, where every share earned
-revenue. The epoch version has not run on testnet yet. Script: a DAO with
-three members, then the shares contract, then holders.
+revenue. Script: a DAO with three members, then the shares contract, then holders.
 
 | Step | Result | Transaction |
 | --- | --- | --- |
