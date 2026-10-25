@@ -53,7 +53,7 @@ describe("protocol sheets match omniroles-conditions::presets", () => {
   }
 });
 
-const TEST_USDC = BASE_SEPOLIA.tokens[0]!.address;
+const TEST_USDC = BASE_SEPOLIA.tokens.find((token) => token.symbol === "TestUSDC")!.address;
 const WETH = BASE_SEPOLIA.tokens[2]!.address;
 
 function swapRole(): RuleChange[] {
