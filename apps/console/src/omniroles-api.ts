@@ -78,19 +78,45 @@ export type RoleView = {
   members: Array<{ member: string; kind: string }>;
 };
 
+/** An operation as the vault (NEAR) and the EVM chain record it. */
+export type OnchainOperation = {
+  opId: string;
+  at: string;
+  actor: string;
+  role: string | null;
+  reference: string;
+  chainId: number;
+  chain: string;
+  summary: string | null;
+  vaultState: string;
+  nonce: number;
+  evm: { hash: string; status: "success" | "reverted" | "not mined"; blockNumber: string | null } | null;
+  nearAuthorizationTxHash: string | null;
+  vaultAccountId: string;
+};
+
+/** Wallet nonce on the chain against the vault's: equal means every transaction came through the vault. */
+export type WalletIntegrity = {
+  chainId: number;
+  chain: string;
+  address: string;
+  walletNonce: number | null;
+  vaultNonce: number;
+  status: "ok" | "pending" | "alert" | "unknown";
+};
+
+/** Refusals and dry runs: MandateOS's own record, they never reach a chain. */
 export type ActivityItem = {
-  kind: "operation" | "refusal" | "allowed";
+  kind: "refusal" | "allowed";
   at: string;
   agent: string;
   reference: string;
-  state: string;
-  amount: string | null;
-  txHash: string | null;
-  opId: string | null;
   reason: string | null;
   summary: string | null;
   request?: { chainId: number; to: string; data: string; value: string } | null;
 };
+
+export type Activity = { operations: OnchainOperation[]; integrity: WalletIntegrity[]; requests: ActivityItem[] };
 
 export type CouncilMember = { id: string; nearAccountId: string | null; name: string | null; role: string; signedIn: boolean };
 type Members = { locked: boolean; members: CouncilMember[]; me?: string | null };
@@ -113,7 +139,7 @@ export const omni = {
   governance: () => api<Governance>("/v1/console/omniroles/governance"),
   activate: () => api<{ transactions: string[] }>("/v1/console/omniroles/rules/activate", { method: "POST", body: "{}" }),
   roles: () => api<{ roles: RoleView[] }>("/v1/console/omniroles/roles"),
-  activity: () => api<{ items: ActivityItem[] }>("/v1/console/omniroles/activity"),
+  activity: () => api<Activity>("/v1/console/omniroles/activity"),
 };
 
 export function thresholdText(threshold: unknown, members: number): string {

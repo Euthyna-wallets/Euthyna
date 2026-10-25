@@ -35,7 +35,7 @@ import {
   type VaultCall,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
-import { erc20Abi, formatUnits, getAddress, type Hex, type PublicClient } from "viem";
+import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
@@ -78,6 +78,10 @@ export interface OmniRolesChain {
    * fees generous enough to still pass after the vote and the veto window.
    */
   fees(input: { chainId: number; from: Hex; calls: GasCall[] }): Promise<{ gasLimits: bigint[]; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
+  /** Transactions the wallet has had mined on a chain (its next nonce). */
+  nonce(chainId: number, address: Hex): Promise<number>;
+  /** The mined result of a transaction, or null while it is not mined. */
+  receipt(chainId: number, hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: string } | null>;
 }
 
 /** NEAR storage: 1e19 yocto per byte; top the vault up below 0.5 NEAR free. */
@@ -122,6 +126,18 @@ export class RpcOmniRolesChain implements OmniRolesChain {
     const priority = input.chainId === 11155111 || input.chainId === 1 ? 1_000_000_000n : 1_000_000n;
     const maxFeePerGas = gasPrice * 3n + priority > floor ? gasPrice * 3n + priority : floor;
     return { gasLimits, maxFeePerGas, maxPriorityFeePerGas: priority < maxFeePerGas ? priority : maxFeePerGas };
+  }
+
+  async nonce(chainId: number, address: Hex): Promise<number> {
+    return this.client(chainId).getTransactionCount({ address, blockTag: "latest" });
+  }
+
+  async receipt(chainId: number, hash: Hex) {
+    const receipt = await this.client(chainId).getTransactionReceipt({ hash }).catch((error: unknown) => {
+      if (error instanceof Error && /could not be found|not found/i.test(error.message)) return null;
+      throw error;
+    });
+    return receipt ? { status: receipt.status, blockNumber: receipt.blockNumber.toString() } : null;
   }
 
   async balances(address: Hex, profile: ChainProfile) {
@@ -172,6 +188,11 @@ type DaoOperation = {
   created_at_ns: string;
   vetoed_by?: string | null;
 };
+
+type LedgerOperation = DaoOperation & { member: string; role: string; signed_transaction: number[] | null };
+
+/** Most recent operations the activity page looks up on chain. */
+const ACTIVITY_LIMIT = 30;
 
 type DaoProposal = {
   id: number;
@@ -939,70 +960,113 @@ export class OmniRolesService {
     };
   }
 
+  /**
+   * What happened, as the chains record it. Operations come from the vault on
+   * NEAR (who, which role, what, its state) and are confirmed on the EVM chain
+   * (mined, success or reverted). The database only says which operations to
+   * look up and gives names. Refusals and dry runs never reach a chain: they are
+   * listed apart, as MandateOS's own record.
+   */
   async activity(organizationId: string) {
-    const [operations, refusals] = await Promise.all([
-      this.prisma.operation.findMany({ where: { organizationId }, include: { agent: true }, orderBy: { createdAt: "desc" }, take: 50 }),
+    const treasury = await this.requireTreasury(organizationId);
+    const [rows, records, agents, labels] = await Promise.all([
+      this.prisma.operation.findMany({ where: { organizationId }, include: { agent: true }, orderBy: { createdAt: "desc" }, take: ACTIVITY_LIMIT }),
       this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.agent.findMany({ where: { organizationId } }),
+      this.labels(organizationId),
     ]);
-    const agents = await this.prisma.agent.findMany({ where: { organizationId } });
-    const labels = await this.labels(organizationId);
-    const describe = (metadata: Record<string, unknown>): string | null => {
-      if (typeof metadata.target !== "string" || typeof metadata.calldata !== "string") return null;
+    const describeRequest = (target: Hex, calldata: Hex, value: bigint): string | null => {
       try {
-        return describeCall(metadata.target as Hex, metadata.calldata as Hex, BigInt(String(metadata.value ?? "0")), { profile: PROFILE, labels });
+        return describeCall(target, calldata, value, { profile: PROFILE, labels });
       } catch {
         return null;
       }
     };
-    const agentName = (id: string) => agents.find((agent) => agent.id === id)?.name ?? id;
-    // Transactions voted by the DAO: described from the vault, where their calldata lives.
-    const treasury = await this.treasury(organizationId);
-    const daoTransactions = treasury
-      ? await this.view<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => [])
-      : [];
-    const daoSummary = new Map<string, string>(daoTransactions.map((item) => [hexOf(item.op_id), describeCall(
-      getAddress(hexOf(item.request.target)),
-      hexOf(item.request.calldata),
-      BigInt(item.request.value),
-      { profile: PROFILE, labels },
-    )]));
-    const items = [
-      ...operations.map((operation) => ({
-        kind: "operation" as const,
-        at: operation.createdAt.toISOString(),
-        agent: operation.agent?.name ?? "Members (DAO vote)",
-        reference: operation.reference,
-        state: operation.state,
-        amount: operation.amount.toString(),
-        txHash: operation.txHash,
-        opId: operation.opId,
-        reason: null as string | null,
-        summary: daoSummary.get(operation.opId) ?? null,
-        request: null as { chainId: number; to: string; data: string; value: string } | null,
-      })),
-      ...refusals.map((refusal) => {
-        const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
-        const allowed = refusal.action === "operation.allowed";
-        return {
-          kind: allowed ? ("allowed" as const) : ("refusal" as const),
-          at: refusal.createdAt.toISOString(),
-          agent: agentName(refusal.actorId),
-          reference: refusal.targetId ?? "",
-          state: allowed ? "Allowed" : "Refused",
-          amount: null as string | null,
-          txHash: null as string | null,
-          opId: null as string | null,
-          reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
-          summary: describe(metadata),
-          // What the agent asked for: a member can turn a refusal into a vote.
-          request: typeof metadata.target === "string" && typeof metadata.calldata === "string"
-            ? { chainId: typeof metadata.chainId === "number" ? metadata.chainId : PROFILE.chainId, to: metadata.target, data: metadata.calldata, value: String(metadata.value ?? "0") }
-            : null,
-        };
-      }),
-    ].sort((left, right) => right.at.localeCompare(left.at));
-    return { items };
+    const agentByAccount = new Map(agents.map((agent) => [agent.nearAccountId, agent.name]));
+
+    const operations = [];
+    for (const row of rows) {
+      const vaultAccountId = row.vaultAccountId ?? treasury.vaultAccountId;
+      const recorded = await this.ledgerEntry(vaultAccountId, row.opId).catch(() => null);
+      if (!recorded) continue; // unknown to the vault: never shown as if it were on chain
+      const { operation, evmHash, receipt } = recorded;
+      operations.push({
+        opId: row.opId,
+        at: new Date(Number(BigInt(operation.created_at_ns) / NANOS_PER_MS)).toISOString(),
+        actor: operation.role === "__dao__" ? "Members (DAO vote)" : agentByAccount.get(operation.member) ?? operation.member,
+        role: operation.role === "__dao__" ? null : operation.role,
+        reference: operation.request.reference,
+        chainId: operation.request.chain_id,
+        chain: chainName(operation.request.chain_id),
+        summary: describeRequest(getAddress(hexOf(operation.request.target)), hexOf(operation.request.calldata), BigInt(operation.request.value)),
+        vaultState: operation.state,
+        nonce: operation.evm_nonce,
+        evm: evmHash ? { hash: evmHash, status: receipt?.status ?? "not mined", blockNumber: receipt?.blockNumber ?? null } : null,
+        nearAuthorizationTxHash: row.nearAuthorizationTxHash,
+        vaultAccountId,
+      });
+    }
+
+    // Every transaction the wallet sends takes the next nonce, and only the vault
+    // hands nonces out: the chain's count must equal the vault's.
+    const integrity = [];
+    for (const chainId of [PROFILE.chainId, ...Object.keys(this.config.extraRpcUrls ?? {}).map(Number)]) {
+      const wallet = await this.near.viewFunction<{ address: number[] | null; next_nonce: number } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: chainId }).catch(() => null);
+      if (!wallet?.address) continue;
+      const address = getAddress(hexOf(wallet.address));
+      const onChain = await this.chain.nonce(chainId, address).catch(() => null);
+      const vault = Number(wallet.next_nonce);
+      integrity.push({
+        chainId,
+        chain: chainName(chainId),
+        address,
+        walletNonce: onChain,
+        vaultNonce: vault,
+        status: onChain === null ? "unknown" : onChain === vault ? "ok" : onChain < vault ? "pending" : "alert",
+      });
+    }
+
+    const requests = records.map((record) => {
+      const metadata = (record.metadata ?? {}) as Record<string, unknown>;
+      const allowed = record.action === "operation.allowed";
+      const target = typeof metadata.target === "string" ? metadata.target as Hex : null;
+      const calldata = typeof metadata.calldata === "string" ? metadata.calldata as Hex : null;
+      return {
+        kind: allowed ? ("allowed" as const) : ("refusal" as const),
+        at: record.createdAt.toISOString(),
+        agent: agents.find((agent) => agent.id === record.actorId)?.name ?? record.actorId,
+        reference: record.targetId ?? "",
+        reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
+        summary: target && calldata ? describeRequest(target, calldata, BigInt(String(metadata.value ?? "0"))) : null,
+        // What the agent asked for: a member can turn a refusal into a vote.
+        request: target && calldata
+          ? { chainId: typeof metadata.chainId === "number" ? metadata.chainId : PROFILE.chainId, to: target, data: calldata, value: String(metadata.value ?? "0") }
+          : null,
+      };
+    });
+    return { operations, integrity, requests };
   }
+
+  /**
+   * One operation as recorded by the vault and, once signed, by the EVM chain.
+   * Settled entries never change again and are kept in memory.
+   */
+  private async ledgerEntry(vaultAccountId: string, opIdHex: string) {
+    const key = `${vaultAccountId}:${opIdHex}`;
+    const settled = this.ledger.get(key);
+    if (settled) return settled;
+    const operation = await this.near.viewFunction<LedgerOperation | null>(vaultAccountId, "get_operation", { op_id: Array.from(Buffer.from(opIdHex.slice(2), "hex")) });
+    if (!operation) return null;
+    const evmHash = operation.signed_transaction ? keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction))) : null;
+    const receipt = evmHash ? await this.chain.receipt(operation.request.chain_id, evmHash).catch(() => null) : null;
+    const entry = { operation, evmHash, receipt };
+    const final = ["Confirmed", "Failed", "Cancelled", "Vetoed", "Expired"].includes(operation.state) && (!evmHash || receipt);
+    if (final) this.ledger.set(key, entry);
+    return entry;
+  }
+
+  private readonly ledger = new Map<string, { operation: LedgerOperation; evmHash: Hex | null; receipt: { status: "success" | "reverted"; blockNumber: string } | null }>();
+
 
   // -------------------------------------------------------------------------
 

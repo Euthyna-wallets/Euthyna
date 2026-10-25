@@ -340,3 +340,7 @@ input[type="checkbox"], input[type="radio"] { appearance: auto; background: none
 .role-progress { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid #e2e5ea; border-radius: 10px; background: #fafbfc; }
 .role-progress-list { margin: 0; padding-left: 18px; color: #374151; }
 .role-progress-list li.sub { list-style: none; margin-left: 4px; color: #6b7280; }
+
+.evm-status { font-weight: 600; }
+.evm-status.ok { color: #0f6e66; }
+.evm-status.bad { color: #b42318; }

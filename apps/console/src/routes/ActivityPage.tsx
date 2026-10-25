@@ -3,52 +3,58 @@ import { useState } from "react";
 
 import { Card, PageState, Status, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
+import { omni, type ProposalDraft, type Sentence, type WalletIntegrity } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { SentenceList } from "./GovernancePage.js";
 import { verifyTransactions, type Requested } from "./WalletPage.js";
 
+const EXPLORERS: Record<number, string> = { 84532: "https://sepolia.basescan.org", 11155111: "https://sepolia.etherscan.io", 8453: "https://basescan.org", 1: "https://etherscan.io" };
+const NEAR_EXPLORER = "https://testnet.nearblocks.io";
+
 export function ActivityPage() {
   const query = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, refetchInterval: 10_000 });
-  const items = query.data?.items ?? [];
-  const refused = items.filter((item) => item.kind === "refusal").length;
-  const allowed = items.filter((item) => item.kind === "allowed").length;
-  const executed = items.filter((item) => item.kind === "operation").length;
+  const operations = query.data?.operations ?? [];
+  const requests = query.data?.requests ?? [];
+  const executed = operations.filter((item) => item.evm?.status === "success").length;
+  const refused = requests.filter((item) => item.kind === "refusal").length;
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>Activity</h1>
-          <p className="muted">Every operation agents asked for: what the vault signed, and what it refused and why.</p>
+          <p className="muted">What the chains record: each operation as the vault signed it on NEAR, and its result on the EVM chain.</p>
         </div>
-        <div className="pill">{allowed} allowed · {refused} refused · {executed} executed</div>
+        <div className="pill">{executed} executed on-chain · {refused} refused</div>
       </header>
-      <Card title="Operations">
-        <PageState loading={query.isLoading} error={query.error} empty={items.length === 0} emptyContent={<div className="state">No operation yet. Agents' requests appear here, including the ones the vault refuses.</div>}>
+
+      {(query.data?.integrity ?? []).map((item) => <IntegrityBanner key={item.chainId} item={item} />)}
+
+      <Card title="On-chain operations">
+        <PageState loading={query.isLoading} error={query.error} empty={operations.length === 0} emptyContent={<div className="state">No operation signed yet.</div>}>
           <table>
-            <thead><tr><th>When</th><th>Agent</th><th>Reference</th><th>Result</th><th>Details</th></tr></thead>
+            <thead><tr><th>When</th><th>By</th><th>What</th><th>Vault (NEAR)</th><th>{"Result (EVM)"}</th></tr></thead>
             <tbody>
-              {items.map((item, index) => (
-                <tr key={`${item.kind}-${item.opId ?? item.reference}-${index}`} className={item.kind === "refusal" ? "refused" : item.kind === "allowed" ? "allowed" : undefined}>
+              {operations.map((item) => (
+                <tr key={item.opId}>
                   <td className="small">{new Date(item.at).toLocaleString()}</td>
-                  <td>{item.agent}</td>
-                  <td className="mono small">{item.reference || "—"}</td>
-                  <td><Status value={item.kind === "refusal" ? "rejected" : item.kind === "allowed" ? "approved" : item.state} /></td>
+                  <td>{item.actor}{item.role ? <div className="small muted">role "{item.role}"</div> : null}</td>
                   <td className="small">
-                    {item.kind === "refusal"
-                      ? (
-                        <span>
-                          {item.summary ? <><strong>{item.summary}</strong><br /></> : null}Refused: {item.reason}
-                          {item.request ? <><br /><AskMembers request={item.request} title={`${item.agent}: ${item.summary ?? "refused request"}`} /></> : null}
+                    {item.summary ? <strong>{item.summary}</strong> : <span className="mono">{short(item.opId)}</span>}
+                    <div className="muted">{item.chain} · nonce {item.nonce}{item.reference ? ` · ${item.reference}` : ""}</div>
+                  </td>
+                  <td className="small">
+                    <Status value={item.vaultState} />
+                    {item.nearAuthorizationTxHash ? <div><a href={`${NEAR_EXPLORER}/txns/${item.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">NEAR tx {short(item.nearAuthorizationTxHash)}</a></div> : null}
+                  </td>
+                  <td className="small">
+                    {item.evm ? (
+                      <>
+                        <span className={`evm-status ${item.evm.status === "success" ? "ok" : item.evm.status === "reverted" ? "bad" : ""}`}>
+                          {item.evm.status === "success" ? "✓ executed" : item.evm.status === "reverted" ? "✗ reverted" : "not mined yet"}
                         </span>
-                      )
-                      : item.kind === "allowed"
-                        ? <span>{item.summary ? <><strong>{item.summary}</strong><br /></> : null}Allowed by the role</span>
-                        : (
-                        <span className="row wrap">
-                          {item.txHash ? <a href={`https://sepolia.basescan.org/tx/${item.txHash}`} target="_blank" rel="noreferrer">Base tx {short(item.txHash)}</a> : <span className="muted">Not broadcast yet</span>}
-                        </span>
-                      )}
+                        <div><a href={`${EXPLORERS[item.chainId] ?? ""}/tx/${item.evm.hash}`} target="_blank" rel="noreferrer">{item.chain} tx {short(item.evm.hash)}</a></div>
+                      </>
+                    ) : <span className="muted">not signed</span>}
                   </td>
                 </tr>
               ))}
@@ -56,8 +62,56 @@ export function ActivityPage() {
           </table>
         </PageState>
       </Card>
+
+      <Card title="Refusals and dry runs">
+        <p className="small muted">Recorded by MandateOS, not on chain: a refused request never becomes a transaction, and a dry run (check) moves nothing.</p>
+        {requests.length === 0 ? <div className="state">Nothing yet.</div> : (
+          <table>
+            <thead><tr><th>When</th><th>Agent</th><th>What</th><th>Result</th></tr></thead>
+            <tbody>
+              {requests.map((item, index) => (
+                <tr key={`${item.kind}-${item.at}-${index}`} className={item.kind === "refusal" ? "refused" : undefined}>
+                  <td className="small">{new Date(item.at).toLocaleString()}</td>
+                  <td>{item.agent}</td>
+                  <td className="small">{item.summary ? <strong>{item.summary}</strong> : "—"}{item.reference ? <div className="mono muted">{item.reference}</div> : null}</td>
+                  <td className="small">
+                    {item.kind === "refusal" ? (
+                      <span>
+                        <Status value="rejected" /> {item.reason}
+                        {item.request ? <><br /><AskMembers request={item.request} title={`${item.agent}: ${item.summary ?? "refused request"}`} /></> : null}
+                      </span>
+                    ) : <span><Status value="dry run" /> allowed by the role</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </div>
   );
+}
+
+/** Nonce check: the chain cannot count more transactions than the vault signed. */
+function IntegrityBanner({ item }: { item: WalletIntegrity }) {
+  if (item.status === "ok") {
+    return (
+      <div className="alert success small">
+        ✓ {item.chain}: the wallet has sent {item.walletNonce} transaction{item.walletNonce === 1 ? "" : "s"}, exactly the number the vault signed. Nothing left the wallet outside MandateOS.
+      </div>
+    );
+  }
+  if (item.status === "pending") {
+    return <div className="alert warning small">{item.chain}: {item.vaultNonce - (item.walletNonce ?? 0)} transaction(s) signed by the vault, not mined yet.</div>;
+  }
+  if (item.status === "alert") {
+    return (
+      <div className="alert error small">
+        {item.chain}: the wallet has sent {item.walletNonce} transactions but the vault signed only {item.vaultNonce}. A transaction left {short(item.address)} outside MandateOS: check the explorer now.
+      </div>
+    );
+  }
+  return <div className="alert small">{item.chain}: could not read the wallet's nonce right now.</div>;
 }
 
 /** A refused request is not lost: members can vote on exactly that transaction. */
