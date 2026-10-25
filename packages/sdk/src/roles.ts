@@ -662,7 +662,8 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         }
         const key = condition.compValue.toLowerCase();
         const existing = result[key];
-        result[key] = { token: existing?.token ?? token, label: `${role} ${kind}` };
+        // "payments" role + payments block → "payments", not "payments payments".
+        result[key] = { token: existing?.token ?? token, label: role === kind ? role : `${role} ${kind}` };
       }
     }
   }
