@@ -2,6 +2,7 @@ import { Buffer } from "buffer";
 import { KeyPair, Near, keyStores, transactions } from "near-api-js";
 import { serializeNep413, setupWalletSelector, type SignedMessage, type WalletSelector } from "@near-wallet-selector/core";
 import { setupModal, type WalletSelectorModal } from "@near-wallet-selector/modal-ui";
+import { setupMeteorWallet } from "@near-wallet-selector/meteor-wallet";
 import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
 import type { EIP1193Provider } from "viem";
 
@@ -103,7 +104,7 @@ let selectorModal: WalletSelectorModal | undefined;
 export function nearSelector(): Promise<WalletSelector> {
   selectorPromise ??= setupWalletSelector({
     network: "testnet",
-    modules: [setupMyNearWallet()],
+    modules: [setupMeteorWallet(), setupMyNearWallet()],
   });
   return selectorPromise;
 }

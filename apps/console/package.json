@@ -15,6 +15,7 @@
   "dependencies": {
     "@mandateos/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",
+    "@near-wallet-selector/meteor-wallet": "^9.5.4",
     "@near-wallet-selector/modal-ui": "^9.1.0",
     "@near-wallet-selector/my-near-wallet": "^9.1.0",
     "@reown/walletkit": "1.6.0",
