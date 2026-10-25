@@ -163,8 +163,17 @@ refused.
 - `POST /v1/console/omniroles/rules/activate`: executes ready rules and starts
   ready transactions. The API also does this on its own loop.
 - `GET /v1/console/omniroles/roles`: roles, budgets, and who holds each role.
-- `GET /v1/console/omniroles/activity`: agent operations, refusals with their
-  reason, and voted transactions.
+- `GET /v1/console/omniroles/activity`: what the chains record.
+  - `operations`: each operation read from the vault (`get_operation`: who,
+    which role, what, state, nonce), then from the EVM chain (receipt of the
+    signed transaction: executed or reverted). The database only says which
+    operations to look up, and gives names.
+  - `integrity`: per chain, the wallet's nonce on the EVM chain against the
+    vault's `next_nonce`. Only the vault hands out nonces, so the chain can
+    never count more transactions than the vault signed. If it does, a
+    transaction left the wallet outside MandateOS (`alert`).
+  - `requests`: refusals and dry runs, MandateOS's own record. They never
+    reach a chain.
 - `POST /v1/console/omniroles/refresh`: clears the API's cached reads.
 
 ### Suppliers
