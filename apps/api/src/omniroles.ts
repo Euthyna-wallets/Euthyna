@@ -25,8 +25,13 @@ import {
   type DaoTransactionDraft,
   councilPolicy,
   describePolicyChange,
+  describeProceedsProposal,
   describeRegistryProposal,
   describeSharesProposal,
+  formatNear,
+  omniRecipient,
+  OMNI_NEAR_TESTNET,
+  proceedsToEvmKinds,
   registryProposalKind,
   hasShareholdersRole,
   membersProposalArgs,
@@ -492,6 +497,7 @@ export class OmniRolesService {
       keyless: keys.keys.length === 0,
       revenueToken,
       daoAccountId: treasury.daoAccountId,
+      vaultAccountId: treasury.vaultAccountId,
       info,
       votesCounted: staking === accountId,
       shareholdersVote: hasShareholdersRole(policy),
@@ -594,6 +600,66 @@ export class OmniRolesService {
     if (!info) throw new OmniRolesError(409, "shares_missing", "this company has no shares yet");
     const kind = revenueProposalKind(accountId, amount);
     return this.daoProposal(treasury, describeSharesProposal(kind, accountId)!.title, kind, accountId);
+  }
+
+  /**
+   * Move NEAR held by the DAO (for example sale proceeds) to the company wallet
+   * on an EVM chain, as wNEAR through Omni Bridge. Two votes: the bridge
+   * storage, then the transfer.
+   */
+  async proceedsProposals(organizationId: string, input: { chainId: number; amountNear: string }) {
+    const treasury = await this.requireTreasury(organizationId);
+    let amount: bigint;
+    try {
+      amount = BigInt(parseNear(input.amountNear));
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_amount", error instanceof Error ? error.message : String(error));
+    }
+    if (amount <= 0n) throw new OmniRolesError(400, "invalid_amount", "the amount must be above zero");
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: input.chainId }).catch(() => null);
+    if (!wallet?.address) throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${chainName(input.chainId)} yet`);
+    const address = getAddress(hexOf(wallet.address));
+    let recipient: string;
+    try {
+      recipient = omniRecipient(input.chainId, address);
+    } catch (error) {
+      throw new OmniRolesError(400, "unsupported_chain", error instanceof Error ? error.message : String(error));
+    }
+    const bridge = OMNI_NEAR_TESTNET.bridge;
+    const [policy, perAccount, perTransfer, daoAccount] = await Promise.all([
+      this.near.viewFunction<{ roles: Array<{ kind: unknown }> }>(treasury.daoAccountId, "get_policy", {}),
+      this.near.viewFunction<string>(bridge, "required_balance_for_account", {}),
+      this.near.viewFunction<string>(bridge, "required_balance_for_init_transfer", {}),
+      this.near.getAccount(treasury.daoAccountId) as Promise<{ amount: string }>,
+    ]);
+    const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+    const registered = await Promise.all(members.map((member) => this.near.viewFunction<unknown>(bridge, "storage_balance_of", { account_id: member }).catch(() => null)));
+    const membersToRegister = members.filter((_, index) => !registered[index]);
+    const needed = amount + BigInt(perTransfer) + BigInt(perAccount) * BigInt(membersToRegister.length);
+    if (BigInt(daoAccount.amount) < needed + 200_000_000_000_000_000_000_000n) {
+      throw new OmniRolesError(409, "dao_balance_low", `the DAO holds ${formatNear(daoAccount.amount)}; this needs ${formatNear(needed)} plus what the DAO keeps for its storage`);
+    }
+    const feeUrl = new URL("/api/v3/transfer-fee", this.config.omniBridgeApi ?? "https://testnet.api.bridge.nearone.org");
+    feeUrl.search = new URLSearchParams({ sender: `near:${treasury.daoAccountId}`, recipient, token: `near:${OMNI_NEAR_TESTNET.wrappedNear}`, amount: amount.toString() }).toString();
+    let fee: string;
+    try {
+      const response = await fetch(feeUrl, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      fee = ((await response.json()) as { transferred_token_fee?: string | null }).transferred_token_fee ?? "0";
+    } catch (error) {
+      throw new OmniRolesError(503, "bridge_fee_unavailable", `the Omni Bridge fee API did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let kinds: ReturnType<typeof proceedsToEvmKinds>;
+    try {
+      kinds = proceedsToEvmKinds({ daoAccountId: treasury.daoAccountId, chainId: input.chainId, wallet: address, amountYocto: amount.toString(), feeYocto: fee, membersToRegister, perAccountYocto: perAccount, perTransferYocto: perTransfer });
+    } catch (error) {
+      throw new OmniRolesError(422, "invalid_transfer", error instanceof Error ? error.message : String(error));
+    }
+    const draft = (kind: unknown) => {
+      const summary = describeProceedsProposal(kind, address)!;
+      return { receiverId: treasury.daoAccountId, args: proposalOf(summary.title, kind), deposit: this.config.proposalBondYocto, title: summary.title, summary: [summary] };
+    };
+    return { companyWallet: address, messageAccount: kinds.messageAccount, proposals: [draft(kinds.storage), draft(kinds.transfer)] };
   }
 
   /** What the public directory knows about this company, read from chain. */
@@ -947,14 +1013,16 @@ export class OmniRolesService {
   async governance(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
-    const [lastId, policy, rules, paused, daoTransactions, lockedShares] = await Promise.all([
+    const [lastId, policy, rules, paused, daoTransactions, lockedShares, baseWallet] = await Promise.all([
       this.view<number>(treasury.daoAccountId, "get_last_proposal_id"),
       this.view<{ default_vote_policy: { threshold: unknown }; roles: Array<{ kind: unknown }>; proposal_period: string }>(treasury.daoAccountId, "get_policy"),
       this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 }),
       this.view<boolean>(treasury.vaultAccountId, "is_paused"),
       this.view<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => [] as DaoOperation[]),
       this.view<string>(treasury.daoAccountId, "delegation_total_supply").catch(() => "0"),
+      this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null),
     ]);
+    const companyWallet = baseWallet?.address ? getAddress(hexOf(baseWallet.address)) : null;
     const proposals = lastId === 0
       ? []
       : await this.view<DaoProposal[]>(treasury.daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 50), limit: 50 });
@@ -1004,7 +1072,7 @@ export class OmniRolesService {
               ? calls.map((call) => describeVaultCall(call, context))
               : (() => {
                 const policyChange = describePolicyChange(proposal.kind);
-                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null);
+                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeProceedsProposal(proposal.kind, companyWallet) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null);
                 return policyChange
                   ? [{ title: policyChange.title, details: policyChange.details }]
                   : sharesChange

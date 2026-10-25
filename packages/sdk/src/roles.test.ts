@@ -11,6 +11,9 @@ import {
   describePolicyChange,
   describeSharesProposal,
   formatNear,
+  describeProceedsProposal,
+  omniMessageAccount,
+  proceedsToEvmKinds,
   hexOf,
   nearRecipient,
   SELECTORS,
@@ -307,6 +310,31 @@ describe("share revenue role", () => {
     expect(text).toContain("message must be empty");
     expect(text).toContain("bridge fee at most 0.001 ETH");
     expect(text).toContain("ETH sent is counted against the revenue budget");
+  });
+});
+
+describe("sale proceeds to the company wallet", () => {
+  it("derives the bridge message account exactly as the testnet run did", () => {
+    // Testnet, 2026-10-25: proposal #11 funded this account, then the transfer of proposal #12 used it.
+    expect(omniMessageAccount({
+      token: "wrap.testnet",
+      amount: 100_000_000_000_000_000_000_000n,
+      chainId: 84532,
+      wallet: "0x834e5A4d6685E2B14189136Aca6fDe051266ef30",
+      fee: 2_183_406_114_039_459_266_024n,
+      sender: "atlas-labs.factory-v2.mandateos.testnet",
+    })).toBe("01af8b027f84f68cd86a400de65a8a12ae5c52d4a9c9a0bc45d58845f5a89d31");
+  });
+
+  it("builds two votes and describes them", () => {
+    const wallet = "0x834e5A4d6685E2B14189136Aca6fDe051266ef30" as const;
+    const kinds = proceedsToEvmKinds({ daoAccountId: "acme.dao.testnet", chainId: 84532, wallet, amountYocto: parseNear("1"), feeYocto: parseNear("0.002"), membersToRegister: ["a.testnet"], perAccountYocto: "1", perTransferYocto: "2" });
+    expect(kinds.recipient).toBe(`base:${wallet.toLowerCase()}`);
+    expect(describeProceedsProposal(kinds.storage, wallet)?.title).toBe("Pay 0 NEAR of Omni Bridge storage");
+    const described = describeProceedsProposal(kinds.transfer, wallet);
+    expect(described?.title).toBe("Send 1 NEAR to the company wallet on Base Sepolia");
+    expect(described?.details).not.toContain("⚠ this is not the company wallet");
+    expect(describeProceedsProposal(kinds.transfer, "0x0000000000000000000000000000000000000001")?.details).toContain("⚠ this is not the company wallet");
   });
 });
 

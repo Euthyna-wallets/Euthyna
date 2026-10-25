@@ -1,12 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { formatUnits } from "viem";
-import { formatNear, parseNear, revenueProposalKind, sharesProposalKinds } from "@mandateos/sdk/roles";
+import { formatNear, OMNI_CHAINS, OMNI_NEAR_TESTNET, parseNear, proceedsToEvmKinds, revenueProposalKind, sharesProposalKinds } from "@mandateos/sdk/roles";
+import { formatUnits, getAddress, toHex, type Hex } from "viem";
 
 import { Card, PageState, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type SharesView } from "../omniroles-api.js";
-import { signContractCall, signDaoProposal } from "../wallets.js";
+import { signContractCall, signDaoProposal, viewContract } from "../wallets.js";
 import { SentenceList } from "./GovernancePage.js";
 
 const REGISTRATION_FEE = parseNear("0.01");
@@ -27,6 +27,48 @@ function verifyRevenueDraft(draft: ProposalDraft, sharesAccountId: string, daoAc
   if (draft.receiverId !== daoAccountId || JSON.stringify(draft.args.proposal.kind) !== expected) {
     throw new Error("The server returned an unexpected proposal: nothing was signed.");
   }
+}
+
+/** Highest bridge fee the browser accepts, as a share of the amount (the server reads it from the Omni Bridge API). */
+const MAX_BRIDGE_FEE_PERCENT = 5n;
+
+/**
+ * Rebuild both proceeds votes from chain data read by the browser: the company
+ * wallet from the vault, the members from the DAO, the storage prices from the
+ * bridge. Only the bridge fee comes from the server, and it is capped.
+ */
+async function verifyProceedsDrafts(drafts: ProposalDraft[], view: { daoAccountId: string; vaultAccountId: string }, chainId: number, amountNear: string): Promise<Hex> {
+  const fail = (why: string): never => {
+    throw new Error(`The server returned an unexpected proposal (${why}): nothing was signed.`);
+  };
+  if (drafts.length !== 2 || drafts.some((draft) => draft.receiverId !== view.daoAccountId)) fail("receiver");
+  const owner = await viewContract<string>(view.vaultAccountId, "owner_id");
+  if (owner !== view.daoAccountId) fail("vault owner");
+  const wallet = await viewContract<{ address: number[] | null } | null>(view.vaultAccountId, "get_wallet", { chain_id: chainId });
+  if (!wallet?.address) fail("no company wallet");
+  const address = getAddress(toHex(new Uint8Array(wallet!.address!)));
+  const bridge = OMNI_NEAR_TESTNET.bridge;
+  const policy = await viewContract<{ roles: Array<{ kind: unknown }> }>(view.daoAccountId, "get_policy");
+  const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+  const perAccount = await viewContract<string>(bridge, "required_balance_for_account");
+  const perTransfer = await viewContract<string>(bridge, "required_balance_for_init_transfer");
+  const membersToRegister: string[] = [];
+  for (const member of members) {
+    if (!(await viewContract<unknown>(bridge, "storage_balance_of", { account_id: member }))) membersToRegister.push(member);
+  }
+  const transfer = (drafts[1]!.args.proposal.kind as { FunctionCall?: { actions?: Array<{ method_name: string; args: string }> } }).FunctionCall;
+  const call = transfer?.actions?.find((action) => action.method_name === "ft_transfer_call");
+  if (!call) fail("transfer");
+  const fee = BigInt((JSON.parse(JSON.parse(atob(call!.args)).msg) as { fee: string }).fee);
+  const amount = BigInt(parseNear(amountNear));
+  if (fee * 100n > amount * MAX_BRIDGE_FEE_PERCENT) fail(`bridge fee ${formatNear(fee)} above ${MAX_BRIDGE_FEE_PERCENT}%`);
+  const expected = proceedsToEvmKinds({
+    daoAccountId: view.daoAccountId, chainId, wallet: address, amountYocto: amount.toString(), feeYocto: fee.toString(),
+    membersToRegister, perAccountYocto: perAccount, perTransferYocto: perTransfer,
+  });
+  if (JSON.stringify(drafts[0]!.args.proposal.kind) !== JSON.stringify(expected.storage)) fail("bridge storage");
+  if (JSON.stringify(drafts[1]!.args.proposal.kind) !== JSON.stringify(expected.transfer)) fail("transfer");
+  return address;
 }
 
 export function SharesPage() {
@@ -136,6 +178,8 @@ function SharesDashboard(props: {
   const [buyCount, setBuyCount] = useState("100");
   const [lockCount, setLockCount] = useState("");
   const [revenue, setRevenue] = useState("1");
+  const [proceeds, setProceeds] = useState("1");
+  const [proceedsChain, setProceedsChain] = useState(84532);
   const ready = data.votesCounted && data.shareholdersVote;
   const token = data.revenueToken;
   const tokenAmount = (amount: string) => (token ? `${formatUnits(BigInt(amount), token.decimals)} ${token.symbol}` : amount);
@@ -274,6 +318,29 @@ function SharesDashboard(props: {
             <button className="ghost" disabled={!me || Boolean(busy)} onClick={() => void call("sync", "sync_revenue", {})}>Split bridged revenue</button>
           ) : null}
         </div>
+      </Card>
+
+      <Card title="Send proceeds to the company wallet">
+        <SentenceList items={[
+          { title: "NEAR held by the DAO goes to the company wallet on an EVM chain", details: ["as wNEAR, through Omni Bridge", "two votes: the bridge storage, then the transfer"] },
+          { title: "Your browser rebuilds both votes before signing", details: ["company wallet read from the vault", "members and storage prices read from the DAO and the bridge", `bridge fee capped at ${MAX_BRIDGE_FEE_PERCENT}% of the amount`] },
+        ]} />
+        <div className="row wrap">
+          <label className="inline">Amount<input inputMode="decimal" value={proceeds} onChange={(event) => setProceeds(event.target.value)} />NEAR</label>
+          <label className="inline">Chain
+            <select value={proceedsChain} onChange={(event) => setProceedsChain(Number(event.target.value))}>
+              {Object.entries(OMNI_CHAINS).map(([chainId, chain]) => <option key={chainId} value={chainId}>{chain.name}</option>)}
+            </select>
+          </label>
+          <button className="secondary" disabled={!me || Boolean(busy)} onClick={() => void run("proceeds", async () => {
+            const { proposals } = await omni.proceedsProposals({ chainId: proceedsChain, amountNear: proceeds });
+            const wallet = await verifyProceedsDrafts(proposals, data, proceedsChain, proceeds);
+            const storage = await signDaoProposal(me, proposals[0]!);
+            const transfer = await signDaoProposal(me, proposals[1]!);
+            return `Proposals #${storage.proposalId} (bridge storage) and #${transfer.proposalId} (transfer to ${short(wallet, 12)}) submitted. Approve them in order in Decisions.`;
+          })}>Propose the transfer</button>
+        </div>
+        <p className="small muted">The bridge takes about 20 minutes.</p>
       </Card>
     </>
   );

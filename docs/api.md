@@ -192,6 +192,13 @@ See [shares.md](./shares.md).
   vote that lists the company in the public directory (`docs/registry.md`).
 - `POST /v1/console/omniroles/proposals/revenue`: `{ amountNear }`. It returns
   a `FunctionCall` to `deposit_revenue`, paid from the DAO.
+- `POST /v1/console/omniroles/proposals/proceeds`: `{ chainId, amountNear }`
+  (84532 Base Sepolia, 11155111 Ethereum Sepolia). It returns two proposals that
+  send NEAR held by the DAO to the company wallet as wNEAR through Omni Bridge:
+  the bridge storage (members who may cast the last vote, and the transfer
+  message account), then `near_deposit` + `ft_transfer_call` on `wrap.testnet`.
+  The bridge fee comes from the Omni Bridge API. Errors: `wallet_missing`,
+  `unsupported_chain`, `dao_balance_low`, `bridge_fee_unavailable`.
 
 Buying, locking, unlocking and claiming are wallet calls to the contract. The
 API is not involved.

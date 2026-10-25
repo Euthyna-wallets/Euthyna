@@ -618,6 +618,10 @@ export function createApp({
       const input = await parseJson(context, z.object({ amountNear: z.string().regex(/^\d+(\.\d{1,24})?$/) }));
       return context.json(await omniroles.revenueProposal(orgOf(context), input.amountNear));
     });
+    app.post("/v1/console/omniroles/proposals/proceeds", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ chainId: z.number().int().positive(), amountNear: z.string().regex(/^\d+(\.\d{1,24})?$/) }));
+      return context.json(await omniroles.proceedsProposals(orgOf(context), input));
+    });
     app.get("/v1/console/omniroles/directory", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.directory(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/registry", requireConsole(auth, consoleLimiter), async (context) => {

@@ -9,7 +9,7 @@
  *
  * Browser-safe: depends on viem only.
  */
-import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
+import { concatHex, decodeFunctionData, encodeAbiParameters, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, sha256, toBytes, toHex, type Hex } from "viem";
 
 // ---------------------------------------------------------------------------
 // Vault JSON types (contracts/vault/src/types.rs)
@@ -660,6 +660,126 @@ export function revenueProposalKind(sharesAccountId: string, amountYocto: string
       actions: [{ method_name: "deposit_revenue", args: btoa("{}"), deposit: amountYocto, gas: "30000000000000" }],
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// NEAR held by the DAO → the company wallet on an EVM chain (Omni Bridge)
+// ---------------------------------------------------------------------------
+
+/** Omni Bridge accounts on NEAR testnet (github.com/Near-One/omni-bridge). */
+export const OMNI_NEAR_TESTNET = { bridge: "omni.n-bridge.testnet", wrappedNear: "wrap.testnet" } as const;
+
+/** Omni Bridge chain prefixes and their OmniAddress variant (borsh index). */
+export const OMNI_CHAINS: Record<number, { prefix: "eth" | "base"; variant: number; name: string }> = {
+  11155111: { prefix: "eth", variant: 0, name: "Ethereum Sepolia" },
+  84532: { prefix: "base", variant: 4, name: "Base Sepolia" },
+};
+
+export function omniRecipient(chainId: number, wallet: Hex): string {
+  const chain = OMNI_CHAINS[chainId];
+  if (!chain) throw new Error(`Omni Bridge does not serve chain ${chainId} here`);
+  return `${chain.prefix}:${getAddress(wallet).toLowerCase()}`;
+}
+
+const u32le = (value: number): Hex => toHex(Uint8Array.from([value & 255, (value >> 8) & 255, (value >> 16) & 255, (value >>> 24) & 255]));
+const u128le = (value: bigint): Hex => toHex(Uint8Array.from({ length: 16 }, (_, index) => Number((value >> BigInt(8 * index)) & 255n)));
+const borshString = (text: string): Hex => concatHex([u32le(toBytes(text).length), toHex(toBytes(text))]);
+
+/**
+ * The bridge charges a transfer's storage to its signer (the member casting
+ * the final vote) or to a "message account" derived from the transfer itself
+ * (omni-types `TransferMessageStorageAccount::id`). The DAO funds that account
+ * first, so no member pays.
+ */
+export function omniMessageAccount(input: { token: string; amount: bigint; chainId: number; wallet: Hex; fee: bigint; sender: string }): string {
+  const chain = OMNI_CHAINS[input.chainId];
+  if (!chain) throw new Error(`Omni Bridge does not serve chain ${input.chainId} here`);
+  const bytes = concatHex([
+    "0x01", borshString(input.token), // token: OmniAddress::Near
+    u128le(input.amount),
+    toHex(Uint8Array.from([chain.variant])), getAddress(input.wallet), // recipient
+    u128le(input.fee), u128le(0n), // fee in token, native fee
+    "0x01", borshString(input.sender), // sender: OmniAddress::Near
+    borshString(""), // msg
+  ]);
+  return sha256(bytes).slice(2);
+}
+
+const b64json = (value: object) => btoa(JSON.stringify(value));
+
+/**
+ * Two votes: pay the bridge storage (the members who may cast the final vote,
+ * and this transfer), then wrap the NEAR and send it to the company wallet.
+ */
+export function proceedsToEvmKinds(input: {
+  daoAccountId: string;
+  chainId: number;
+  wallet: Hex;
+  amountYocto: string;
+  feeYocto: string;
+  membersToRegister: string[];
+  perAccountYocto: string;
+  perTransferYocto: string;
+  accounts?: { bridge: string; wrappedNear: string };
+}) {
+  const accounts = input.accounts ?? OMNI_NEAR_TESTNET;
+  const recipient = omniRecipient(input.chainId, input.wallet);
+  const messageAccount = omniMessageAccount({
+    token: accounts.wrappedNear, amount: BigInt(input.amountYocto), chainId: input.chainId, wallet: input.wallet, fee: BigInt(input.feeYocto), sender: input.daoAccountId,
+  });
+  if (BigInt(input.feeYocto) >= BigInt(input.amountYocto)) throw new Error("the bridge fee is above the amount");
+  const storage = {
+    FunctionCall: {
+      receiver_id: accounts.bridge,
+      actions: [
+        ...input.membersToRegister.map((member) => ({ method_name: "storage_deposit", args: b64json({ account_id: member }), deposit: input.perAccountYocto, gas: "10000000000000" })),
+        { method_name: "storage_deposit", args: b64json({ account_id: messageAccount }), deposit: input.perTransferYocto, gas: "10000000000000" },
+      ],
+    },
+  };
+  const transfer = {
+    FunctionCall: {
+      receiver_id: accounts.wrappedNear,
+      actions: [
+        { method_name: "near_deposit", args: b64json({}), deposit: input.amountYocto, gas: "10000000000000" },
+        {
+          method_name: "ft_transfer_call",
+          args: b64json({ receiver_id: accounts.bridge, amount: input.amountYocto, memo: null, msg: JSON.stringify({ recipient, fee: input.feeYocto, native_token_fee: "0" }) }),
+          deposit: "1",
+          gas: "150000000000000",
+        },
+      ],
+    },
+  };
+  return { messageAccount, recipient, storage, transfer };
+}
+
+/** Describe the two votes above; null for anything else. */
+export function describeProceedsProposal(kind: unknown, companyWallet: Hex | null): { title: string; details: string[] } | null {
+  const call = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; args: string; deposit: string }> } })?.FunctionCall;
+  if (!call?.actions?.length) return null;
+  if (call.receiver_id === OMNI_NEAR_TESTNET.bridge && call.actions.every((action) => action.method_name === "storage_deposit")) {
+    const total = call.actions.reduce((sum, action) => sum + BigInt(action.deposit), 0n);
+    return { title: `Pay ${formatNear(total)} of Omni Bridge storage`, details: ["for the members who may cast the final vote and for the transfer to the company wallet", "paid from the DAO account"] };
+  }
+  const transfer = call.actions.find((action) => action.method_name === "ft_transfer_call");
+  if (call.receiver_id === OMNI_NEAR_TESTNET.wrappedNear && transfer) {
+    const args = JSON.parse(atob(transfer.args)) as { receiver_id: string; amount: string; msg: string };
+    const msg = JSON.parse(args.msg) as { recipient: string; fee: string };
+    const [prefix, address] = msg.recipient.split(":");
+    const chain = Object.values(OMNI_CHAINS).find((item) => item.prefix === prefix)?.name ?? prefix;
+    const ours = Boolean(companyWallet && address && address.toLowerCase() === companyWallet.toLowerCase());
+    return {
+      title: `Send ${formatNear(args.amount)} to the company wallet on ${chain}`,
+      details: [
+        `as wNEAR, through Omni Bridge (${args.receiver_id})`,
+        `to ${address}${ours ? " (company wallet)" : ""}`,
+        `bridge fee ${formatNear(msg.fee)}, taken from the amount`,
+        ...(ours ? [] : ["⚠ this is not the company wallet"]),
+      ],
+    };
+  }
+  return null;
 }
 
 /** Base64 of a JSON value, UTF-8 safe (names can hold any character). */

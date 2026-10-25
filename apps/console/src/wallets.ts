@@ -213,6 +213,17 @@ async function nearRpc<T>(params: Record<string, unknown>): Promise<T> {
   return nearRpcMethod<T>("query", { finality: "final", ...params });
 }
 
+/** Read a contract view straight from NEAR RPC, so the browser does not trust the server for it. */
+export async function viewContract<T>(accountId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
+  const result = await nearRpc<{ result: number[] }>({
+    request_type: "call_function",
+    account_id: accountId,
+    method_name: method,
+    args_base64: btoa(JSON.stringify(args)),
+  });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(result.result))) as T;
+}
+
 export type AgentAccessKeyRpcAttestation = {
   valid: boolean;
   checks: Array<{ label: string; expected: string; actual: string; ok: boolean }>;
