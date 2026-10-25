@@ -13,8 +13,11 @@ export type OmniStatus = {
   checks: Check[];
   dao: null | { members: string[]; threshold: unknown };
   wallet: null | { address: string; eth: string; tokens: Array<{ symbol: string; address: string; amount: string }> };
+  chains?: Array<{ chainId: number; name: string; enabled: boolean }>;
   paused: boolean;
 };
+
+export type DaoTransactionView = { opId: string; state: string; createdAt: string; executesAt: string | null; title: string; details: string[] };
 
 export type OmniPlan = {
   daoAccountId: string;
@@ -64,6 +67,7 @@ export type Governance = {
   paused: boolean;
   proposals: GovernanceProposal[];
   rules: GovernanceRule[];
+  transactions?: DaoTransactionView[];
 };
 
 export type RoleView = {
@@ -85,6 +89,7 @@ export type ActivityItem = {
   opId: string | null;
   reason: string | null;
   summary: string | null;
+  request?: { chainId: number; to: string; data: string; value: string } | null;
 };
 
 export type CouncilMember = { id: string; nearAccountId: string | null; name: string | null; role: string; signedIn: boolean };
@@ -97,7 +102,9 @@ export const omni = {
   status: () => api<OmniStatus>("/v1/console/omniroles/status"),
   plan: (daoName: string) => api<OmniPlan>("/v1/console/omniroles/plan", { method: "POST", body: JSON.stringify({ daoName }) }),
   create: (daoName: string) => api<{ daoTransaction: string; vaultTransaction: string }>("/v1/console/omniroles/create", { method: "POST", body: JSON.stringify({ daoName }) }),
-  walletProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: "{}" }),
+  walletProposal: (chainId?: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify(chainId ? { chainId } : {}) }),
+  transactionProposal: (input: { title?: string; transactions: Array<{ chainId: number; to: string; value?: string; data?: string; gas?: string }> }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/transaction", { method: "POST", body: JSON.stringify(input) }),
   roleProposal: (draft: unknown) => api<ProposalDraft>("/v1/console/omniroles/proposals/role", { method: "POST", body: JSON.stringify({ draft }) }),
   membershipProposal: (input: { role: string; member: string; kind: "Agent" | "Human"; action: "grant" | "revoke" }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/membership", { method: "POST", body: JSON.stringify(input) }),

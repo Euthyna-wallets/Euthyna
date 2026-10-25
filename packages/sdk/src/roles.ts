@@ -390,7 +390,27 @@ export const PROPOSAL_MARKER = "[mandateos]";
 const RULE_GAS = "20000000000000"; // 20 Tgas per queued rule change
 const WALLET_GAS = "60000000000000"; // MPC derivation + callback
 
-export type VaultCall = { method: "queue_rule_change"; change: RuleChange } | { method: "request_wallet"; chainId: number } | { method: "pause" | "unpause" };
+/** An EVM transaction the DAO votes on directly (outside any role). */
+export type DaoTransactionDraft = {
+  chainId: number;
+  to: Hex;
+  value: string;
+  data: Hex;
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
+};
+
+export type VaultCall =
+  | { method: "queue_rule_change"; change: RuleChange }
+  | { method: "request_wallet"; chainId: number }
+  | { method: "pause" | "unpause" }
+  | { method: "submit_transactions"; transactions: DaoTransactionDraft[] };
+
+const DAO_TRANSACTIONS_GAS = "100000000000000"; // 100 Tgas
+
+const bytesOf = (hex: Hex): number[] => Array.from(toBytes(hex));
+const hexOfBytes = (bytes: number[]): Hex => toHex(Uint8Array.from(bytes));
 
 export function proposalArgs(vaultAccountId: string, title: string, calls: VaultCall[]) {
   requireNonEmpty(calls, "vault call");
@@ -399,12 +419,24 @@ export function proposalArgs(vaultAccountId: string, title: string, calls: Vault
       ? { change: call.change }
       : call.method === "request_wallet"
         ? { chain_id: call.chainId }
-        : {};
+        : call.method === "submit_transactions"
+          ? {
+            transactions: call.transactions.map((transaction) => ({
+              chain_id: transaction.chainId,
+              target: bytesOf(getAddress(transaction.to)),
+              value: transaction.value,
+              calldata: bytesOf(transaction.data),
+              gas_limit: transaction.gasLimit,
+              max_fee_per_gas: transaction.maxFeePerGas,
+              max_priority_fee_per_gas: transaction.maxPriorityFeePerGas,
+            })),
+          }
+          : {};
     return {
       method_name: call.method,
       args: btoa(JSON.stringify(args)),
       deposit: "0",
-      gas: call.method === "request_wallet" ? WALLET_GAS : RULE_GAS,
+      gas: call.method === "request_wallet" ? WALLET_GAS : call.method === "submit_transactions" ? DAO_TRANSACTIONS_GAS : RULE_GAS,
     };
   });
   return {
@@ -497,6 +529,18 @@ export function decodeVaultCalls(kind: unknown, vaultAccountId: string): VaultCa
     if (action.method_name === "queue_rule_change") return { method: "queue_rule_change", change: args.change as RuleChange };
     if (action.method_name === "request_wallet") return { method: "request_wallet", chainId: Number(args.chain_id) };
     if (action.method_name === "pause" || action.method_name === "unpause") return { method: action.method_name };
+    if (action.method_name === "submit_transactions") {
+      const transactions = (args.transactions as Array<Record<string, unknown>>).map((transaction) => ({
+        chainId: Number(transaction.chain_id),
+        to: getAddress(hexOfBytes(transaction.target as number[])),
+        value: String(transaction.value),
+        data: hexOfBytes(transaction.calldata as number[]),
+        gasLimit: String(transaction.gas_limit),
+        maxFeePerGas: String(transaction.max_fee_per_gas),
+        maxPriorityFeePerGas: String(transaction.max_priority_fee_per_gas),
+      }));
+      return { method: "submit_transactions", transactions };
+    }
     throw new Error(`unknown vault method ${action.method_name}`);
   });
 }
@@ -543,7 +587,7 @@ function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function labelAddress(address: Hex, context: DescribeContext): string {
+export function labelAddress(address: Hex, context: DescribeContext, kind: "recipient" | "contract" = "recipient"): string {
   const key = address.toLowerCase();
   const label = Object.entries(context.labels ?? {}).find(([candidate]) => candidate.toLowerCase() === key)?.[1];
   const full = getAddress(address);
@@ -552,7 +596,7 @@ export function labelAddress(address: Hex, context: DescribeContext): string {
   if (token) return token.symbol;
   const protocol = Object.values(context.profile.protocols).find((item) => item.router.toLowerCase() === key);
   if (protocol) return `${protocol.name} router`;
-  return `${context.fullAddresses ? full : short(full)} (not a registered supplier)`;
+  return `${context.fullAddresses ? full : short(full)} (${kind === "contract" ? "unknown contract" : "not a registered supplier"})`;
 }
 
 function wordToAddress(value: Hex): Hex {
@@ -744,8 +788,47 @@ export function describeVaultCall(call: VaultCall, context: DescribeContext): { 
   if (call.method === "pause") return { title: "Pause all operations", details: [] };
   if (call.method === "unpause") return { title: "Resume operations", details: [] };
   if (call.method === "queue_rule_change") return describeChange(call.change, context);
+  if (call.method === "submit_transactions") return describeDaoTransactions(call.transactions, context);
   return { title: "Unknown vault call", details: [] };
 }
+
+const CHAIN_NAMES: Record<number, string> = { 1: "Ethereum", 8453: "Base", 84532: "Base Sepolia", 11155111: "Ethereum Sepolia" };
+
+export function chainName(chainId: number): string {
+  return CHAIN_NAMES[chainId] ?? `chain ${chainId}`;
+}
+
+/**
+ * A transaction voted outside any role, spelled out for the voters: what it
+ * does, then the exact target, value, data and the most it can cost in fees.
+ */
+export function describeDaoTransactions(transactions: DaoTransactionDraft[], context: DescribeContext): { title: string; details: string[] } {
+  const details = transactions.flatMap((transaction, index) => {
+    const value = BigInt(transaction.value);
+    const fee = BigInt(transaction.gasLimit) * BigInt(transaction.maxFeePerGas);
+    const bytes = (transaction.data.length - 2) / 2;
+    return [
+      `${transactions.length > 1 ? `${index + 1}. ` : ""}${describeCall(transaction.to, transaction.data, value, context)} on ${chainName(transaction.chainId)}`,
+      `  · to ${getAddress(transaction.to)}${value > 0n ? `, sends ${formatUnits(value, 18)} ETH` : ""}`,
+      `  · data ${bytes === 0 ? "none" : `${transaction.data.slice(0, 10)}… (${bytes} bytes)`}`,
+      `  · network fee at most ${formatUnits(fee, 18)} ETH`,
+    ];
+  });
+  return {
+    title: `Send ${transactions.length === 1 ? "a transaction" : `${transactions.length} transactions`} from the company wallet`,
+    details: [...details, "Signed after the veto window, in this order, outside any role."],
+  };
+}
+
+const POOL_ABI = parseAbi([
+  "function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)",
+  "function withdraw(address asset, uint256 amount, address to)",
+  "function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)",
+  "function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)",
+  "function deposit()",
+  "function depositETH(uint32 minGasLimit, bytes extraData)",
+  "function depositETHTo(address to, uint32 minGasLimit, bytes extraData)",
+]);
 
 const ROUTER_ABI = parseAbi([
   "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params)",
@@ -756,6 +839,7 @@ const ROUTER_ABI = parseAbi([
 export function describeCall(target: Hex, calldata: Hex, value: bigint, context: DescribeContext): string {
   const token = context.profile.tokens.find((item) => item.address.toLowerCase() === target.toLowerCase());
   const label = (address: Hex) => labelAddress(address, context);
+  const contract = (address: Hex) => labelAddress(address, context, "contract");
   try {
     if (calldata === "0x") return `send ${formatUnits(value, 18)} ETH to ${label(target)}`;
     const selector = calldata.slice(0, 10);
@@ -772,14 +856,31 @@ export function describeCall(target: Hex, calldata: Hex, value: bigint, context:
       if (decoded.functionName === "exactInputSingle") {
         const params = decoded.args[0];
         const tokenIn = context.profile.tokens.find((item) => item.address.toLowerCase() === params.tokenIn.toLowerCase());
-        return `swap ${amountText(params.amountIn, tokenIn)} for ${label(params.tokenOut)} on ${label(target)}, sent to ${label(params.recipient)}`;
+        return `swap ${amountText(params.amountIn, tokenIn)} for ${label(params.tokenOut)} on ${contract(target)}, sent to ${label(params.recipient)}`;
       }
       const [amountIn, , path, to] = decoded.args;
       const tokenIn = context.profile.tokens.find((item) => item.address.toLowerCase() === path[0]?.toLowerCase());
-      return `swap ${amountText(amountIn, tokenIn)} along ${path.map((hop) => label(hop)).join(" → ")} on ${label(target)}, sent to ${label(to)}`;
+      return `swap ${amountText(amountIn, tokenIn)} along ${path.map((hop) => label(hop)).join(" → ")} on ${contract(target)}, sent to ${label(to)}`;
+    }
+    const pool = (() => {
+      try {
+        return decodeFunctionData({ abi: POOL_ABI, data: calldata });
+      } catch {
+        return null;
+      }
+    })();
+    if (pool) {
+      const tokenOf = (address: Hex) => context.profile.tokens.find((item) => item.address.toLowerCase() === address.toLowerCase());
+      if (pool.functionName === "supply") return `deposit ${amountText(pool.args[1], tokenOf(pool.args[0]))} into ${contract(target)} for ${label(pool.args[2])}`;
+      if (pool.functionName === "withdraw") return `withdraw ${pool.args[1] >= 2n ** 255n ? "everything" : amountText(pool.args[1], tokenOf(pool.args[0]))} from ${contract(target)} to ${label(pool.args[2])}`;
+      if (pool.functionName === "borrow") return `borrow ${amountText(pool.args[1], tokenOf(pool.args[0]))} from ${contract(target)} for ${label(pool.args[4])}`;
+      if (pool.functionName === "repay") return `repay ${amountText(pool.args[1], tokenOf(pool.args[0]))} to ${contract(target)} for ${label(pool.args[3])}`;
+      if (pool.functionName === "deposit") return `wrap ${formatUnits(value, 18)} ETH with ${contract(target)}`;
+      if (pool.functionName === "depositETH") return `bridge ${formatUnits(value, 18)} ETH through ${contract(target)} to the same address on the other chain`;
+      if (pool.functionName === "depositETHTo") return `bridge ${formatUnits(value, 18)} ETH through ${contract(target)} to ${label(pool.args[0])}`;
     }
   } catch {
     // fall through
   }
-  return `call ${calldata.slice(0, 10)} on ${label(target)}`;
+  return `call function ${calldata.slice(0, 10)} on ${contract(target)}${value > 0n ? ` with ${formatUnits(value, 18)} ETH` : ""}`;
 }

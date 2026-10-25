@@ -180,3 +180,28 @@ describe("DAO members", async () => {
     expect(() => councilPolicy(["a.testnet", "a.testnet", "b.testnet"], settings)).toThrow(/twice/);
   });
 });
+
+describe("DAO transactions", async () => {
+  const { describeDaoTransactions, proposalArgs: args, decodeVaultCalls: decode } = await import("./roles.js");
+  const { encodeFunctionData, erc20Abi, parseAbi } = await import("viem");
+  const pool = "0x07ea79f68b2b3df564d0a34f8e19d9b1e339814b" as Hex;
+  const wallet = "0x061aBa709C5A8D910010B7FaC3D0513668A67ae9" as Hex;
+  const transactions = [
+    { chainId: 84532, to: TEST_USDC, value: "0", data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [pool, 10_000_000n] }), gasLimit: "80000", maxFeePerGas: "100000000", maxPriorityFeePerGas: "1000000" },
+    { chainId: 84532, to: pool, value: "0", data: encodeFunctionData({ abi: parseAbi(["function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)"]), functionName: "supply", args: [TEST_USDC, 10_000_000n, wallet, 0] }), gasLimit: "300000", maxFeePerGas: "100000000", maxPriorityFeePerGas: "1000000" },
+  ];
+
+  it("round-trips through a Sputnik proposal", () => {
+    const proposal = args("vault.testnet", "Deposit in Aave", [{ method: "submit_transactions", transactions }]);
+    expect(decode(proposal.proposal.kind, "vault.testnet")).toEqual([{ method: "submit_transactions", transactions: transactions.map((item) => ({ ...item, to: getAddress(item.to) })) }]);
+  });
+
+  it("spells out each call, its target and its fees", () => {
+    const text = describeDaoTransactions(transactions, { profile: BASE_SEPOLIA, labels: { [wallet]: "company wallet" }, fullAddresses: true });
+    expect(text.title).toBe("Send 2 transactions from the company wallet");
+    const details = text.details.join("\n");
+    expect(details).toContain(`1. approve ${getAddress(pool)} (not a registered supplier) to spend 10 TestUSDC on Base Sepolia`);
+    expect(details).toContain(`2. deposit 10 TestUSDC into ${getAddress(pool)} (unknown contract) for company wallet (${wallet}) on Base Sepolia`);
+    expect(details).toContain("network fee at most 0.00003 ETH");
+  });
+});

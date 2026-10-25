@@ -37,6 +37,7 @@ const schema = z.object({
   BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000000"),
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
+  ETHEREUM_SEPOLIA_RPC_URL: z.string().url().default("https://ethereum-sepolia-rpc.publicnode.com"),
   OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
   OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("7000000000000000000000000"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),

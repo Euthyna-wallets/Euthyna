@@ -56,6 +56,7 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
   vaultDepositYocto: env.OMNIROLES_VAULT_DEPOSIT_YOCTO,
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
+  extraRpcUrls: { 11155111: env.ETHEREUM_SEPOLIA_RPC_URL },
   ruleDelayNs: env.OMNIROLES_RULE_DELAY_SECONDS * 1_000_000_000,
   ruleExpirationNs: (env.OMNIROLES_RULE_DELAY_SECONDS + 7 * 86_400) * 1_000_000_000,
   operationTtlNs: 600_000_000_000,

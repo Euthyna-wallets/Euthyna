@@ -24,8 +24,8 @@ const ACTIVE_STATES = [
 export interface WorkerOperationRecord {
   organizationId: string;
   opId: string;
-  agentId: string;
-  agentNearAccountId: string;
+  agentId: string | null;
+  agentNearAccountId: string | null;
   agentEvmAddress: string | null;
   vaultAccountId: string;
   reference: string;
@@ -174,9 +174,9 @@ export class PrismaWorkerStore implements WorkerStore {
       organizationId: operation.organizationId,
       opId: operation.opId,
       agentId: operation.agentId,
-      agentNearAccountId: operation.agent.nearAccountId,
-      agentEvmAddress: operation.agent.evmAddress,
-      vaultAccountId: operation.agent.vaultAccountId,
+      agentNearAccountId: operation.agent?.nearAccountId ?? null,
+      agentEvmAddress: operation.agent?.evmAddress ?? null,
+      vaultAccountId: operation.agent?.vaultAccountId ?? operation.vaultAccountId ?? "",
       reference: operation.reference,
       state: operation.state,
       txHash: operation.txHash,
@@ -208,7 +208,7 @@ export class PrismaWorkerStore implements WorkerStore {
 
   async syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void> {
     await this.prisma.agent.updateMany({
-      where: { id: operation.agentId, organizationId: operation.organizationId },
+      where: { id: operation.agentId ?? "", organizationId: operation.organizationId },
       data: { evmAddress },
     });
   }
@@ -287,10 +287,12 @@ export class OperationWorker {
       chain_id: operation.request.chain_id,
     });
     const derivedAddress = onChainWalletEvmAddress(chainWallet);
-    if (derivedAddress && derivedAddress !== record.agentEvmAddress) {
+    if (record.agentId && derivedAddress && derivedAddress !== record.agentEvmAddress) {
       await this.store.syncAgentEvmAddress(record, derivedAddress);
     }
     try {
+      // DAO transactions have no agent account to keep funded.
+      if (!record.agentNearAccountId) throw new Error("no agent");
       const agentAccount = await this.near.getAccount(record.agentNearAccountId);
       if (BigInt(agentAccount.amount) < BigInt(this.config.agentGasLowYocto)) {
         console.warn(JSON.stringify({

@@ -9,6 +9,7 @@ import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
 import { OnboardingPage } from "./routes/OnboardingPage.js";
 import { SignIn } from "./routes/SignIn.js";
+import { WalletPage } from "./routes/WalletPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
 import { ActivityPage } from "./routes/ActivityPage.js";
 import { RolesPage } from "./routes/RolesPage.js";
@@ -44,6 +45,7 @@ export function App() {
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/roles" element={<RolesPage />} />
               <Route path="/activity" element={<ActivityPage />} />
+              <Route path="/wallet" element={<WalletPage />} />
               <Route path="/mandate" element={<Navigate to="/roles" replace />} />
               <Route path="/payments" element={<Navigate to="/activity" replace />} />
               <Route path="/governance" element={<GovernancePage />} />

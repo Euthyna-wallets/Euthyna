@@ -296,7 +296,9 @@ model WorkerLease {
 model Operation {
   organizationId          String
   opId                    String
-  agentId                 String
+  /// Null for a transaction voted by the DAO (no agent behind it).
+  agentId                 String?
+  vaultAccountId          String?
   reference               String
   state                   String
   txDigest                String
@@ -318,7 +320,7 @@ model Operation {
   attempts                Int          @default(0)
   lastError               String?
   organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  agent                   Agent        @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  agent                   Agent?       @relation(fields: [agentId], references: [id], onDelete: Restrict)
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
 

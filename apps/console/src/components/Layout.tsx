@@ -76,6 +76,7 @@ export function Layout() {
             <NavLink to="/roles">Roles</NavLink>
             <NavLink to="/agents">Agents</NavLink>
             <NavLink to="/activity">Activity</NavLink>
+            <NavLink to="/wallet">Wallet</NavLink>
             <NavLink to="/governance">Decisions</NavLink>
             <NavLink to="/suppliers">Suppliers</NavLink>
             <NavLink to="/settings">Settings</NavLink>

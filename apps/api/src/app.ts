@@ -538,8 +538,23 @@ export function createApp({
       });
       return context.json(result);
     });
-    app.post("/v1/console/omniroles/proposals/wallet", requireConsole(auth, consoleLimiter), async (context) =>
-      context.json(await omniroles.walletProposal(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/wallet", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ chainId: z.number().int().positive().optional() }));
+      return context.json(await omniroles.walletProposal(orgOf(context), input.chainId));
+    });
+    app.post("/v1/console/omniroles/proposals/transaction", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        title: z.string().max(120).optional(),
+        transactions: z.array(z.object({
+          chainId: z.number().int().positive(),
+          to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+          value: z.string().regex(/^\d+$/).optional(),
+          data: z.string().regex(/^0x([0-9a-fA-F]{2})*$/).max(50_000).optional(),
+          gas: z.string().regex(/^\d+$/).optional(),
+        })).min(1).max(10),
+      }));
+      return context.json(await omniroles.transactionProposal(orgOf(context), input));
+    });
     app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, roleDraftSchema);
       return context.json(await omniroles.roleProposal(orgOf(context), input.draft as RoleDraft));
