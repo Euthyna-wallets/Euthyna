@@ -662,6 +662,62 @@ export function revenueProposalKind(sharesAccountId: string, amountYocto: string
   };
 }
 
+/** Base64 of a JSON value, UTF-8 safe (names can hold any character). */
+function jsonBase64(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function jsonFromBase64(value: string): unknown {
+  const binary = atob(value);
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0))));
+}
+
+/** Storage deposit attached to a directory listing; the registry refunds what it does not use. */
+export const REGISTRY_DEPOSIT_YOCTO = "20000000000000000000000";
+export const REGISTRY_NAME_MAX = 64;
+export const REGISTRY_DESCRIPTION_MAX = 280;
+
+export type DirectoryListing = { vaultAccountId: string; sharesAccountId: string | null; name: string; description: string };
+
+/** The DAO lists the company in the public directory (contracts/registry). */
+export function registryProposalKind(registryId: string, listing: DirectoryListing) {
+  const name = listing.name.trim();
+  if (!name || [...name].length > REGISTRY_NAME_MAX) throw new Error(`the name must be 1 to ${REGISTRY_NAME_MAX} characters`);
+  if ([...listing.description].length > REGISTRY_DESCRIPTION_MAX) throw new Error(`the description must be at most ${REGISTRY_DESCRIPTION_MAX} characters`);
+  return {
+    FunctionCall: {
+      receiver_id: registryId,
+      actions: [{
+        method_name: "register",
+        args: jsonBase64({ vault_id: listing.vaultAccountId, shares_id: listing.sharesAccountId, name, description: listing.description }),
+        deposit: REGISTRY_DEPOSIT_YOCTO,
+        gas: "100000000000000",
+      }],
+    },
+  };
+}
+
+/** Describe a directory listing proposal; null for anything else. */
+export function describeRegistryProposal(kind: unknown, registryId: string | null): { title: string; details: string[] } | null {
+  const call = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; args: string }> } })?.FunctionCall;
+  if (!registryId || call?.receiver_id !== registryId || !call.actions?.length) return null;
+  const action = call.actions[0]!;
+  if (action.method_name === "unregister") return { title: "Leave the public directory of AI companies", details: [`registry ${registryId}`] };
+  if (action.method_name !== "register") return null;
+  const args = jsonFromBase64(action.args) as { vault_id: string; shares_id: string | null; name: string; description: string };
+  return {
+    title: `List "${args.name}" in the public directory of AI companies`,
+    details: [
+      args.description ? `description: ${args.description}` : "no description",
+      `vault ${args.vault_id}${args.shares_id ? `, shares ${args.shares_id}` : ""}`,
+      "the registry checks on chain that both belong to this DAO",
+    ],
+  };
+}
+
 /** Describe the proposals about shares; null for anything else. */
 export function describeSharesProposal(kind: unknown, sharesAccountId: string | null): { title: string; details: string[] } | null {
   const staking = (kind as { SetStakingContract?: { staking_id?: string } })?.SetStakingContract;

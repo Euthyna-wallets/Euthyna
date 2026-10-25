@@ -30,6 +30,14 @@ export type OmniPlan = {
 
 export type Sentence = { title: string; details: string[] };
 
+export type DirectoryView = {
+  registryId: string | null;
+  daoAccountId: string;
+  vaultAccountId: string;
+  sharesAccountId: string | null;
+  listing: null | { name: string; description: string; vault_id: string; shares_id: string | null; registered_at_ns: string };
+};
+
 export type ProposalDraft = {
   receiverId: string;
   args: { proposal: { description: string; kind: unknown } };
@@ -204,6 +212,9 @@ export const omni = {
   createShares: (draft: SharesDraft) =>
     api<{ accountId: string; transaction: string; proposals: ProposalDraft[] }>("/v1/console/omniroles/shares", { method: "POST", body: JSON.stringify(draft) }),
   sharesProposals: () => api<{ proposals: ProposalDraft[] }>("/v1/console/omniroles/proposals/shares", { method: "POST", body: "{}" }),
+  directory: () => api<DirectoryView>("/v1/console/omniroles/directory"),
+  registryProposal: (input: { name: string; description: string }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/registry", { method: "POST", body: JSON.stringify(input) }),
   revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
 };
 

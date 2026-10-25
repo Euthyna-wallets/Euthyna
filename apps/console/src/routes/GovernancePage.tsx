@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { singleRoleTitle } from "../lib/role-summary.js";
 
-import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeRegistryProposal, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
 
 import { api } from "../api.js";
 import { Card, PageState, Status } from "../components/ui.js";
@@ -275,10 +275,13 @@ type Registry = {
 function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string): Sentence[] | null {
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry"), staleTime: 60_000 });
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, staleTime: 60_000 });
+  const directory = useQuery({ queryKey: ["omni-directory"], queryFn: omni.directory, staleTime: 60_000 });
   const policyChange = describePolicyChange(proposal.kind);
   if (policyChange) return [{ title: policyChange.title, details: policyChange.details }];
   const sharesChange = describeSharesProposal(proposal.kind, vaultAccountId.replace(/-vault\./, "-shares."));
   if (sharesChange) return [sharesChange];
+  const listing = describeRegistryProposal(proposal.kind, directory.data?.registryId ?? null);
+  if (listing) return [listing];
   const calls = decodeVaultCalls(proposal.kind as Parameters<typeof decodeVaultCalls>[0], vaultAccountId);
   if (!calls) return null;
   const labels: Record<string, string> = {};

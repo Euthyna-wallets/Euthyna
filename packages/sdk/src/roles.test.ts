@@ -309,3 +309,16 @@ describe("share revenue role", () => {
     expect(text).toContain("ETH sent is counted against the revenue budget");
   });
 });
+
+describe("public directory", () => {
+  it("builds and describes the listing vote, with any characters in the name", async () => {
+    const { registryProposalKind, describeRegistryProposal } = await import("./roles.js");
+    const kind = registryProposalKind("registry.testnet", { vaultAccountId: "acme-vault.testnet", sharesAccountId: null, name: " Société Acme ", description: "Pentest à la demande" });
+    expect(kind.FunctionCall.receiver_id).toBe("registry.testnet");
+    const summary = describeRegistryProposal(kind, "registry.testnet")!;
+    expect(summary.title).toBe('List "Société Acme" in the public directory of AI companies');
+    expect(summary.details[0]).toBe("description: Pentest à la demande");
+    expect(describeRegistryProposal(kind, "other.testnet")).toBeNull();
+    expect(() => registryProposalKind("registry.testnet", { vaultAccountId: "v", sharesAccountId: null, name: " ", description: "" })).toThrow();
+  });
+});
