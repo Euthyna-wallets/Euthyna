@@ -113,8 +113,6 @@ export interface AgentApiGateway {
   check?(request: OmniRolesOperationRequest): Promise<OperationCheckResult>;
   /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
   mandate?(): Promise<Record<string, unknown>>;
-  /** Ask the members to vote on something the role does not allow. */
-  askMembers?(input: MemberRequest): Promise<Record<string, unknown>>;
 }
 
 export interface OperationCheckResult {
@@ -126,16 +124,6 @@ export interface OperationCheckResult {
   requires_delay: boolean;
   requires_cosign: boolean;
   wallet_busy?: boolean;
-}
-
-/** A call the agent wants the members to vote on. */
-export interface MemberRequest {
-  chainId: number;
-  to: Hex;
-  value?: string;
-  data?: Hex;
-  /** Why the agent needs it. Shown to members as the agent's words. */
-  reason: string;
 }
 
 /** Any call from the company wallet; `allowanceAmount` is the budget it consumes. */
@@ -257,10 +245,6 @@ export class MandateAgentClient {
     return this.api.mandate();
   }
 
-  askMembers(input: MemberRequest): Promise<Record<string, unknown>> {
-    if (!this.api.askMembers) throw new Error("this API does not accept member requests");
-    return this.api.askMembers(input);
-  }
 
   async cancel(opId: Hex | number[], fees: CancellationFees): Promise<{
     opId: Hex;
@@ -374,11 +358,6 @@ export class HttpAgentApi implements AgentApiGateway {
     return result.body;
   }
 
-  async askMembers(input: MemberRequest): Promise<Record<string, unknown>> {
-    const result = await this.request("/v1/operations/request", { method: "POST", body: JSON.stringify(input) });
-    if (result.status !== 202) throw new Error(String(result.body.message ?? result.body.error ?? "request failed"));
-    return result.body;
-  }
 
   private async request(path: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
     const response = await this.fetcher(`${this.baseUrl.replace(/\/$/, "")}${path}`, {

@@ -53,7 +53,7 @@ describe("MandateMcpTools", () => {
     expect(calls).toEqual(["cancel_nonce", "record_cancellation"]);
   });
 
-  it("checks transfers and calls, reads the mandate and asks the members", async () => {
+  it("checks transfers and calls, and reads the mandate", async () => {
     const checked: Array<Record<string, unknown>> = [];
     const vault: VaultGateway = {
       prepare: async () => { throw new Error("check must not prepare"); },
@@ -71,7 +71,6 @@ describe("MandateMcpTools", () => {
         return { allowed: false, refusedBy: "guard", reason: "GUARD:guard_refused:x", explanation: "Guard: x", requires_delay: false, requires_cosign: false };
       },
       mandate: async () => ({ role: "suppliers", budgets: [] }),
-      askMembers: async (input) => ({ status: "waiting_for_members", reason: input.reason }),
     };
     const tools = new MandateMcpTools(new MandateAgentClient(vault, api));
     await expect(tools.check({
@@ -85,7 +84,5 @@ describe("MandateMcpTools", () => {
     expect(checked[1]).toMatchObject({ chain_id: 11155111, calldata: [0x61, 0x7b, 0xa0, 0x37], allowance_amount: "10" });
     await expect(tools.check({ reference: "nothing" })).rejects.toThrow(/token \+ recipient \+ amount/);
     await expect(tools.mandate()).resolves.toEqual({ role: "suppliers", budgets: [] });
-    await expect(tools.askMembers({ chainId: 84532, to: "0x3333333333333333333333333333333333333333", reason: "new supplier" }))
-      .resolves.toMatchObject({ status: "waiting_for_members" });
   });
 });
