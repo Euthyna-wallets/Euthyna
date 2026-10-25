@@ -46,7 +46,7 @@ import {
   type VaultCall,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
-import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, type Hex, type PublicClient } from "viem";
+import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseUnits, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
@@ -772,6 +772,46 @@ export class OmniRolesService {
       : { RevokeMembership: { role: input.role, member: input.member } };
     const title = input.action === "grant" ? `Add ${input.member} to role ${input.role}` : `Remove ${input.member} from role ${input.role}`;
     return this.proposal(treasury, title, [{ method: "queue_rule_change", change }]);
+  }
+
+  /** Fire an agent: one vote removes it from every job it holds. */
+  async fireProposal(organizationId: string, member: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const { roles } = await this.roles(organizationId);
+    const held = roles.filter((role) => role.members.some((item) => item.member === member));
+    if (held.length === 0) throw new OmniRolesError(409, "not_hired", `${member} holds no job`);
+    const calls = held.map((role) => ({ method: "queue_rule_change" as const, change: { RevokeMembership: { role: role.name, member } } as RuleChange }));
+    return this.proposal(treasury, `Fire ${member} (${held.map((role) => role.name).join(", ")})`, calls, await this.labels(organizationId));
+  }
+
+  /** Change a job's budget: same period, new amount, what is left resets to it. */
+  async budgetProposal(organizationId: string, input: { key: string; amount: string }) {
+    const treasury = await this.requireTreasury(organizationId);
+    const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    const budgets = budgetsOf(rules.filter((rule) => rule.state === "Executed").reverse().map((rule) => rule.change), PROFILE);
+    const key = input.key.toLowerCase();
+    const info = budgets[key];
+    const allowance = await this.view<{ period_ns: number } | null>(treasury.vaultAccountId, "get_allowance", { key: Array.from(Buffer.from(key.slice(2), "hex")) });
+    if (!info || !allowance) throw new OmniRolesError(404, "budget_not_found", "no active budget with this key");
+    let amount: bigint;
+    try {
+      amount = parseUnits(input.amount, info.token?.decimals ?? 0);
+    } catch {
+      throw new OmniRolesError(400, "invalid_amount", `${input.amount} is not an amount`);
+    }
+    if (amount <= 0n) throw new OmniRolesError(400, "invalid_amount", "to stop a job, fire the agent or pause the company instead");
+    const change: RuleChange = {
+      SetAllowance: {
+        key: Array.from(Buffer.from(key.slice(2), "hex")),
+        balance: amount.toString(),
+        refill: amount.toString(),
+        max_refill: amount.toString(),
+        period_ns: allowance.period_ns,
+      },
+    };
+    const days = allowance.period_ns / 86_400_000_000_000;
+    const title = `Set the ${info.label} budget to ${input.amount} ${info.token?.symbol ?? ""} every ${days} day${days === 1 ? "" : "s"}`.replace(/\s+/g, " ");
+    return this.proposal(treasury, title, [{ method: "queue_rule_change", change }], await this.labels(organizationId));
   }
 
   async pauseProposal(organizationId: string, pause: boolean) {

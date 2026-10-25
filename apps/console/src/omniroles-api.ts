@@ -193,6 +193,8 @@ export const omni = {
   membershipProposal: (input: { role: string; member: string; kind: "Agent" | "Human"; action: "grant" | "revoke" }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/membership", { method: "POST", body: JSON.stringify(input) }),
   membersProposals: (members: string[]) => api<{ proposals: ProposalDraft[] }>("/v1/console/omniroles/proposals/members", { method: "POST", body: JSON.stringify({ members }) }),
+  fireProposal: (member: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/fire", { method: "POST", body: JSON.stringify({ member }) }),
+  budgetProposal: (key: string, amount: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/budget", { method: "POST", body: JSON.stringify({ key, amount }) }),
   pauseProposal: (pause: boolean) => api<ProposalDraft>("/v1/console/omniroles/proposals/pause", { method: "POST", body: JSON.stringify({ pause }) }),
   governance: () => api<Governance>("/v1/console/omniroles/governance"),
   activate: () => api<{ transactions: string[] }>("/v1/console/omniroles/rules/activate", { method: "POST", body: "{}" }),
