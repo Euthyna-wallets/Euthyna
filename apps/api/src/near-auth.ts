@@ -29,6 +29,8 @@ export interface NearSignInOptions {
   recipient: string;
   /** True when publicKey is a full-access key of accountId on chain. */
   isFullAccessKey(accountId: string, publicKey: string): Promise<boolean>;
+  /** False when the account does not exist on chain yet (an implicit account nobody funded). */
+  accountExists?(accountId: string): Promise<boolean>;
 }
 
 const accountSchema = z.string().trim().toLowerCase().regex(NEAR_ACCOUNT_ID, "invalid NEAR account id");
@@ -81,6 +83,11 @@ export function nearSignIn(options: NearSignInOptions) {
         }
         if (!valid) throw APIError.fromStatus("UNAUTHORIZED", { message: "invalid NEP-413 signature" });
         if (!await options.isFullAccessKey(accountId, publicKey)) {
+          if (options.accountExists && !await options.accountExists(accountId)) {
+            throw APIError.fromStatus("UNAUTHORIZED", {
+              message: `${accountId} does not exist on NEAR yet. Create an account in a NEAR wallet, or send this one 0.1 NEAR to activate it.`,
+            });
+          }
           throw APIError.fromStatus("UNAUTHORIZED", { message: `the signing key is not a full-access key of ${accountId}` });
         }
 

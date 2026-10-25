@@ -37,6 +37,11 @@ const auth = new BetterAuthGateway(createAuth(env, prisma, {
       return false;
     }
   },
+  // Only a definite "unknown account" counts as missing: an RPC failure keeps the generic message.
+  accountExists: async (accountId) => near.getAccount(accountId).then(
+    () => true,
+    (error: unknown) => !/does not exist|UNKNOWN_ACCOUNT/i.test(error instanceof Error ? error.message : String(error)),
+  ),
 }), prisma);
 const agentProvisioning = new AgentProvisioningService(
   prisma,
