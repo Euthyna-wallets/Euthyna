@@ -25,7 +25,9 @@ import {
   type DaoTransactionDraft,
   councilPolicy,
   describePolicyChange,
+  describeRegistryProposal,
   describeSharesProposal,
+  registryProposalKind,
   hasShareholdersRole,
   membersProposalArgs,
   MAX_BRIDGE_FEE_WEI,
@@ -77,6 +79,8 @@ export interface OmniRolesConfig {
   sharesEpochSeconds?: number;
   /** Omni Bridge API (transfer fees). Default: the testnet one. */
   omniBridgeApi?: string;
+  /** Public directory of AI companies; unset disables listing. */
+  registryId?: string | undefined;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
   sharesRevenueToken?: string | null;
   baseRpcUrl: string;
@@ -592,6 +596,38 @@ export class OmniRolesService {
     return this.daoProposal(treasury, describeSharesProposal(kind, accountId)!.title, kind, accountId);
   }
 
+  /** What the public directory knows about this company, read from chain. */
+  async directory(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const registryId = this.config.registryId ?? null;
+    const sharesAccountId = this.sharesAccountOf(treasury);
+    const shares = await this.view<{ dao_id: string }>(sharesAccountId, "info").catch(() => null);
+    const listing = registryId
+      ? await this.view<{ name: string; description: string; vault_id: string; shares_id: string | null; registered_at_ns: string } | null>(registryId, "get_company", { dao_id: treasury.daoAccountId }).catch(() => null)
+      : null;
+    return {
+      registryId,
+      daoAccountId: treasury.daoAccountId,
+      vaultAccountId: treasury.vaultAccountId,
+      sharesAccountId: shares?.dao_id === treasury.daoAccountId ? sharesAccountId : null,
+      listing,
+    };
+  }
+
+  /** A vote that lists the company in the public directory. */
+  async registryProposal(organizationId: string, input: { name: string; description: string }) {
+    const directory = await this.directory(organizationId);
+    if (!directory.registryId) throw new OmniRolesError(409, "registry_disabled", "no public directory is configured");
+    let kind: ReturnType<typeof registryProposalKind>;
+    try {
+      kind = registryProposalKind(directory.registryId, { vaultAccountId: directory.vaultAccountId, sharesAccountId: directory.sharesAccountId, name: input.name, description: input.description });
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_listing", error instanceof Error ? error.message : String(error));
+    }
+    const summary = describeRegistryProposal(kind, directory.registryId)!;
+    return { receiverId: directory.daoAccountId, args: proposalOf(summary.title, kind), deposit: this.config.proposalBondYocto, title: summary.title, summary: [summary] };
+  }
+
   private daoProposal(treasury: { daoAccountId: string }, title: string, kind: unknown, sharesAccountId: string) {
     return {
       receiverId: treasury.daoAccountId,
@@ -968,7 +1004,7 @@ export class OmniRolesService {
               ? calls.map((call) => describeVaultCall(call, context))
               : (() => {
                 const policyChange = describePolicyChange(proposal.kind);
-                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury));
+                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null);
                 return policyChange
                   ? [{ title: policyChange.title, details: policyChange.details }]
                   : sharesChange

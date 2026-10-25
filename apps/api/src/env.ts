@@ -46,6 +46,8 @@ const schema = z.object({
   OMNIROLES_SHARES_EPOCH_SECONDS: z.coerce.number().int().positive().optional(),
   /** NEP-141 shared as revenue next to NEAR. Default: Base Sepolia ETH bridged by Omni Bridge. */
   OMNIROLES_SHARES_REVENUE_TOKEN: z.string().default("base.omnidep.testnet"),
+  /** Public directory of AI companies (contracts/registry); empty disables listing. */
+  OMNIROLES_REGISTRY_ID: z.string().optional(),
   OMNI_BRIDGE_API_URL: z.string().url().default("https://testnet.api.bridge.nearone.org"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
 });

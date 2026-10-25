@@ -186,6 +186,10 @@ See [shares.md](./shares.md).
   on an account with no access key, then returns the proposals that turn it on.
 - `POST /v1/console/omniroles/proposals/shares`: the proposals still missing
   (`SetStakingContract`, the shareholders role).
+- `GET /v1/console/omniroles/directory`: the registry, the company's DAO,
+  vault and shares accounts, and its listing as read on chain.
+- `POST /v1/console/omniroles/proposals/registry`: `{ name, description }`. A
+  vote that lists the company in the public directory (`docs/registry.md`).
 - `POST /v1/console/omniroles/proposals/revenue`: `{ amountNear }`. It returns
   a `FunctionCall` to `deposit_revenue`, paid from the DAO.
 
