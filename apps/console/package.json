@@ -17,7 +17,6 @@
     "@near-wallet-selector/core": "^9.1.0",
     "@near-wallet-selector/meteor-wallet": "^9.5.4",
     "@near-wallet-selector/modal-ui": "^9.1.0",
-    "@near-wallet-selector/my-near-wallet": "^9.1.0",
     "@reown/walletkit": "1.6.0",
     "@safe-global/safe-deployments": "1.37.64",
     "@simplewebauthn/browser": "^13.1.0",
