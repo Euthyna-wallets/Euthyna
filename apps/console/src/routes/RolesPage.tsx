@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
 import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
@@ -34,13 +34,14 @@ export function RolesPage() {
         {!building ? <button className="primary" onClick={() => setBuilding(true)}>New role</button> : null}
       </header>
       {building ? <RoleBuilder initialName={suggested} onClose={() => { setBuilding(false); setParams({}); }} /> : null}
+      <RolesInProgress />
       <PageState
         loading={roles.isLoading}
         error={roles.error}
         empty={roles.data?.roles.length === 0}
-        emptyContent={building ? null : (
+        emptyContent={building ? <></> : (
           <div className="state empty-action">
-            <span>No role yet. Create one, the members vote on it, and it applies after the veto window.</span>
+            <span>No active role yet. Create one, the members vote on it, and it applies after the veto window.</span>
             <button className="primary" onClick={() => setBuilding(true)}>Create the first role</button>
           </div>
         )}
@@ -48,6 +49,49 @@ export function RolesPage() {
         {(roles.data?.roles ?? []).map((role) => <RoleCard key={role.name} role={role} />)}
       </PageState>
     </div>
+  );
+}
+
+/**
+ * A role exists only once voted and past the veto window. Until then, show
+ * where it stands so it does not look lost.
+ */
+function RolesInProgress() {
+  const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, refetchInterval: 15_000 });
+  const data = governance.data;
+  if (!data) return null;
+  const aboutRoles = (titles: string[]) => titles.some((title) => /role "/.test(title));
+  const needed = (() => {
+    const threshold = data.dao.threshold as unknown;
+    if (typeof threshold === "string" || typeof threshold === "number") return Number(threshold);
+    if (threshold && typeof threshold === "object" && "Weight" in threshold) return Number((threshold as { Weight: string }).Weight);
+    return null;
+  })();
+  const voting = data.proposals.filter((proposal) => proposal.status === "InProgress" && aboutRoles(proposal.changes.map((change) => change.title)));
+  const waiting = data.rules.filter((rule) => rule.state === "Queued" && aboutRoles([rule.title]));
+  if (voting.length === 0 && waiting.length === 0) return null;
+  return (
+    <Card title="On its way" action={<Link className="small" to="/governance">Open Decisions</Link>}>
+      <div className="stack">
+        {voting.map((proposal) => {
+          const approvals = Object.values(proposal.votes).filter((vote) => vote === "Approve").length;
+          return (
+            <div key={`p${proposal.id}`} className="row wrap" style={{ justifyContent: "space-between" }}>
+              <span><strong>{proposal.changes.map((change) => change.title).filter((title) => /role "/.test(title)).join(" · ")}</strong></span>
+              <span className="small muted">Waiting for votes: {approvals}{needed ? ` of ${needed}` : ""} approvals</span>
+            </div>
+          );
+        })}
+        {waiting.map((rule) => (
+          <div key={rule.queueId} className="row wrap" style={{ justifyContent: "space-between" }}>
+            <span><strong>{rule.title}</strong></span>
+            <span className="small muted">
+              {rule.readyToActivate ? "Veto window over: applying now" : `Approved: applies at ${new Date(rule.activatesAt).toLocaleTimeString()} unless vetoed`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -183,6 +227,18 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
 
   const ready = validRoleName(name) && blocks.length > 0 && blocks.every((block) =>
     Number(block.amount) > 0 && (block.kind === "payments" ? block.recipients.length > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0));
+  // Say what is missing instead of a silently disabled button.
+  const missing = !validRoleName(name)
+    ? "Give the role a name."
+    : blocks.length === 0
+      ? "Add what this role allows: + Transfers or + DeFi…"
+      : blocks.some((block) => block.kind === "payments" && block.recipients.length === 0)
+        ? "Pick at least one recipient for the transfers."
+        : blocks.some((block) => block.kind === "swap" && (block.tokensOut.length === 0 || block.protocols.length === 0))
+          ? "Pick the tokens it may buy and at least one exchange."
+          : blocks.some((block) => !(Number(block.amount) > 0))
+            ? "Set a budget above zero."
+            : null;
 
   return (
     <Card title="New role" action={<button className="ghost" onClick={onClose}>Cancel</button>}>
@@ -298,7 +354,11 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
           >
             {busy === "preview" ? "Preparing…" : "Preview what members vote on"}
           </button>
+          {!ready && missing ? <span className="small muted">{missing}</span> : null}
         </div>
+        <p className="small muted">
+          Then: submit to the members' vote → members approve in Decisions → the role applies after the veto window and shows up below.
+        </p>
 
         {catalogOpen ? <DefiCatalog onPick={addSwap} onClose={() => setCatalogOpen(false)} /> : null}
 
