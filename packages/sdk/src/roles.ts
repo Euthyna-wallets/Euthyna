@@ -797,6 +797,9 @@ export function describeVaultCall(call: VaultCall, context: DescribeContext): { 
 /** Public contracts the console recognises in proposals (lowercase address → name). */
 const KNOWN_CONTRACTS: Record<string, string> = {
   "0xfd0bf71f60660e2f608ed56e1659c450eb113120": "bridge to Base Sepolia",
+  // NEAR Omni Bridge, testnet deployment (github.com/Near-One/omni-bridge README).
+  "0xa56b860017152cd296ad723e8409abd6e5d86d4d": "NEAR Omni Bridge",
+  "0x68a86e0ea5b1d39f385c1326e4d493526dfe4401": "NEAR Omni Bridge",
 };
 
 const CHAIN_NAMES: Record<number, string> = { 1: "Ethereum", 8453: "Base", 84532: "Base Sepolia", 11155111: "Ethereum Sepolia" };
@@ -834,6 +837,7 @@ const POOL_ABI = parseAbi([
   "function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)",
   "function deposit()",
   "function depositETH(uint32 minGasLimit, bytes extraData)",
+  "function initTransfer(address tokenAddress, uint128 amount, uint128 fee, uint128 nativeFee, string recipient, string message)",
   "function depositETHTo(address to, uint32 minGasLimit, bytes extraData)",
 ]);
 
@@ -884,6 +888,15 @@ export function describeCall(target: Hex, calldata: Hex, value: bigint, context:
       if (pool.functionName === "repay") return `repay ${amountText(pool.args[1], tokenOf(pool.args[0]))} to ${contract(target)} for ${label(pool.args[3])}`;
       if (pool.functionName === "deposit") return `wrap ${formatUnits(value, 18)} ETH with ${contract(target)}`;
       if (pool.functionName === "depositETH") return `bridge ${formatUnits(value, 18)} ETH to the same address on the other chain, through ${contract(target)}`;
+      if (pool.functionName === "initTransfer") {
+        const [tokenAddress, amount, , nativeFee, recipient] = pool.args;
+        const what = tokenAddress === "0x0000000000000000000000000000000000000000"
+          ? `${formatUnits(amount, 18)} ETH`
+          : amountText(amount, tokenOf(tokenAddress)) + (tokenOf(tokenAddress) ? "" : ` of ${label(tokenAddress)}`);
+        const [chain, account] = recipient.includes(":") ? recipient.split(/:(.*)/s) : ["eth", recipient];
+        const destination = chain === "near" ? `NEAR account ${account}` : `${account} on ${chain}`;
+        return `bridge ${what} to ${destination} through ${contract(target)} (relayer fee ${formatUnits(nativeFee, 18)} ETH)`;
+      }
       if (pool.functionName === "depositETHTo") return `bridge ${formatUnits(value, 18)} ETH through ${contract(target)} to ${label(pool.args[0])}`;
     }
   } catch {

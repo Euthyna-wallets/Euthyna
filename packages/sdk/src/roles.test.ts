@@ -155,6 +155,16 @@ describe("describeCall", async () => {
     const drain = encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: ["0x000000000000000000000000000000000000dEaD", 2n ** 256n - 1n] });
     expect(describeCall(TEST_USDC, drain, 0n, context)).toBe("approve 0x0000…dEaD (not a registered supplier) to spend an unlimited amount of TestUSDC");
   });
+  it("reads a bridge transfer to a NEAR account through the Omni Bridge", async () => {
+    const { parseAbi } = await import("viem");
+    const data = encodeFunctionData({
+      abi: parseAbi(["function initTransfer(address tokenAddress, uint128 amount, uint128 fee, uint128 nativeFee, string recipient, string message)"]),
+      functionName: "initTransfer",
+      args: ["0x0000000000000000000000000000000000000000", 1_000_000_000_000_000n, 0n, 9_009_498_255_508n, "near:shares.mandateos.testnet", ""],
+    });
+    expect(describeCall("0xa56b860017152cD296ad723E8409Abd6e5D86d4d", data, 1_009_009_498_255_508n, context))
+      .toBe("bridge 0.001 ETH to NEAR account shares.mandateos.testnet through NEAR Omni Bridge (relayer fee 0.000009009498255508 ETH)");
+  });
 });
 
 describe("DAO members", async () => {
