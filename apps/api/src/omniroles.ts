@@ -35,16 +35,16 @@ import {
   type VaultCall,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
-import { createPublicClient, erc20Abi, formatUnits, getAddress, http, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
+import { erc20Abi, formatUnits, getAddress, type Hex, type PublicClient } from "viem";
 
+import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
 import { NEAR_ACCOUNT_ID, NEAR_PROVIDER_ID, nearUserEmail } from "./near-auth.js";
 
 export class OmniRolesError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 404 | 409 | 422 | 500 | 503,
     readonly code: string,
     message: string,
   ) {
@@ -73,8 +73,11 @@ export interface OmniRolesConfig {
 export interface OmniRolesChain {
   /** Read ETH and token balances of the company wallet. */
   balances(address: Hex, profile: ChainProfile): Promise<{ eth: string; tokens: Array<{ symbol: string; address: Hex; amount: string }> }>;
-  /** Gas and fees for a DAO transaction; generous, since it is signed after the vote and the veto window. */
-  fees(input: { chainId: number; from: Hex; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }): Promise<{ gasLimit: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
+  /**
+   * Gas limits for calls sent in this order from the wallet on one chain, and
+   * fees generous enough to still pass after the vote and the veto window.
+   */
+  fees(input: { chainId: number; from: Hex; calls: GasCall[] }): Promise<{ gasLimits: bigint[]; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
 }
 
 /** NEAR storage: 1e19 yocto per byte; top the vault up below 0.5 NEAR free. */
@@ -82,45 +85,50 @@ const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
 const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
 const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 
-/** Gas limit (before headroom) of a voted call that cannot be estimated. */
-const FALLBACK_GAS = 1_000_000n;
-
 /** Lowest max fee a voted transaction gets, per chain (wei). */
 const FEE_FLOOR_WEI: Record<number, bigint> = { 1: 20_000_000_000n, 11155111: 5_000_000_000n, 8453: 50_000_000n, 84532: 50_000_000n };
 
 export class RpcOmniRolesChain implements OmniRolesChain {
-  private readonly client;
+  private readonly clients = new Map<number, PublicClient>();
+  private readonly configured: Record<number, string>;
 
-  constructor(rpcUrl: string, private readonly rpcUrls: Record<number, string> = {}) {
-    this.client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
-    this.rpcUrls = { 84532: rpcUrl, 11155111: "https://ethereum-sepolia-rpc.publicnode.com", ...rpcUrls };
+  constructor(rpcUrl: string, rpcUrls: Record<number, string> = {}) {
+    this.configured = { 84532: rpcUrl, ...rpcUrls };
   }
 
-  async fees(input: { chainId: number; from: Hex; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }) {
-    const url = this.rpcUrls[input.chainId];
-    if (!url) throw new OmniRolesError(400, "unsupported_chain", `no RPC configured for chain ${input.chainId}`);
-    const client = createPublicClient({ transport: http(url) });
-    // A call that depends on an earlier one in the same proposal (approve, then
-    // supply) cannot be estimated yet, and a public RPC can fail the estimate:
-    // fall back to a wide limit. Unused gas is not paid; running out reverts
-    // the voted transaction (a bridge deposit burns ~670k on Sepolia).
-    const estimate = input.gas ?? await client.estimateGas({ account: input.from, to: input.to, value: input.value, data: input.data }).catch(() => FALLBACK_GAS);
-    const gasPrice = await client.getGasPrice();
+  private client(chainId: number): PublicClient {
+    let client = this.clients.get(chainId);
+    if (!client) {
+      const urls = rpcUrls(chainId, [this.configured[chainId]]);
+      if (urls.length === 0) throw new OmniRolesError(400, "unsupported_chain", `no RPC configured for chain ${chainId}`);
+      client = chainClient(urls);
+      this.clients.set(chainId, client);
+    }
+    return client;
+  }
+
+  async fees(input: { chainId: number; from: Hex; calls: GasCall[] }) {
+    const client = this.client(input.chainId);
+    let gasLimits: bigint[];
+    let gasPrice: bigint;
+    try {
+      [gasLimits, gasPrice] = await Promise.all([estimateCalls(client, input.from, input.calls), client.getGasPrice()]);
+    } catch (error) {
+      if (error instanceof GasEstimateError) throw error;
+      throw new GasEstimateError("rpc_unavailable", 0, error instanceof Error ? error.message : String(error));
+    }
     // Signed after the vote and the veto window: leave room for fees to rise.
     const floor = FEE_FLOOR_WEI[input.chainId] ?? 1_000_000_000n;
     const priority = input.chainId === 11155111 || input.chainId === 1 ? 1_000_000_000n : 1_000_000n;
     const maxFeePerGas = gasPrice * 3n + priority > floor ? gasPrice * 3n + priority : floor;
-    return {
-      gasLimit: (estimate * 13n) / 10n,
-      maxFeePerGas,
-      maxPriorityFeePerGas: priority < maxFeePerGas ? priority : maxFeePerGas,
-    };
+    return { gasLimits, maxFeePerGas, maxPriorityFeePerGas: priority < maxFeePerGas ? priority : maxFeePerGas };
   }
 
   async balances(address: Hex, profile: ChainProfile) {
-    const eth = await this.client.getBalance({ address });
+    const client = this.client(84532);
+    const eth = await client.getBalance({ address });
     const tokens = await Promise.all(profile.tokens.map(async (token) => {
-      const amount = await this.client
+      const amount = await client
         .readContract({ address: token.address, abi: erc20Abi, functionName: "balanceOf", args: [address] })
         .catch(() => 0n);
       return { symbol: token.symbol, address: token.address, amount: formatUnits(amount, token.decimals) };
@@ -453,25 +461,47 @@ export class OmniRolesService {
     if (input.transactions.length === 0 || input.transactions.length > 10) {
       throw new OmniRolesError(400, "invalid_transactions", "between 1 and 10 transactions per proposal");
     }
-    const drafts: DaoTransactionDraft[] = [];
-    for (const transaction of input.transactions) {
-      const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: transaction.chainId }).catch(() => null);
+    // Calls of one chain run in order from the same wallet: estimate them together.
+    const byChain = new Map<number, Array<{ index: number; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }>>();
+    input.transactions.forEach((transaction, index) => {
+      const calls = byChain.get(transaction.chainId) ?? [];
+      calls.push({
+        index,
+        to: getAddress(transaction.to),
+        value: BigInt(transaction.value ?? "0"),
+        data: (transaction.data && transaction.data !== "0x" ? transaction.data : "0x") as Hex,
+        gas: transaction.gas ? BigInt(transaction.gas) : undefined,
+      });
+      byChain.set(transaction.chainId, calls);
+    });
+    const drafts: DaoTransactionDraft[] = new Array(input.transactions.length);
+    for (const [chainId, calls] of byChain) {
+      const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: chainId }).catch(() => null);
       if (!wallet?.address) {
-        throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${chainName(transaction.chainId)} yet: propose it first`);
+        throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${chainName(chainId)} yet: propose it first`);
       }
       const from = getAddress(hexOf(wallet.address));
-      const to = getAddress(transaction.to);
-      const data = (transaction.data && transaction.data !== "0x" ? transaction.data : "0x") as Hex;
-      const value = BigInt(transaction.value ?? "0");
-      const fees = await this.chain.fees({ chainId: transaction.chainId, from, to, value, data, gas: transaction.gas ? BigInt(transaction.gas) : undefined });
-      drafts.push({
-        chainId: transaction.chainId,
-        to,
-        value: value.toString(),
-        data,
-        gasLimit: fees.gasLimit.toString(),
-        maxFeePerGas: fees.maxFeePerGas.toString(),
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+      let fees;
+      try {
+        fees = await this.chain.fees({ chainId, from, calls });
+      } catch (error) {
+        if (!(error instanceof GasEstimateError)) throw error;
+        const position = input.transactions.length > 1 ? `transaction ${calls[error.index]!.index + 1}` : "the transaction";
+        if (error.code === "would_revert") {
+          throw new OmniRolesError(422, "would_revert", `${position} would fail on ${chainName(chainId)}: ${error.message}`);
+        }
+        throw new OmniRolesError(503, "gas_estimate_unavailable", `no ${chainName(chainId)} RPC could estimate ${position}; try again: ${error.message}`);
+      }
+      calls.forEach((call, position) => {
+        drafts[call.index] = {
+          chainId,
+          to: call.to,
+          value: call.value.toString(),
+          data: call.data,
+          gasLimit: fees.gasLimits[position]!.toString(),
+          maxFeePerGas: fees.maxFeePerGas.toString(),
+          maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+        };
       });
     }
     const title = input.title?.trim() || describeDaoTransactions(drafts, { profile: PROFILE }).title;
