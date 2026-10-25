@@ -596,6 +596,8 @@ export function labelAddress(address: Hex, context: DescribeContext, kind: "reci
   if (token) return token.symbol;
   const protocol = Object.values(context.profile.protocols).find((item) => item.router.toLowerCase() === key);
   if (protocol) return `${protocol.name} router`;
+  const known = KNOWN_CONTRACTS[key];
+  if (known) return context.fullAddresses ? `${known} (${full})` : known;
   return `${context.fullAddresses ? full : short(full)} (${kind === "contract" ? "unknown contract" : "not a registered supplier"})`;
 }
 
@@ -791,6 +793,11 @@ export function describeVaultCall(call: VaultCall, context: DescribeContext): { 
   if (call.method === "submit_transactions") return describeDaoTransactions(call.transactions, context);
   return { title: "Unknown vault call", details: [] };
 }
+
+/** Public contracts the console recognises in proposals (lowercase address → name). */
+const KNOWN_CONTRACTS: Record<string, string> = {
+  "0xfd0bf71f60660e2f608ed56e1659c450eb113120": "Base Sepolia bridge on Ethereum Sepolia",
+};
 
 const CHAIN_NAMES: Record<number, string> = { 1: "Ethereum", 8453: "Base", 84532: "Base Sepolia", 11155111: "Ethereum Sepolia" };
 

@@ -77,6 +77,9 @@ export interface OmniRolesChain {
   fees(input: { chainId: number; from: Hex; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }): Promise<{ gasLimit: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
 }
 
+/** Lowest max fee a voted transaction gets, per chain (wei). */
+const FEE_FLOOR_WEI: Record<number, bigint> = { 1: 20_000_000_000n, 11155111: 5_000_000_000n, 8453: 50_000_000n, 84532: 50_000_000n };
+
 export class RpcOmniRolesChain implements OmniRolesChain {
   private readonly client;
 
@@ -93,11 +96,14 @@ export class RpcOmniRolesChain implements OmniRolesChain {
     // supply) cannot be estimated yet: fall back to a wide limit.
     const estimate = input.gas ?? await client.estimateGas({ account: input.from, to: input.to, value: input.value, data: input.data }).catch(() => 400_000n);
     const gasPrice = await client.getGasPrice();
-    const priority = 1_000_000n; // 0.001 gwei, enough on L2 testnets
+    // Signed after the vote and the veto window: leave room for fees to rise.
+    const floor = FEE_FLOOR_WEI[input.chainId] ?? 1_000_000_000n;
+    const priority = input.chainId === 11155111 || input.chainId === 1 ? 1_000_000_000n : 1_000_000n;
+    const maxFeePerGas = gasPrice * 3n + priority > floor ? gasPrice * 3n + priority : floor;
     return {
       gasLimit: (estimate * 13n) / 10n,
-      maxFeePerGas: gasPrice * 3n + priority,
-      maxPriorityFeePerGas: priority,
+      maxFeePerGas,
+      maxPriorityFeePerGas: priority < maxFeePerGas ? priority : maxFeePerGas,
     };
   }
 
