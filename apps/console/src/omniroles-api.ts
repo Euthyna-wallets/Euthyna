@@ -161,6 +161,7 @@ export type SharesView =
     keyless: boolean;
     revenueToken: null | { accountId: string; symbol: string; decimals: number };
     daoAccountId: string;
+    vaultAccountId: string;
     info: SharesInfo;
     votesCounted: boolean;
     shareholdersVote: boolean;
@@ -204,6 +205,8 @@ export const omni = {
   createShares: (draft: SharesDraft) =>
     api<{ accountId: string; transaction: string; proposals: ProposalDraft[] }>("/v1/console/omniroles/shares", { method: "POST", body: JSON.stringify(draft) }),
   sharesProposals: () => api<{ proposals: ProposalDraft[] }>("/v1/console/omniroles/proposals/shares", { method: "POST", body: "{}" }),
+  proceedsProposals: (input: { chainId: number; amountNear: string }) =>
+    api<{ companyWallet: string; messageAccount: string; proposals: ProposalDraft[] }>("/v1/console/omniroles/proposals/proceeds", { method: "POST", body: JSON.stringify(input) }),
   revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
 };
 
