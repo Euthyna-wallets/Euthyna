@@ -796,7 +796,7 @@ export function describeVaultCall(call: VaultCall, context: DescribeContext): { 
 
 /** Public contracts the console recognises in proposals (lowercase address → name). */
 const KNOWN_CONTRACTS: Record<string, string> = {
-  "0xfd0bf71f60660e2f608ed56e1659c450eb113120": "Base Sepolia bridge on Ethereum Sepolia",
+  "0xfd0bf71f60660e2f608ed56e1659c450eb113120": "bridge to Base Sepolia",
 };
 
 const CHAIN_NAMES: Record<number, string> = { 1: "Ethereum", 8453: "Base", 84532: "Base Sepolia", 11155111: "Ethereum Sepolia" };
@@ -883,7 +883,7 @@ export function describeCall(target: Hex, calldata: Hex, value: bigint, context:
       if (pool.functionName === "borrow") return `borrow ${amountText(pool.args[1], tokenOf(pool.args[0]))} from ${contract(target)} for ${label(pool.args[4])}`;
       if (pool.functionName === "repay") return `repay ${amountText(pool.args[1], tokenOf(pool.args[0]))} to ${contract(target)} for ${label(pool.args[3])}`;
       if (pool.functionName === "deposit") return `wrap ${formatUnits(value, 18)} ETH with ${contract(target)}`;
-      if (pool.functionName === "depositETH") return `bridge ${formatUnits(value, 18)} ETH through ${contract(target)} to the same address on the other chain`;
+      if (pool.functionName === "depositETH") return `bridge ${formatUnits(value, 18)} ETH to the same address on the other chain, through ${contract(target)}`;
       if (pool.functionName === "depositETHTo") return `bridge ${formatUnits(value, 18)} ETH through ${contract(target)} to ${label(pool.args[0])}`;
     }
   } catch {
