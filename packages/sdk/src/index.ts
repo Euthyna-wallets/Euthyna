@@ -109,6 +109,43 @@ export interface AgentApiGateway {
   recordAuthorization(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>>;
   recordCancellation(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>>;
   status(opId: number[]): Promise<Record<string, unknown>>;
+  /** Dry run: the vault's verdict, then the Guard's. Nothing is reserved. */
+  check?(request: OmniRolesOperationRequest): Promise<OperationCheckResult>;
+  /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
+  mandate?(): Promise<Record<string, unknown>>;
+  /** Ask the members to vote on something the role does not allow. */
+  askMembers?(input: MemberRequest): Promise<Record<string, unknown>>;
+}
+
+export interface OperationCheckResult {
+  allowed: boolean;
+  /** "vault" (on-chain rule) or "guard" (suppliers, reused reference). */
+  refusedBy: "vault" | "guard" | null;
+  reason: string | null;
+  explanation: string | null;
+  requires_delay: boolean;
+  requires_cosign: boolean;
+  wallet_busy?: boolean;
+}
+
+/** A call the agent wants the members to vote on. */
+export interface MemberRequest {
+  chainId: number;
+  to: Hex;
+  value?: string;
+  data?: Hex;
+  /** Why the agent needs it. Shown to members as the agent's words. */
+  reason: string;
+}
+
+/** Any call from the company wallet; `allowanceAmount` is the budget it consumes. */
+export interface CallRequest {
+  chainId: number;
+  to: Hex;
+  value?: string;
+  data?: Hex;
+  reference: string;
+  allowanceAmount?: string;
 }
 
 export type PayResult =
@@ -192,6 +229,37 @@ export class MandateAgentClient {
 
   status(opId: Hex | number[]): Promise<Record<string, unknown>> {
     return this.api.status(Array.isArray(opId) ? opId : operationIdBytes(opId));
+  }
+
+  /**
+   * Would this be allowed? A token transfer (`PaymentRequest`) or any call
+   * (`CallRequest`). The dry run does not check network fees.
+   */
+  check(request: PaymentRequest | CallRequest, chainId = 84532): Promise<OperationCheckResult> {
+    if (!this.api.check) throw new Error("this API does not support checks");
+    const noFees = { gas_limit: "0", max_fee_per_gas: "0", max_priority_fee_per_gas: "0" };
+    const operation: OmniRolesOperationRequest = "token" in request
+      ? omniRolesPaymentRequest({ ...request, ...noFees }, chainId)
+      : {
+        chain_id: request.chainId,
+        target: evmAddressBytes(request.to),
+        value: request.value ?? "0",
+        calldata: Array.from(hexToBytes(request.data ?? "0x")),
+        allowance_amount: request.allowanceAmount ?? "0",
+        reference: request.reference,
+        ...noFees,
+      };
+    return this.api.check(operation);
+  }
+
+  mandate(): Promise<Record<string, unknown>> {
+    if (!this.api.mandate) throw new Error("this API does not expose the mandate");
+    return this.api.mandate();
+  }
+
+  askMembers(input: MemberRequest): Promise<Record<string, unknown>> {
+    if (!this.api.askMembers) throw new Error("this API does not accept member requests");
+    return this.api.askMembers(input);
   }
 
   async cancel(opId: Hex | number[], fees: CancellationFees): Promise<{
@@ -291,6 +359,24 @@ export class HttpAgentApi implements AgentApiGateway {
   async status(opId: number[]): Promise<Record<string, unknown>> {
     const result = await this.request(`/v1/operations/${operationIdHex(opId)}`, { method: "GET" });
     if (result.status !== 200) throw new Error(String(result.body.message ?? result.body.error ?? "status lookup failed"));
+    return result.body;
+  }
+
+  async check(request: OmniRolesOperationRequest): Promise<OperationCheckResult> {
+    const result = await this.request("/v1/operations/check", { method: "POST", body: JSON.stringify({ request }) });
+    if (result.status !== 200) throw new Error(String(result.body.message ?? result.body.error ?? "check failed"));
+    return result.body as unknown as OperationCheckResult;
+  }
+
+  async mandate(): Promise<Record<string, unknown>> {
+    const result = await this.request("/v1/agent/mandate", { method: "GET" });
+    if (result.status !== 200) throw new Error(String(result.body.message ?? result.body.error ?? "mandate lookup failed"));
+    return result.body;
+  }
+
+  async askMembers(input: MemberRequest): Promise<Record<string, unknown>> {
+    const result = await this.request("/v1/operations/request", { method: "POST", body: JSON.stringify(input) });
+    if (result.status !== 202) throw new Error(String(result.body.message ?? result.body.error ?? "request failed"));
     return result.body;
   }
 

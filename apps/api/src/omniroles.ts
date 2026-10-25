@@ -870,18 +870,30 @@ export class OmniRolesService {
     return { roles };
   }
 
+  /**
+   * Dry run for an agent: the vault's verdict (on chain), then, when the role
+   * allows it, the Guard's (suppliers, reused references). Nothing is reserved.
+   */
   async checkOperation(
     organizationId: string,
     agent: { agentId: string; nearAccountId: string; role: string },
     request: Record<string, unknown>,
+    guard?: () => Promise<{ code: string; reasons: string[] } | null>,
   ) {
     const treasury = await this.requireTreasury(organizationId);
     // Never cached: an agent must see the vault's current budgets and rules.
-    const result = await this.near.viewFunction<{ allowed: boolean; reason: string | null; requires_delay: boolean; requires_cosign: boolean }>(
+    const vault = await this.near.viewFunction<{ allowed: boolean; reason: string | null; requires_delay: boolean; requires_cosign: boolean; wallet_busy?: boolean }>(
       treasury.vaultAccountId,
       "check_operation",
       { role: agent.role, member: agent.nearAccountId, request },
     );
+    const refusedByGuard = vault.allowed && guard ? await guard() : null;
+    const result = {
+      ...vault,
+      allowed: vault.allowed && !refusedByGuard,
+      reason: refusedByGuard ? `GUARD:${refusedByGuard.code}:${refusedByGuard.reasons.join("; ")}` : vault.reason,
+      refusedBy: refusedByGuard ? "guard" as const : vault.allowed ? null : "vault" as const,
+    };
     {
       // Both outcomes are logged: the activity page shows what agents asked for, allowed or not.
       await this.prisma.auditLog.create({
@@ -902,13 +914,67 @@ export class OmniRolesService {
         },
       });
     }
-    return result;
+    return { ...result, explanation: result.allowed ? null : explainRefusal(result.reason ?? "") };
+  }
+
+  /** What an agent may do: its role, what is left of its budgets, and the company wallet. */
+  async agentMandate(organizationId: string, agent: { nearAccountId: string; role: string }) {
+    const treasury = await this.requireTreasury(organizationId);
+    const { roles } = await this.roles(organizationId);
+    const role = roles.find((item) => item.name === agent.role) ?? null;
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: PROFILE.chainId }).catch(() => null);
+    const membership = await this.near.viewFunction<{ active: boolean; max_uses: number | null; used_uses: number; ends_at_ns: string | null } | null>(
+      treasury.vaultAccountId,
+      "get_membership",
+      { role: agent.role, member: agent.nearAccountId },
+    ).catch(() => null);
+    return {
+      role: agent.role,
+      enabled: role?.enabled ?? false,
+      member: membership ? { active: membership.active, usesLeft: membership.max_uses === null ? null : membership.max_uses - membership.used_uses } : null,
+      allows: role?.description?.details ?? [],
+      budgets: role?.budgets ?? [],
+      chainId: PROFILE.chainId,
+      companyWallet: wallet?.address ? getAddress(hexOf(wallet.address)) : null,
+    };
+  }
+
+  /**
+   * An agent asks the members to vote on something its role does not allow.
+   * Only recorded: a member decides whether to turn it into a proposal. The
+   * agent's reason is shown as the agent's words, never as a fact.
+   */
+  async requestFromAgent(
+    organizationId: string,
+    agent: { agentId: string; role: string },
+    input: { chainId: number; to: string; value: string; data: string; reason: string },
+  ) {
+    await this.requireTreasury(organizationId);
+    const entry = await this.prisma.auditLog.create({
+      data: {
+        organizationId,
+        actorType: "agent",
+        actorId: agent.agentId,
+        action: "operation.requested",
+        targetType: "operation",
+        targetId: null,
+        metadata: {
+          role: agent.role,
+          chainId: input.chainId,
+          target: getAddress(input.to),
+          value: input.value,
+          calldata: input.data,
+          agentReason: input.reason,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return { requestId: entry.id, status: "waiting_for_members", message: "Recorded. Members see it in Activity and decide whether to put it to a vote." };
   }
 
   async activity(organizationId: string) {
     const [operations, refusals] = await Promise.all([
       this.prisma.operation.findMany({ where: { organizationId }, include: { agent: true }, orderBy: { createdAt: "desc" }, take: 50 }),
-      this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed", "operation.requested"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
     ]);
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
     const labels = await this.labels(organizationId);
@@ -949,20 +1015,22 @@ export class OmniRolesService {
       ...refusals.map((refusal) => {
         const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
         const allowed = refusal.action === "operation.allowed";
+        const requested = refusal.action === "operation.requested";
         return {
-          kind: allowed ? ("allowed" as const) : ("refusal" as const),
+          kind: requested ? ("request" as const) : allowed ? ("allowed" as const) : ("refusal" as const),
           at: refusal.createdAt.toISOString(),
           agent: agentName(refusal.actorId),
           reference: refusal.targetId ?? "",
-          state: allowed ? "Allowed" : "Refused",
+          state: requested ? "Asks the members" : allowed ? "Allowed" : "Refused",
           amount: null as string | null,
           txHash: null as string | null,
           opId: null as string | null,
-          reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
+          // The agent's own words: untrusted, shown quoted.
+          reason: requested ? `The agent says: "${String(metadata.agentReason ?? "").slice(0, 500)}"` : allowed ? null : explainRefusal(String(metadata.reason ?? "")),
           summary: describe(metadata),
-          // What the agent asked for: members can turn a refusal into a vote.
+          // What the agent asked for: members can turn it into a vote.
           request: typeof metadata.target === "string" && typeof metadata.calldata === "string"
-            ? { chainId: PROFILE.chainId, to: metadata.target, data: metadata.calldata, value: String(metadata.value ?? "0") }
+            ? { chainId: typeof metadata.chainId === "number" ? metadata.chainId : PROFILE.chainId, to: metadata.target, data: metadata.calldata, value: String(metadata.value ?? "0") }
             : null,
         };
       }),
@@ -1085,7 +1153,7 @@ export function explainRefusal(reason: string): string {
     parameterNotOneOfAllowed: "a parameter is not in the allowed list",
     parameterLessThanAllowed: "an amount is below the allowed minimum",
     parameterGreaterThanAllowed: "an amount is above the allowed maximum",
-    allowanceExceeded: "the budget for this period is exhausted",
+    allowanceExceeded: "the amount exceeds what is left of the budget this period",
     unknownAllowance: "the role refers to a budget that does not exist",
     notEveryArrayElementPasses: "an item of the list is not allowed",
     noArrayElementPasses: "no item of the list is allowed",

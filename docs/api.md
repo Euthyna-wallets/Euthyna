@@ -25,11 +25,28 @@ DAO's council, changed only by a vote.
 
 ## Agent routes
 
+### `GET /v1/agent/mandate`
+
+What the agent may do. The response has its role, the role's rules in plain
+sentences, what each budget has left this period, the recipients the Guard
+accepts (registered suppliers and the company wallet), and the company wallet
+address. The data is read from the vault.
+
 ### `POST /v1/operations/check`
 
-Dry run of an operation request against the agent's role, with nothing
-reserved. Body: `{ request }` (the vault `OperationRequest`). It returns whether
-the role allows it and why.
+A dry run with nothing reserved. Body: `{ request }`, the vault
+`OperationRequest`. The vault's `check_operation` answers first. When the role
+allows the call, the Guard answers next (registered suppliers, references
+already paid). The response has `allowed`, `refusedBy` (`vault` or `guard`),
+`reason` and a readable `explanation`. Network fees are not checked. Both
+outcomes appear in Activity.
+
+### `POST /v1/operations/request`
+
+Asks the members for something the role does not allow. Body: `{ chainId, to,
+value?, data?, reason }`. The call and the reason are recorded, and nothing
+runs. Members see the request in Activity, with the agent's reason quoted as
+its own words, and can turn it into a proposal with one click. Returns `202`.
 
 ### `POST /v1/operations/gas-quote`
 
@@ -63,6 +80,25 @@ worker uses it to recover the MPC signature if the vault could not store it.
 
 These routes cancel an operation the agent owns, or read its state (vault
 state, EVM hash, confirmations).
+
+## MCP server
+
+`packages/mcp` exposes the agent API to any MCP client: Claude, Cursor, Codex.
+Its instructions tell the agent to read `mandate` first, `check` before `pay`,
+and to use `ask_members` instead of retrying when a call is refused.
+
+| Tool | Does |
+| --- | --- |
+| `mandate` | role, budgets left, accepted recipients, company wallet |
+| `check` | dry run of a transfer (`token`, `recipient`, `amount`) or of any call (`to`, `data`, `value`, `allowanceAmount`) |
+| `pay` | prepare → Guard visa → authorize on NEAR |
+| `ask_members` | records a call for the members to vote on |
+| `status`, `cancel` | operation state; same-nonce cancellation |
+
+```bash
+MANDATEOS_API_URL=… MANDATEOS_AGENT_API_KEY=… AGENT_NEAR_ACCOUNT_ID=… \
+VAULT_ACCOUNT_ID=… AGENT_ROLE=… pnpm --filter @mandateos/mcp start
+```
 
 ## Console routes
 
