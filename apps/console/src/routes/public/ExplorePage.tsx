@@ -6,11 +6,10 @@ import { SecuritySection } from "./SecuritySection.js";
 
 const INITIALS_COLORS = ["#4FD1E8", "#F2B544", "#9AD39C", "#F7A99D", "#9DB4F2"];
 
-type ChainIcon = "near" | "ethereum" | "base" | "arbitrum" | "solana" | "bitcoin";
+type ChainIcon = "near" | "base" | "arbitrum" | "solana" | "bitcoin";
 
 const CHAIN_ICONS: Record<ChainIcon, string> = {
   near: "/chains/near.svg",
-  ethereum: "/chains/ethereum.svg",
   base: "/chains/base.svg",
   arbitrum: "/chains/arbitrum.svg",
   solana: "/chains/solana.svg",
@@ -25,15 +24,6 @@ function ChainBadge({ chain, children }: { chain: ChainIcon; children: string })
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: "7px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}>
       <ChainLogo chain={chain} />
-      {children}
-    </span>
-  );
-}
-
-function EvmNetwork({ chain, children }: { chain: Extract<ChainIcon, "ethereum" | "base" | "arbitrum">; children: string }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", whiteSpace: "nowrap" }}>
-      <ChainLogo chain={chain} size={14} />
       {children}
     </span>
   );
@@ -208,16 +198,10 @@ export function ExplorePage() {
         <span style={{ fontSize: "12px", color: "#5A6B8C" }}>CHAINS AGENTS WORK ON</span>
         <span style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px", fontSize: "13px", fontWeight: "600" }}>
           <ChainBadge chain="near">NEAR</ChainBadge>
-          <ChainBadge chain="ethereum">EVM</ChainBadge>
+          <ChainBadge chain="base">Base</ChainBadge>
+          <ChainBadge chain="arbitrum">Arbitrum</ChainBadge>
           <ChainBadge chain="solana">Solana</ChainBadge>
           <ChainBadge chain="bitcoin">Bitcoin</ChainBadge>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "7px 10px", fontSize: "12px", color: "#5A6B8C", marginTop: "7px" }}>
-          <span>EVM:</span>
-          <EvmNetwork chain="ethereum">Ethereum</EvmNetwork>
-          <EvmNetwork chain="base">Base</EvmNetwork>
-          <EvmNetwork chain="arbitrum">Arbitrum</EvmNetwork>
-          <span style={{ whiteSpace: "nowrap" }}>Robinhood Chain</span>
         </span>
       </div>
       <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px", borderRight: "1px solid #E4EAF4" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>KEYS ANYONE HOLDS</span><span style={{ fontSize: "36px", fontWeight: "600", color: "#127F95" }}>0</span></div>
