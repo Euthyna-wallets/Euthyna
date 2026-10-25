@@ -66,6 +66,46 @@ In this run the Guard visa and the receipt report were signed by a script with
 the test company's Guard keys, and the transaction was broadcast by it: the
 same steps the API and the worker run.
 
+## Sale proceeds to the company wallet on an EVM chain
+
+The NEAR paid for shares sits on the DAO account. **Shares → Send proceeds to
+the company wallet** moves some of it to the company wallet on Base Sepolia or
+Ethereum Sepolia, as wNEAR through Omni Bridge. Members vote twice:
+
+1. **Bridge storage.** The bridge charges storage to the account that signs the
+   transaction, here the member who casts the last vote, and to the transfer
+   itself (a "message account" derived from the transfer). The DAO pays both,
+   for every member not yet registered on the bridge.
+2. **Transfer.** `near_deposit` on `wrap.testnet`, then `ft_transfer_call` to
+   `omni.n-bridge.testnet` with the company wallet as recipient and the bridge
+   fee from the Omni Bridge API.
+
+Before the wallet signs, the browser rebuilds both votes from chain data it
+reads itself: the company wallet from the vault (whose owner must be the DAO),
+the members from the DAO, the storage prices from the bridge. Only the bridge
+fee comes from the server, and the browser refuses it above 5% of the amount.
+
+The DAO is the sender on the bridge. If the transfer cannot complete, the
+bridge refunds the DAO, not a member.
+
+### Proof on testnet (2026-10-25)
+
+Company Atlas Labs, DAO `atlas-labs.factory-v2.mandateos.testnet`, wallet
+`0x834e5A4d6685E2B14189136Aca6fDe051266ef30` on Base Sepolia.
+
+| Step | Result | Transaction |
+| --- | --- | --- |
+| First try without bridge storage | `ERR_MESSAGE_ACCOUNT_NOT_REGISTERED`, 0.1 wNEAR refunded to the DAO | |
+| Members vote the bridge storage (proposal #11) | Approved, message account `01af8b02…5a89d31` | `CHSPQXP47snDNVyhqygbqNws2ztNLUNkBf1G19rxnySm` |
+| Members vote 0.1 NEAR to the company wallet (proposal #12) | Approved, `InitTransferEvent` origin nonce 20241, fee 0.00218 wNEAR | `8rcfYH2uEcmUoJkcQcVkoiHQUh417cxkNNG5Q9rA3eC7` |
+| Delivery on Base | pending: the transfer is stored on the bridge (`get_transfer_message`) and waits for the bridge relayer | |
+
+On NEAR, only a trusted relayer can ask NEAR MPC to sign a transfer
+(`sign_transfer`). On testnet the relayer had not signed a NEAR-origin
+transfer since 2026-10-12 (last one: nonce 20238). An unrelated transfer,
+nonce 20239, was still waiting at the time of this run. The relayer finalizes
+on Base on its own: MandateOS has nothing to do once the transfer is stored.
+
 ## Who decides what
 
 | Who | Votes on | Rule |
@@ -156,6 +196,8 @@ delivering straight to the shares account was not part of it.
 ## Limits
 
 - Unaudited, testnet.
+- Proceeds reach the EVM wallet only when the Omni Bridge relayer signs and
+  finalizes the transfer.
 - One revenue token per contract, set when the contract is deployed.
 - No `ft_transfer_call` from the shares token itself: plain transfers only.
 - Anyone who buys a majority of the shares outvotes the others on calls and
