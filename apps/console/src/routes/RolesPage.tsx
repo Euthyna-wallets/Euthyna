@@ -9,6 +9,7 @@ import { Card, PageState, Status, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
+import { summarizeRoleChanges, type RoleSummary } from "../lib/role-summary.js";
 import { SentenceList } from "./GovernancePage.js";
 
 type Registry = { suppliers: Array<{ id: string; name: string; wallets: Array<{ chainId: number; address: string }> }> };
@@ -60,36 +61,52 @@ function RolesInProgress() {
   const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, refetchInterval: 15_000 });
   const data = governance.data;
   if (!data) return null;
-  const aboutRoles = (titles: string[]) => titles.some((title) => /role "/.test(title));
   const needed = (() => {
     const threshold = data.dao.threshold as unknown;
     if (typeof threshold === "string" || typeof threshold === "number") return Number(threshold);
     if (threshold && typeof threshold === "object" && "Weight" in threshold) return Number((threshold as { Weight: string }).Weight);
     return null;
   })();
-  const voting = data.proposals.filter((proposal) => proposal.status === "InProgress" && aboutRoles(proposal.changes.map((change) => change.title)));
-  const waiting = data.rules.filter((rule) => rule.state === "Queued" && aboutRoles([rule.title]));
-  if (voting.length === 0 && waiting.length === 0) return null;
+  // A vote on a role is several rule changes; fold each vote back into its role(s).
+  const items: Array<{ key: string; status: string; roles: RoleSummary[] }> = [];
+  for (const proposal of data.proposals.filter((item) => item.status === "InProgress")) {
+    const { roles } = summarizeRoleChanges(proposal.changes);
+    if (roles.length === 0) continue;
+    const approvals = Object.values(proposal.votes).filter((vote) => vote === "Approve").length;
+    items.push({ key: `p${proposal.id}`, status: `Waiting for votes: ${approvals}${needed ? ` of ${needed}` : ""} approvals`, roles });
+  }
+  const queued = new Map<string, typeof data.rules>();
+  for (const rule of data.rules.filter((item) => item.state === "Queued")) {
+    const key = `${rule.queuedAt}|${rule.activatesAt}`;
+    queued.set(key, [...(queued.get(key) ?? []), rule]);
+  }
+  for (const [key, rules] of queued) {
+    const { roles } = summarizeRoleChanges(rules);
+    if (roles.length === 0) continue;
+    const first = rules[0]!;
+    const ready = rules.every((rule) => rule.readyToActivate);
+    items.push({ key: `q${key}`, status: ready ? "Veto window over: applying now" : `Approved: active at ${new Date(first.activatesAt).toLocaleTimeString()} unless vetoed`, roles });
+  }
+  if (items.length === 0) return null;
   return (
     <Card title="On its way" action={<Link className="small" to="/governance">Open Decisions</Link>}>
       <div className="stack">
-        {voting.map((proposal) => {
-          const approvals = Object.values(proposal.votes).filter((vote) => vote === "Approve").length;
-          return (
-            <div key={`p${proposal.id}`} className="row wrap" style={{ justifyContent: "space-between" }}>
-              <span><strong>{proposal.changes.map((change) => change.title).filter((title) => /role "/.test(title)).join(" · ")}</strong></span>
-              <span className="small muted">Waiting for votes: {approvals}{needed ? ` of ${needed}` : ""} approvals</span>
+        {items.flatMap((item) => item.roles.map((role) => (
+          <div key={`${item.key}-${role.role}`} className="role-progress">
+            <div className="row wrap" style={{ justifyContent: "space-between" }}>
+              <strong>Role "{role.role}"{role.deleted ? " · deleted" : role.disabled ? " · disabled" : ""}</strong>
+              <span className="small muted">{item.status}</span>
             </div>
-          );
-        })}
-        {waiting.map((rule) => (
-          <div key={rule.queueId} className="row wrap" style={{ justifyContent: "space-between" }}>
-            <span><strong>{rule.title}</strong></span>
-            <span className="small muted">
-              {rule.readyToActivate ? "Veto window over: applying now" : `Approved: applies at ${new Date(rule.activatesAt).toLocaleTimeString()} unless vetoed`}
-            </span>
+            {role.allows.length ? (
+              <ul className="small role-progress-list">
+                {role.allows.map((line, index) => <li key={index} className={line.startsWith("  ·") ? "sub" : undefined}>{line.replace(/^\s*·\s*/, "")}</li>)}
+              </ul>
+            ) : null}
+            {role.budgets.length ? <div className="small">Budget: {role.budgets.join(" · ")}</div> : null}
+            {role.holders.length ? <div className="small">Held by {role.holders.join(", ")}</div> : null}
+            {role.removedHolders.length ? <div className="small">No longer held by {role.removedHolders.join(", ")}</div> : null}
           </div>
-        ))}
+        )))}
       </div>
     </Card>
   );

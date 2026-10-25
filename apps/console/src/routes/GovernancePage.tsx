@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { singleRoleTitle } from "../lib/role-summary.js";
 
 import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
 
@@ -305,7 +306,7 @@ function ProposalCard(props: {
       <header>
         <div>
           <span className="eyebrow">Proposal #{proposal.id} · by {proposal.proposer}</span>
-          <h3>{proposal.title}</h3>
+          <h3>{singleRoleTitle(proposal.changes) ?? proposal.title}</h3>
         </div>
         <div className="votes">
           <strong>{approvals} / {props.needed}</strong>
@@ -351,7 +352,7 @@ function RuleCard(props: {
       <header>
         <div>
           <span className="eyebrow">Approved · {ready ? "veto window over" : `applies ${relativeTime(first.activatesAt, props.now)}`}</span>
-          <h3>{props.rules.length === 1 ? first.title : `${props.rules.length} changes approved together`}</h3>
+          <h3>{singleRoleTitle(props.rules) ?? (props.rules.length === 1 ? first.title : `${props.rules.length} changes approved together`)}</h3>
         </div>
       </header>
       <SentenceList items={props.rules.map((rule) => ({ title: rule.title, details: rule.details }))} />
