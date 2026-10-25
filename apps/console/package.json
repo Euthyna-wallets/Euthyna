@@ -13,7 +13,6 @@
     "test:build": "vitest run src/prod-build.test.ts"
   },
   "dependencies": {
-    "@better-auth/passkey": "^1.7.12",
     "@mandateos/deployer": "workspace:^",
     "@mandateos/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",

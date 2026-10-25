@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Hex } from "viem";
+import { getAddress, type Hex } from "viem";
 
 import fixture from "./fixtures/presets.json" with { type: "json" };
 import {
@@ -117,6 +117,12 @@ describe("descriptions", () => {
     expect(text).toContain("route must be TestUSDC → WETH");
   });
 
+  it("prints full addresses for server-provided labels when asked", () => {
+    const text = describeChange(changes[2]!, { ...context, fullAddresses: true }).details.join("\n");
+    expect(text).toContain(`recipient must be Studio Pixel (${getAddress(SUPPLIER)})`);
+    expect(text).toContain("spender must be one of: Uniswap V3 router, Uniswap V2 router");
+  });
+
   it("describes members", () => {
     expect(describeChange(changes[3]!, context)).toEqual({
       title: 'Give role "treasury" to AI agent swap-bot.mandateos.testnet',
@@ -148,5 +154,29 @@ describe("describeCall", async () => {
     expect(describeCall(TEST_USDC, transfer, 0n, context)).toBe("transfer 250 TestUSDC to Studio Pixel");
     const drain = encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: ["0x000000000000000000000000000000000000dEaD", 2n ** 256n - 1n] });
     expect(describeCall(TEST_USDC, drain, 0n, context)).toBe("approve 0x0000…dEaD (not a registered supplier) to spend an unlimited amount of TestUSDC");
+  });
+});
+
+describe("DAO members", async () => {
+  const { councilPolicy, describePolicyChange, membersProposalArgs } = await import("./roles.js");
+  const settings = { proposalBond: "100000000000000000000000", proposalPeriodNs: "604800000000000" };
+  it("builds the standard council policy with a two-thirds threshold", () => {
+    const policy = councilPolicy(["a.testnet", "b.testnet", "c.testnet", "d.testnet"], settings);
+    expect(policy.default_vote_policy.threshold).toBe("3");
+    const described = describePolicyChange(membersProposalArgs(policy, "Change members").proposal.kind)!;
+    expect(described.members).toEqual(["a.testnet", "b.testnet", "c.testnet", "d.testnet"]);
+    expect(described.standard).toBe(true);
+    expect(described.details[0]).toBe("a decision will need 3 of 4 approvals");
+  });
+  it("flags a policy that would hand control to someone else", () => {
+    const policy = councilPolicy(["a.testnet", "b.testnet", "c.testnet"], settings);
+    policy.roles.push({ name: "all", kind: "Everyone", permissions: ["*:*"], vote_policy: {} });
+    const described = describePolicyChange({ ChangePolicy: { policy } })!;
+    expect(described.standard).toBe(false);
+    expect(described.details.join("\n")).toContain("extra permissions: *:*");
+  });
+  it("refuses fewer than three members or duplicates", () => {
+    expect(() => councilPolicy(["a.testnet", "b.testnet"], settings)).toThrow(/three/);
+    expect(() => councilPolicy(["a.testnet", "a.testnet", "b.testnet"], settings)).toThrow(/twice/);
   });
 });

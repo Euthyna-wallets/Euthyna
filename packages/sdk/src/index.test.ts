@@ -177,6 +177,9 @@ describe("FileAgentKeyStore", () => {
 describe("OmniRoles SDK", () => {
   it("derives the account id and exposes only member-authorized FunctionCall methods", () => {
     expect(proposedAgentAccountId("Compta Bot", "mandateos.testnet")).toBe("compta-bot-agent.mandateos.testnet");
+    const first = proposedAgentAccountId("Compta Bot", "mandateos.testnet", "org-1");
+    expect(first).toMatch(/^compta-bot-[0-9a-f]{6}-agent\.mandateos\.testnet$/);
+    expect(proposedAgentAccountId("Compta Bot", "mandateos.testnet", "org-2")).not.toBe(first);
     expect(AGENT_FUNCTION_CALL_METHODS).toEqual([
       "prepare",
       "authorize",

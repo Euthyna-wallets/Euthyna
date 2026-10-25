@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { BASE_SEPOLIA, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { getAddress } from "viem";
+import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
@@ -17,7 +18,9 @@ const PROTOCOLS = Object.entries(PROFILE.protocols) as Array<[ProtocolId, { name
 
 export function RolesPage() {
   const roles = useQuery({ queryKey: ["omni-roles"], queryFn: omni.roles, refetchInterval: 15_000 });
-  const [building, setBuilding] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const [building, setBuilding] = useState(params.get("new") === "1");
+  const suggested = params.get("role") ?? "";
   return (
     <div className="page">
       <header className="page-head">
@@ -30,7 +33,7 @@ export function RolesPage() {
         </div>
         {!building ? <button className="primary" onClick={() => setBuilding(true)}>New role</button> : null}
       </header>
-      {building ? <RoleBuilder onClose={() => setBuilding(false)} /> : null}
+      {building ? <RoleBuilder initialName={suggested} onClose={() => { setBuilding(false); setParams({}); }} /> : null}
       <PageState
         loading={roles.isLoading}
         error={roles.error}
@@ -97,14 +100,22 @@ type BlockDraft =
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
-function RoleBuilder({ onClose }: { onClose: () => void }) {
+function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initialName?: string }) {
   const wallets = useWallets();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents") });
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status });
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry") });
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
   const [members, setMembers] = useState<string[]>([]);
+  const [preselected, setPreselected] = useState(false);
+  useEffect(() => {
+    // Agents created for this role are ticked by default.
+    if (preselected || !agents.data || !initialName) return;
+    setMembers(agents.data.agents.filter((agent) => agent.active && agent.role === initialName).map((agent) => agent.nearAccountId));
+    setPreselected(true);
+  }, [agents.data, initialName, preselected]);
   const [preview, setPreview] = useState<ProposalDraft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +136,28 @@ function RoleBuilder({ onClose }: { onClose: () => void }) {
       : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
     members: members.map((accountId) => ({ accountId, kind: "Agent" as const })),
   });
+
+  /**
+   * The server prepares the proposal; this browser recompiles the role and
+   * refuses to sign unless the proposal says exactly the same thing.
+   */
+  async function verifiedProposal(role: RoleDraft): Promise<ProposalDraft> {
+    const draft = await omni.roleProposal(role);
+    const treasury = status.data?.treasury;
+    if (!treasury) throw new Error("The treasury is not loaded yet");
+    if (draft.receiverId !== treasury.daoAccountId) throw new Error(`The proposal targets ${draft.receiverId}, not the company DAO`);
+    const decoded = decodeVaultCalls(draft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], treasury.vaultAccountId);
+    const changes = compileRole(role, PROFILE);
+    const expected = changes.map((change) => ({ method: "queue_rule_change" as const, change }));
+    if (!decoded || canonical(decoded) !== canonical(expected)) {
+      throw new Error("The proposal prepared by the server does not match the role built here. Nothing was signed.");
+    }
+    const labels: Record<string, string> = Object.fromEntries(supplierOptions.map((option) => [option.address, option.label]));
+    for (const block of role.blocks) if (block.kind === "payments") for (const recipient of block.recipients) labels[recipient.address] ??= recipient.label ?? recipient.address;
+    if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
+    const context = { profile: PROFILE, labels, budgets: budgetsOf(changes, PROFILE), fullAddresses: true };
+    return { ...draft, summary: expected.map((call) => describeVaultCall(call, context)) };
+  }
 
   async function run(label: string, action: () => Promise<void>) {
     setBusy(label);
@@ -179,9 +212,13 @@ function RoleBuilder({ onClose }: { onClose: () => void }) {
                   })}
                   {supplierOptions.length === 0 ? <span className="small muted">No supplier wallet on {PROFILE.name} yet. Add suppliers first, or enter an address:</span> : null}
                 </div>
-                <ManualRecipient onAdd={(recipient) => update(index, { recipients: [...block.recipients, recipient] })} />
+                <ManualRecipient onAdd={async (recipient) => {
+                  // A new recipient is also a supplier request; the member who approves the role registers it.
+                  await api("/v1/console/suppliers", { method: "POST", body: JSON.stringify({ name: recipient.label, address: recipient.address, chainId: PROFILE.chainId }) });
+                  update(index, { recipients: [...block.recipients, recipient] });
+                }} />
                 {block.recipients.filter((item) => !supplierOptions.some((option) => option.address.toLowerCase() === item.address.toLowerCase())).map((item) => (
-                  <span key={item.address} className="small">{item.label} <span className="mono">{short(item.address)}</span></span>
+                  <span key={item.address} className="small">{item.label} <span className="mono">{item.address}</span> · new supplier, registered when another member approves this role</span>
                 ))}
               </>
             ) : (
@@ -236,6 +273,7 @@ function RoleBuilder({ onClose }: { onClose: () => void }) {
                 <label key={agent.id} className="check">
                   <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== agent.nearAccountId) : [...current, agent.nearAccountId]); setPreview(null); }} />
                   {agent.name} <span className="mono small muted">{agent.nearAccountId}</span>
+                  {checked && name && agent.role !== name ? <span className="small warn"> · its requests use role "{agent.role}": name this role "{agent.role}" or update AGENT_ROLE</span> : null}
                 </label>
               );
             })}
@@ -246,7 +284,7 @@ function RoleBuilder({ onClose }: { onClose: () => void }) {
         <div className="row wrap">
           <button
             disabled={!ready || Boolean(busy)}
-            onClick={() => void run("preview", async () => setPreview(await omni.roleProposal(draft())))}
+            onClick={() => void run("preview", async () => setPreview(await verifiedProposal(draft())))}
           >
             {busy === "preview" ? "Preparing…" : "Preview what members vote on"}
           </button>
@@ -256,6 +294,7 @@ function RoleBuilder({ onClose }: { onClose: () => void }) {
           <div className="decision">
             <header><div><span className="eyebrow">Members will vote on</span><h3>{preview.title}</h3></div></header>
             <SentenceList items={preview.summary} />
+            <p className="small muted verified">✓ Checked in your browser: the proposal prepared by MandateOS is exactly this role.</p>
             <footer className="row wrap">
               <span className="small muted">Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
               <div className="spacer" />
@@ -286,15 +325,38 @@ function TokenSelect({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
-function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; label: string }) => void }) {
+function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; label: string }) => Promise<void> }) {
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const valid = /^0x[0-9a-fA-F]{40}$/.test(address) && label.trim().length > 0;
   return (
     <div className="row wrap">
       <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
       <input placeholder="0x… address" value={address} onChange={(event) => setAddress(event.target.value.trim())} />
-      <button disabled={!valid} onClick={() => { onAdd({ address, label: label.trim() }); setLabel(""); setAddress(""); }}>Add recipient</button>
+      <button disabled={!valid || busy} onClick={() => void (async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          await onAdd({ address: getAddress(address), label: label.trim() });
+          setLabel("");
+          setAddress("");
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+          setBusy(false);
+        }
+      })()}>Add recipient</button>
+      {error ? <span className="small warn">{error}</span> : null}
     </div>
   );
+}
+
+/** JSON with sorted keys, to compare two decoded proposals. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : typeof item === "bigint" ? item.toString() : item);
 }

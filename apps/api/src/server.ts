@@ -5,6 +5,7 @@ import { BaseGasEstimator } from "./base-gas.js";
 import { Guard } from "./guard.js";
 import { createApp } from "./app.js";
 import { createAuth } from "./auth.js";
+import { hasFullAccessKey } from "./near-auth.js";
 import { BetterAuthGateway } from "./auth-gateway.js";
 import { loadEnv } from "./env.js";
 import { GovernanceService } from "./governance.js";
@@ -16,7 +17,6 @@ import { MandateService } from "./mandates.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { ConsoleDataService } from "./console-data.js";
-import { WalletProofService } from "./wallet-proof.js";
 import { OmniRolesService } from "./omniroles.js";
 
 const env = loadEnv();
@@ -34,14 +34,16 @@ const gasEstimator = BaseGasEstimator.fromRpc(env.BASE_SEPOLIA_RPC_URL, {
   maxFeePerGas: BigInt(env.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI),
   maxPriorityFeePerGas: BigInt(env.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI),
 });
-const auth = new BetterAuthGateway(createAuth(env, prisma), prisma);
-const walletProof = new WalletProofService(
-  prisma,
-  near,
-  env.NEAR_ACCOUNT_PARENT,
-  84532,
-  env.UAT_DEMO_WALLETS_ENABLED,
-);
+const auth = new BetterAuthGateway(createAuth(env, prisma, {
+  recipient: new URL(env.CONSOLE_ORIGIN).host,
+  isFullAccessKey: async (accountId, publicKey) => {
+    try {
+      return hasFullAccessKey((await near.getAccessKeys(accountId)).keys, publicKey);
+    } catch {
+      return false;
+    }
+  },
+}), prisma);
 const agentProvisioning = new AgentProvisioningService(
   prisma,
   near,
@@ -134,7 +136,6 @@ const app = createApp({
   guard,
   relayer,
   auth,
-  walletProof,
   treasury,
   agentProvisioning,
   governance,
@@ -146,7 +147,6 @@ const app = createApp({
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
   nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
-  registrationRateLimitEnabled: !env.UAT_DEMO_WALLETS_ENABLED,
   omniroles,
 });
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { authClient } from "../auth.js";
+import { demoWalletsEnabled } from "./wallet-store.js";
 import {
   connectNearWallet,
   evmAccounts,
@@ -74,7 +75,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(onFocus, 5_000);
     let unsubscribe: (() => void) | undefined;
-    void nearSelector().then((selector) => {
+    // Test and demo signers do not go through the wallet selector.
+    const selectorDriven = import.meta.env.VITE_E2E !== "1" && !demoWalletsEnabled();
+    if (selectorDriven) void nearSelector().then((selector) => {
       const subscription = selector.store.observable.subscribe((state) => {
         const accountId = state.accounts[0]?.accountId ?? "";
         setNearConnected(Boolean(accountId));

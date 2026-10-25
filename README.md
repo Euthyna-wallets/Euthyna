@@ -186,14 +186,13 @@ See [`.env.example`](./.env.example) for variable names. Never use faucet rotati
 
 ## Authentication
 
-Humans use Better Auth passkeys. An invited council seat requires:
+Humans sign in with their NEAR wallet (NEP-413 message, through a Better Auth plugin in `apps/api/src/near-auth.ts`). The server checks the signature, the one-time nonce, and that the signing key is a full-access key of the account on chain. A console user *is* a NEAR account.
 
-1. session email equals the invited email;
-2. OTP verification;
-3. NEP-413 and EIP-191 wallet proofs;
-4. approval of that exact wallet-proof snapshot by another administrator.
+Company members are the NEAR accounts the founder enters before the treasury exists (each account is checked on chain). No email is sent: a member signs in with that wallet and lands on their seat. They become the DAO members when the treasury is created; from then on the DAO policy is the source of truth.
 
-Email/password is disabled. Normal mode uses NEAR Wallet Selector and MetaMask/Rabby; browser-generated private keys exist only behind explicit UAT demo mode.
+What a member votes on is decoded in the browser from the proposal stored in the DAO, with full addresses next to supplier names. Sputnik only accepts a vote that repeats that exact proposal, so a server that showed something else could not collect votes for it. Before a role proposal is signed, the browser recompiles the role and refuses to sign if the server-prepared proposal differs.
+
+Email/password is disabled. Browser-generated private keys exist only behind explicit UAT demo mode.
 
 ## License note
 

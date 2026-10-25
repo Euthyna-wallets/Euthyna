@@ -82,7 +82,7 @@ export function Layout() {
             {setupRequired ? <NavLink className="setup-link" to="/onboarding">Finish setup</NavLink> : null}
           </nav>
           <div className="spacer" />
-          <div className="small muted">{session.data?.user.email}</div>
+          <div className="small muted">{session.data?.user.name}</div>
           <button className="ghost" onClick={() => void authClient.signOut().then(() => navigate("/"))}>Sign out</button>
         </aside>
         <div className="app-frame">

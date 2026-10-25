@@ -1,3 +1,4 @@
+import { proposedAgentAccountId } from "@mandateos/sdk";
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
@@ -24,7 +25,6 @@ import type { MandateGateway, MandatePreview } from "./mandates.js";
 import type { RegistryService } from "./registry-db.js";
 import type { PaymentService } from "./payments.js";
 import type { ConsoleDataService } from "./console-data.js";
-import { WalletProofError, type WalletProofGateway } from "./wallet-proof.js";
 
 const transferCalldata = [
   0xa9, 0x05, 0x9c, 0xbb,
@@ -119,11 +119,6 @@ class FakeAuth implements AuthGateway {
   }
 
 
-  identifyPasskeyUser(headers: Headers) {
-    const cookie = headers.get("cookie");
-    const identity = cookie ? this.consoles.get(cookie) : null;
-    return Promise.resolve(identity ? { userId: identity.userId, email: identity.email, emailVerified: identity.emailVerified } : null);
-  }
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
     const cookie = headers.get("cookie");
     return Promise.resolve(cookie ? (this.consoles.get(cookie) ?? null) : null);
@@ -140,59 +135,6 @@ class FakeAuth implements AuthGateway {
 
   listMembers(): Promise<import("./auth-gateway.js").MemberView[]> {
     return Promise.resolve([]);
-  }
-
-  setMemberWallets(_organizationId: string, memberId: string, input: { nearAccountId: string; evmAddress: string }) {
-    return Promise.resolve({
-      id: memberId,
-      userId: "user-owner",
-      role: "owner",
-      nearAccountId: input.nearAccountId,
-      evmAddress: input.evmAddress,
-      email: "owner@acme.test",
-      name: "Owner",
-      walletProofClaimable: false,
-      walletProofVerifiedAt: null,
-      walletProofApprovedAt: null,
-      walletProofApprovedBy: null,
-    });
-  }
-
-  addMember(_organizationId: string, input: { name: string; nearAccountId: string; evmAddress: string }) {
-    return Promise.resolve({
-      id: "member-new",
-      userId: "user-new",
-      role: "member",
-      nearAccountId: input.nearAccountId,
-      evmAddress: input.evmAddress,
-      email: null,
-      name: input.name,
-      walletProofClaimable: true,
-      walletProofVerifiedAt: null,
-      walletProofApprovedAt: null,
-      walletProofApprovedBy: null,
-    });
-  }
-
-  decideMemberWalletProof(
-    _organizationId: string,
-    memberId: string,
-    actorId: string,
-    input: { decision: "approve" | "reject" },
-  ) {
-    return Promise.resolve({
-      id: memberId,
-      userId: "user-member",
-      role: "member",
-      nearAccountId: input.decision === "approve" ? "member.testnet" : null,
-      evmAddress: input.decision === "approve" ? "0x0000000000000000000000000000000000000001" : null,
-      email: "member@example.test",
-      name: "Member",
-      walletProofClaimable: false,
-      walletProofVerifiedAt: input.decision === "approve" ? new Date() : null,
-      walletProofApprovedAt: input.decision === "approve" ? new Date() : null,
-      walletProofApprovedBy: input.decision === "approve" ? actorId : null,
-    });
   }
 
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null> {
@@ -235,12 +177,6 @@ class FakeAuth implements AuthGateway {
     return Promise.resolve(agentId === "agent-a" && organizationId === "org-1");
   }
 
-  startPasskeyRegistration(): Promise<Response> {
-    return Promise.resolve(new Response(JSON.stringify({ context: "signed-registration-context" }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }));
-  }
 
   reserveNearWalletSponsorship() {
     return Promise.resolve(this.sponsorshipReservation);
@@ -263,8 +199,6 @@ function testApp(options?: {
   consoleRole?: "admin" | "member";
   treasuryStatus?: string;
   sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
-  registrationRateLimitEnabled?: boolean;
-  walletProofError?: WalletProofError;
 }) {
   const auth = new FakeAuth();
   auth.agents.set("key-a", agentA);
@@ -426,29 +360,6 @@ function testApp(options?: {
     agentDetail: async () => null,
     governance: async () => ({ proposals: [], delay: null }),
   } as unknown as ConsoleDataService;
-  const walletProof: WalletProofGateway = {
-    createChallenge: async (_identity, input) => {
-      if (options?.walletProofError) throw options.walletProofError;
-      return {
-        id: "11111111-1111-4111-8111-111111111111",
-        memberId: input.memberId,
-        nearAccountId: input.nearAccountId,
-        evmAddress: input.evmAddress,
-        message: "proof",
-        nonceBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        recipient: "mandateos.testnet",
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      };
-    },
-    verify: async () => ({ memberId: admin.memberId, organizationId: admin.organizationId }),
-    invitation: async (_identity, memberId) => ({
-      memberId,
-      memberName: "Ben",
-      role: "member",
-      organizationName: "ACME",
-      invitedEmail: "ben@acme.test",
-    }),
-  };
   const agentProvisioning = {
     provision: async () => ({
       status: "provisioned",
@@ -519,7 +430,6 @@ function testApp(options?: {
     guard,
     relayer: {} as BaseRelayer,
     auth,
-    walletProof,
     agentProvisioning,
     treasury,
     governance,
@@ -531,7 +441,6 @@ function testApp(options?: {
     nearParentAccount: "mandateos.testnet",
     nearSponsorDailyWalletLimit: 2,
     nearSponsorWalletAmountYocto: "500000000000000000000000",
-    registrationRateLimitEnabled: options?.registrationRateLimitEnabled ?? true,
   });
   return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
 }
@@ -672,77 +581,6 @@ describe("agent detail", () => {
   });
 });
 
-describe("members", () => {
-  it("adds a wallet-only member for an admin", async () => {
-    const { app } = testApp();
-    const response = await app.request("/v1/console/members", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({
-        name: "Alice",
-        nearAccountId: "alice.testnet",
-        evmAddress: "0x1111111111111111111111111111111111111111",
-      }),
-    });
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ nearAccountId: "alice.testnet", name: "Alice" });
-  });
-
-  it("invites a member by email without requiring wallet re-entry by the founder", async () => {
-    const { app } = testApp();
-    const response = await app.request("/v1/console/members", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({ name: "Bob", email: "bob@example.test" }),
-    });
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ name: "Bob" });
-  });
-
-  it("normalizes annotated wallet values", async () => {
-    const { app } = testApp();
-    const response = await app.request("/v1/console/members", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({
-        name: "Alice",
-        nearAccountId: "busyvideo615.testnet (*testnet)",
-        evmAddress: "0x1111111111111111111111111111111111111111 (Base Sepolia)",
-      }),
-    });
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ nearAccountId: "busyvideo615.testnet" });
-  });
-
-  it("lets an admin set wallets on an existing member", async () => {
-    const { app } = testApp();
-    const response = await app.request("/v1/console/members/member-1/wallets", {
-      method: "PATCH",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({
-        nearAccountId: "owner.testnet",
-        evmAddress: "0x3333333333333333333333333333333333333333",
-      }),
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ nearAccountId: "owner.testnet" });
-  });
-
-  it("forbids a non-admin member from adding a member", async () => {
-    const { app } = testApp({ consoleRole: "member" });
-    const response = await app.request("/v1/console/members", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        name: "Bob",
-        nearAccountId: "bob.testnet",
-        evmAddress: "0x2222222222222222222222222222222222222222",
-      }),
-    });
-    expect(response.status).toBe(403);
-  });
-});
-
 describe("treasury refresh", () => {
   it("lets an admin re-run verification", async () => {
     const { app, treasuryCalls } = testApp();
@@ -767,65 +605,7 @@ describe("treasury refresh", () => {
   });
 });
 
-describe("passwordless registration", () => {
-  const nearPublicKey = "ed25519:11111111111111111111111111111111";
-  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
-
-  it("issues a signed passkey registration context and defers NEAR funding", async () => {
-    const { app, nearCalls } = testApp();
-    const response = await app.request("/api/register/passkey-start", {
-      method: "POST",
-      headers: headers({ origin: consoleOrigin, "x-real-ip": "198.51.100.1" }),
-      body: JSON.stringify({ email: "NEW@example.test", name: "New User", nearPublicKey }),
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ context: "signed-registration-context", nearAccountId });
-    expect(nearCalls.sponsored).toEqual([]);
-  });
-
-
-  it("rate-limits repeated registration by normalized email", async () => {
-    const { app } = testApp();
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const response = await app.request("/api/register/passkey-start", {
-        method: "POST",
-        headers: headers({ origin: consoleOrigin, "x-real-ip": `198.51.100.${attempt + 1}` }),
-        body: JSON.stringify({ email: "RateLimit@Example.test", name: "User" }),
-      });
-      statuses.push(response.status);
-    }
-    expect(statuses).toEqual([200, 200, 200, 429]);
-  });
-
-  it("rate-limits registration by remote IP across emails", async () => {
-    const { app } = testApp();
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const response = await app.request("/api/register/passkey-start", {
-        method: "POST",
-        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.10" }),
-        body: JSON.stringify({ email: `user-${attempt}@example.test`, name: "User" }),
-      });
-      statuses.push(response.status);
-    }
-    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
-  });
-
-
-  it("disables registration throttling only for explicit UAT demo mode", async () => {
-    const { app } = testApp({ registrationRateLimitEnabled: false });
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const response = await app.request("/api/register/passkey-start", {
-        method: "POST",
-        headers: headers({ origin: consoleOrigin, "x-real-ip": "203.0.113.20" }),
-        body: JSON.stringify({ email: "uat-demo@example.test", name: "UAT User" }),
-      });
-      statuses.push(response.status);
-    }
-    expect(statuses).toEqual([200, 200, 200, 200, 200, 200]);
-  });
+describe("sign-in boundaries", () => {
   it("returns 404 for password sign-up and sign-in routes", async () => {
     const { app } = testApp();
     for (const path of ["/api/auth/sign-up/email", "/api/auth/sign-in/email"]) {
@@ -838,7 +618,7 @@ describe("passwordless registration", () => {
     }
   });
 
-  it("refuses Better Auth email invitations in favor of wallet-proof claims", async () => {
+  it("refuses Better Auth invitations: members follow the DAO", async () => {
     const { app } = testApp();
     const response = await app.request("/api/auth/organization/accept-invitation", {
       method: "POST",
@@ -846,7 +626,7 @@ describe("passwordless registration", () => {
       body: JSON.stringify({ invitationId: "invite-1" }),
     });
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "wallet_proof_required" });
+    expect(await response.json()).toEqual({ error: "members_follow_the_dao" });
   });
 });
 
@@ -984,43 +764,6 @@ describe("console CSRF protection", () => {
 });
 
 describe("treasury onboarding", () => {
-  it("starts a wallet proof challenge from a passkey session", async () => {
-    const { app } = testApp();
-    const response = await app.request("/v1/profile/wallet-proof/challenge", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        memberId: "better-auth-member-id",
-        nearAccountId: "alice.testnet",
-        evmAddress: "0x1111111111111111111111111111111111111111",
-      }),
-    });
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      memberId: "better-auth-member-id",
-      nearAccountId: "alice.testnet",
-      evmAddress: "0x1111111111111111111111111111111111111111",
-      message: "proof",
-    });
-  });
-
-  it("returns 403 when a session email does not match the invited seat", async () => {
-    const { app } = testApp({
-      walletProofError: new WalletProofError(403, "invitation_email_mismatch", "This invitation belongs to another email address"),
-    });
-    const response = await app.request("/v1/profile/wallet-proof/challenge", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        memberId: "ben-invitation",
-        nearAccountId: "mallory.testnet",
-        evmAddress: "0x1111111111111111111111111111111111111111",
-      }),
-    });
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "invitation_email_mismatch" });
-  });
-
   it("builds a treasury plan for the session organization", async () => {
     const { app, treasuryCalls } = testApp();
     const response = await app.request("/v1/console/treasury/plan", {
@@ -1143,7 +886,7 @@ describe("console isolation and emergency", () => {
       body: JSON.stringify({
         name: "Research agent",
         role: "researcher",
-        nearAccountId: "research-agent-agent.mandateos.testnet",
+        nearAccountId: proposedAgentAccountId("Research agent", "mandateos.testnet", "org-1"),
         nearPublicKey: "ed25519:11111111111111111111111111111111",
         vaultAccountId: "vault-1.near",
         mpcPath: "agents/researcher/base",
@@ -1153,7 +896,7 @@ describe("console isolation and emergency", () => {
     expect(auth.created).toEqual([
       expect.objectContaining({
         organizationId: "org-1",
-        nearAccountId: "research-agent-agent.mandateos.testnet",
+        nearAccountId: expect.stringMatching(/^research-agent-[0-9a-f]{6}-agent\.mandateos\.testnet$/),
         nearPublicKey: "ed25519:11111111111111111111111111111111",
       }),
     ]);

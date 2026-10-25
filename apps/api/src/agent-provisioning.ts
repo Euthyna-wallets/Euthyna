@@ -170,8 +170,9 @@ export class AgentProvisioningService {
   private async agent(organizationId: string, agentId: string) {
     const agent = await this.prisma.agent.findFirst({ where: { id: agentId, organizationId, active: true } });
     if (!agent) throw new AgentProvisioningError(404, "agent_not_found", "agent not found");
-    const expectedAccountId = proposedAgentAccountId(agent.name, this.parentAccountId);
-    if (agent.nearAccountId !== expectedAccountId) {
+    // Agents created before organization-scoped names keep their legacy account.
+    const expectedAccountId = proposedAgentAccountId(agent.name, this.parentAccountId, organizationId);
+    if (agent.nearAccountId !== expectedAccountId && agent.nearAccountId !== proposedAgentAccountId(agent.name, this.parentAccountId)) {
       throw new AgentProvisioningError(
         422,
         "agent_account_mismatch",

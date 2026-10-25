@@ -16,7 +16,7 @@ export function OverviewPage() {
   const myVotes = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress" && !(me in proposal.votes)).length;
   const pendingRules = (governance.data?.rules ?? []).filter((rule) => rule.state === "Queued").length;
   const refused = (activity.data?.items ?? []).filter((item) => item.kind === "refusal").length;
-  const executed = (activity.data?.items ?? []).filter((item) => item.kind === "operation").length;
+  const executed = (activity.data?.items ?? []).filter((item) => item.kind !== "refusal").length;
 
   const loading = Boolean(status.data?.treasury) && (roles.isLoading || governance.isLoading || activity.isLoading);
   const count = (value: number) => (loading ? "…" : value);
@@ -54,7 +54,7 @@ export function OverviewPage() {
               <div className="metric"><span>Balance</span><strong>{status.data.wallet ? status.data.wallet.tokens.filter((token) => Number(token.amount) > 0).map((token) => `${Number(token.amount).toLocaleString()} ${token.symbol}`).join(" · ") || "empty" : "—"}</strong></div>
               <div className="metric"><span>Roles</span><strong>{count(roles.data?.roles.length ?? 0)}</strong></div>
               <div className="metric"><span>Rules in veto window</span><strong>{count(pendingRules)}</strong></div>
-              <div className="metric"><span>Operations / refused</span><strong>{loading ? "…" : `${executed} / ${refused}`}</strong></div>
+              <div className="metric"><span>Allowed / refused</span><strong>{loading ? "…" : `${executed} / ${refused}`}</strong></div>
             </div>
             <Card title="Budgets">
               {roles.isLoading ? <div className="state">Loading…</div> : (roles.data?.roles ?? []).flatMap((role) => role.budgets).length === 0 ? <div className="state">No budget yet.</div> : (
