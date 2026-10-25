@@ -4,24 +4,42 @@ import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
+import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
 import { NewAgent, RunYourAgent, type AgentReady } from "./AgentSetup.js";
 import { FundWallet, TreasuryCreate, WalletSetup } from "./TreasurySetup.js";
 
 type Organization = { id: string; name: string; slug: string };
-type Stage = "company" | "members" | "treasury" | "wallet" | "agent" | "role" | "done";
+type Stage = "company" | "members" | "treasury" | "wallet" | "shares" | "agent" | "role" | "done";
 
 const STEPS: Array<{ id: Exclude<Stage, "done">; label: string }> = [
   { id: "company", label: "Company" },
-  { id: "members", label: "Members" },
-  { id: "treasury", label: "Treasury" },
+  { id: "members", label: "Founders" },
+  { id: "treasury", label: "Incorporate" },
   { id: "wallet", label: "Wallet" },
-  { id: "agent", label: "Agent" },
-  { id: "role", label: "First role" },
+  { id: "shares", label: "Shares" },
+  { id: "agent", label: "First hire" },
+  { id: "role", label: "Job contract" },
 ];
 
 const confirmedKey = (organizationId: string) => `mandateos.members-confirmed.${organizationId}`;
+const sharesSkippedKey = (organizationId: string) => `mandateos.shares-skipped.${organizationId}`;
+const readFlag = (key: string) => {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+};
+const writeFlag = (key: string, value: boolean) => {
+  try {
+    if (value) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
+  } catch {
+    // A convenience only.
+  }
+};
 
 export function OnboardingPage() {
   const queryClient = useQueryClient();
@@ -35,12 +53,16 @@ export function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState<AgentReady | null>(null);
   const [membersConfirmed, setMembersConfirmed] = useState(false);
+  const [sharesSkipped, setSharesSkipped] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
 
   useEffect(() => {
     if (!active) return;
     setReady(false);
     localStorage.setItem("mandateos.organization", active.id);
     setMembersConfirmed(localStorage.getItem(confirmedKey(active.id)) === "1");
+    setSharesSkipped(readFlag(sharesSkippedKey(active.id)));
+    setJob(rememberedJob(active.id));
     void authClient.organization.setActive({ organizationId: active.id }).finally(() => {
       setReady(true);
       void queryClient.invalidateQueries();
@@ -51,6 +73,7 @@ export function OnboardingPage() {
   const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: ready });
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), enabled: Boolean(status.data?.wallet) });
   const roles = useQuery({ queryKey: ["omni-roles"], queryFn: omni.roles, enabled: Boolean(status.data?.treasury), refetchInterval: 15_000 });
+  const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares, enabled: Boolean(status.data?.wallet), refetchInterval: 15_000 });
 
   const treasury = status.data?.treasury ?? null;
   const memberCount = members.data?.members.filter((member) => member.nearAccountId).length ?? 0;
@@ -61,30 +84,38 @@ export function OnboardingPage() {
       ? (memberCount < 3 || !membersConfirmed ? "members" : "treasury")
       : !status.data?.wallet
         ? "wallet"
-        : newAgent || activeAgents.length === 0
+        : !shares.data?.deployed && !sharesSkipped
+          ? "shares"
+          : newAgent || activeAgents.length === 0
           ? "agent"
           : (roles.data?.roles.length ?? 0) === 0
             ? "role"
             : "done";
-  const loading = organizations.isLoading || (Boolean(active) && (!ready || status.isLoading || members.isLoading));
+  const loading = organizations.isLoading || (Boolean(active) && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
+  const firstAgent = activeAgents[0];
+  const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
 
   const waitingFor: Record<Stage, string> = {
-    company: "Name the company",
-    members: `${memberCount} of 3 members · add the NEAR accounts that will vote`,
-    treasury: "Create the DAO and the vault",
-    wallet: "Members vote to create the company wallet",
-    agent: "Fund the wallet and create the agent",
-    role: "Say what the agent may do",
-    done: "Setup complete",
+    company: "Name your AI company",
+    members: `${memberCount} of 3 founders · the NEAR accounts that vote on the rules`,
+    treasury: "Incorporate on NEAR: the DAO and the vault",
+    wallet: "Founders vote to open the company wallet",
+    shares: "Open the company to shareholders, or skip",
+    agent: "Hire the first agent",
+    role: "Write its job contract",
+    done: "Your AI company is live",
   };
 
   return (
     <div className="page onboarding-page">
       <header className="page-head">
         <div>
-          <span className="eyebrow">Company setup</span>
-          <h1>{active?.name ?? "Create your company"}</h1>
-          <p className="muted">Humans set the rules once. Agents then work inside them, and nothing else gets signed.</p>
+          <span className="eyebrow">Create your AI company</span>
+          <h1>{active?.name ?? "Your AI company"}</h1>
+          <p className="muted">
+            Agents do the work. Founders and shareholders own the company and vote on the rules. The vault on NEAR
+            enforces them: an agent cannot sign anything its job does not allow.
+          </p>
           {!loading ? <p className="setup-actor">{waitingFor[stage]}</p> : null}
         </div>
         <div className="pill">Base Sepolia · NEAR testnet</div>
@@ -92,7 +123,7 @@ export function OnboardingPage() {
       {error ? <div className="alert error">{error}</div> : null}
       {loading ? <div className="state">Loading…</div> : (
         <>
-          <SetupProgress stage={stage} />
+          <SetupProgress stage={stage} skipped={sharesSkipped && !shares.data?.deployed ? ["shares"] : []} />
 
           {stage === "company" ? (
             <CompanyStep
@@ -126,9 +157,33 @@ export function OnboardingPage() {
 
           {stage === "wallet" && status.data ? <WalletSetup status={status.data} onChanged={async () => { await status.refetch(); }} /> : null}
 
-          {(stage === "agent" || stage === "role") && status.data ? <FundWallet status={status.data} showNext={false} /> : null}
+          {stage === "shares" && active ? (
+            <section className="card empty-action">
+              <div>
+                <h2>Open the company to shareholders?</h2>
+                <p className="muted">
+                  Anyone with a NEAR wallet can then buy shares. Locked shares vote on company decisions, and the revenue
+                  the company shares goes to the holders who vote. Founders keep their vote and their veto.
+                </p>
+              </div>
+              <div className="row wrap">
+                <Link className="button primary" to="/shares">Issue shares</Link>
+                <button className="ghost" onClick={() => { writeFlag(sharesSkippedKey(active.id), true); setSharesSkipped(true); }}>Skip for now</button>
+              </div>
+            </section>
+          ) : null}
 
-          {stage === "agent" && treasury ? (
+          {stage === "agent" && treasury && !newAgent && !job ? (
+            <JobPicker
+              hasShares={Boolean(shares.data?.deployed)}
+              onPick={(picked) => {
+                if (active) rememberJob(active.id, picked.id);
+                setJob(picked);
+              }}
+            />
+          ) : null}
+
+          {stage === "agent" && treasury && (newAgent || job) ? (
             newAgent ? (
               <RunYourAgent
                 agent={newAgent}
@@ -140,11 +195,14 @@ export function OnboardingPage() {
               />
             ) : (
               <section className="card">
-                <h2>Create the agent</h2>
+                <span className="eyebrow">First hire · {job!.title}</span>
+                <h2>Hire the {job!.agentName.toLowerCase()}</h2>
                 <p className="muted">
-                  The agent gets its own NEAR account. It can only ask the vault for operations, and only those a voted role allows.
+                  The agent gets its own NEAR account. It can only ask the vault for operations, and only those its voted
+                  job contract allows.
                 </p>
-                <NewAgent vaultAccountId={treasury.vaultAccountId} onReady={setNewAgent} />
+                <NewAgent vaultAccountId={treasury.vaultAccountId} defaultName={job!.agentName} defaultRole={job!.role} onReady={setNewAgent} />
+                <button className="ghost" onClick={() => setJob(null)}>← Another job</button>
               </section>
             )
           ) : null}
@@ -152,27 +210,44 @@ export function OnboardingPage() {
           {stage === "role" ? (
             <section className="card empty-action">
               <div>
-                <h2>Say what {activeAgents[0]?.name ?? "the agent"} may do</h2>
+                <span className="eyebrow">Job contract</span>
+                <h2>What {firstAgent?.name ?? "the agent"} may do</h2>
                 <p className="muted">
-                  A role lists what the agent may do with company funds. Everything else is refused by the vault.
+                  {contractJob ? `${contractJob.allows}. ` : ""}Everything else is refused by the vault. You set the budget;
+                  the founders vote on it.
                 </p>
                 <ol className="small muted role-steps">
-                  <li>Name the role <span className="mono">{activeAgents[0]?.role ?? "treasury"}</span> (the name the agent uses) and add what it allows: + Transfers to registered suppliers, or + DeFi from the catalog (Uniswap), each with a budget.</li>
-                  <li>Preview, then submit it to the members' vote.</li>
-                  <li>Members approve it in Decisions; it applies after the veto window.</li>
+                  <li>The job <span className="mono">{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
+                  <li>Preview, then submit it to the founders' vote.</li>
+                  <li>They approve it in Decisions; it applies after the veto window, and the agent can start.</li>
                 </ol>
               </div>
-              <Link className="button primary" to={`/roles?new=1&role=${encodeURIComponent(activeAgents[0]?.role ?? "treasury")}`}>Build the role</Link>
+              <Link
+                className="button primary"
+                to={`/roles?new=1&role=${encodeURIComponent(firstAgent?.role ?? "treasury")}${contractJob ? `&job=${contractJob.id}` : ""}`}
+              >
+                Write the job contract
+              </Link>
             </section>
           ) : null}
+
+          {(stage === "agent" || stage === "role") && status.data ? <FundWallet status={status.data} showNext={false} /> : null}
 
           {stage === "done" ? (
             <section className="card empty-action">
               <div>
-                <h2>Setup complete</h2>
-                <p className="muted">The treasury, the wallet, an agent and its first role are in place.</p>
+                <span className="eyebrow">Live</span>
+                <h2>{active?.name ?? "Your AI company"} is live</h2>
+                <p className="muted">
+                  Founders and {shares.data?.deployed ? "shareholders" : "members"} set the rules, {activeAgents.length} agent{activeAgents.length > 1 ? "s" : ""} work
+                  inside them, and every operation is checked by the vault on NEAR before the company wallet signs.
+                </p>
               </div>
-              <Link className="button primary" to="/">Go to Overview</Link>
+              <div className="row wrap">
+                <Link className="button primary" to="/">Overview</Link>
+                <Link className="button" to="/activity">What the agents did</Link>
+                {shares.data?.deployed ? <Link className="button" to="/shares">Shares</Link> : null}
+              </div>
             </section>
           ) : null}
         </>
@@ -181,14 +256,36 @@ export function OnboardingPage() {
   );
 }
 
-function SetupProgress({ stage }: { stage: Stage }) {
+function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
+  return (
+    <section className="card">
+      <span className="eyebrow">First hire</span>
+      <h2>What should your first agent do?</h2>
+      <p className="muted">Pick a job. You set its budget next, and the founders vote on it.</p>
+      <div className="job-grid">
+        {JOBS.map((item) => {
+          const blocked = item.needsShares && !props.hasShares;
+          return (
+            <button key={item.id} className="job-card" disabled={blocked} onClick={() => props.onPick(item)}>
+              <strong>{item.title}</strong>
+              <span>{item.pitch}</span>
+              <span className="small muted">{blocked ? "Issue shares first (Shares page)." : `Allowed: ${item.allows}.`}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SetupProgress({ stage, skipped = [] }: { stage: Stage; skipped?: Stage[] }) {
   const current = stage === "done" ? STEPS.length : STEPS.findIndex((step) => step.id === stage);
   return (
     <nav className="setup-progress" aria-label="Company setup progress">
       {STEPS.map((step, index) => (
         <div key={step.id} className={`${index < current ? "done" : ""} ${index === current ? "current" : ""}`}>
-          <span>{index < current ? "✓" : index + 1}</span>
-          {step.label}
+          <span>{index < current ? (skipped.includes(step.id) ? "–" : "✓") : index + 1}</span>
+          {step.label}{index < current && skipped.includes(step.id) ? " (skipped)" : ""}
         </div>
       ))}
     </nav>

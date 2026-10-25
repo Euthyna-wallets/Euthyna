@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
 import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, nearRecipient, stringHash, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
@@ -22,6 +22,7 @@ export function RolesPage() {
   const [params, setParams] = useSearchParams();
   const [building, setBuilding] = useState(params.get("new") === "1");
   const suggested = params.get("role") ?? "";
+  const job = params.get("job");
   return (
     <div className="page">
       <header className="page-head">
@@ -34,7 +35,7 @@ export function RolesPage() {
         </div>
         {!building ? <button className="primary" onClick={() => setBuilding(true)}>New role</button> : null}
       </header>
-      {building ? <RoleBuilder initialName={suggested} onClose={() => { setBuilding(false); setParams({}); }} /> : null}
+      {building ? <RoleBuilder initialName={suggested} initialJob={job} onClose={() => { setBuilding(false); setParams({}); }} /> : null}
       <RolesInProgress />
       <PageState
         loading={roles.isLoading}
@@ -162,7 +163,7 @@ type BlockDraft =
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
-function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initialName?: string }) {
+function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose: () => void; initialName?: string; initialJob?: string | null }) {
   const wallets = useWallets();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents") });
@@ -200,6 +201,18 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
     setBlocks((current) => [...current, { kind: "share-revenue", sharesAccountId, amount: "0.01", periodDays: 7 }]);
     setPreview(null);
   };
+  // A job picked in "Create your AI company" opens with its block already added.
+  const jobApplied = useRef(false);
+  useEffect(() => {
+    if (jobApplied.current || !initialJob) return;
+    if (initialJob === "payments") addTransfers();
+    else if (initialJob === "treasury") addSwap("uniswap-v3");
+    else if (initialJob === "revenue") {
+      if (!sharesAccountId) return; // waits for the shares contract to load
+      addShareRevenue();
+    }
+    jobApplied.current = true;
+  }, [initialJob, sharesAccountId]);
   const supplierOptions = (registry.data?.suppliers ?? []).flatMap((supplier) =>
     supplier.wallets.filter((wallet) => wallet.chainId === PROFILE.chainId).map((wallet) => ({ address: wallet.address, label: supplier.name })));
 
