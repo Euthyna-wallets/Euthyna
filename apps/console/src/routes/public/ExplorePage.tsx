@@ -6,6 +6,39 @@ import { SecuritySection } from "./SecuritySection.js";
 
 const INITIALS_COLORS = ["#4FD1E8", "#F2B544", "#9AD39C", "#F7A99D", "#9DB4F2"];
 
+type ChainIcon = "near" | "ethereum" | "base" | "arbitrum" | "solana" | "bitcoin";
+
+const CHAIN_ICONS: Record<ChainIcon, string> = {
+  near: "/chains/near.svg",
+  ethereum: "/chains/ethereum.svg",
+  base: "/chains/base.svg",
+  arbitrum: "/chains/arbitrum.svg",
+  solana: "/chains/solana.svg",
+  bitcoin: "/chains/bitcoin.svg",
+};
+
+function ChainLogo({ chain, size = 16 }: { chain: ChainIcon; size?: number }) {
+  return <img src={CHAIN_ICONS[chain]} alt="" aria-hidden="true" width={size} height={size} style={{ display: "block", flex: "0 0 auto" }} />;
+}
+
+function ChainBadge({ chain, children }: { chain: ChainIcon; children: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "7px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}>
+      <ChainLogo chain={chain} />
+      {children}
+    </span>
+  );
+}
+
+function EvmNetwork({ chain, children }: { chain: Extract<ChainIcon, "ethereum" | "base" | "arbitrum">; children: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", whiteSpace: "nowrap" }}>
+      <ChainLogo chain={chain} size={14} />
+      {children}
+    </span>
+  );
+}
+
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("");
 }
@@ -171,7 +204,22 @@ export function ExplorePage() {
     </div>
     <div style={{ marginTop: "20px", background: "#FFFFFF", color: "#0F1E3D", borderRadius: "24px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
       <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px", borderRight: "1px solid #E4EAF4" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>JOBS TO HIRE FOR</span><span style={{ fontSize: "36px", fontWeight: "600" }}>3</span></div>
-      <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px", borderRight: "1px solid #E4EAF4" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>CHAINS AGENTS WORK ON</span><span style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px", fontSize: "13px", fontWeight: "600" }}><span style={{ display: "flex", alignItems: "center", gap: "6px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}><span style={{ width: "9px", height: "9px", borderRadius: "999px", background: "#0F1E3D" }}></span>NEAR</span><span style={{ display: "flex", alignItems: "center", gap: "6px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}><span style={{ width: "9px", height: "9px", borderRadius: "999px", background: "#627EEA" }}></span>EVM</span><span style={{ display: "flex", alignItems: "center", gap: "6px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}><span style={{ width: "9px", height: "9px", borderRadius: "999px", background: "#9945FF" }}></span>Solana</span><span style={{ display: "flex", alignItems: "center", gap: "6px", background: "#EEF2F8", borderRadius: "999px", padding: "5px 10px" }}><span style={{ width: "9px", height: "9px", borderRadius: "999px", background: "#F7931A" }}></span>Bitcoin</span></span><span style={{ fontSize: "12px", color: "#5A6B8C", marginTop: "4px" }}>EVM: Ethereum, Base, Arbitrum, Robinhood Chain</span></div>
+      <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px", borderRight: "1px solid #E4EAF4" }}>
+        <span style={{ fontSize: "12px", color: "#5A6B8C" }}>CHAINS AGENTS WORK ON</span>
+        <span style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px", fontSize: "13px", fontWeight: "600" }}>
+          <ChainBadge chain="near">NEAR</ChainBadge>
+          <ChainBadge chain="ethereum">EVM</ChainBadge>
+          <ChainBadge chain="solana">Solana</ChainBadge>
+          <ChainBadge chain="bitcoin">Bitcoin</ChainBadge>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "7px 10px", fontSize: "12px", color: "#5A6B8C", marginTop: "7px" }}>
+          <span>EVM:</span>
+          <EvmNetwork chain="ethereum">Ethereum</EvmNetwork>
+          <EvmNetwork chain="base">Base</EvmNetwork>
+          <EvmNetwork chain="arbitrum">Arbitrum</EvmNetwork>
+          <span style={{ whiteSpace: "nowrap" }}>Robinhood Chain</span>
+        </span>
+      </div>
       <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px", borderRight: "1px solid #E4EAF4" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>KEYS ANYONE HOLDS</span><span style={{ fontSize: "36px", fontWeight: "600", color: "#127F95" }}>0</span></div>
       <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>REVENUE EPOCH</span><span style={{ fontSize: "36px", fontWeight: "600", color: "#A86A00" }}>7 days</span><span style={{ fontSize: "12px", color: "#5A6B8C" }}>1 hour on testnet</span></div>
     </div>
