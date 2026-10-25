@@ -52,6 +52,7 @@ export function SignIn() {
     }
   }
 
+  const demo = demoWalletsEnabled();
   return (
     <div className="auth">
       <aside className="auth-intro">
@@ -64,29 +65,48 @@ export function SignIn() {
         </ul>
       </aside>
       <div className="auth-card">
-        <div className="brand">MandateOS</div>
-        <h1>Sign in with NEAR</h1>
-        <p className="muted">
-          Use the NEAR account you vote with. Signing a message proves it is yours; it costs nothing and sends no transaction.
-        </p>
-        {demoWalletsEnabled() ? <div className="alert error">UAT DEMO MODE — test-only private keys are stored in this browser.</div> : null}
-        {error ? <div className="alert error">{error}</div> : null}
+        <div className="auth-head">
+          <span className="brand">MandateOS</span>
+          {demo ? <span className="test-pill" title="UAT demo mode: test-only private keys are stored in this browser.">Test mode</span> : null}
+        </div>
+        <h1>Sign in</h1>
+        <p className="muted">With the NEAR account you vote with. You sign a message: it is free and sends no transaction.</p>
         {account ? (
           <>
-            <div className="notice">Wallet connected: <strong className="mono">{account}</strong></div>
-            <button className="primary" disabled={busy} onClick={() => void signIn(account)}>
-              {busy ? "Waiting for the wallet signature…" : `Sign in as ${account}`}
+            <div className="account-chip" title={account}>
+              <span className="account-avatar" style={{ background: accountColor(account) }} aria-hidden="true">{account.slice(0, 1).toUpperCase()}</span>
+              <span className="account-text">
+                <span className="account-label">Connected wallet</span>
+                <span className="account-id mono">{shortAccount(account)}</span>
+              </span>
+              <button className="link-button" type="button" disabled={busy} onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}>Change</button>
+            </div>
+            <button className="primary block" disabled={busy} onClick={() => void signIn(account)}>
+              {busy ? "Confirm in your wallet…" : "Sign in"}
             </button>
           </>
         ) : (
-          <button className="primary" disabled={busy} onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}>
-            Connect NEAR wallet
+          <button className="primary block" disabled={busy} onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}>
+            Connect a NEAR wallet
           </button>
         )}
-        <p className="small muted">
-          New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account, then sign in here.
+        {error ? <div className="alert error auth-error">{error}</div> : null}
+        <p className="auth-foot">
+          New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account.
         </p>
       </div>
     </div>
   );
+}
+
+/** Implicit accounts are 64 hex characters: keep the ends. Named accounts are cut by CSS. */
+function shortAccount(accountId: string): string {
+  return /^[0-9a-f]{64}$/.test(accountId) ? `${accountId.slice(0, 6)}…${accountId.slice(-6)}` : accountId;
+}
+
+/** A stable colour per account, so a member recognises theirs at a glance. */
+function accountColor(accountId: string): string {
+  let hash = 0;
+  for (const char of accountId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return `hsl(${hash % 360} 45% 42%)`;
 }

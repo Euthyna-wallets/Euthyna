@@ -309,3 +309,19 @@ tr.refused td { background: #fff8f7; }
 .warn { color: #b45309; }
 .verified { color: #0f766e; margin: 6px 0 0; }
 tr.allowed td { background: #f4fbf9; }
+
+/* Sign-in card */
+.auth-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.auth-card h1 { margin-top: 18px; }
+.auth-card > .muted { margin: 0 0 22px; line-height: 1.5; }
+.test-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; color: #f5c26b; background: rgba(181, 71, 8, 0.16); border: 1px solid rgba(245, 194, 107, 0.35); cursor: help; }
+.account-chip { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border: 1px solid #28313d; border-radius: 12px; background: #0b0f14; min-width: 0; }
+.account-avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 600; font-size: 15px; }
+.account-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.account-label { font-size: 12px; color: #8b97a7; }
+.account-id { color: #f1f5f9; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-button { flex: none; background: none; border: none; color: var(--accent-2); padding: 4px 2px; cursor: pointer; font: inherit; font-size: 13px; }
+.link-button:hover { text-decoration: underline; }
+button.block { width: 100%; min-height: 44px; font-size: 15px; }
+.auth-error { margin: 14px 0 0; overflow-wrap: anywhere; }
+.auth-foot { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #1f2731; font-size: 13px; color: #8b97a7; line-height: 1.5; }
