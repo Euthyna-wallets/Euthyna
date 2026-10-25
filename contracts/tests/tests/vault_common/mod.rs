@@ -315,6 +315,18 @@ pub fn approval(
     expires_at_ns: u64,
     digest_override: Option<[u8; 32]>,
 ) -> Value {
+    approval_signed_by(fixture, &fixture.guard, operation, visa_nonce, expires_at_ns, digest_override)
+}
+
+/// A visa signed by any key: the Guard's, or an attacker's.
+pub fn approval_signed_by(
+    fixture: &Fixture,
+    signer: &SigningKey,
+    operation: &Value,
+    visa_nonce: u64,
+    expires_at_ns: u64,
+    digest_override: Option<[u8; 32]>,
+) -> Value {
     let op_id = array32(&operation["op_id"]);
     let digest = digest_override.unwrap_or_else(|| array32(&operation["tx_digest"]));
     let reference = operation["request"]["reference"]
@@ -335,7 +347,7 @@ pub fn approval(
     };
     let mut message = b"mandateos:visa:v1".to_vec();
     message.extend_from_slice(&borsh::to_vec(&visa).expect("visa serializes"));
-    let signature = fixture.guard.sign(&message);
+    let signature = signer.sign(&message);
     json!({
         "visa": VisaJson {
             client_id: CLIENT_ID.to_owned(),
@@ -355,6 +367,16 @@ pub fn approval(
 
 pub fn status_report(
     fixture: &Fixture,
+    operation: &Value,
+    report_nonce: u64,
+    confirmed: bool,
+) -> Value {
+    status_report_signed_by(&fixture.status_guard, operation, report_nonce, confirmed)
+}
+
+/// A status report signed by any key: the worker's, or an attacker's.
+pub fn status_report_signed_by(
+    signer: &SigningKey,
     operation: &Value,
     report_nonce: u64,
     confirmed: bool,
@@ -382,7 +404,7 @@ pub fn status_report(
     };
     let mut message = b"mandateos:status:v1".to_vec();
     message.extend_from_slice(&borsh::to_vec(&report).expect("report serializes"));
-    let signature = fixture.status_guard.sign(&message);
+    let signature = signer.sign(&message);
     json!({
         "signed_report": {
             "report": {

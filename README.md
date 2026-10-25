@@ -187,6 +187,17 @@ company shares, in NEAR or in Base ETH bridged by Omni Bridge. Members keep
 their two-thirds vote and their veto on vault changes. See
 [docs/shares.md](./docs/shares.md).
 
+## Attack suite
+
+```bash
+pnpm attack:all       # 39 attacks: vault in a NEAR sandbox + Guard
+pnpm attack:testnet   # the live testnet vault, view calls only
+```
+
+Each attack prints the lock that refused it. The attacker holds the agent's
+key, a stolen Guard key, the server, or one member's account. See
+[docs/attacks.md](./docs/attacks.md).
+
 ## Security boundaries
 
 - The server has no MPC or EVM fund-moving key.
