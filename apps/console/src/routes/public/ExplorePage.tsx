@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { listCompanies, REGISTRY_ID, type DirectoryEntry } from "../../lib/directory.js";
+import { SecuritySection } from "./SecuritySection.js";
 
 const INITIALS_COLORS = ["#4FD1E8", "#F2B544", "#9AD39C", "#F7A99D", "#9DB4F2"];
 
@@ -54,9 +55,10 @@ export function ExplorePage() {
     <nav aria-label="Main" style={{ display: "flex", flexWrap: "wrap", gap: "32px", fontSize: "14px" }}>
       <a href="#pillars" style={{ color: "#F2F6FC", textDecoration: "none" }}>Economy</a>
       <a href="#staff" style={{ color: "#F2F6FC", textDecoration: "none" }}>Control</a>
+      <a href="#security" style={{ color: "#F2F6FC", textDecoration: "none" }}>Security</a>
       <a href="#companies" style={{ color: "#F2F6FC", textDecoration: "none" }}>Companies</a>
     </nav>
-    <a href="/onboarding" style={{ background: "#4FD1E8", color: "#0F1E3D", textDecoration: "none", fontSize: "14px", fontWeight: "600", padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
+    <a href="/overview" style={{ background: "#4FD1E8", color: "#0F1E3D", textDecoration: "none", fontSize: "14px", fontWeight: "600", padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
   </header>
 
   <section id="top" style={{ maxWidth: "1392px", margin: "0 auto", padding: "8px 24px 0" }}>
@@ -174,6 +176,8 @@ export function ExplorePage() {
       <div style={{ padding: "26px 30px", display: "flex", flexDirection: "column", gap: "6px" }}><span style={{ fontSize: "12px", color: "#5A6B8C" }}>REVENUE EPOCH</span><span style={{ fontSize: "36px", fontWeight: "600", color: "#A86A00" }}>7 days</span><span style={{ fontSize: "12px", color: "#5A6B8C" }}>1 hour on testnet</span></div>
     </div>
   </section>
+
+  <SecuritySection />
 
   <section id="roles" style={{ maxWidth: "1392px", margin: "0 auto", padding: "72px 24px 24px" }}>
     <h2 style={{ margin: "0 0 28px", fontSize: "32px", fontWeight: "700" }}>Who are you?</h2>

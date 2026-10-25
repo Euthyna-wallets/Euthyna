@@ -3,7 +3,8 @@
  * MandateOS API is not involved, so what a visitor sees is what the chain says.
  */
 import { BASE_SEPOLIA, budgetsOf, describeVaultCall, formatNear, type RuleChange } from "@mandateos/sdk/roles";
-import { formatUnits, getAddress, hexToBytes, toHex, type Hex } from "viem";
+import { createPublicClient, erc20Abi, formatUnits, getAddress, hexToBytes, http, toHex, type Hex } from "viem";
+import { baseSepolia, sepolia } from "viem/chains";
 
 import { chainView } from "./chain-view.js";
 
@@ -35,7 +36,7 @@ export type CompanyProfile = DirectoryEntry & {
   paused: boolean;
   wallets: Array<{ chainId: number; name: string; address: string }>;
   employees: Employee[];
-  shares: null | { symbol: string; total: string; sold: string; priceNear: string; distributedNear: string; epochHours: number };
+  shares: null | { symbol: string; total: string; sold: string; priceNear: string; distributedNear: string; distributedNearRaw: string; distributedToken: string; revenueToken: string | null; epochHours: number };
 };
 
 async function rpc<T>(params: Record<string, unknown>): Promise<T> {
@@ -122,7 +123,7 @@ export async function companyProfile(entry: DirectoryEntry): Promise<CompanyProf
       return wallet?.address ? { ...chain, address: getAddress(toHex(new Uint8Array(wallet.address))) } : null;
     })),
     entry.shares_id
-      ? chainView<{ dao_id: string; symbol: string; total_supply: string; unsold: string; price_per_share: string; near_distributed: string; epoch_ns: string }>(entry.shares_id, "info").catch(() => null)
+      ? chainView<{ dao_id: string; symbol: string; total_supply: string; unsold: string; price_per_share: string; near_distributed: string; token_distributed: string; revenue_token: string | null; epoch_ns: string }>(entry.shares_id, "info").catch(() => null)
       : Promise.resolve(null),
   ]);
   const council = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
@@ -141,8 +142,60 @@ export async function companyProfile(entry: DirectoryEntry): Promise<CompanyProf
         sold: (BigInt(shares.total_supply) - BigInt(shares.unsold)).toString(),
         priceNear: formatNear(shares.price_per_share),
         distributedNear: formatNear(shares.near_distributed),
+        distributedNearRaw: shares.near_distributed,
+        distributedToken: shares.token_distributed,
+        revenueToken: shares.revenue_token,
         epochHours: Number(BigInt(shares.epoch_ns) / 3_600_000_000_000n),
       }
       : null,
   };
+}
+
+
+export type Holding = { symbol: string; place: string; amount: number; usd: number | null };
+export type Treasury = { holdings: Holding[]; totalUsd: number | null; pricedAt: string | null };
+
+const EVM = [
+  { chainId: 84532, name: "Base", client: createPublicClient({ chain: baseSepolia, transport: http(import.meta.env.VITE_BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org") }), tokens: [
+    { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", decimals: 6, price: "usd-coin" },
+    { address: "0xb8cae3ea035ab123c1833258835ef270c9934162", symbol: "wNEAR", decimals: 24, price: "near" },
+  ] },
+  { chainId: 11155111, name: "Ethereum", client: createPublicClient({ chain: sepolia, transport: http(import.meta.env.VITE_ETHEREUM_SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com") }), tokens: [
+    { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", symbol: "USDC", decimals: 6, price: "usd-coin" },
+  ] },
+] as const;
+
+/** Market prices in USD (CoinGecko), used as a reference: testnet tokens have no value of their own. */
+async function prices(): Promise<Record<string, number> | null> {
+  try {
+    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=near,ethereum,usd-coin&vs_currencies=usd", { signal: AbortSignal.timeout(8_000) });
+    const body = await response.json() as Record<string, { usd?: number }>;
+    return Object.fromEntries(Object.entries(body).map(([id, value]) => [id, value.usd ?? 0]));
+  } catch {
+    return null;
+  }
+}
+
+/** What the company holds: NEAR in the DAO, then native ETH and known tokens in its wallets. */
+export async function treasuryOf(company: CompanyProfile): Promise<Treasury> {
+  const [rates, account] = await Promise.all([prices(), rpc<{ amount: string }>({ request_type: "view_account", account_id: company.dao_id })]);
+  const holdings: Array<Holding & { price: string }> = [
+    { symbol: "NEAR", place: "DAO on NEAR", amount: Number(formatUnits(BigInt(account.amount), 24)), usd: null, price: "near" },
+  ];
+  await Promise.all(company.wallets.map(async (wallet) => {
+    const chain = EVM.find((item) => item.chainId === wallet.chainId);
+    if (!chain) return;
+    const address = wallet.address as Hex;
+    const native = await chain.client.getBalance({ address }).catch(() => 0n);
+    holdings.push({ symbol: "ETH", place: `Wallet on ${chain.name}`, amount: Number(formatUnits(native, 18)), usd: null, price: "ethereum" });
+    for (const token of chain.tokens) {
+      const balance = await chain.client.readContract({ address: token.address as Hex, abi: erc20Abi, functionName: "balanceOf", args: [address] }).catch(() => 0n);
+      holdings.push({ symbol: token.symbol, place: `Wallet on ${chain.name}`, amount: Number(formatUnits(balance, token.decimals)), usd: null, price: token.price });
+    }
+  }));
+  const priced = holdings
+    .filter((holding) => holding.amount > 0)
+    .map(({ price, ...holding }) => ({ ...holding, usd: rates ? holding.amount * (rates[price] ?? 0) : null }))
+    .sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0));
+  return { holdings: priced, totalUsd: rates ? priced.reduce((sum, holding) => sum + (holding.usd ?? 0), 0) : null, pricedAt: rates ? new Date().toISOString() : null };
 }

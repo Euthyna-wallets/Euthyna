@@ -73,7 +73,7 @@ export function Layout() {
             </label>
           ) : null}
           <nav className="app-nav">
-            <NavLink to="/" end>Overview</NavLink>
+            <NavLink to="/overview" end>Overview</NavLink>
             <NavLink to="/roles">Roles</NavLink>
             <NavLink to="/agents">Agents</NavLink>
             <NavLink to="/activity">Activity</NavLink>
