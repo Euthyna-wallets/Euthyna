@@ -104,8 +104,13 @@ Rule changes go through a veto window (`queue_rule_change`, then
 deposit on Aave, a bridge, or a payment to a new recipient. The API adds the
 network fees and nothing else:
 
-- gas: the estimate × 1.3, or 1,000,000 when a call cannot be estimated yet
-  (for example a call that depends on an earlier one in the same proposal);
+- gas: the calls of one chain are estimated in order. The first uses
+  `eth_estimateGas` × 1.3. The next ones run in one `eth_simulateV1` after the
+  earlier calls (gas used × 1.5 + 30k), so an approve-then-supply is estimated
+  on the right state. Several RPCs are tried per chain. A call that would
+  revert refuses the proposal with its reason (`422 would_revert`); no RPC
+  answering refuses it too (`503 gas_estimate_unavailable`). No limit is
+  guessed;
 - max fee: `max(3 × gasPrice + priority, floor per chain)`;
 - the vault caps each transaction at 5M gas, 500 gwei and 0.5 ETH of fees.
 
