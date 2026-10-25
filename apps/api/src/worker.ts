@@ -7,7 +7,7 @@ import { Guard } from "./guard.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { OperationWorker, PrismaWorkerStore } from "./operation-worker.js";
-import { createBaseRelayer } from "./relayer.js";
+import { createBaseRelayer, createChainRelayers } from "./relayer.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -35,6 +35,8 @@ const worker = new OperationWorker(
     cancellationSenderAccountId: env.NEAR_RELAYER_ACCOUNT_ID,
     agentGasLowYocto: env.NEAR_AGENT_GAS_LOW_YOCTO,
   },
+  undefined,
+  createChainRelayers(env, near, guard),
 );
 let running = true;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

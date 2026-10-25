@@ -350,7 +350,7 @@ describe("OperationWorker", () => {
       state: "Broadcast",
       txHash: originalHash,
       receiptBlock: 99n,
-      lastError: "waiting for Base confirmations 4/5",
+      lastError: "waiting for confirmations 4/5",
     });
   });
 

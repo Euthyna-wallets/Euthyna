@@ -242,14 +242,21 @@ export class PrismaWorkerStore implements WorkerStore {
 }
 
 export class OperationWorker {
+  /** Gateway of the chain of the operation being processed (operations run one at a time). */
+  private base: WorkerBaseGateway;
+
   constructor(
     private readonly store: WorkerStore,
     private readonly near: WorkerNearGateway,
-    private readonly base: WorkerBaseGateway,
+    private readonly defaultChain: WorkerBaseGateway,
     private readonly guard: Pick<Guard, "confirmationReport" | "failureReport">,
     private readonly config: WorkerConfig,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+    /** Other EVM chains the company wallet acts on (DAO-voted transactions). */
+    private readonly chains: Record<number, WorkerBaseGateway> = {},
+  ) {
+    this.base = defaultChain;
+  }
 
   async tick(): Promise<{ leased: boolean; processed: number }> {
     const now = this.now();
@@ -283,6 +290,7 @@ export class OperationWorker {
   private async process(record: WorkerOperationRecord, blockTimestampNs: bigint): Promise<void> {
     const id = opBytes(record.opId);
     let operation = await this.near.getOperation(record.vaultAccountId, id);
+    this.base = this.chains[operation.request.chain_id] ?? this.defaultChain;
     const chainWallet = await this.near.viewFunction<unknown>(record.vaultAccountId, "get_wallet", {
       chain_id: operation.request.chain_id,
     });
@@ -382,7 +390,8 @@ export class OperationWorker {
         record,
         id,
         record.nearAuthorizationTxHash,
-        operation.member,
+        // DAO transactions are started by the relayer, agent ones by the agent.
+        operation.role === "__dao__" ? this.config.cancellationSenderAccountId : operation.member,
       );
       operation = await this.near.getOperation(record.vaultAccountId, id);
     }
@@ -479,7 +488,7 @@ export class OperationWorker {
         receiptBlock: receipt.blockNumber,
         lastAttemptAt: this.now(),
         nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+        lastError: `waiting for confirmations ${depth}/${this.config.confirmations}`,
       });
       return;
     }
@@ -567,7 +576,7 @@ export class OperationWorker {
         receiptBlock: receipt.blockNumber,
         lastAttemptAt: this.now(),
         nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+        lastError: `waiting for confirmations ${depth}/${this.config.confirmations}`,
       });
       return;
     }

@@ -77,6 +77,9 @@ export interface OmniRolesChain {
   fees(input: { chainId: number; from: Hex; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }): Promise<{ gasLimit: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
 }
 
+/** Gas limit (before headroom) of a voted call that cannot be estimated. */
+const FALLBACK_GAS = 1_000_000n;
+
 /** Lowest max fee a voted transaction gets, per chain (wei). */
 const FEE_FLOOR_WEI: Record<number, bigint> = { 1: 20_000_000_000n, 11155111: 5_000_000_000n, 8453: 50_000_000n, 84532: 50_000_000n };
 
@@ -93,8 +96,10 @@ export class RpcOmniRolesChain implements OmniRolesChain {
     if (!url) throw new OmniRolesError(400, "unsupported_chain", `no RPC configured for chain ${input.chainId}`);
     const client = createPublicClient({ transport: http(url) });
     // A call that depends on an earlier one in the same proposal (approve, then
-    // supply) cannot be estimated yet: fall back to a wide limit.
-    const estimate = input.gas ?? await client.estimateGas({ account: input.from, to: input.to, value: input.value, data: input.data }).catch(() => 400_000n);
+    // supply) cannot be estimated yet, and a public RPC can fail the estimate:
+    // fall back to a wide limit. Unused gas is not paid; running out reverts
+    // the voted transaction (a bridge deposit burns ~670k on Sepolia).
+    const estimate = input.gas ?? await client.estimateGas({ account: input.from, to: input.to, value: input.value, data: input.data }).catch(() => FALLBACK_GAS);
     const gasPrice = await client.getGasPrice();
     // Signed after the vote and the veto window: leave room for fees to rise.
     const floor = FEE_FLOOR_WEI[input.chainId] ?? 1_000_000_000n;
@@ -699,6 +704,9 @@ export class OmniRolesService {
     const transactions = await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => null);
     if (!transactions) return []; // vault deployed before DAO transactions
     const hashes: string[] = [];
+    // The start transaction carries the MPC response: the worker recovers the
+    // signature from it if the vault could not store it.
+    const startedBy = new Map<number, string>();
     const now = nowNs();
     const busy = new Set(transactions.filter((item) => ["Prepared", "Queued", "PossiblySigned"].includes(item.state)).map((item) => item.request.chain_id));
     const waiting = transactions
@@ -708,7 +716,9 @@ export class OmniRolesService {
       const chainId = item.request.chain_id;
       if (busy.has(chainId)) continue;
       busy.add(chainId);
-      hashes.push(await this.near.callFunction(treasury.vaultAccountId, "start_dao_transaction", { chain_id: chainId }, "150000000000000", "0"));
+      const hash = await this.near.callFunction(treasury.vaultAccountId, "start_dao_transaction", { chain_id: chainId }, "150000000000000", "0");
+      hashes.push(hash);
+      startedBy.set(chainId, hash);
     }
     const started = hashes.length
       ? await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 })
@@ -728,6 +738,7 @@ export class OmniRolesService {
           txDigest: hexOf(item.tx_digest),
           evmNonce: BigInt(item.evm_nonce),
           amount: "0",
+          nearAuthorizationTxHash: item.state === "PossiblySigned" || item.state === "Queued" ? startedBy.get(item.request.chain_id) ?? null : null,
           nextAttemptAt: new Date(),
         },
       });
