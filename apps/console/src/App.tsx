@@ -16,6 +16,8 @@ import { ActivityPage } from "./routes/ActivityPage.js";
 import { RolesPage } from "./routes/RolesPage.js";
 import { SuppliersPage } from "./routes/SuppliersPage.js";
 import { SettingsPage } from "./routes/SettingsPage.js";
+import { CompanyPublicPage } from "./routes/public/CompanyPublicPage.js";
+import { ExplorePage } from "./routes/public/ExplorePage.js";
 
 function Gate() {
   const session = authClient.useSession();
@@ -40,6 +42,9 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
+          {/* Public pages: read from NEAR, no sign-in. */}
+          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/c/:dao" element={<CompanyPublicPage />} />
           <Route element={<Gate />}>
             <Route element={<Layout />}>
               <Route path="/" element={<OverviewPage />} />
