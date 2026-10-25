@@ -38,6 +38,21 @@ the DAO and that the shares contract belongs to it, rebuilds the vote, and only
 then the wallet signs. Members approve it in **Decisions**. The API needs
 `OMNIROLES_REGISTRY_ID`.
 
+## On testnet (2026-10-25)
+
+`registry.mandateos.testnet`, factory `factory-v2.mandateos.testnet`. Created,
+funded, deployed and initialised in one transaction with no `AddKey`, so the
+account never had an access key.
+
+| Step | Result | Transaction |
+| --- | --- | --- |
+| Create + deploy + `new` | 0 access keys; code hash `5j7m4A77ouHUjZGwYEzu6TYiqEL5GG8Rwu2h4Z95xRuC` = base58(sha256 of `contracts/res/registry.wasm`) | `9vRRAXDLQo4TxEcNkAdots5BeRRjT2qDdhxvELog7DPy` |
+| Atlas Labs members vote the listing (proposal #13) | Approved, `registered atlas-labs.factory-v2.mandateos.testnet` | `CSmuZNP23iALw6VCZREq8kHowS6cgF4YxaenspbrA3Bz` |
+| A member account (not a DAO) lists Atlas's vault as "Fake Atlas" | refused, `ERR_NOT_A_MANDATEOS_DAO`; `company_count` stays 1 | receipt `EH5SfsDp241HNKVDMTnwSEhhJbcX1ZQmresKAoMstDnT` |
+
+On testnet the API uses `registry.mandateos.testnet` unless
+`OMNIROLES_REGISTRY_ID` says otherwise.
+
 ## Tests
 
 `contracts/tests/tests/registry.rs` (NEAR sandbox): a company lists itself and
