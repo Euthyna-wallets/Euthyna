@@ -1,71 +1,37 @@
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it } from "vitest";
 
-import { buildAuthOptions, passkeyRelyingParty, type AuthEnvironment } from "./auth.js";
-import { loadEnv } from "./env.js";
+import { buildAuthOptions, type AuthEnvironment } from "./auth.js";
 
 const authEnv: AuthEnvironment = {
   BETTER_AUTH_SECRET: "0123456789012345678901234567890123456789",
   BETTER_AUTH_URL: "http://api.example.com",
   CONSOLE_ORIGIN: "http://console.example.com",
-  PASSKEY_RP_ID: "console.example.com",
 };
+const near = { recipient: "console.example.com", isFullAccessKey: async () => true };
 
-describe("console passkey origin", () => {
-  it("binds the relying party to the console domain, not the API origin", () => {
-    expect(passkeyRelyingParty(authEnv)).toEqual({
-      rpID: "console.example.com",
-      rpName: "MandateOS",
-      origin: "http://console.example.com",
-    });
-    expect(new URL(authEnv.BETTER_AUTH_URL).hostname).not.toBe(passkeyRelyingParty(authEnv).rpID);
-  });
-
-  it("derives rpID from CONSOLE_ORIGIN when PASSKEY_RP_ID is absent", () => {
-    const env = loadEnv({
-      GUARD_VISA_ED25519_PRIVATE_KEY_BASE64: "unused-visa",
-      GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64: "unused-status",
-      NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
-      NEAR_RELAYER_PRIVATE_KEY: "ed25519:unused",
-      DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
-      BETTER_AUTH_SECRET: "0123456789012345678901234567890123456789",
-      CONSOLE_ORIGIN: "https://console.example.com",
-      BUDGET_TOKEN_ACCOUNT_ID: "test-ft.testnet",
-    });
-    expect(env.PASSKEY_RP_ID).toBe("console.example.com");
-  });
-
-  it("keeps email/password disabled and enables sessionless passkey registration", () => {
-    const options = buildAuthOptions(authEnv, undefined, async () => ({
-      id: "user-1",
-      name: "Passkey User",
-      email: "user@example.test",
-      emailVerified: false,
-      image: null,
-      createdAt: new Date(0),
-      updatedAt: new Date(0),
-    }));
+describe("console authentication", () => {
+  it("keeps email/password disabled and signs people in with NEAR only", () => {
+    const options = buildAuthOptions(authEnv, undefined, near);
     expect(options.emailAndPassword?.enabled).toBe(false);
-    expect(options.plugins?.map((plugin) => plugin.id)).toContain("passkey");
+    const plugins = options.plugins?.map((plugin) => plugin.id) ?? [];
+    expect(plugins).toContain("near-sign-in");
+    expect(plugins).not.toContain("passkey");
+    expect(plugins).not.toContain("email-otp");
   });
 
-  it("accepts the console origin for passkey registration and rejects others", async () => {
-    const options = buildAuthOptions(authEnv, undefined);
-    const testOptions = { ...options, emailAndPassword: { enabled: true } };
-    const { auth, signInWithTestUser } = await getTestInstance(testOptions, { port: 3001 });
-    const { headers } = await signInWithTestUser();
-    headers.set("origin", authEnv.CONSOLE_ORIGIN);
-
-    const register = await auth.handler(
-      new Request(`${authEnv.BETTER_AUTH_URL}/api/auth/passkey/generate-register-options`, {
-        method: "GET",
-        headers,
-      }),
-    );
-    expect(register.status).toBe(200);
-    const body = (await register.json()) as { rp: { id: string } };
-    expect(body.rp.id).toBe("console.example.com");
-    expect(body.rp.id).not.toBe(new URL(authEnv.BETTER_AUTH_URL).hostname);
+  it("issues a NEP-413 challenge for the console origin only", async () => {
+    // The test harness seeds a user with email/password; the console never enables it.
+    const { auth } = await getTestInstance({ ...buildAuthOptions(authEnv, undefined, near), emailAndPassword: { enabled: true } }, { port: 3001 });
+    const challenge = await auth.handler(new Request(`${authEnv.BETTER_AUTH_URL}/api/auth/near/challenge`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: authEnv.CONSOLE_ORIGIN },
+      body: JSON.stringify({ accountId: "alice.testnet" }),
+    }));
+    expect(challenge.status).toBe(200);
+    const body = (await challenge.json()) as { message: string; recipient: string };
+    expect(body.recipient).toBe("console.example.com");
+    expect(body.message).toContain("account_id: alice.testnet");
 
     const context = await auth.$context;
     expect(context.trustedOrigins).toContain("http://console.example.com");

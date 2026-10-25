@@ -415,6 +415,79 @@ export function proposalArgs(vaultAccountId: string, title: string, calls: Vault
   };
 }
 
+// ---------------------------------------------------------------------------
+// DAO members (Sputnik policy)
+// ---------------------------------------------------------------------------
+
+export const COUNCIL_ROLE = "council";
+export const COUNCIL_PERMISSIONS = ["*:AddProposal", "*:VoteApprove", "*:VoteReject", "*:VoteRemove", "*:Finalize"];
+
+export type DaoPolicy = {
+  roles: Array<{ name: string; kind: unknown; permissions: string[]; vote_policy: Record<string, unknown> }>;
+  default_vote_policy: { weight_kind: string; quorum: string; threshold: unknown };
+  proposal_bond: string;
+  proposal_period: string;
+  bounty_bond: string;
+  bounty_forgiveness_period: string;
+};
+
+/** Two thirds of the members, rounded up. */
+export function councilThreshold(members: number): number {
+  return Math.ceil((2 * members) / 3);
+}
+
+/** The only policy MandateOS creates: one council group, two-thirds threshold. */
+export function councilPolicy(members: string[], settings: { proposalBond: string; proposalPeriodNs: string }): DaoPolicy {
+  if (members.length < 3) throw new Error("at least three members are needed");
+  if (new Set(members).size !== members.length) throw new Error("a member is listed twice");
+  return {
+    roles: [{ name: COUNCIL_ROLE, kind: { Group: members }, permissions: [...COUNCIL_PERMISSIONS], vote_policy: {} }],
+    default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: String(councilThreshold(members.length)) },
+    proposal_bond: settings.proposalBond,
+    proposal_period: settings.proposalPeriodNs,
+    bounty_bond: settings.proposalBond,
+    bounty_forgiveness_period: settings.proposalPeriodNs,
+  };
+}
+
+export function membersProposalArgs(policy: DaoPolicy, title: string) {
+  return { proposal: { description: `${PROPOSAL_MARKER} ${title}`, kind: { ChangePolicy: { policy } } } };
+}
+
+/**
+ * Describe a ChangePolicy proposal. Anything that is not the standard council
+ * policy (other roles, other permissions, another vote rule) is spelled out
+ * as a warning: it could hand the treasury to someone else.
+ */
+export function describePolicyChange(kind: unknown): { title: string; details: string[]; members: string[]; standard: boolean } | null {
+  const policy = (kind as { ChangePolicy?: { policy?: DaoPolicy } })?.ChangePolicy?.policy;
+  if (!policy || !Array.isArray(policy.roles)) return null;
+  const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+  const warnings: string[] = [];
+  if (policy.roles.length !== 1 || policy.roles[0]?.name !== COUNCIL_ROLE) warnings.push(`⚠ unusual roles: ${policy.roles.map((role) => role.name).join(", ")}`);
+  for (const role of policy.roles) {
+    if ((role.kind as { Group?: unknown })?.Group === undefined) warnings.push(`⚠ role "${role.name}" is open to ${JSON.stringify(role.kind)}`);
+    const extra = role.permissions.filter((permission) => !COUNCIL_PERMISSIONS.includes(permission));
+    if (extra.length) warnings.push(`⚠ role "${role.name}" gets extra permissions: ${extra.join(", ")}`);
+    if (Object.keys(role.vote_policy ?? {}).length) warnings.push(`⚠ role "${role.name}" has its own vote rule`);
+  }
+  const vote = policy.default_vote_policy;
+  const threshold = String(vote?.threshold ?? "");
+  if (vote?.weight_kind !== "RoleWeight" || threshold !== String(councilThreshold(members.length))) {
+    warnings.push(`⚠ vote rule ${JSON.stringify(vote)} instead of ${councilThreshold(members.length)} of ${members.length}`);
+  }
+  return {
+    title: `Members become: ${members.join(", ")}`,
+    details: [
+      `a decision will need ${threshold} of ${members.length} approvals`,
+      "applies as soon as it is approved",
+      ...warnings,
+    ],
+    members,
+    standard: warnings.length === 0,
+  };
+}
+
 /** Decode the vault calls of a Sputnik proposal kind (null if it is not a vault call). */
 export function decodeVaultCalls(kind: unknown, vaultAccountId: string): VaultCall[] | null {
   const functionCall = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; args: string }> } })?.FunctionCall;

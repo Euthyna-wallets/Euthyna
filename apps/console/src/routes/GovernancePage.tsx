@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { BASE_SEPOLIA, budgetsOf, decodeVaultCalls, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
 
 import { api } from "../api.js";
 import { Card, PageState, Status } from "../components/ui.js";
@@ -138,7 +138,9 @@ export function GovernancePage() {
                   now={now}
                   onVote={(action) => run(`vote-${proposal.id}`, async () => {
                     await signDaoAction(me, data!.dao.accountId, proposal.id, proposal.kind, action);
-                    return action === "VoteApprove" ? `You approved proposal #${proposal.id}.` : `You rejected proposal #${proposal.id}.`;
+                    if (action !== "VoteApprove") return `You rejected proposal #${proposal.id}.`;
+                    const approved = await approveProposedSuppliers(proposal.kind);
+                    return `You approved proposal #${proposal.id}.${approved ? ` ${approved} new supplier${approved > 1 ? "s" : ""} it pays registered with your approval.` : ""}`;
                   })}
                 />
               ))}
@@ -171,6 +173,20 @@ export function GovernancePage() {
             </div>
           )}
         </Card>
+
+        {data ? (
+          <MembersCard
+            members={data.dao.members}
+            me={me}
+            canPropose={isMember && !busy}
+            onPropose={(next) => run("members", async () => {
+              const { proposals } = await omni.membersProposals(next);
+              verifyMembersDrafts(proposals, next, data.dao.accountId, data.vaultAccountId);
+              for (const draft of proposals) await signDaoProposal(me, draft);
+              return "Two proposals submitted: the DAO members, then the security council. Members vote on both.";
+            })}
+          />
+        ) : null}
 
         <Card title="Emergency">
           <div className="row wrap" style={{ justifyContent: "space-between" }}>
@@ -218,7 +234,10 @@ export function GovernancePage() {
   );
 }
 
-type Registry = { suppliers: Array<{ name: string; wallets: Array<{ chainId: number; address: string }> }> };
+type Registry = {
+  suppliers: Array<{ name: string; wallets: Array<{ chainId: number; address: string }> }>;
+  pendingChanges?: Array<{ id: string; kind: string; authorId: string; payload: Record<string, unknown> }>;
+};
 
 /**
  * What a member approves is decoded here, in the browser, from the proposal
@@ -229,11 +248,16 @@ type Registry = { suppliers: Array<{ name: string; wallets: Array<{ chainId: num
 function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string): Sentence[] | null {
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry"), staleTime: 60_000 });
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, staleTime: 60_000 });
+  const policyChange = describePolicyChange(proposal.kind);
+  if (policyChange) return [{ title: policyChange.title, details: policyChange.details }];
   const calls = decodeVaultCalls(proposal.kind as Parameters<typeof decodeVaultCalls>[0], vaultAccountId);
   if (!calls) return null;
   const labels: Record<string, string> = {};
   for (const supplier of registry.data?.suppliers ?? []) {
     for (const wallet of supplier.wallets) if (wallet.chainId === BASE_SEPOLIA.chainId) labels[wallet.address] = supplier.name;
+  }
+  for (const change of registry.data?.pendingChanges ?? []) {
+    if (change.kind === "supplier_create" && typeof change.payload.address === "string") labels[change.payload.address] = `${String(change.payload.name)} (new supplier)`;
   }
   if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
   const changes = calls.flatMap((call) => (call.method === "queue_rule_change" ? [call.change as RuleChange] : []));
@@ -326,3 +350,92 @@ function RuleCard(props: {
 }
 
 export { hexToBytes };
+
+/**
+ * A recipient typed in the role builder is a supplier request waiting for a
+ * second person (four-eyes). Approving the role that pays it is that second
+ * look, so the voter's approval also registers it. The author of the request
+ * cannot approve it: the API refuses, and that refusal is ignored here.
+ */
+async function approveProposedSuppliers(kind: unknown): Promise<number> {
+  const registry = await api<Registry>("/v1/console/registry");
+  const text = JSON.stringify(kind).toLowerCase();
+  const decoded = (() => {
+    try {
+      const calls = (kind as { FunctionCall?: { actions?: Array<{ args: string }> } })?.FunctionCall?.actions ?? [];
+      return calls.map((action) => atob(action.args)).join(" ").toLowerCase();
+    } catch {
+      return text;
+    }
+  })();
+  let approved = 0;
+  for (const change of registry.pendingChanges ?? []) {
+    const address = typeof change.payload.address === "string" ? change.payload.address.toLowerCase().slice(2) : null;
+    if (change.kind !== "supplier_create" || !address || !decoded.includes(address)) continue;
+    const ok = await api(`/v1/console/registry-changes/${change.id}/decision`, { method: "POST", body: JSON.stringify({ decision: "approve" }) })
+      .then(() => true, () => false);
+    if (ok) approved += 1;
+  }
+  return approved;
+}
+
+/** Refuse to sign member proposals that do not say exactly what was asked. */
+function verifyMembersDrafts(drafts: Array<{ receiverId: string; args: { proposal: { kind: unknown } } }>, next: string[], dao: string, vault: string) {
+  const [policyDraft, councilDraft] = drafts;
+  const policy = policyDraft ? describePolicyChange(policyDraft.args.proposal.kind) : null;
+  if (!policyDraft || policyDraft.receiverId !== dao || !policy || !policy.standard || policy.members.join() !== next.join()) {
+    throw new Error("The members proposal prepared by the server does not match what you asked. Nothing was signed.");
+  }
+  const calls = councilDraft ? decodeVaultCalls(councilDraft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], vault) : null;
+  const council = calls?.length === 1 && calls[0]!.method === "queue_rule_change" && "SetCouncil" in calls[0]!.change ? calls[0]!.change.SetCouncil.members : null;
+  if (!councilDraft || councilDraft.receiverId !== dao || !council || council.join() !== next.join()) {
+    throw new Error("The security council proposal prepared by the server does not match. Nothing was signed.");
+  }
+}
+
+function MembersCard(props: { members: string[]; me: string; canPropose: boolean; onPropose: (members: string[]) => void }) {
+  const [next, setNext] = useState<string[] | null>(null);
+  const [account, setAccount] = useState("");
+  const list = next ?? props.members;
+  const changed = next !== null && next.join() !== props.members.join();
+  return (
+    <Card title={`Members (${props.members.length})`}>
+      <p className="muted small">
+        The NEAR accounts that vote, veto and pause. Changing them is itself a decision: the DAO members apply when approved,
+        the security council after the veto window.
+      </p>
+      <table>
+        <tbody>
+          {list.map((member) => (
+            <tr key={member}>
+              <td className="mono">{member}{member === props.me ? <span className="small muted"> (you)</span> : null}{!props.members.includes(member) ? <span className="small warn"> · to add</span> : null}</td>
+              <td style={{ textAlign: "right" }}>
+                <button className="ghost" disabled={!props.canPropose || list.length <= 3} title={list.length <= 3 ? "At least three members" : undefined} onClick={() => setNext(list.filter((item) => item !== member))}>Remove</button>
+              </td>
+            </tr>
+          ))}
+          {props.members.filter((member) => !list.includes(member)).map((member) => (
+            <tr key={member}><td className="mono small muted"><s>{member}</s> · to remove</td><td /></tr>
+          ))}
+        </tbody>
+      </table>
+      <form className="row wrap" onSubmit={(event) => {
+        event.preventDefault();
+        const value = account.trim().toLowerCase();
+        if (value && !list.includes(value)) setNext([...list, value]);
+        setAccount("");
+      }}>
+        <input placeholder="new-member.testnet" value={account} onChange={(event) => setAccount(event.target.value)} />
+        <button className="secondary" type="submit" disabled={!props.canPropose || account.trim().length < 2}>Add</button>
+        <div className="spacer" />
+        {changed ? (
+          <>
+            <span className="small">{list.length} members · {councilThreshold(list.length)} of {list.length} approvals</span>
+            <button className="ghost" type="button" onClick={() => setNext(null)}>Undo</button>
+            <button className="primary" type="button" disabled={!props.canPropose} onClick={() => { props.onPropose(list); setNext(null); }}>Propose this change</button>
+          </>
+        ) : null}
+      </form>
+    </Card>
+  );
+}

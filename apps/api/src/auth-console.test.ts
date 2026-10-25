@@ -30,20 +30,12 @@ function fixture(input: { passkey?: boolean; near?: string; seatNear?: string | 
 }
 
 describe("console session boundary", () => {
-  it("refuses a session with neither a NEAR wallet nor a passkey", async () => {
+  it("refuses a session without a NEAR wallet", async () => {
     await expect(fixture({}).gateway.identifyConsole(new Headers())).resolves.toBeNull();
   });
 
-  it("accepts a passkey session", async () => {
-    await expect(fixture({ passkey: true }).gateway.identifyConsole(new Headers())).resolves.toEqual({
-      userId: "user-1",
-      memberId: "member-1",
-      nearAccountId: null,
-      organizationId: "org-1",
-      role: "owner",
-      email: "member@example.test",
-      emailVerified: false,
-    });
+  it("refuses a session from a passkey alone", async () => {
+    await expect(fixture({ passkey: true }).gateway.identifyConsole(new Headers())).resolves.toBeNull();
   });
 
   it("accepts a NEAR wallet session and records the creator's NEAR account on their seat", async () => {

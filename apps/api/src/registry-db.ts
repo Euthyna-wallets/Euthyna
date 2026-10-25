@@ -125,12 +125,20 @@ export class RegistryService {
     });
   }
 
-  requestSupplier(organizationId: string, authorId: string, input: SupplierInput) {
+  async requestSupplier(organizationId: string, authorId: string, input: SupplierInput) {
+    const address = getAddress(input.address);
+    // The same address asked twice (e.g. a role edited again) reuses the request waiting for review.
+    const waiting = await this.prisma.registryChange.findMany({ where: { organizationId, status: "pending", kind: "supplier_create" } });
+    const same = waiting.find((change) => {
+      const payload = change.payload as Record<string, unknown>;
+      return payload.address === address && payload.chainId === input.chainId;
+    });
+    if (same) return same;
     return this.pending(organizationId, authorId, "supplier_create", {
       name: input.name,
       contact: input.contact ?? null,
       chainId: input.chainId,
-      address: getAddress(input.address),
+      address,
     });
   }
 

@@ -14,13 +14,13 @@ export interface AgentIdentity {
   role: string;
 }
 
-export interface PasskeyIdentity {
+export interface SessionIdentity {
   userId: string;
   email: string;
   emailVerified: boolean;
 }
 
-export interface ConsoleIdentity extends PasskeyIdentity {
+export interface ConsoleIdentity extends SessionIdentity {
   memberId: string;
   nearAccountId?: string | null;
   organizationId: string;
@@ -95,35 +95,11 @@ export type NearSponsorshipReservation =
 export interface AuthGateway {
   handler(request: Request): Promise<Response>;
   identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null>;
-  identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null>;
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
   setAgentEvmAddress(organizationId: string, agentId: string, evmAddress: string): Promise<AgentView | null>;
   listMembers(organizationId: string): Promise<MemberView[]>;
-  addMember(
-    organizationId: string,
-    input: { name: string; email?: string | undefined; nearAccountId?: string | undefined; evmAddress?: string | undefined },
-  ): Promise<MemberView>;
-  setMemberWallets(
-    organizationId: string,
-    memberId: string,
-    input: { nearAccountId: string; evmAddress: string },
-  ): Promise<MemberView | null>;
-  decideMemberWalletProof(
-    organizationId: string,
-    memberId: string,
-    actorId: string,
-    input: {
-      decision: "approve" | "reject";
-      nearAccountId?: string | undefined;
-      evmAddress?: string | undefined;
-      walletProofVerifiedAt?: string | undefined;
-    },
-  ): Promise<MemberView | null>;
-  startPasskeyRegistration(
-    input: { email: string; name: string; nearPublicKey?: string | undefined },
-  ): Promise<Response>;
   reserveNearWalletSponsorship(input: {
     organizationId: string;
     userId: string;
@@ -220,28 +196,21 @@ export class BetterAuthGateway implements AuthGateway {
     };
   }
 
-  private async passkeySession(headers: Headers) {
+  /** A console session belongs to a user who signed in with a NEAR wallet. */
+  private async nearSession(headers: Headers) {
     const session = await this.auth.api.getSession({ headers });
     if (!session) return null;
-    // Console users sign in with their NEAR wallet (NEP-413); older profiles with a passkey still work.
-    const [nearAccount, enrolledPasskey] = await Promise.all([
-      this.prisma.account.findFirst({ where: { userId: session.user.id, providerId: NEAR_PROVIDER_ID }, select: { accountId: true } }),
-      this.prisma.passkey.findFirst({ where: { userId: session.user.id }, select: { id: true } }),
-    ]);
-    if (!nearAccount && !enrolledPasskey) return null;
-    return { ...session, nearAccountId: nearAccount?.accountId ?? null };
-  }
-
-  async identifyPasskeyUser(headers: Headers): Promise<PasskeyIdentity | null> {
-    const session = await this.passkeySession(headers);
-    if (!session) return null;
-    return { userId: session.user.id, email: session.user.email, emailVerified: session.user.emailVerified };
+    const nearAccount = await this.prisma.account.findFirst({
+      where: { userId: session.user.id, providerId: NEAR_PROVIDER_ID },
+      select: { accountId: true },
+    });
+    return nearAccount ? { ...session, nearAccountId: nearAccount.accountId } : null;
   }
 
   async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
-    const session = await this.passkeySession(headers);
+    const session = await this.nearSession(headers);
     if (!session) return null;
-    const passkeyUser = { userId: session.user.id, email: session.user.email };
+    const sessionUser = { userId: session.user.id, email: session.user.email };
     const rawSession: unknown = session.session;
     if (
       !rawSession ||
@@ -256,7 +225,7 @@ export class BetterAuthGateway implements AuthGateway {
     }
 
     let member = await this.prisma.member.findFirst({
-      where: { userId: passkeyUser.userId, organizationId: activeOrganizationId },
+      where: { userId: sessionUser.userId, organizationId: activeOrganizationId },
     });
     if (!member) return null;
     if (!member.nearAccountId && session.nearAccountId) {
@@ -264,7 +233,7 @@ export class BetterAuthGateway implements AuthGateway {
       member = await this.prisma.member.update({ where: { id: member.id }, data: { nearAccountId: session.nearAccountId } });
     }
     return {
-      ...passkeyUser,
+      ...sessionUser,
       memberId: member.id,
       nearAccountId: member.nearAccountId,
       organizationId: member.organizationId,
@@ -272,35 +241,6 @@ export class BetterAuthGateway implements AuthGateway {
       emailVerified: session.user.emailVerified,
     };
   }
-
-  async startPasskeyRegistration(
-    input: { email: string; name: string; nearPublicKey?: string | undefined },
-  ): Promise<Response> {
-    const email = input.email.trim().toLowerCase();
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      const enrolled = await this.prisma.passkey.findFirst({
-        where: { userId: existing.id },
-        select: { id: true },
-      });
-      if (enrolled) {
-        return new Response(JSON.stringify({ error: "account_exists" }), {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        });
-      }
-    }
-    const context = await this.auth.createRegistrationContext({
-      email,
-      name: input.name,
-      userId: existing?.id ?? randomUUID(),
-    });
-    return new Response(JSON.stringify({ context }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
 
   async reserveNearWalletSponsorship(input: {
     organizationId: string;
@@ -415,129 +355,6 @@ export class BetterAuthGateway implements AuthGateway {
     });
     if (updated.count === 0) return null;
     return toAgentView(await this.prisma.agent.findUniqueOrThrow({ where: { id: agentId } }));
-  }
-
-  async addMember(
-    organizationId: string,
-    input: { name: string; email?: string | undefined; nearAccountId?: string | undefined; evmAddress?: string | undefined },
-  ): Promise<MemberView> {
-    const userId = randomUUID();
-    const memberId = randomUUID();
-    await this.prisma.$transaction([
-      this.prisma.user.create({
-        data: {
-          id: userId,
-          name: input.name,
-          email: input.email?.trim().toLowerCase() ?? `member-${userId}@members.mandateos.invalid`,
-          emailVerified: false,
-        },
-      }),
-      this.prisma.member.create({
-        data: {
-          id: memberId,
-          organizationId,
-          userId,
-          role: "member",
-          nearAccountId: input.nearAccountId ?? null,
-          evmAddress: input.evmAddress ? getAddress(input.evmAddress) : null,
-          walletProofClaimable: true,
-          createdAt: new Date(),
-        },
-      }),
-    ]);
-    const member = await this.prisma.member.findUniqueOrThrow({
-      where: { id: memberId },
-      include: { user: true },
-    });
-    return toMemberView(member);
-  }
-
-  async setMemberWallets(
-    organizationId: string,
-    memberId: string,
-    input: { nearAccountId: string; evmAddress: string },
-  ): Promise<MemberView | null> {
-    const member = await this.prisma.member.findFirst({
-      where: { id: memberId, organizationId },
-    });
-    if (!member) return null;
-    await this.prisma.$transaction([
-      this.prisma.member.update({
-        where: { id: memberId },
-        data: {
-          nearAccountId: input.nearAccountId,
-          evmAddress: getAddress(input.evmAddress),
-          walletProofVerifiedAt: null,
-          walletProofApprovedAt: null,
-          walletProofApprovedBy: null,
-          walletProofMessage: null,
-          nearProofPublicKey: null,
-          nearProofSignature: null,
-          evmProofSignature: null,
-        },
-      }),
-      this.prisma.walletProofChallenge.deleteMany({ where: { memberId } }),
-      this.prisma.treasuryDeploymentConfirmation.deleteMany({ where: { memberId } }),
-    ]);
-    const updated = await this.prisma.member.findUniqueOrThrow({
-      where: { id: memberId },
-      include: { user: true },
-    });
-    return toMemberView(updated);
-  }
-
-  async decideMemberWalletProof(
-    organizationId: string,
-    memberId: string,
-    actorId: string,
-    input: {
-      decision: "approve" | "reject";
-      nearAccountId?: string | undefined;
-      evmAddress?: string | undefined;
-      walletProofVerifiedAt?: string | undefined;
-    },
-  ): Promise<MemberView | null> {
-    const member = await this.prisma.member.findFirst({
-      where: { id: memberId, organizationId },
-      include: { user: true },
-    });
-    if (!member) return null;
-    if (!member.walletProofVerifiedAt) throw new Error("wallet proof has not been verified");
-    if (member.userId === actorId) throw new Error("a member cannot approve their own wallet proof");
-    if (input.decision === "approve") {
-      if (!input.nearAccountId || !input.evmAddress || !input.walletProofVerifiedAt) {
-        throw new Error("approved wallet proof snapshot is required");
-      }
-      const result = await this.prisma.member.updateMany({
-        where: {
-          id: memberId,
-          organizationId,
-          nearAccountId: input.nearAccountId,
-          evmAddress: getAddress(input.evmAddress),
-          walletProofVerifiedAt: new Date(input.walletProofVerifiedAt),
-        },
-        data: { walletProofApprovedAt: new Date(), walletProofApprovedBy: actorId },
-      });
-      if (result.count !== 1) throw new Error("wallet proof changed during approval");
-    } else {
-      await this.prisma.member.update({
-        where: { id: memberId },
-        data: {
-          walletProofApprovedAt: null,
-          walletProofApprovedBy: null,
-          walletProofVerifiedAt: null,
-          walletProofMessage: null,
-          nearProofPublicKey: null,
-          nearProofSignature: null,
-          evmProofSignature: null,
-        },
-      });
-    }
-    const updated = await this.prisma.member.findUniqueOrThrow({
-      where: { id: memberId },
-      include: { user: true },
-    });
-    return toMemberView(updated);
   }
 
   async listMembers(organizationId: string): Promise<MemberView[]> {

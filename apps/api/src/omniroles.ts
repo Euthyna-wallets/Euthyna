@@ -20,6 +20,9 @@ import {
   decodeVaultCalls,
   describeCall,
   describeVaultCall,
+  councilPolicy,
+  describePolicyChange,
+  membersProposalArgs,
   proposalArgs,
   PROPOSAL_MARKER,
   hexOf,
@@ -210,23 +213,9 @@ export class OmniRolesService {
     const taken = await this.prisma.member.findFirst({ where: { organizationId, nearAccountId: accountId } });
     if (taken) throw new OmniRolesError(409, "member_exists", `${accountId} is already a member`);
     // The user is the NEAR account: signing in with that wallet later lands on this seat.
-    const email = nearUserEmail(accountId);
-    const linked = await this.prisma.account.findFirst({ where: { providerId: NEAR_PROVIDER_ID, accountId } });
-    const user = linked
-      ? await this.prisma.user.findUniqueOrThrow({ where: { id: linked.userId } })
-      : (await this.prisma.user.findUnique({ where: { email } })) ?? await this.prisma.user.create({
-        data: { id: randomUUID(), name: input.name?.trim() || accountId, email, emailVerified: true },
-      });
-    if (!linked) {
-      await this.prisma.account.create({
-        data: { id: randomUUID(), userId: user.id, providerId: NEAR_PROVIDER_ID, accountId, createdAt: new Date(), updatedAt: new Date() },
-      });
+    if (!(await this.createSeat(organizationId, accountId, input.name))) {
+      throw new OmniRolesError(409, "member_exists", `${accountId} is already a member`);
     }
-    const existingSeat = await this.prisma.member.findFirst({ where: { organizationId, userId: user.id } });
-    if (existingSeat) throw new OmniRolesError(409, "member_exists", `${accountId} is already a member`);
-    await this.prisma.member.create({
-      data: { id: randomUUID(), organizationId, userId: user.id, role: "member", nearAccountId: accountId, createdAt: new Date() },
-    });
     return this.members(organizationId);
   }
 
@@ -308,20 +297,11 @@ export class OmniRolesService {
     return { daoTransaction, vaultTransaction };
   }
 
-  private daoPolicy(plan: OmniRolesPlan) {
-    return {
-      roles: [{
-        name: "council",
-        kind: { Group: plan.council.map((member) => member.nearAccountId) },
-        permissions: ["*:AddProposal", "*:VoteApprove", "*:VoteReject", "*:VoteRemove", "*:Finalize"],
-        vote_policy: {},
-      }],
-      default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: String(plan.threshold) },
-      proposal_bond: this.config.proposalBondYocto,
-      proposal_period: this.config.proposalPeriodNs,
-      bounty_bond: this.config.proposalBondYocto,
-      bounty_forgiveness_period: this.config.proposalPeriodNs,
-    };
+  private daoPolicy(plan: { council: Array<{ nearAccountId: string }> }) {
+    return councilPolicy(plan.council.map((member) => member.nearAccountId), {
+      proposalBond: this.config.proposalBondYocto,
+      proposalPeriodNs: this.config.proposalPeriodNs,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -331,7 +311,6 @@ export class OmniRolesService {
   async status(organizationId: string) {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };
-    const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const [daoPolicy, daoKeys, vaultAccount, vaultKeys, owner, council, visa, status, wallet, paused] = await Promise.all([
       this.view<{ roles: Array<{ name: string; kind: unknown }>; default_vote_policy: { threshold: unknown } }>(treasury.daoAccountId, "get_policy").catch(() => null),
       this.cached("keys", treasury.daoAccountId).catch(() => null),
@@ -347,6 +326,8 @@ export class OmniRolesService {
     const daoMembers = (daoPolicy?.roles ?? [])
       .flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []))
       .sort();
+    if (daoMembers.length) await this.syncSeats(organizationId, daoMembers).catch(() => undefined);
+    const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const expectedMembers = (plan?.council.map((member) => member.nearAccountId) ?? []).sort();
     const expectedCodeHash = bs58.encode(Buffer.from(treasury.vaultWasmSha256, "hex"));
     const visaKey = Buffer.from(await this.visaSigner.publicKey()).toString("base64");
@@ -358,7 +339,7 @@ export class OmniRolesService {
       ok: String(expected) === String(actual),
     });
     const checks: Check[] = [
-      check("DAO members are the verified company members", expectedMembers.join(", "), daoMembers.join(", ")),
+      check("DAO members are the company members", expectedMembers.join(", "), daoMembers.join(", ")),
       check("DAO has no access key (only votes change it)", 0, daoKeys?.keys.length ?? "unreadable"),
       check("Vault code is the published MandateOS vault", expectedCodeHash, vaultAccount?.code_hash ?? "missing"),
       check("Vault has no access key (no one can replace its code)", 0, vaultKeys?.keys.length ?? "unreadable"),
@@ -428,6 +409,72 @@ export class OmniRolesService {
     return this.proposal(treasury, pause ? "Pause all operations" : "Resume operations", [{ method: pause ? "pause" : "unpause" }]);
   }
 
+  /**
+   * Change who votes. Two proposals, voted together: the DAO policy (members
+   * and the two-thirds threshold, applies on approval) and the vault's security
+   * council (who can veto and pause, applies after the veto window).
+   */
+  async membersProposals(organizationId: string, nextMembers: string[]) {
+    const treasury = await this.requireTreasury(organizationId);
+    const members = nextMembers.map((member) => member.trim().toLowerCase());
+    for (const accountId of members) {
+      if (!NEAR_ACCOUNT_ID.test(accountId)) throw new OmniRolesError(400, "invalid_account", `${accountId} is not a NEAR account id`);
+      if (!(await this.accountExists(accountId))) throw new OmniRolesError(422, "account_not_found", `${accountId} does not exist on NEAR ${this.config.nearNetwork}`);
+    }
+    let policy: ReturnType<typeof councilPolicy>;
+    try {
+      policy = this.daoPolicy({ council: members.map((nearAccountId) => ({ nearAccountId })) });
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_members", error instanceof Error ? error.message : String(error));
+    }
+    const title = `Change members: ${members.join(", ")}`;
+    const policyDraft = {
+      receiverId: treasury.daoAccountId,
+      args: membersProposalArgs(policy, title),
+      deposit: this.config.proposalBondYocto,
+      title,
+      summary: [describePolicyChange({ ChangePolicy: { policy } })!].map(({ title: heading, details }) => ({ title: heading, details })),
+    };
+    const councilDraft = await this.proposal(treasury, "Update the security council", [
+      { method: "queue_rule_change", change: { SetCouncil: { members } } },
+    ]);
+    return { proposals: [policyDraft, councilDraft] };
+  }
+
+  /** Console seats follow the DAO: every DAO member has one, removed members lose theirs. */
+  private async syncSeats(organizationId: string, daoMembers: string[]) {
+    const seats = await this.prisma.member.findMany({ where: { organizationId } });
+    for (const accountId of daoMembers) {
+      if (!seats.some((seat) => seat.nearAccountId === accountId)) await this.createSeat(organizationId, accountId);
+    }
+    const stale = seats.filter((seat) => seat.role !== "owner" && seat.nearAccountId && !daoMembers.includes(seat.nearAccountId));
+    if (stale.length) await this.prisma.member.deleteMany({ where: { id: { in: stale.map((seat) => seat.id) } } });
+  }
+
+  private async createSeat(organizationId: string, accountId: string, name?: string) {
+    const email = nearUserEmail(accountId);
+    const linked = await this.prisma.account.findFirst({ where: { providerId: NEAR_PROVIDER_ID, accountId } });
+    const user = linked
+      ? await this.prisma.user.findUniqueOrThrow({ where: { id: linked.userId } })
+      : (await this.prisma.user.findUnique({ where: { email } })) ?? await this.prisma.user.create({
+        data: { id: randomUUID(), name: name?.trim() || accountId, email, emailVerified: true },
+      });
+    if (!linked) {
+      await this.prisma.account.create({
+        data: { id: randomUUID(), userId: user.id, providerId: NEAR_PROVIDER_ID, accountId, createdAt: new Date(), updatedAt: new Date() },
+      });
+    }
+    const existingSeat = await this.prisma.member.findFirst({ where: { organizationId, userId: user.id } });
+    if (existingSeat) {
+      if (!existingSeat.nearAccountId) await this.prisma.member.update({ where: { id: existingSeat.id }, data: { nearAccountId: accountId } });
+      return false;
+    }
+    await this.prisma.member.create({
+      data: { id: randomUUID(), organizationId, userId: user.id, role: "member", nearAccountId: accountId, createdAt: new Date() },
+    });
+    return true;
+  }
+
   private async proposal(
     treasury: { daoAccountId: string; vaultAccountId: string },
     title: string,
@@ -463,6 +510,7 @@ export class OmniRolesService {
       ? []
       : await this.view<DaoProposal[]>(treasury.daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 50), limit: 50 });
     const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+    await this.syncSeats(organizationId, members);
     // Budgets are named from every role ever proposed, so older budgets keep their names.
     const allChanges = [
       ...rules.map((rule) => rule.change),
@@ -496,7 +544,14 @@ export class OmniRolesService {
             kind: proposal.kind,
             submittedAt: new Date(Number(BigInt(proposal.submission_time) / NANOS_PER_MS)).toISOString(),
             expiresAt: new Date(Number((BigInt(proposal.submission_time) + BigInt(policy.proposal_period)) / NANOS_PER_MS)).toISOString(),
-            changes: calls ? calls.map((call) => describeVaultCall(call, context)) : [{ title: "Not a vault change", details: [JSON.stringify(proposal.kind).slice(0, 300)] }],
+            changes: calls
+              ? calls.map((call) => describeVaultCall(call, context))
+              : (() => {
+                const policyChange = describePolicyChange(proposal.kind);
+                return policyChange
+                  ? [{ title: policyChange.title, details: policyChange.details }]
+                  : [{ title: "Not a vault change", details: [JSON.stringify(proposal.kind).slice(0, 300)] }];
+              })(),
           };
         }),
       rules: rules.map((rule) => ({

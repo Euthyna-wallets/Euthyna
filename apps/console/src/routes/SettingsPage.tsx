@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 
-import { authClient } from "../auth.js";
 import { Card } from "../components/ui.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 
@@ -26,12 +25,6 @@ export function SettingsPage() {
         <Card title="Escalations">
           <p className="muted">Review payments that fall outside an active mandate.</p>
           <Link className="text-action" to="/escalations">Review escalations →</Link>
-        </Card>
-        <Card title="Passkey">
-          <p className="muted">Add another passkey to this MandateOS profile.</p>
-          <button className="secondary" onClick={() => void authClient.passkey.addPasskey({ name: "MandateOS console" })}>
-            Add passkey
-          </button>
         </Card>
       </div>
       <details className="advanced-settings">

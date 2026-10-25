@@ -4,14 +4,13 @@ import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
 import { Hono, type Context, type Next } from "hono";
-import { getConnInfo } from "@hono/node-server/conninfo";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
 import { AgentProvisioningError, type AgentProvisioningService } from "./agent-provisioning.js";
 import { onChainAgentEvmAddress } from "./agent-chain.js";
-import type { AgentIdentity, AuthGateway, ConsoleIdentity, PasskeyIdentity } from "./auth-gateway.js";
+import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway.js";
 import type { Guard } from "./guard.js";
 import { GovernanceError, type GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
@@ -22,7 +21,6 @@ import { PaymentError, type PaymentService } from "./payments.js";
 import type { ConsoleDataService } from "./console-data.js";
 import type { MandateGateway } from "./mandates.js";
 import type { BaseRelayer } from "./relayer.js";
-import { WalletProofError, type WalletProofGateway } from "./wallet-proof.js";
 
 const requestSchema = z.object({
   vaultAccountId: z.string().min(2),
@@ -122,29 +120,6 @@ const evmAddressSchema = z
   .transform((value) => value.trim().split(/\s+/)[0]!)
   .pipe(z.string().regex(/^0x[0-9a-fA-F]{40}$/));
 
-const addMemberSchema = z.object({
-  name: z.string().min(1).max(120),
-  email: z.string().email().optional(),
-  nearAccountId: nearAccountSchema.optional(),
-  evmAddress: evmAddressSchema.optional(),
-}).refine((input) => Boolean(input.nearAccountId) === Boolean(input.evmAddress), {
-  message: "nearAccountId and evmAddress must be provided together",
-});
-
-const walletsSchema = z.object({
-  nearAccountId: nearAccountSchema,
-  evmAddress: evmAddressSchema,
-});
-const walletProofDecisionSchema = z.discriminatedUnion("decision", [
-  z.object({
-    decision: z.literal("approve"),
-    nearAccountId: nearAccountSchema,
-    evmAddress: evmAddressSchema,
-    walletProofVerifiedAt: z.string().datetime(),
-  }),
-  z.object({ decision: z.literal("reject") }),
-]);
-
 const treasuryPlanSchema = z.object({
   environment: z.string().min(1).default("uat"),
   daoName: z.string().min(2).max(40),
@@ -204,40 +179,13 @@ const nearRpcProxySchema = z.object({
 
 
 
-const walletProofChallengeSchema = z.object({
-  memberId: z.string().min(1).max(128),
-  nearAccountId: nearAccountSchema,
-  evmAddress: evmAddressSchema,
-});
-
-const walletProofSubmissionSchema = z.object({
-  challengeId: z.string().uuid(),
-  nearAccountId: nearAccountSchema,
-  nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
-  nearSignature: z.string().min(40).max(200),
-  evmAddress: evmAddressSchema,
-  evmSignature: z.string().regex(/^0x[0-9a-fA-F]+$/).max(300),
-});
-
 function derivedWalletAccountId(publicKey: string, parent: string): string {
   const suffix = createHash("sha256").update(publicKey).digest("hex").slice(0, 12);
   return `w-${suffix}.${parent}`;
 }
 
-function registrationIp(context: Context): string {
-  try {
-    const directIp = getConnInfo(context).remote.address;
-    if (directIp) return directIp;
-  } catch {
-    // In-memory tests do not expose a socket; use the explicit edge header below.
-  }
-  return context.req.header("cf-connecting-ip") ?? context.req.header("x-real-ip") ?? "unknown";
-}
-
-
 interface AppVariables {
   agent: AgentIdentity;
-  passkey: PasskeyIdentity;
   console: ConsoleIdentity;
 }
 type AppContext = Context<{ Variables: AppVariables }>;
@@ -247,7 +195,6 @@ export interface AppDependencies {
   guard: Guard;
   relayer: BaseRelayer;
   auth: AuthGateway;
-  walletProof: WalletProofGateway;
   agentProvisioning: AgentProvisioningService;
   treasury: TreasuryGateway;
   governance: GovernanceGateway;
@@ -259,7 +206,6 @@ export interface AppDependencies {
   nearParentAccount: string;
   nearSponsorDailyWalletLimit: number;
   nearSponsorWalletAmountYocto: string;
-  registrationRateLimitEnabled: boolean;
   omniroles?: OmniRolesService;
 }
 
@@ -287,18 +233,6 @@ function requireConsole(auth: AuthGateway, limiter: RateLimiter) {
       throw new HTTPException(429, { message: "rate limit exceeded" });
     }
     context.set("console", identity);
-    await next();
-  };
-}
-
-function requirePasskey(auth: AuthGateway, limiter: RateLimiter) {
-  return async (context: AppContext, next: Next) => {
-    const identity = await auth.identifyPasskeyUser(context.req.raw.headers);
-    if (!identity) throw new HTTPException(401, { message: "passkey session required" });
-    if (!limiter.allow(`profile:${identity.userId}`)) {
-      throw new HTTPException(429, { message: "rate limit exceeded" });
-    }
-    context.set("passkey", identity);
     await next();
   };
 }
@@ -334,18 +268,6 @@ function requireConsoleRequest(consoleOrigin: string) {
   };
 }
 
-async function parseJsonPublic<T>(context: Context, schema: z.ZodType<T>): Promise<T> {
-  let body: unknown;
-  try {
-    body = await context.req.json();
-  } catch {
-    throw new HTTPException(400, { message: "invalid JSON body" });
-  }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
-  return parsed.data;
-}
-
 async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<T> {
   let body: unknown;
   try {
@@ -365,7 +287,6 @@ export function createApp({
   guard,
   relayer,
   auth,
-  walletProof,
   agentProvisioning,
   treasury,
   governance,
@@ -377,35 +298,32 @@ export function createApp({
   nearParentAccount,
   nearSponsorDailyWalletLimit,
   nearSponsorWalletAmountYocto,
-  registrationRateLimitEnabled,
   omniroles,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
   const agentProvisionLimiter = new MemoryRateLimiter(10, 60 * 60_000);
-  const registrationIpLimiter = new MemoryRateLimiter(5, 15 * 60_000);
-  const registrationEmailLimiter = new MemoryRateLimiter(3, 60 * 60_000);
   app.use(
     "*",
     cors({
       origin: consoleOrigin,
       credentials: true,
       allowHeaders: ["content-type", "x-api-key"],
-      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     }),
   );
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
-  app.use("/v1/profile/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     const path = context.req.path;
     if (path.endsWith("/sign-up/email") || path.endsWith("/sign-in/email")) {
       return context.json({ error: "not_found" }, 404);
     }
-    if (path.endsWith("/organization/accept-invitation")) {
-      return context.json({ error: "wallet_proof_required" }, 403);
+    // Members are the NEAR accounts of the DAO: no Better Auth invitations or member edits.
+    if (/\/organization\/(invite-member|accept-invitation|reject-invitation|cancel-invitation|add-member|remove-member|update-member-role|leave)$/.test(path)) {
+      return context.json({ error: "members_follow_the_dao" }, 403);
     }
     return auth.handler(context.req.raw);
   });
@@ -426,76 +344,6 @@ export function createApp({
     }
   });
 
-
-  app.post("/api/register/passkey-start", async (context) => {
-    const input = await parseJsonPublic(context, z.object({
-      email: z.string().email().transform((value) => value.trim().toLowerCase()),
-      name: z.string().min(1).max(120),
-      nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/).optional(),
-    }));
-    const ip = registrationIp(context);
-    if (
-      registrationRateLimitEnabled &&
-      (
-        !registrationIpLimiter.allow(`register:ip:${ip}`) ||
-        !registrationEmailLimiter.allow(`register:email:${input.email}`)
-      )
-    ) {
-      return context.json({ error: "registration_rate_limited" }, 429);
-    }
-
-    const response = await auth.startPasskeyRegistration(input);
-    if (!response.ok || !input.nearPublicKey) return response;
-    const payload = (await response.clone().json()) as Record<string, unknown>;
-    const nearAccountId = derivedWalletAccountId(input.nearPublicKey, nearParentAccount);
-    if (nearAccountId.length > 64) {
-      return context.json({ error: "near_account_too_long" }, 500);
-    }
-    return new Response(JSON.stringify({ ...payload, nearAccountId }), {
-      status: response.status,
-      headers: response.headers,
-    });
-  });
-
-  app.get(
-    "/v1/profile/invitations/:memberId",
-    requirePasskey(auth, consoleLimiter),
-    async (context) => {
-      const identity = context.get("passkey");
-      const memberId = z.string().uuid().parse(context.req.param("memberId"));
-      return context.json(await walletProof.invitation(identity, memberId));
-    },
-  );
-
-  app.post(
-    "/v1/profile/wallet-proof/challenge",
-    requirePasskey(auth, consoleLimiter),
-    async (context) => {
-      const identity = context.get("passkey");
-      const input = await parseJson(context, walletProofChallengeSchema);
-      return context.json(await walletProof.createChallenge(identity, input));
-    },
-  );
-
-  app.post(
-    "/v1/profile/wallet-proof/verify",
-    requirePasskey(auth, consoleLimiter),
-    async (context) => {
-      const identity = context.get("passkey");
-      const input = await parseJson(context, walletProofSubmissionSchema);
-      const result = await walletProof.verify(identity.userId, input);
-      await auth.recordAudit({
-        organizationId: result.organizationId,
-        actorType: "console",
-        actorId: identity.userId,
-        action: "member.wallets_proved",
-        targetType: "member",
-        targetId: result.memberId,
-        metadata: { nearAccountId: input.nearAccountId, evmAddress: input.evmAddress },
-      });
-      return context.json({ ...result, verified: true });
-    },
-  );
 
   app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const input = await parseJson(context, requestSchema);
@@ -949,74 +797,6 @@ export function createApp({
     return context.json(registered, 201);
   });
 
-  app.post("/v1/console/members", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, addMemberSchema);
-    const member = await auth.addMember(consoleIdentity.organizationId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "member.added",
-      targetType: "member",
-      targetId: member.id,
-      metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
-    });
-    return context.json(member, 201);
-  });
-
-  app.patch("/v1/console/members/:id/wallets", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const memberId = context.req.param("id");
-    if (!memberId) return context.json({ error: "member_not_found" }, 404);
-    const input = await parseJson(context, walletsSchema);
-    const member = await auth.setMemberWallets(consoleIdentity.organizationId, memberId, input);
-    if (!member) return context.json({ error: "member_not_found" }, 404);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "member.wallets_updated",
-      targetType: "member",
-      targetId: member.id,
-      metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
-    });
-    return context.json(member);
-  });
-  app.post("/v1/console/members/:id/wallet-proof-decision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const memberId = context.req.param("id");
-    if (!memberId) return context.json({ error: "member_not_found" }, 404);
-    const input = await parseJson(context, walletProofDecisionSchema);
-    try {
-      const member = await auth.decideMemberWalletProof(
-        consoleIdentity.organizationId,
-        memberId,
-        consoleIdentity.userId,
-        input,
-      );
-      if (!member) return context.json({ error: "member_not_found" }, 404);
-      await auth.recordAudit({
-        organizationId: consoleIdentity.organizationId,
-        actorType: "console",
-        actorId: consoleIdentity.userId,
-        action: `member.wallets_${input.decision}d`,
-        targetType: "member",
-        targetId: member.id,
-        metadata: { nearAccountId: member.nearAccountId, evmAddress: member.evmAddress },
-      });
-      return context.json(member);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("own wallet proof")) return context.json({ error: "four_eyes_required", message }, 403);
-      if (message.includes("has not been verified")) return context.json({ error: "wallet_proof_missing", message }, 409);
-      if (message.includes("proof changed") || message.includes("snapshot is required")) {
-        return context.json({ error: "wallet_proof_changed", message }, 409);
-      }
-      throw error;
-    }
-  });
-
   app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     return context.json({ members: await auth.listMembers(consoleIdentity.organizationId) });
@@ -1255,6 +1035,10 @@ export function createApp({
         maxUses: input.maxUses ?? null,
       }));
     });
+    app.post("/v1/console/omniroles/proposals/members", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ members: z.array(z.string().min(2).max(64)).min(3).max(20) }));
+      return context.json(await omniroles.membersProposals(orgOf(context), input.members));
+    });
     app.post("/v1/console/omniroles/proposals/pause", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ pause: z.boolean() }));
       return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
@@ -1295,9 +1079,6 @@ export function createApp({
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof GovernanceError) {
-      return context.json({ error: error.code, message: error.message }, error.status);
-    }
-    if (error instanceof WalletProofError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof AgentProvisioningError) {

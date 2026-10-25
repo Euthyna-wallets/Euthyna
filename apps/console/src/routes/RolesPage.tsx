@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { getAddress } from "viem";
 import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
@@ -211,9 +212,13 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
                   })}
                   {supplierOptions.length === 0 ? <span className="small muted">No supplier wallet on {PROFILE.name} yet. Add suppliers first, or enter an address:</span> : null}
                 </div>
-                <ManualRecipient onAdd={(recipient) => update(index, { recipients: [...block.recipients, recipient] })} />
+                <ManualRecipient onAdd={async (recipient) => {
+                  // A new recipient is also a supplier request; the member who approves the role registers it.
+                  await api("/v1/console/suppliers", { method: "POST", body: JSON.stringify({ name: recipient.label, address: recipient.address, chainId: PROFILE.chainId }) });
+                  update(index, { recipients: [...block.recipients, recipient] });
+                }} />
                 {block.recipients.filter((item) => !supplierOptions.some((option) => option.address.toLowerCase() === item.address.toLowerCase())).map((item) => (
-                  <span key={item.address} className="small">{item.label} <span className="mono">{short(item.address)}</span></span>
+                  <span key={item.address} className="small">{item.label} <span className="mono">{item.address}</span> · new supplier, registered when another member approves this role</span>
                 ))}
               </>
             ) : (
@@ -320,15 +325,30 @@ function TokenSelect({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
-function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; label: string }) => void }) {
+function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; label: string }) => Promise<void> }) {
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const valid = /^0x[0-9a-fA-F]{40}$/.test(address) && label.trim().length > 0;
   return (
     <div className="row wrap">
       <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
       <input placeholder="0x… address" value={address} onChange={(event) => setAddress(event.target.value.trim())} />
-      <button disabled={!valid} onClick={() => { onAdd({ address, label: label.trim() }); setLabel(""); setAddress(""); }}>Add recipient</button>
+      <button disabled={!valid || busy} onClick={() => void (async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          await onAdd({ address: getAddress(address), label: label.trim() });
+          setLabel("");
+          setAddress("");
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+          setBusy(false);
+        }
+      })()}>Add recipient</button>
+      {error ? <span className="small warn">{error}</span> : null}
     </div>
   );
 }

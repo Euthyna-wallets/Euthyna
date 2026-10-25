@@ -152,63 +152,6 @@ export async function signNearMessage(input: { message: string; recipient: strin
   return signed;
 }
 
-export type WalletProofChallenge = {
-  id: string;
-  memberId: string;
-  nearAccountId: string;
-  evmAddress: string;
-  message: string;
-  nonceBase64: string;
-  recipient: string;
-  expiresAt: string;
-};
-
-export async function signWalletProofChallenge(challenge: WalletProofChallenge): Promise<{
-  challengeId: string;
-  nearAccountId: string;
-  nearPublicKey: string;
-  nearSignature: string;
-  evmAddress: string;
-  evmSignature: Hex;
-}> {
-  if (
-    demoWalletsEnabled() &&
-    !selectDemoWalletScopeForAccounts(challenge.nearAccountId, challenge.evmAddress)
-  ) {
-    throw new Error("No generated demo wallet matches the declared member accounts");
-  }
-  const nonce = Buffer.from(challenge.nonceBase64, "base64");
-  const params = { message: challenge.message, recipient: challenge.recipient, nonce };
-  const injected = e2eNear();
-  const nearSigned = injected?.signMessage
-    ? await injected.signMessage(params)
-    : demoWalletsEnabled()
-      ? await (await generatedNear()).signMessage!(params)
-      : await (await nearSelector()).wallet().then((wallet) => wallet.signMessage(params));
-  if (!nearSigned) throw new Error("NEAR wallet did not return a NEP-413 signature");
-  if (nearSigned.accountId !== challenge.nearAccountId) {
-    throw new Error(`NEAR signer ${nearSigned.accountId} does not match ${challenge.nearAccountId}`);
-  }
-
-  await switchToBaseSepolia();
-  const evmAddress = getAddress((await evmAccounts())[0] ?? "");
-  if (evmAddress !== getAddress(challenge.evmAddress)) {
-    throw new Error(`EVM signer ${evmAddress} does not match ${challenge.evmAddress}`);
-  }
-  const evmSignature = await evmWalletClient().signMessage({
-    account: demoWalletsEnabled() ? generatedEvmAccount() : evmAddress,
-    message: challenge.message,
-  });
-  return {
-    challengeId: challenge.id,
-    nearAccountId: nearSigned.accountId,
-    nearPublicKey: nearSigned.publicKey,
-    nearSignature: nearSigned.signature,
-    evmAddress,
-    evmSignature,
-  };
-}
-
 function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));

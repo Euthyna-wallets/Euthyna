@@ -17,7 +17,6 @@ import { MandateService } from "./mandates.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { ConsoleDataService } from "./console-data.js";
-import { WalletProofService } from "./wallet-proof.js";
 import { OmniRolesService } from "./omniroles.js";
 
 const env = loadEnv();
@@ -45,13 +44,6 @@ const auth = new BetterAuthGateway(createAuth(env, prisma, {
     }
   },
 }), prisma);
-const walletProof = new WalletProofService(
-  prisma,
-  near,
-  env.NEAR_ACCOUNT_PARENT,
-  84532,
-  env.UAT_DEMO_WALLETS_ENABLED,
-);
 const agentProvisioning = new AgentProvisioningService(
   prisma,
   near,
@@ -144,7 +136,6 @@ const app = createApp({
   guard,
   relayer,
   auth,
-  walletProof,
   treasury,
   agentProvisioning,
   governance,
@@ -156,7 +147,6 @@ const app = createApp({
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
   nearSponsorDailyWalletLimit: env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   nearSponsorWalletAmountYocto: env.NEAR_SPONSOR_WALLET_AMOUNT_YOCTO,
-  registrationRateLimitEnabled: !env.UAT_DEMO_WALLETS_ENABLED,
   omniroles,
 });
 
