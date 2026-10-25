@@ -34,3 +34,14 @@ describe("Base gas cap configuration", () => {
   });
 
 });
+
+describe("NEAR account parent", () => {
+  it("defaults to the relayer when empty or missing", () => {
+    expect(loadEnv({ ...required }).NEAR_ACCOUNT_PARENT).toBe("relayer.testnet");
+    expect(loadEnv({ ...required, NEAR_ACCOUNT_PARENT: "" }).NEAR_ACCOUNT_PARENT).toBe("relayer.testnet");
+  });
+
+  it("refuses a parent the relayer cannot create sub-accounts under", () => {
+    expect(() => loadEnv({ ...required, NEAR_ACCOUNT_PARENT: "mandateos.testnet" })).toThrow("must be the relayer account");
+  });
+});
