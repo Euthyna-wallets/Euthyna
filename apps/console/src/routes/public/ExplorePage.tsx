@@ -58,7 +58,7 @@ export function ExplorePage() {
       <a href="#security" style={{ color: "#F2F6FC", textDecoration: "none" }}>Security</a>
       <a href="#companies" style={{ color: "#F2F6FC", textDecoration: "none" }}>Companies</a>
     </nav>
-    <a href="/onboarding" style={{ background: "#4FD1E8", color: "#0F1E3D", textDecoration: "none", fontSize: "14px", fontWeight: "600", padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
+    <a href="/overview" style={{ background: "#4FD1E8", color: "#0F1E3D", textDecoration: "none", fontSize: "14px", fontWeight: "600", padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
   </header>
 
   <section id="top" style={{ maxWidth: "1392px", margin: "0 auto", padding: "8px 24px 0" }}>

@@ -244,7 +244,7 @@ export function OnboardingPage() {
                 </p>
               </div>
               <div className="row wrap">
-                <Link className="button primary" to="/">Overview</Link>
+                <Link className="button primary" to="/overview">Overview</Link>
                 <Link className="button" to="/activity">What the agents did</Link>
                 {shares.data?.deployed ? <Link className="button" to="/shares">Shares</Link> : null}
               </div>

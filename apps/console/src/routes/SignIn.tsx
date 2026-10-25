@@ -63,7 +63,7 @@ export function SignIn() {
           <li>A vault checks every agent request against them</li>
           <li>No key on our servers can move company funds</li>
         </ul>
-        <a className="text-action" href="/explore">Explore the AI companies →</a>
+        <a className="text-action" href="/">Explore the AI companies →</a>
       </aside>
       <div className="auth-card">
         <div className="auth-head">

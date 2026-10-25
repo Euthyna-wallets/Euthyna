@@ -43,11 +43,12 @@ export function App() {
       <BrowserRouter>
         <Routes>
           {/* Public pages: read from NEAR, no sign-in. */}
-          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/" element={<ExplorePage />} />
+          <Route path="/explore" element={<Navigate to="/" replace />} />
           <Route path="/c/:dao" element={<CompanyPublicPage />} />
           <Route element={<Gate />}>
             <Route element={<Layout />}>
-              <Route path="/" element={<OverviewPage />} />
+              <Route path="/overview" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/roles" element={<RolesPage />} />
               <Route path="/activity" element={<ActivityPage />} />
@@ -60,7 +61,7 @@ export function App() {
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />
               <Route path="/decisions" element={<Navigate to="/governance" replace />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/overview" replace />} />
             </Route>
           </Route>
         </Routes>

@@ -52,12 +52,12 @@ export function CompanyPublicPage() {
   return (
     <div style={{ fontFamily: mono, color: "#F2F6FC", background: NAVY, minHeight: "100vh" }}>
       <header style={{ maxWidth: "1240px", margin: "0 auto", padding: "18px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
-        <Link to="/explore" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none", color: "#F2F6FC" }}>
+        <Link to="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none", color: "#F2F6FC" }}>
           <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M4 26V8l11-5 11 5v18" stroke="#4FD1E8" strokeWidth="2.2" strokeLinejoin="round" /><path d="M10 26v-9l5 4 5-4v9" stroke="#F2B544" strokeWidth="2.2" strokeLinejoin="round" /></svg>
           <span style={{ fontWeight: 700, fontSize: "18px" }}>MandateOS</span>
         </Link>
-        <nav aria-label="Breadcrumb" style={{ fontSize: "14px", color: "#C9D6EE" }}><Link to="/explore#companies" style={{ color: "#4FD1E8" }}>AI companies</Link> / <span style={{ color: "#F2F6FC" }}>{entry.data?.name ?? dao}</span></nav>
-        <a href="/onboarding" style={{ background: "#4FD1E8", color: INK, textDecoration: "none", fontSize: "14px", fontWeight: 600, padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
+        <nav aria-label="Breadcrumb" style={{ fontSize: "14px", color: "#C9D6EE" }}><Link to="/#companies" style={{ color: "#4FD1E8" }}>AI companies</Link> / <span style={{ color: "#F2F6FC" }}>{entry.data?.name ?? dao}</span></nav>
+        <a href="/overview" style={{ background: "#4FD1E8", color: INK, textDecoration: "none", fontSize: "14px", fontWeight: 600, padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
       </header>
 
       <main style={{ maxWidth: "1240px", margin: "0 auto", padding: "8px 24px 64px", display: "flex", flexDirection: "column", gap: "24px" }}>
