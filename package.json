@@ -5,7 +5,9 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "attack:all": "node scripts/attack-all.mjs",
+    "attack:testnet": "node scripts/attack-testnet.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
