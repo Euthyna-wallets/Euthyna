@@ -119,8 +119,18 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
   const [preview, setPreview] = useState<ProposalDraft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const defaultToken = PROFILE.tokens[0]!.address;
+  const addTransfers = () => {
+    setBlocks((current) => [...current, { kind: "payments", token: defaultToken, recipients: [], amount: "1000", periodDays: 30 }]);
+    setPreview(null);
+  };
+  const addSwap = (protocol: ProtocolId) => {
+    setBlocks((current) => [...current, { kind: "swap", tokenIn: defaultToken, tokensOut: [], protocols: [protocol], amount: "10000", periodDays: 30, maxApproval: "1000" }]);
+    setPreview(null);
+    setCatalogOpen(false);
+  };
   const supplierOptions = (registry.data?.suppliers ?? []).flatMap((supplier) =>
     supplier.wallets.filter((wallet) => wallet.chainId === PROFILE.chainId).map((wallet) => ({ address: wallet.address, label: supplier.name })));
 
@@ -187,7 +197,7 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
         {blocks.map((block, index) => (
           <div className="block" key={index}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Pay suppliers" : "Swap tokens"}</strong>
+              <strong>{block.kind === "payments" ? "Transfers" : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
               <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
             </div>
             {block.kind === "payments" ? (
@@ -260,8 +270,8 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
         ))}
 
         <div className="row wrap">
-          <button onClick={() => { setBlocks((current) => [...current, { kind: "payments", token: defaultToken, recipients: [], amount: "1000", periodDays: 30 }]); setPreview(null); }}>+ Pay suppliers</button>
-          <button onClick={() => { setBlocks((current) => [...current, { kind: "swap", tokenIn: defaultToken, tokensOut: [], protocols: ["uniswap-v3"], amount: "10000", periodDays: 30, maxApproval: "1000" }]); setPreview(null); }}>+ Swap tokens</button>
+          <button onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
+          <button onClick={() => setCatalogOpen(true)} title="Pick a protocol from the catalog">+ DeFi…</button>
         </div>
 
         <div>
@@ -290,6 +300,8 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
           </button>
         </div>
 
+        {catalogOpen ? <DefiCatalog onPick={addSwap} onClose={() => setCatalogOpen(false)} /> : null}
+
         {preview ? (
           <div className="decision">
             <header><div><span className="eyebrow">Members will vote on</span><h3>{preview.title}</h3></div></header>
@@ -314,6 +326,51 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
         ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Protocols a role can allow. Each one has a rule template checked by the vault
+ * (contracts/omniroles-conditions presets); the others are listed as coming.
+ */
+const DEFI_CATALOG: Array<{ id: string; name: string; action: string; protocol?: ProtocolId; note: string }> = [
+  { id: "uniswap-v3", name: "Uniswap V3", action: "Swap", protocol: "uniswap-v3", note: "Swap within a budget; bought tokens always return to the company wallet." },
+  { id: "uniswap-v2", name: "Uniswap V2", action: "Swap", protocol: "uniswap-v2", note: "Same rules, on the V2 router." },
+  { id: "aave-v3", name: "Aave V3", action: "Deposit & withdraw", note: "Coming soon: deposits earn yield for the company wallet only." },
+];
+
+function DefiCatalog({ onPick, onClose }: { onPick: (protocol: ProtocolId) => void; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="catalog-backdrop" role="presentation" onClick={onClose}>
+      <div className="catalog" role="dialog" aria-modal="true" aria-label="DeFi catalog" onClick={(event) => event.stopPropagation()}>
+        <header className="row" style={{ justifyContent: "space-between" }}>
+          <div>
+            <h3>DeFi catalog</h3>
+            <p className="small muted">What the agent may do on each protocol. Everything else stays refused by the vault.</p>
+          </div>
+          <button className="ghost" onClick={onClose} aria-label="Close">✕</button>
+        </header>
+        <div className="catalog-list">
+          {DEFI_CATALOG.map((item) => (
+            <button
+              key={item.id}
+              className="catalog-item"
+              disabled={!item.protocol}
+              onClick={() => item.protocol && onPick(item.protocol)}
+            >
+              <span className="catalog-name">{item.name}<span className="catalog-action">{item.action}</span></span>
+              <span className="small muted">{item.note}</span>
+              {!item.protocol ? <span className="catalog-soon">Soon</span> : null}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -154,7 +154,7 @@ export function OnboardingPage() {
               <div>
                 <h2>Create the first role</h2>
                 <p className="muted">
-                  Pick what {activeAgents[0]?.name ?? "the agent"} may do: pay registered suppliers, swap on Uniswap, with a budget.
+                  Pick what {activeAgents[0]?.name ?? "the agent"} may do: transfers to registered suppliers, or DeFi from the catalog (Uniswap), each with a budget.
                   Members vote, and it applies after the veto window.
                 </p>
               </div>
