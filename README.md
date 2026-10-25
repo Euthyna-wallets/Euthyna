@@ -179,6 +179,14 @@ Observed jury UAT using the exact artifact in [`deployments/omniroles-base-sepol
 
 See [`.env.example`](./.env.example) for variable names. Never use faucet rotation or IP rotation.
 
+## Shares
+
+A company can sell shares on NEAR. Shareholders vote with their locked shares
+on company calls and transfers in the Sputnik DAO, and receive the revenue the
+company shares, in NEAR or in Base ETH bridged by Omni Bridge. Members keep
+their two-thirds vote and their veto on vault changes. See
+[docs/shares.md](./docs/shares.md).
+
 ## Security boundaries
 
 - The server has no MPC or EVM fund-moving key.

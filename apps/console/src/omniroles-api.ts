@@ -45,6 +45,8 @@ export type GovernanceProposal = {
   proposer: string;
   status: string;
   votes: Record<string, string>;
+  /** Weighted totals per DAO role: [approve, reject, remove]. */
+  voteCounts?: Record<string, [string, string, string]>;
   kind: unknown;
   submittedAt: string;
   expiresAt: string;
@@ -62,7 +64,7 @@ export type GovernanceRule = Sentence & {
 };
 
 export type Governance = {
-  dao: { accountId: string; members: string[]; threshold: unknown; proposalPeriodNs: string };
+  dao: { accountId: string; members: string[]; threshold: unknown; proposalPeriodNs: string; shareholders?: { lockedShares: string } | null };
   vaultAccountId: string;
   paused: boolean;
   proposals: GovernanceProposal[];
@@ -118,6 +120,52 @@ export type ActivityItem = {
 
 export type Activity = { operations: OnchainOperation[]; integrity: WalletIntegrity[]; requests: ActivityItem[] };
 
+export type SharesInfo = {
+  dao_id: string;
+  name: string;
+  symbol: string;
+  total_supply: string;
+  unsold: string;
+  price_per_share: string;
+  unlock_period_ns: string;
+  revenue_token: string | null;
+  near_distributed: string;
+  token_distributed: string;
+};
+
+export type SharesHolder = {
+  balance: string;
+  locked: string;
+  cooling: string;
+  cooling_until_ns: string;
+  transferable: string;
+  claimable_near: string;
+  claimable_token: string;
+};
+
+export type SharesView =
+  | { accountId: string; deployed: false }
+  | {
+    accountId: string;
+    deployed: true;
+    keyless: boolean;
+    revenueToken: null | { accountId: string; symbol: string; decimals: number };
+    daoAccountId: string;
+    info: SharesInfo;
+    votesCounted: boolean;
+    shareholdersVote: boolean;
+    lockedTotal: string;
+    me: null | { accountId: string; holder: SharesHolder | null; votes: string };
+  };
+
+export type SharesDraft = {
+  name: string;
+  symbol: string;
+  totalSupply: number;
+  priceNear: string;
+  allocations: Array<{ accountId: string; shares: number }>;
+};
+
 export type CouncilMember = { id: string; nearAccountId: string | null; name: string | null; role: string; signedIn: boolean };
 type Members = { locked: boolean; members: CouncilMember[]; me?: string | null };
 
@@ -140,6 +188,11 @@ export const omni = {
   activate: () => api<{ transactions: string[] }>("/v1/console/omniroles/rules/activate", { method: "POST", body: "{}" }),
   roles: () => api<{ roles: RoleView[] }>("/v1/console/omniroles/roles"),
   activity: () => api<Activity>("/v1/console/omniroles/activity"),
+  shares: () => api<SharesView>("/v1/console/omniroles/shares"),
+  createShares: (draft: SharesDraft) =>
+    api<{ accountId: string; transaction: string; proposals: ProposalDraft[] }>("/v1/console/omniroles/shares", { method: "POST", body: JSON.stringify(draft) }),
+  sharesProposals: () => api<{ proposals: ProposalDraft[] }>("/v1/console/omniroles/proposals/shares", { method: "POST", body: "{}" }),
+  revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
 };
 
 export function thresholdText(threshold: unknown, members: number): string {

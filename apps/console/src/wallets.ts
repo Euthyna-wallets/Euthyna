@@ -356,6 +356,27 @@ export async function signVaultCall(
   return outcome.transaction_outcome.id;
 }
 
+/** A call from the connected wallet to any contract (shares: buy, lock, unlock, claim). */
+export async function signContractCall(
+  signerId: string,
+  receiverId: string,
+  methodName: string,
+  args: Record<string, unknown>,
+  options: { deposit?: string; gas?: string } = {},
+): Promise<string> {
+  const wallet = await transactionWallet();
+  const outcome = await wallet.signAndSendTransaction({
+    signerId,
+    receiverId,
+    actions: [{
+      type: "FunctionCall",
+      params: { methodName, args, gas: options.gas ?? "150000000000000", deposit: options.deposit ?? "0" },
+    }],
+  });
+  await refreshOmniReads();
+  return outcome.transaction_outcome.id;
+}
+
 /** The API caches NEAR reads; drop them after a member's own transaction so the page shows it at once. */
 async function refreshOmniReads(): Promise<void> {
   await api("/v1/console/omniroles/refresh", { method: "POST", body: "{}" }).catch(() => undefined);

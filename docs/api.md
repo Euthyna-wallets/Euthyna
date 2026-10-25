@@ -164,6 +164,25 @@ connects to the company address, and every `eth_sendTransaction` becomes a
 proposal. Off-chain signatures (`personal_sign`, `eth_signTypedData_v4`) are
 refused.
 
+### Shares
+
+See [shares.md](./shares.md).
+
+- `GET /v1/console/omniroles/shares`: the shares contract next to the vault
+  (supply, price, revenue shared), whether its account is keyless, whether the
+  DAO counts locked shares and has the `shareholders` role, and the signed-in
+  member's position.
+- `POST /v1/console/omniroles/shares` (admin): `{ name, symbol, totalSupply,
+  priceNear, allocations: [{ accountId, shares }] }`. It deploys the contract
+  on an account with no access key, then returns the proposals that turn it on.
+- `POST /v1/console/omniroles/proposals/shares`: the proposals still missing
+  (`SetStakingContract`, the shareholders role).
+- `POST /v1/console/omniroles/proposals/revenue`: `{ amountNear }`. It returns
+  a `FunctionCall` to `deposit_revenue`, paid from the DAO.
+
+Buying, locking, unlocking and claiming are wallet calls to the contract. The
+API is not involved.
+
 ### Governance and activity
 
 - `GET /v1/console/omniroles/governance`: proposals (decoded), the veto window

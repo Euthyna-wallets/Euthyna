@@ -470,12 +470,156 @@ export function councilThreshold(members: number): number {
   return Math.ceil((2 * members) / 3);
 }
 
-/** The only policy MandateOS creates: one council group, two-thirds threshold. */
-export function councilPolicy(members: string[], settings: { proposalBond: string; proposalPeriodNs: string }): DaoPolicy {
+// ---------------------------------------------------------------------------
+// Shares
+// ---------------------------------------------------------------------------
+
+export const SHAREHOLDERS_ROLE = "shareholders";
+/** What shareholders vote on: company calls (the vault: roles, transactions) and NEAR transfers. */
+export const SHAREHOLDER_KINDS = ["call", "transfer"] as const;
+const SHAREHOLDER_ACTIONS = ["AddProposal", "VoteApprove", "VoteReject", "Finalize"] as const;
+const TOKEN_MAJORITY = { weight_kind: "TokenWeight", quorum: "0", threshold: [1, 2] };
+
+/**
+ * Shareholders vote with their locked shares: a company call or transfer passes
+ * with more than half of all locked shares. Members still pass anything by two
+ * thirds, and any member can veto a vault change during the veto window.
+ */
+export function shareholdersRole(): DaoPolicy["roles"][number] {
+  return {
+    name: SHAREHOLDERS_ROLE,
+    kind: { Member: "1" },
+    permissions: SHAREHOLDER_KINDS.flatMap((kind) => SHAREHOLDER_ACTIONS.map((action) => `${kind}:${action}`)),
+    vote_policy: Object.fromEntries(SHAREHOLDER_KINDS.map((kind) => [kind, { ...TOKEN_MAJORITY }])),
+  };
+}
+
+/** Sputnik returns permissions and vote policies in any order: compare their content. */
+function isShareholdersRole(role: DaoPolicy["roles"][number]): boolean {
+  const expected = shareholdersRole();
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
+  const votes = Object.entries(role.vote_policy ?? {});
+  return role.name === expected.name
+    && JSON.stringify(role.kind) === JSON.stringify(expected.kind)
+    && sameSet(role.permissions ?? [], expected.permissions)
+    && sameSet(votes.map(([kind]) => kind), Object.keys(expected.vote_policy))
+    && votes.every(([, vote]) => JSON.stringify(vote) === JSON.stringify(TOKEN_MAJORITY));
+}
+
+/** True when a DAO policy (as returned by `get_policy`) already lets shareholders vote. */
+export function hasShareholdersRole(policy: { roles: DaoPolicy["roles"] }): boolean {
+  return policy.roles.some(isShareholdersRole);
+}
+
+export type SharesConfig = {
+  name: string;
+  symbol: string;
+  totalSupply: number;
+  /** Price of one share, in yoctoNEAR. */
+  pricePerShareYocto: string;
+  unlockPeriodNs: string;
+  revenueToken: string | null;
+  allocations: Array<[string, number]>;
+};
+
+/** Init arguments of the shares contract. */
+export function sharesInitArgs(daoAccountId: string, config: SharesConfig) {
+  if (!/^[A-Z0-9]{2,8}$/.test(config.symbol)) throw new Error("symbol must be 2 to 8 capital letters or digits");
+  if (!Number.isInteger(config.totalSupply) || config.totalSupply < 1) throw new Error("total supply must be a positive whole number");
+  const allocated = config.allocations.reduce((sum, [, amount]) => sum + amount, 0);
+  if (allocated > config.totalSupply) throw new Error("allocations exceed the total supply");
+  return {
+    dao_id: daoAccountId,
+    name: config.name,
+    symbol: config.symbol,
+    total_supply: String(config.totalSupply),
+    price_per_share: config.pricePerShareYocto,
+    unlock_period_ns: config.unlockPeriodNs,
+    revenue_token: config.revenueToken,
+    allocations: config.allocations.map(([account, amount]) => [account, String(amount)]),
+  };
+}
+
+/** The two votes that turn shares on: the DAO counts them, and shareholders get a role. */
+export function sharesProposalKinds(sharesAccountId: string) {
+  return [
+    { title: `Count locked shares of ${sharesAccountId} as votes`, kind: { SetStakingContract: { staking_id: sharesAccountId } } },
+    { title: "Let shareholders vote on company calls and transfers", kind: { ChangePolicyAddOrUpdateRole: { role: shareholdersRole() } } },
+  ];
+}
+
+export function proposalOf(title: string, kind: unknown) {
+  return { proposal: { description: `${PROPOSAL_MARKER} ${title}`, kind } };
+}
+
+const YOCTO = 10n ** 24n;
+export function formatNear(yocto: string | bigint): string {
+  const value = BigInt(yocto);
+  const whole = value / YOCTO;
+  const fraction = (value % YOCTO).toString().padStart(24, "0").slice(0, 4).replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction} NEAR` : `${whole} NEAR`;
+}
+
+export function parseNear(amount: string): string {
+  const match = /^(\d+)(?:\.(\d{1,24}))?$/.exec(amount.trim());
+  if (!match) throw new Error(`${amount} is not a NEAR amount`);
+  return (BigInt(match[1]!) * YOCTO + BigInt((match[2] ?? "").padEnd(24, "0"))).toString();
+}
+
+/** Share the DAO's NEAR with shareholders: a call to the shares contract, paid from the DAO. */
+export function revenueProposalKind(sharesAccountId: string, amountYocto: string) {
+  return {
+    FunctionCall: {
+      receiver_id: sharesAccountId,
+      actions: [{ method_name: "deposit_revenue", args: btoa("{}"), deposit: amountYocto, gas: "30000000000000" }],
+    },
+  };
+}
+
+/** Describe the proposals about shares; null for anything else. */
+export function describeSharesProposal(kind: unknown, sharesAccountId: string | null): { title: string; details: string[] } | null {
+  const staking = (kind as { SetStakingContract?: { staking_id?: string } })?.SetStakingContract;
+  if (staking) {
+    const known = staking.staking_id === sharesAccountId;
+    return {
+      title: "Votes count locked shares",
+      details: [
+        `vote weight comes from ${staking.staking_id}`,
+        "can be set only once for this DAO",
+        ...(known ? [] : ["⚠ this is not the company's shares contract"]),
+      ],
+    };
+  }
+  const role = (kind as { ChangePolicyAddOrUpdateRole?: { role?: DaoPolicy["roles"][number] } })?.ChangePolicyAddOrUpdateRole?.role;
+  if (role) {
+    const standard = isShareholdersRole(role);
+    return {
+      title: standard ? "Shareholders vote on company calls and transfers" : `Add or change role "${role.name}"`,
+      details: standard
+        ? ["passes with more than half of all locked shares", "members still decide by two thirds and can veto vault changes"]
+        : [`⚠ role "${role.name}" open to ${JSON.stringify(role.kind)} with ${role.permissions.join(", ")}`],
+    };
+  }
+  const call = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; deposit: string }> } })?.FunctionCall;
+  if (call && sharesAccountId && call.receiver_id === sharesAccountId && call.actions?.length === 1 && call.actions[0]?.method_name === "deposit_revenue") {
+    return { title: `Share ${formatNear(call.actions[0].deposit)} with shareholders`, details: ["paid from the DAO account", "split pro rata over every share held"] };
+  }
+  return null;
+}
+
+/** The only policy MandateOS creates: one council group, two-thirds threshold, and shareholders once shares exist. */
+export function councilPolicy(
+  members: string[],
+  settings: { proposalBond: string; proposalPeriodNs: string },
+  options: { shareholders?: boolean } = {},
+): DaoPolicy {
   if (members.length < 3) throw new Error("at least three members are needed");
   if (new Set(members).size !== members.length) throw new Error("a member is listed twice");
   return {
-    roles: [{ name: COUNCIL_ROLE, kind: { Group: members }, permissions: [...COUNCIL_PERMISSIONS], vote_policy: {} }],
+    roles: [
+      { name: COUNCIL_ROLE, kind: { Group: members }, permissions: [...COUNCIL_PERMISSIONS], vote_policy: {} },
+      ...(options.shareholders ? [shareholdersRole()] : []),
+    ],
     default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: String(councilThreshold(members.length)) },
     proposal_bond: settings.proposalBond,
     proposal_period: settings.proposalPeriodNs,
@@ -498,8 +642,10 @@ export function describePolicyChange(kind: unknown): { title: string; details: s
   if (!policy || !Array.isArray(policy.roles)) return null;
   const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
   const warnings: string[] = [];
-  if (policy.roles.length !== 1 || policy.roles[0]?.name !== COUNCIL_ROLE) warnings.push(`⚠ unusual roles: ${policy.roles.map((role) => role.name).join(", ")}`);
-  for (const role of policy.roles) {
+  const others = policy.roles.filter((role) => role.name !== COUNCIL_ROLE && !isShareholdersRole(role));
+  const councils = policy.roles.filter((role) => role.name === COUNCIL_ROLE);
+  if (councils.length !== 1 || others.length) warnings.push(`⚠ unusual roles: ${policy.roles.map((role) => role.name).join(", ")}`);
+  for (const role of [...councils, ...others]) {
     if ((role.kind as { Group?: unknown })?.Group === undefined) warnings.push(`⚠ role "${role.name}" is open to ${JSON.stringify(role.kind)}`);
     const extra = role.permissions.filter((permission) => !COUNCIL_PERMISSIONS.includes(permission));
     if (extra.length) warnings.push(`⚠ role "${role.name}" gets extra permissions: ${extra.join(", ")}`);
@@ -510,10 +656,12 @@ export function describePolicyChange(kind: unknown): { title: string; details: s
   if (vote?.weight_kind !== "RoleWeight" || threshold !== String(councilThreshold(members.length))) {
     warnings.push(`⚠ vote rule ${JSON.stringify(vote)} instead of ${councilThreshold(members.length)} of ${members.length}`);
   }
+  const shareholders = policy.roles.some(isShareholdersRole);
   return {
     title: `Members become: ${members.join(", ")}`,
     details: [
       `a decision will need ${threshold} of ${members.length} approvals`,
+      ...(shareholders ? ["shareholders keep their vote on company calls and transfers"] : []),
       "applies as soon as it is approved",
       ...warnings,
     ],

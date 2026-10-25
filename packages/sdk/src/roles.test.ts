@@ -6,7 +6,17 @@ import {
   BASE_SEPOLIA,
   budgetsOf,
   compileRole,
+  councilPolicy,
   decodeVaultCalls,
+  describePolicyChange,
+  describeSharesProposal,
+  formatNear,
+  hasShareholdersRole,
+  parseNear,
+  revenueProposalKind,
+  shareholdersRole,
+  sharesInitArgs,
+  sharesProposalKinds,
   describeChange,
   describeVaultCall,
   erc20ApproveSheet,
@@ -213,5 +223,49 @@ describe("DAO transactions", async () => {
     expect(details).toContain(`1. approve ${getAddress(pool)} (not a registered supplier) to spend 10 TestUSDC on Base Sepolia`);
     expect(details).toContain(`2. deposit 10 TestUSDC into ${getAddress(pool)} (unknown contract) for company wallet (${wallet}) on Base Sepolia`);
     expect(details).toContain("network fee at most 0.00003 ETH");
+  });
+});
+
+describe("shares governance", () => {
+  const settings = { proposalBond: "1", proposalPeriodNs: "2" };
+
+  it("keeps the shareholders role standard when members change", () => {
+    const policy = councilPolicy(["a.testnet", "b.testnet", "c.testnet"], settings, { shareholders: true });
+    const described = describePolicyChange({ ChangePolicy: { policy } });
+    expect(described?.standard).toBe(true);
+    expect(described?.details).toContain("shareholders keep their vote on company calls and transfers");
+  });
+
+  it("recognizes the role whatever order Sputnik returns it in", () => {
+    const role = shareholdersRole();
+    const shuffled = { ...role, permissions: [...role.permissions].reverse(), vote_policy: { transfer: role.vote_policy.transfer, call: role.vote_policy.call } };
+    expect(hasShareholdersRole({ roles: [shuffled] })).toBe(true);
+    expect(hasShareholdersRole({ roles: [{ ...role, permissions: [...role.permissions, "policy:VoteApprove"] }] })).toBe(false);
+  });
+
+  it("flags a role that is not the shareholders template", () => {
+    const role = { ...shareholdersRole(), permissions: ["*:VoteApprove"] };
+    const described = describeSharesProposal({ ChangePolicyAddOrUpdateRole: { role } }, "acme-shares.testnet");
+    expect(described?.details[0]).toContain("⚠");
+    const policy = { ...councilPolicy(["a.testnet", "b.testnet", "c.testnet"], settings), roles: [councilPolicy(["a.testnet", "b.testnet", "c.testnet"], settings).roles[0]!, role] };
+    expect(describePolicyChange({ ChangePolicy: { policy } })?.standard).toBe(false);
+  });
+
+  it("describes the setup votes and a revenue share", () => {
+    const [staking, shareholders] = sharesProposalKinds("acme-shares.testnet");
+    expect(describeSharesProposal(staking!.kind, "acme-shares.testnet")?.details).not.toContain("⚠ this is not the company's shares contract");
+    expect(describeSharesProposal(staking!.kind, "other.testnet")?.details).toContain("⚠ this is not the company's shares contract");
+    expect(describeSharesProposal(shareholders!.kind, "acme-shares.testnet")?.title).toBe("Shareholders vote on company calls and transfers");
+    const revenue = revenueProposalKind("acme-shares.testnet", parseNear("2.5"));
+    expect(describeSharesProposal(revenue, "acme-shares.testnet")?.title).toBe("Share 2.5 NEAR with shareholders");
+    expect(describeSharesProposal(revenue, "someone-else.testnet")).toBeNull();
+  });
+
+  it("checks the init arguments", () => {
+    const base = { name: "Acme", symbol: "ACME", totalSupply: 1000, pricePerShareYocto: parseNear("0.1"), unlockPeriodNs: "1", revenueToken: null, allocations: [["a.testnet", 100]] as Array<[string, number]> };
+    expect(sharesInitArgs("dao.testnet", base).allocations).toEqual([["a.testnet", "100"]]);
+    expect(() => sharesInitArgs("dao.testnet", { ...base, symbol: "acme" })).toThrow();
+    expect(() => sharesInitArgs("dao.testnet", { ...base, allocations: [["a.testnet", 1001]] })).toThrow();
+    expect(formatNear(parseNear("0.1"))).toBe("0.1 NEAR");
   });
 });
