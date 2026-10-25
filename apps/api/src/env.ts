@@ -11,7 +11,8 @@ const schema = z.object({
   GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
   NEAR_RELAYER_ACCOUNT_ID: z.string().min(1),
   NEAR_RELAYER_PRIVATE_KEY: z.string().min(1),
-  NEAR_ACCOUNT_PARENT: z.string().min(1).optional(),
+  // Empty means "the relayer": only an account can create its own sub-accounts.
+  NEAR_ACCOUNT_PARENT: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(1).optional()),
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
@@ -54,8 +55,13 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   if (BigInt(parsed.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
     throw new Error("BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
   }
-  return {
-    ...parsed,
-    NEAR_ACCOUNT_PARENT: parsed.NEAR_ACCOUNT_PARENT ?? parsed.NEAR_RELAYER_ACCOUNT_ID,
-  };
+  const parent = parsed.NEAR_ACCOUNT_PARENT ?? parsed.NEAR_RELAYER_ACCOUNT_ID;
+  // Vaults and agents are created as <name>.<parent>; NEAR lets only <parent> itself create them.
+  if (parent !== parsed.NEAR_RELAYER_ACCOUNT_ID) {
+    throw new Error(
+      `NEAR_ACCOUNT_PARENT (${parent}) must be the relayer account (${parsed.NEAR_RELAYER_ACCOUNT_ID}): ` +
+      "only an account can create its own sub-accounts. Leave it empty to use the relayer.",
+    );
+  }
+  return { ...parsed, NEAR_ACCOUNT_PARENT: parent };
 }
