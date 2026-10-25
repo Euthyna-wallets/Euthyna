@@ -95,8 +95,9 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
   const mcp = JSON.stringify({
     mcpServers: {
       mandateos: {
-        command: "pnpm",
-        args: ["--dir", "/path/to/MandateOS", "--filter", "@mandateos/mcp", "start"],
+        // The compiled entry point: a package manager would print banners on stdout, which MCP reserves.
+        command: "node",
+        args: ["/path/to/MandateOS/packages/mcp/dist/server.js"],
         env: mcpEnv,
       },
     },
@@ -126,6 +127,7 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
       {mode === "mcp" ? (
         <ol className="small">
           <li>Keep <code>{props.agent.keyFile}</code> (downloaded) on the machine that runs the agent. Never upload it.</li>
+          <li>Build once in the repository: <code>pnpm --filter @mandateos/sdk build && pnpm --filter @mandateos/mcp build</code>.</li>
           <li>Add this server to Claude Desktop, Claude Code, Cursor or Codex (MCP settings), with your paths. It contains the agent's API key, which cannot be displayed again.</li>
           <li>The agent then has the tools <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>share_revenue</code>, <code>status</code> and <code>cancel</code>, and nothing else.</li>
         </ol>
