@@ -50,7 +50,7 @@ async fn derives_one_wallet_per_chain_and_builds_direct_evm_calls() -> Result<()
         .await?
         .json::<Option<Value>>()?
         .expect("wallet");
-    assert_eq!(wallet["mpc_path"], "omniroles/evm/84532");
+    assert_eq!(wallet["mpc_path"], "omniroles/evm");
     assert!(wallet["address"].is_array());
     assert_eq!(wallet["next_nonce"], 0);
 
@@ -923,5 +923,166 @@ async fn refusal_comes_from_the_closest_permission() -> Result<()> {
         .transact()
         .await?;
     assert_failure_contains(&refused, "parameterNotAllowed");
+    Ok(())
+}
+
+fn dao_transaction(reference_amount: u128) -> Value {
+    json!({
+        "chain_id": CHAIN_ID,
+        "target": TOKEN,
+        "value": "0",
+        "calldata": erc20_transfer(RECIPIENT, reference_amount),
+        "gas_limit": "100000",
+        "max_fee_per_gas": "1000000000",
+        "max_priority_fee_per_gas": "1000000"
+    })
+}
+
+async fn submit_dao(fixture: &vault_common::Fixture, transactions: Value) -> Result<Vec<Value>> {
+    Ok(fixture
+        .owner
+        .call(fixture.vault.id(), "submit_transactions")
+        .args_json(json!({"transactions": transactions}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?
+        .json::<Vec<Value>>()?)
+}
+
+async fn start_dao(fixture: &vault_common::Fixture) -> Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(fixture
+        .outsider
+        .call(fixture.vault.id(), "start_dao_transaction")
+        .args_json(json!({"chain_id": CHAIN_ID}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?)
+}
+
+async fn operation_by_id(fixture: &vault_common::Fixture, op_id: &Value) -> Result<Value> {
+    Ok(fixture
+        .vault
+        .view("get_operation")
+        .args_json(json!({"op_id": op_id}))
+        .await?
+        .json::<Option<Value>>()?
+        .expect("operation"))
+}
+
+#[tokio::test]
+#[serial]
+async fn dao_transactions_wait_for_the_veto_window_then_run_in_order() -> Result<()> {
+    let fixture = setup().await?;
+    // Only the DAO (owner) can submit, and no role is involved.
+    let outsider = fixture
+        .outsider
+        .call(fixture.vault.id(), "submit_transactions")
+        .args_json(json!({"transactions": [dao_transaction(1)]}))
+        .transact()
+        .await?;
+    assert_failure_contains(&outsider, "ERR_OWNER_ONLY");
+
+    let ids = submit_dao(&fixture, json!([dao_transaction(10), dao_transaction(20)])).await?;
+    assert_eq!(ids.len(), 2);
+    let first = operation_by_id(&fixture, &ids[0]).await?;
+    assert_eq!(first["state"], "Scheduled");
+    assert_eq!(first["role"], "__dao__");
+
+    // Veto window still open.
+    assert_failure_contains(&start_dao(&fixture).await?, "ERR_VETO_WINDOW_OPEN");
+    fixture.worker.fast_forward(2).await?;
+
+    start_dao(&fixture).await?.into_result()?;
+    let first = operation_by_id(&fixture, &ids[0]).await?;
+    assert_eq!(first["state"], "PossiblySigned");
+    assert_eq!(first["evm_nonce"], 0);
+    assert_eq!(first["transaction"]["input"], json!(erc20_transfer(RECIPIENT, 10)));
+
+    // One transaction at a time per wallet: the second waits for the first.
+    assert_failure_contains(&start_dao(&fixture).await?, "ERR_WALLET_QUEUE_BUSY");
+    let confirmed = confirm(&fixture, &first, 900).await?;
+    assert_eq!(confirmed["state"], "Confirmed");
+
+    start_dao(&fixture).await?.into_result()?;
+    let second = operation_by_id(&fixture, &ids[1]).await?;
+    assert_eq!(second["state"], "PossiblySigned");
+    assert_eq!(second["evm_nonce"], 1);
+
+    let listed: Vec<Value> = fixture
+        .vault
+        .view("list_dao_transactions")
+        .args_json(json!({}))
+        .await?
+        .json()?;
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0]["op_id"], ids[1]);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn council_vetoes_a_dao_transaction_and_agents_keep_working() -> Result<()> {
+    let fixture = setup().await?;
+    let ids = submit_dao(&fixture, json!([dao_transaction(10)])).await?;
+    fixture
+        .council
+        .call(fixture.vault.id(), "veto_operation")
+        .args_json(json!({"op_id": ids[0]}))
+        .transact()
+        .await?
+        .into_result()?;
+    assert_eq!(operation_by_id(&fixture, &ids[0]).await?["state"], "Vetoed");
+    fixture.worker.fast_forward(2).await?;
+    assert_failure_contains(&start_dao(&fixture).await?, "ERR_NO_DAO_TRANSACTION");
+    // The wallet was never held: an agent can still prepare.
+    let operation = prepare(&fixture, "AFTER-VETO", 100).await?;
+    assert_eq!(operation["evm_nonce"], 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn dao_role_name_is_reserved_and_fees_are_bounded() -> Result<()> {
+    let fixture = setup().await?;
+    // Refused as soon as the DAO tries to queue it.
+    let queued = fixture
+        .owner
+        .call(fixture.vault.id(), "queue_rule_change")
+        .args_json(json!({"change": {"SetRole": {"role": "__dao__", "config": role_config()}}}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&queued, "ERR_RESERVED_ROLE");
+
+    let mut expensive = dao_transaction(1);
+    expensive["max_fee_per_gas"] = json!("600000000000");
+    let refused = fixture
+        .owner
+        .call(fixture.vault.id(), "submit_transactions")
+        .args_json(json!({"transactions": [expensive]}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&refused, "ERR_MAX_FEE_PER_GAS");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn the_company_wallet_has_the_same_address_on_every_evm_chain() -> Result<()> {
+    let fixture = setup().await?;
+    fixture
+        .owner
+        .call(fixture.vault.id(), "request_wallet")
+        .args_json(json!({"chain_id": 11155111}))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await?
+        .into_result()?;
+    let base: Value = fixture.vault.view("get_wallet").args_json(json!({"chain_id": CHAIN_ID})).await?.json()?;
+    let sepolia: Value = fixture.vault.view("get_wallet").args_json(json!({"chain_id": 11155111})).await?.json()?;
+    assert!(base["address"].is_array());
+    assert_eq!(base["address"], sepolia["address"]);
     Ok(())
 }

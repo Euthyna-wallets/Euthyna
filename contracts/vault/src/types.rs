@@ -215,6 +215,23 @@ pub enum OperationState {
     Cancelled,
     Vetoed,
     Expired,
+    /// A transaction the DAO voted: waiting for its veto window, then for the
+    /// wallet to be free (it has no nonce yet).
+    Scheduled,
+}
+
+/// One EVM transaction the DAO approved, outside any role (a multisig
+/// transaction). The vault signs it after the veto window, in submission order.
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct DaoTransaction {
+    pub chain_id: u64,
+    pub target: EvmAddress,
+    pub value: U128,
+    pub calldata: Vec<u8>,
+    pub gas_limit: U128,
+    pub max_fee_per_gas: U128,
+    pub max_priority_fee_per_gas: U128,
 }
 
 #[derive(Clone, Debug)]
