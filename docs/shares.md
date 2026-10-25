@@ -37,6 +37,35 @@ A vote counts whatever it says: rejecting counts as much as approving. Anyone
 holding locked shares can submit a proposal (bond 0.1 NEAR), which lets
 holders vote in an otherwise quiet epoch.
 
+## An agent shares revenue on its own
+
+Members give an agent a `share-revenue` role: it may call the Omni Bridge on
+Base, with native ETH, no token fee, a bridge fee of at most 0.001 ETH, an
+empty message and the recipient fixed to `near:<company>-shares.<parent>`,
+within an ETH budget (the bridge fee counts). Anything else is refused by the
+vault (6 attacks in `pnpm attack:all`). The agent uses `share_revenue` (MCP)
+or `GET /v1/agent/share-revenue`.
+
+### Proof on testnet (2026-10-25)
+
+Company Atlas Labs (`atlas-labs-vault.mandateos-e2e-mvms3m2m.testnet`), role
+`revenue` (0.003 ETH every 7 days) toward the epochs demo shares contract.
+
+| Step | Result | Transaction |
+| --- | --- | --- |
+| Members approve the role (proposal #8), rules apply after the veto window | role active | `3swxogRiZQyFzCr9eBScd4L1oJNtG6cJ5x6STR2CAgBw` |
+| Same call toward `near:attacker.testnet`, checked on the vault | refused, `parameterNotAllowed` (node 5, the recipient) | view call |
+| Agent prepares 0.002 ETH + 0.0000042 ETH bridge fee | Prepared | `J2JyBWjLjFz5KMqmEguGJPtEjMszP3Xq9puKU1RAjJzg` |
+| Guard visa, agent authorizes, NEAR MPC signs | PossiblySigned | `5zZkMwmRS7YP1khKwcQDKAZwkDAfG697Ja5LwhHoDfph` |
+| Broadcast on Base Sepolia | success, 74473 gas | `0xaadc75c9bc6360579bc02758d5730e736253862ec7dd4f476ec87824fcc8a9d8` |
+| Receipt reported to the vault | Confirmed | `9fz7qHCQAgafxnxS3yBboQy8eHFdBWLAXRvPEinGWq6F` |
+| Omni Bridge delivers to the shares contract | +0.002 ETH after 23 min | |
+| `sync_revenue` | 0.002 ETH counted for the current epoch's voters | `8tJh3Ra4WAdD5iHpXwNg18wHkTgnidyVF38fq1Hq2Ge1` |
+
+In this run the Guard visa and the receipt report were signed by a script with
+the test company's Guard keys, and the transaction was broadcast by it: the
+same steps the API and the worker run.
+
 ## Who decides what
 
 | Who | Votes on | Rule |
