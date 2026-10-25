@@ -174,6 +174,8 @@ The SDK turns a business payment into canonical `ERC20.transfer(recipient, amoun
 
 Sputnik remains the human governance layer. The DAO is `owner_id`, but an approved proposal only **queues** a rule. The mandatory NEAR waiting period is enforced by OmniRoles itself, not by a Base contract. Council accounts stored in the vault can veto one rule entry or one delayed operation without advancing or clearing unrelated entries.
 
+Transactions voted by the DAO (`submit_transactions`, reserved role `__dao__`) become `Scheduled` with `execute_after = now + rule_delay`. After the window, anyone can call `start_dao_transaction(chain_id)`, which starts the oldest transaction of that chain once the wallet is free there and assigns it the next nonce. The vault caps their fees (5M gas, 500 gwei, 0.5 ETH). The MPC path is `omniroles/evm`, so the company has one address on every EVM chain.
+
 DAO sandbox tests prove:
 
 - direct accounts cannot queue owner changes;
@@ -196,7 +198,7 @@ Task 1a deployment attests:
 
 The jury run recorded in [`deployments/omniroles-base-sepolia.json`](./deployments/omniroles-base-sepolia.json) uses a Sputnik DAO owner, three distinct council accounts, a 300-second rule delay, zero Vault access keys, separate Guard keys, a direct Base payment, and a terminal `Confirmed` report.
 
-The old Safe, Roles, Delay, governance-relay, owner-signature batch, and `0xGOV` attestations are obsolete. Console removal occurs in issue #40 task 2; they are not evidence for an OmniRoles deployment.
+The old Safe, Roles, Delay, governance-relay and `0xGOV` attestations are obsolete; that code has been removed.
 
 ## Current delivery boundary
 

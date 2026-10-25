@@ -24,8 +24,8 @@ const ACTIVE_STATES = [
 export interface WorkerOperationRecord {
   organizationId: string;
   opId: string;
-  agentId: string;
-  agentNearAccountId: string;
+  agentId: string | null;
+  agentNearAccountId: string | null;
   agentEvmAddress: string | null;
   vaultAccountId: string;
   reference: string;
@@ -67,9 +67,6 @@ export interface WorkerStore {
   update(operation: WorkerOperationRecord, data: WorkerOperationUpdate): Promise<void>;
   releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed"): Promise<void>;
   syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void>;
-}
-export interface GovernanceJobRunner {
-  tick(): Promise<number>;
 }
 
 
@@ -177,9 +174,9 @@ export class PrismaWorkerStore implements WorkerStore {
       organizationId: operation.organizationId,
       opId: operation.opId,
       agentId: operation.agentId,
-      agentNearAccountId: operation.agent.nearAccountId,
-      agentEvmAddress: operation.agent.evmAddress,
-      vaultAccountId: operation.agent.vaultAccountId,
+      agentNearAccountId: operation.agent?.nearAccountId ?? null,
+      agentEvmAddress: operation.agent?.evmAddress ?? null,
+      vaultAccountId: operation.agent?.vaultAccountId ?? operation.vaultAccountId ?? "",
       reference: operation.reference,
       state: operation.state,
       txHash: operation.txHash,
@@ -211,7 +208,7 @@ export class PrismaWorkerStore implements WorkerStore {
 
   async syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void> {
     await this.prisma.agent.updateMany({
-      where: { id: operation.agentId, organizationId: operation.organizationId },
+      where: { id: operation.agentId ?? "", organizationId: operation.organizationId },
       data: { evmAddress },
     });
   }
@@ -245,15 +242,21 @@ export class PrismaWorkerStore implements WorkerStore {
 }
 
 export class OperationWorker {
+  /** Gateway of the chain of the operation being processed (operations run one at a time). */
+  private base: WorkerBaseGateway;
+
   constructor(
     private readonly store: WorkerStore,
     private readonly near: WorkerNearGateway,
-    private readonly base: WorkerBaseGateway,
+    private readonly defaultChain: WorkerBaseGateway,
     private readonly guard: Pick<Guard, "confirmationReport" | "failureReport">,
     private readonly config: WorkerConfig,
     private readonly now: () => Date = () => new Date(),
-    private readonly governance?: GovernanceJobRunner,
-  ) {}
+    /** Other EVM chains the company wallet acts on (DAO-voted transactions). */
+    private readonly chains: Record<number, WorkerBaseGateway> = {},
+  ) {
+    this.base = defaultChain;
+  }
 
   async tick(): Promise<{ leased: boolean; processed: number }> {
     const now = this.now();
@@ -281,23 +284,23 @@ export class OperationWorker {
         processed += 1;
       }
     }
-    if (this.governance && await this.store.acquireLease(this.now(), this.config.leaseMs)) {
-      processed += await this.governance.tick();
-    }
     return { leased: true, processed };
   }
 
   private async process(record: WorkerOperationRecord, blockTimestampNs: bigint): Promise<void> {
     const id = opBytes(record.opId);
     let operation = await this.near.getOperation(record.vaultAccountId, id);
+    this.base = this.chains[operation.request.chain_id] ?? this.defaultChain;
     const chainWallet = await this.near.viewFunction<unknown>(record.vaultAccountId, "get_wallet", {
       chain_id: operation.request.chain_id,
     });
     const derivedAddress = onChainWalletEvmAddress(chainWallet);
-    if (derivedAddress && derivedAddress !== record.agentEvmAddress) {
+    if (record.agentId && derivedAddress && derivedAddress !== record.agentEvmAddress) {
       await this.store.syncAgentEvmAddress(record, derivedAddress);
     }
     try {
+      // DAO transactions have no agent account to keep funded.
+      if (!record.agentNearAccountId) throw new Error("no agent");
       const agentAccount = await this.near.getAccount(record.agentNearAccountId);
       if (BigInt(agentAccount.amount) < BigInt(this.config.agentGasLowYocto)) {
         console.warn(JSON.stringify({
@@ -387,7 +390,8 @@ export class OperationWorker {
         record,
         id,
         record.nearAuthorizationTxHash,
-        operation.member,
+        // DAO transactions are started by the relayer, agent ones by the agent.
+        operation.role === "__dao__" ? this.config.cancellationSenderAccountId : operation.member,
       );
       operation = await this.near.getOperation(record.vaultAccountId, id);
     }
@@ -484,7 +488,7 @@ export class OperationWorker {
         receiptBlock: receipt.blockNumber,
         lastAttemptAt: this.now(),
         nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+        lastError: `waiting for confirmations ${depth}/${this.config.confirmations}`,
       });
       return;
     }
@@ -572,7 +576,7 @@ export class OperationWorker {
         receiptBlock: receipt.blockNumber,
         lastAttemptAt: this.now(),
         nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-        lastError: `waiting for Base confirmations ${depth}/${this.config.confirmations}`,
+        lastError: `waiting for confirmations ${depth}/${this.config.confirmations}`,
       });
       return;
     }

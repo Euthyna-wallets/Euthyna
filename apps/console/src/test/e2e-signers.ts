@@ -5,28 +5,12 @@
  */
 import { serializeNep413 } from "@near-wallet-selector/core";
 import { KeyPair, Near, keyStores, transactions } from "near-api-js";
-import { createPublicClient, createWalletClient, http, type Address, type EIP1193Provider, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
-import { privateKeyToAccount } from "viem/accounts";
 
 export const E2E_SIGNERS_MARKER = "MANDATEOS_E2E_SIGNERS_V1";
 
 interface SelectorAction {
   type: string;
   params?: Record<string, unknown>;
-}
-
-interface E2eNearWallet {
-  getAccounts(): Promise<Array<{ accountId: string }>>;
-  signAndSendTransaction(input: {
-    signerId: string;
-    receiverId: string;
-    actions: SelectorAction[];
-  }): Promise<{ transaction_outcome: { id: string } }>;
-  signAndSendTransactions(input: {
-    transactions: Array<{ signerId: string; receiverId: string; actions: SelectorAction[] }>;
-  }): Promise<Array<{ transaction_outcome: { id: string } }>>;
-  signMessage(input: { message: string; recipient: string; nonce: Buffer }): Promise<{ accountId: string; publicKey: string; signature: string }>;
 }
 
 function nearActions(actions: SelectorAction[]) {
@@ -101,58 +85,7 @@ async function installNearSigner(): Promise<void> {
   };
 }
 
-function installEvmProvider(): void {
-  const privateKey = import.meta.env.VITE_E2E_EVM_PRIVATE_KEY;
-  if (!privateKey) throw new Error("VITE_E2E_EVM_PRIVATE_KEY is required");
-  const rpcUrl = import.meta.env.VITE_E2E_BASE_RPC_URL ?? "https://sepolia.base.org";
-  const account = privateKeyToAccount(privateKey as Hex);
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
-  const wallet = createWalletClient({ account, chain: baseSepolia, transport: http(rpcUrl) });
-
-  const provider = {
-    async request(args: { method: string; params?: unknown }) {
-      switch (args.method) {
-        case "eth_requestAccounts":
-        case "eth_accounts":
-          return [account.address];
-        case "eth_chainId":
-          return "0x14a34";
-        case "wallet_switchEthereumChain":
-        case "wallet_addEthereumChain":
-          return null;
-        case "eth_sendTransaction": {
-          const [transaction] = args.params as Array<{ to: Address; value?: Hex; data?: Hex; gas?: Hex }>;
-          if (!transaction) throw new Error("missing transaction");
-          return wallet.sendTransaction({
-            account,
-            to: transaction.to,
-            value: transaction.value ? BigInt(transaction.value) : 0n,
-            data: transaction.data,
-            ...(transaction.gas ? { gas: BigInt(transaction.gas) } : {}),
-          });
-        }
-        case "eth_signTypedData_v4": {
-          const [, typedData] = args.params as [string, string];
-          return wallet.signTypedData(JSON.parse(typedData) as Parameters<typeof wallet.signTypedData>[0]);
-        }
-        case "personal_sign": {
-          const [message] = args.params as [Hex];
-          return account.signMessage({ message: { raw: message } });
-        }
-        case "eth_getTransactionReceipt": {
-          const [hash] = args.params as [Hex];
-          return publicClient.getTransactionReceipt({ hash });
-        }
-        default:
-          throw new Error(`unsupported EVM method ${args.method}`);
-      }
-    },
-  } as unknown as EIP1193Provider;
-  window.ethereum = provider;
-}
-
 export async function installE2eSigners(): Promise<void> {
   console.info(E2E_SIGNERS_MARKER);
   await installNearSigner();
-  installEvmProvider();
 }

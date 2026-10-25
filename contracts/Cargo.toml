@@ -1,5 +1,5 @@
 [workspace]
-members = ["vault", "omniroles-conditions", "governance-relay", "dao-factory", "mock-mpc", "test-ft", "tests"]
+members = ["vault", "omniroles-conditions", "dao-factory", "mock-mpc", "test-ft", "tests"]
 resolver = "2"
 
 [workspace.package]

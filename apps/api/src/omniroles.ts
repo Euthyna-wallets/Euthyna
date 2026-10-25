@@ -20,6 +20,9 @@ import {
   decodeVaultCalls,
   describeCall,
   describeVaultCall,
+  describeDaoTransactions,
+  chainName,
+  type DaoTransactionDraft,
   councilPolicy,
   describePolicyChange,
   membersProposalArgs,
@@ -32,16 +35,16 @@ import {
   type VaultCall,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
-import { createPublicClient, erc20Abi, formatUnits, getAddress, http, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
+import { erc20Abi, formatUnits, getAddress, type Hex, type PublicClient } from "viem";
 
+import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
 import { NEAR_ACCOUNT_ID, NEAR_PROVIDER_ID, nearUserEmail } from "./near-auth.js";
 
 export class OmniRolesError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 404 | 409 | 422 | 500 | 503,
     readonly code: string,
     message: string,
   ) {
@@ -58,6 +61,8 @@ export interface OmniRolesConfig {
   daoCreateDepositYocto: string;
   vaultDepositYocto: string;
   baseRpcUrl: string;
+  /** RPC per extra EVM chain the company wallet can act on (same address everywhere). */
+  extraRpcUrls?: Record<number, string>;
   ruleDelayNs: number;
   ruleExpirationNs: number;
   operationTtlNs: number;
@@ -68,19 +73,62 @@ export interface OmniRolesConfig {
 export interface OmniRolesChain {
   /** Read ETH and token balances of the company wallet. */
   balances(address: Hex, profile: ChainProfile): Promise<{ eth: string; tokens: Array<{ symbol: string; address: Hex; amount: string }> }>;
+  /**
+   * Gas limits for calls sent in this order from the wallet on one chain, and
+   * fees generous enough to still pass after the vote and the veto window.
+   */
+  fees(input: { chainId: number; from: Hex; calls: GasCall[] }): Promise<{ gasLimits: bigint[]; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
 }
 
-export class RpcOmniRolesChain implements OmniRolesChain {
-  private readonly client;
+/** NEAR storage: 1e19 yocto per byte; top the vault up below 0.5 NEAR free. */
+const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
+const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
+const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 
-  constructor(rpcUrl: string) {
-    this.client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
+/** Lowest max fee a voted transaction gets, per chain (wei). */
+const FEE_FLOOR_WEI: Record<number, bigint> = { 1: 20_000_000_000n, 11155111: 5_000_000_000n, 8453: 50_000_000n, 84532: 50_000_000n };
+
+export class RpcOmniRolesChain implements OmniRolesChain {
+  private readonly clients = new Map<number, PublicClient>();
+  private readonly configured: Record<number, string>;
+
+  constructor(rpcUrl: string, rpcUrls: Record<number, string> = {}) {
+    this.configured = { 84532: rpcUrl, ...rpcUrls };
+  }
+
+  private client(chainId: number): PublicClient {
+    let client = this.clients.get(chainId);
+    if (!client) {
+      const urls = rpcUrls(chainId, [this.configured[chainId]]);
+      if (urls.length === 0) throw new OmniRolesError(400, "unsupported_chain", `no RPC configured for chain ${chainId}`);
+      client = chainClient(urls);
+      this.clients.set(chainId, client);
+    }
+    return client;
+  }
+
+  async fees(input: { chainId: number; from: Hex; calls: GasCall[] }) {
+    const client = this.client(input.chainId);
+    let gasLimits: bigint[];
+    let gasPrice: bigint;
+    try {
+      [gasLimits, gasPrice] = await Promise.all([estimateCalls(client, input.from, input.calls), client.getGasPrice()]);
+    } catch (error) {
+      if (error instanceof GasEstimateError) throw error;
+      throw new GasEstimateError("rpc_unavailable", 0, error instanceof Error ? error.message : String(error));
+    }
+    // Signed after the vote and the veto window: leave room for fees to rise.
+    const floor = FEE_FLOOR_WEI[input.chainId] ?? 1_000_000_000n;
+    const priority = input.chainId === 11155111 || input.chainId === 1 ? 1_000_000_000n : 1_000_000n;
+    const maxFeePerGas = gasPrice * 3n + priority > floor ? gasPrice * 3n + priority : floor;
+    return { gasLimits, maxFeePerGas, maxPriorityFeePerGas: priority < maxFeePerGas ? priority : maxFeePerGas };
   }
 
   async balances(address: Hex, profile: ChainProfile) {
-    const eth = await this.client.getBalance({ address });
+    const client = this.client(84532);
+    const eth = await client.getBalance({ address });
     const tokens = await Promise.all(profile.tokens.map(async (token) => {
-      const amount = await this.client
+      const amount = await client
         .readContract({ address: token.address, abi: erc20Abi, functionName: "balanceOf", args: [address] })
         .catch(() => 0n);
       return { symbol: token.symbol, address: token.address, amount: formatUnits(amount, token.decimals) };
@@ -113,6 +161,18 @@ type QueuedRule = {
   vetoed_by: string | null;
 };
 
+type DaoOperation = {
+  op_id: number[];
+  state: string;
+  request: { chain_id: number; target: number[]; value: string; calldata: number[]; reference: string; gas_limit: string; max_fee_per_gas: string; max_priority_fee_per_gas: string };
+  evm_nonce: number;
+  tx_digest: number[];
+  execute_after_ns: string | null;
+  expires_at_ns: string;
+  created_at_ns: string;
+  vetoed_by?: string | null;
+};
+
 type DaoProposal = {
   id: number;
   proposer: string;
@@ -125,6 +185,8 @@ type DaoProposal = {
 };
 
 const PROFILE = BASE_SEPOLIA;
+/** EVM chains the console offers for DAO transactions. */
+const SUPPORTED_CHAINS = [84532, 11155111];
 const NANOS_PER_MS = 1_000_000n;
 
 function slugify(name: string): string {
@@ -142,7 +204,7 @@ export class OmniRolesService {
     private readonly visaSigner: KmsSigner,
     private readonly statusSigner: KmsSigner,
     private readonly config: OmniRolesConfig,
-    private readonly chain: OmniRolesChain = new RpcOmniRolesChain(config.baseRpcUrl),
+    private readonly chain: OmniRolesChain = new RpcOmniRolesChain(config.baseRpcUrl, config.extraRpcUrls),
   ) {}
 
   // -------------------------------------------------------------------------
@@ -181,6 +243,12 @@ export class OmniRolesService {
   // -------------------------------------------------------------------------
   // Members: NEAR accounts entered by an admin before the DAO exists
   // -------------------------------------------------------------------------
+
+  /** The company treasury, for routes that need the vault (agents). */
+  async activeTreasury(organizationId: string) {
+    const treasury = await this.treasury(organizationId);
+    return treasury ? { status: treasury.status, daoAccountId: treasury.daoAccountId, vaultAccountId: treasury.vaultAccountId } : null;
+  }
 
   async members(organizationId: string) {
     const members = await this.prisma.member.findMany({
@@ -283,13 +351,6 @@ export class OmniRolesService {
         baseChainId: PROFILE.chainId,
         daoAccountId: plan.daoAccountId,
         vaultAccountId: plan.vaultAccountId,
-        // Safe-era columns, unused by OmniRoles.
-        relayAccountId: "",
-        safeAddress: "",
-        rolesAddress: "",
-        delayAddress: "",
-        govAddress: "",
-        relayWasmSha256: "",
         vaultWasmSha256: artifact.sha256,
         status: "wallet_pending",
       },
@@ -363,6 +424,13 @@ export class OmniRolesService {
       },
       checks,
       dao: { members: daoMembers, threshold: daoPolicy?.default_vote_policy.threshold ?? null },
+      // The same address on every EVM chain; a chain is usable once its wallet is requested.
+      chains: await Promise.all(SUPPORTED_CHAINS.map(async (chainId) => {
+        const chainWallet = chainId === treasury.baseChainId
+          ? wallet
+          : await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: chainId }).catch(() => null);
+        return { chainId, name: chainName(chainId), enabled: Boolean(chainWallet?.address) };
+      })),
       wallet: walletAddress
         ? { address: walletAddress, ...(await this.chain.balances(walletAddress, PROFILE).catch(() => ({ eth: "?", tokens: [] }))) }
         : null,
@@ -374,10 +442,70 @@ export class OmniRolesService {
   // Proposals (signed by members in their wallet)
   // -------------------------------------------------------------------------
 
-  async walletProposal(organizationId: string) {
+  async walletProposal(organizationId: string, chainId?: number) {
     const treasury = await this.requireTreasury(organizationId);
-    const calls: VaultCall[] = [{ method: "request_wallet", chainId: treasury.baseChainId }];
-    return this.proposal(treasury, `Create the company wallet on ${PROFILE.name}`, calls);
+    const target = chainId ?? treasury.baseChainId;
+    const calls: VaultCall[] = [{ method: "request_wallet", chainId: target }];
+    return this.proposal(treasury, `Create the company wallet on ${chainName(target)}`, calls);
+  }
+
+  /**
+   * A transaction outside any role (from a dApp through WalletConnect, or typed
+   * by a member): the DAO votes on the exact calls, which run after the veto window.
+   */
+  async transactionProposal(
+    organizationId: string,
+    input: { title?: string | undefined; transactions: Array<{ chainId: number; to: string; value?: string | undefined; data?: string | undefined; gas?: string | undefined }> },
+  ) {
+    const treasury = await this.requireTreasury(organizationId);
+    if (input.transactions.length === 0 || input.transactions.length > 10) {
+      throw new OmniRolesError(400, "invalid_transactions", "between 1 and 10 transactions per proposal");
+    }
+    // Calls of one chain run in order from the same wallet: estimate them together.
+    const byChain = new Map<number, Array<{ index: number; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }>>();
+    input.transactions.forEach((transaction, index) => {
+      const calls = byChain.get(transaction.chainId) ?? [];
+      calls.push({
+        index,
+        to: getAddress(transaction.to),
+        value: BigInt(transaction.value ?? "0"),
+        data: (transaction.data && transaction.data !== "0x" ? transaction.data : "0x") as Hex,
+        gas: transaction.gas ? BigInt(transaction.gas) : undefined,
+      });
+      byChain.set(transaction.chainId, calls);
+    });
+    const drafts: DaoTransactionDraft[] = new Array(input.transactions.length);
+    for (const [chainId, calls] of byChain) {
+      const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: chainId }).catch(() => null);
+      if (!wallet?.address) {
+        throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${chainName(chainId)} yet: propose it first`);
+      }
+      const from = getAddress(hexOf(wallet.address));
+      let fees;
+      try {
+        fees = await this.chain.fees({ chainId, from, calls });
+      } catch (error) {
+        if (!(error instanceof GasEstimateError)) throw error;
+        const position = input.transactions.length > 1 ? `transaction ${calls[error.index]!.index + 1}` : "the transaction";
+        if (error.code === "would_revert") {
+          throw new OmniRolesError(422, "would_revert", `${position} would fail on ${chainName(chainId)}: ${error.message}`);
+        }
+        throw new OmniRolesError(503, "gas_estimate_unavailable", `no ${chainName(chainId)} RPC could estimate ${position}; try again: ${error.message}`);
+      }
+      calls.forEach((call, position) => {
+        drafts[call.index] = {
+          chainId,
+          to: call.to,
+          value: call.value.toString(),
+          data: call.data,
+          gasLimit: fees.gasLimits[position]!.toString(),
+          maxFeePerGas: fees.maxFeePerGas.toString(),
+          maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+        };
+      });
+    }
+    const title = input.title?.trim() || describeDaoTransactions(drafts, { profile: PROFILE }).title;
+    return this.proposal(treasury, title, [{ method: "submit_transactions", transactions: drafts }], await this.labels(organizationId));
   }
 
   async roleProposal(organizationId: string, draft: RoleDraft) {
@@ -500,11 +628,12 @@ export class OmniRolesService {
   async governance(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
-    const [lastId, policy, rules, paused] = await Promise.all([
+    const [lastId, policy, rules, paused, daoTransactions] = await Promise.all([
       this.view<number>(treasury.daoAccountId, "get_last_proposal_id"),
       this.view<{ default_vote_policy: { threshold: unknown }; roles: Array<{ kind: unknown }>; proposal_period: string }>(treasury.daoAccountId, "get_policy"),
       this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 }),
       this.view<boolean>(treasury.vaultAccountId, "is_paused"),
+      this.view<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => [] as DaoOperation[]),
     ]);
     const proposals = lastId === 0
       ? []
@@ -564,12 +693,29 @@ export class OmniRolesService {
         vetoedBy: rule.vetoed_by,
         ...describeVaultCall({ method: "queue_rule_change", change: rule.change }, context),
       })),
+      // Transactions voted outside any role: veto window, then signed in order.
+      transactions: daoTransactions.map((item) => ({
+        opId: hexOf(item.op_id),
+        state: item.state,
+        createdAt: new Date(Number(BigInt(item.created_at_ns) / NANOS_PER_MS)).toISOString(),
+        executesAt: item.execute_after_ns ? new Date(Number(BigInt(item.execute_after_ns) / NANOS_PER_MS)).toISOString() : null,
+        ...describeDaoTransactions([{
+          chainId: item.request.chain_id,
+          to: getAddress(hexOf(item.request.target)),
+          value: item.request.value,
+          data: hexOf(item.request.calldata),
+          gasLimit: item.request.gas_limit,
+          maxFeePerGas: item.request.max_fee_per_gas,
+          maxPriorityFeePerGas: item.request.max_priority_fee_per_gas,
+        }], { ...context, fullAddresses: true }),
+      })),
     };
   }
 
   /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
     const treasury = await this.requireTreasury(organizationId);
+    await this.keepStorageFunded(treasury.vaultAccountId);
     const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
     const now = nowNs();
     const ready = rules
@@ -580,12 +726,79 @@ export class OmniRolesService {
     for (const rule of ready) {
       hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, "100000000000000", "0"));
     }
+    hashes.push(...await this.startDaoTransactions(organizationId, treasury));
     if (hashes.length) this.forget(treasury.vaultAccountId);
     return hashes;
   }
 
+  /**
+   * Every operation the vault keeps (and every MPC signature it stores) costs
+   * NEAR storage. When the vault runs short, the MPC callback cannot store the
+   * signature and the operation sticks: top it up from the relayer first.
+   * Only NEAR for storage moves here, never company funds.
+   */
+  private async keepStorageFunded(vaultAccountId: string): Promise<void> {
+    const account = await this.near.getAccount(vaultAccountId).catch(() => null);
+    if (!account) return;
+    const free = BigInt(account.amount) - BigInt(account.storage_usage ?? 0) * STORAGE_PRICE_PER_BYTE;
+    if (free >= STORAGE_LOW_YOCTO) return;
+    await this.near.executeActions(vaultAccountId, [{ type: "Transfer", depositYocto: STORAGE_TOP_UP_YOCTO.toString() }]);
+    console.log(JSON.stringify({ event: "omniroles.vault_storage_topped_up", vaultAccountId, freeYocto: free.toString() }));
+  }
+
+  /**
+   * Start the next voted transaction of each chain once its veto window has
+   * passed and the wallet is free (permissionless on chain), then hand every
+   * started one to the worker, which broadcasts it like an agent operation.
+   */
+  private async startDaoTransactions(organizationId: string, treasury: { vaultAccountId: string }): Promise<string[]> {
+    const transactions = await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => null);
+    if (!transactions) return []; // vault deployed before DAO transactions
+    const hashes: string[] = [];
+    // The start transaction carries the MPC response: the worker recovers the
+    // signature from it if the vault could not store it.
+    const startedBy = new Map<number, string>();
+    const now = nowNs();
+    const busy = new Set(transactions.filter((item) => ["Prepared", "Queued", "PossiblySigned"].includes(item.state)).map((item) => item.request.chain_id));
+    const waiting = transactions
+      .filter((item) => item.state === "Scheduled" && item.execute_after_ns !== null && BigInt(item.execute_after_ns) <= now && now <= BigInt(item.expires_at_ns))
+      .reverse();
+    for (const item of waiting) {
+      const chainId = item.request.chain_id;
+      if (busy.has(chainId)) continue;
+      busy.add(chainId);
+      const hash = await this.near.callFunction(treasury.vaultAccountId, "start_dao_transaction", { chain_id: chainId }, "150000000000000", "0");
+      hashes.push(hash);
+      startedBy.set(chainId, hash);
+    }
+    const started = hashes.length
+      ? await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 })
+      : transactions;
+    for (const item of started.filter((entry) => entry.state !== "Scheduled")) {
+      const opId = hexOf(item.op_id);
+      const existing = await this.prisma.operation.findUnique({ where: { organizationId_opId: { organizationId, opId } } });
+      if (existing) continue;
+      await this.prisma.operation.create({
+        data: {
+          organizationId,
+          opId,
+          agentId: null,
+          vaultAccountId: treasury.vaultAccountId,
+          reference: item.request.reference,
+          state: item.state,
+          txDigest: hexOf(item.tx_digest),
+          evmNonce: BigInt(item.evm_nonce),
+          amount: "0",
+          nearAuthorizationTxHash: item.state === "PossiblySigned" || item.state === "Queued" ? startedBy.get(item.request.chain_id) ?? null : null,
+          nextAttemptAt: new Date(),
+        },
+      });
+    }
+    return hashes;
+  }
+
   async activateAllReadyRules(): Promise<void> {
-    const treasuries = await this.prisma.treasury.findMany({ where: { safeAddress: "" } });
+    const treasuries = await this.prisma.treasury.findMany();
     for (const treasury of treasuries) {
       await this.activateReadyRules(treasury.organizationId).catch((error: unknown) => {
         console.error(`rule activation failed for ${treasury.vaultAccountId}:`, error);
@@ -708,18 +921,30 @@ export class OmniRolesService {
       }
     };
     const agentName = (id: string) => agents.find((agent) => agent.id === id)?.name ?? id;
+    // Transactions voted by the DAO: described from the vault, where their calldata lives.
+    const treasury = await this.treasury(organizationId);
+    const daoTransactions = treasury
+      ? await this.view<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => [])
+      : [];
+    const daoSummary = new Map<string, string>(daoTransactions.map((item) => [hexOf(item.op_id), describeCall(
+      getAddress(hexOf(item.request.target)),
+      hexOf(item.request.calldata),
+      BigInt(item.request.value),
+      { profile: PROFILE, labels },
+    )]));
     const items = [
       ...operations.map((operation) => ({
         kind: "operation" as const,
         at: operation.createdAt.toISOString(),
-        agent: operation.agent.name,
+        agent: operation.agent?.name ?? "Members (DAO vote)",
         reference: operation.reference,
         state: operation.state,
         amount: operation.amount.toString(),
         txHash: operation.txHash,
         opId: operation.opId,
         reason: null as string | null,
-        summary: null as string | null,
+        summary: daoSummary.get(operation.opId) ?? null,
+        request: null as { chainId: number; to: string; data: string; value: string } | null,
       })),
       ...refusals.map((refusal) => {
         const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
@@ -735,6 +960,10 @@ export class OmniRolesService {
           opId: null as string | null,
           reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
           summary: describe(metadata),
+          // What the agent asked for: members can turn a refusal into a vote.
+          request: typeof metadata.target === "string" && typeof metadata.calldata === "string"
+            ? { chainId: PROFILE.chainId, to: metadata.target, data: metadata.calldata, value: String(metadata.value ?? "0") }
+            : null,
         };
       }),
     ].sort((left, right) => right.at.localeCompare(left.at));
@@ -847,6 +1076,9 @@ export class OmniRolesService {
 
 /** Plain-English reason for a vault refusal code. */
 export function explainRefusal(reason: string): string {
+  // Guard refusals carry their own sentence: GUARD:<code>:<reasons>.
+  const guard = reason.match(/^GUARD:[a-z_]+:(.*)$/s);
+  if (guard) return `Guard: ${guard[1]}`;
   const status = reason.match(/"status":"([a-zA-Z]+)"/)?.[1];
   const byStatus: Record<string, string> = {
     parameterNotAllowed: "a parameter is not allowed by the role (recipient, token or address)",

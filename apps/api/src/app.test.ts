@@ -15,16 +15,10 @@ import type {
   CreateAgentInput,
   CreatedAgent,
 } from "./auth-gateway.js";
-import type { Guard } from "./guard.js";
-import type { GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
-import type { BaseRelayer } from "./relayer.js";
 import type { VaultOperation } from "./types.js";
-import type { TreasuryGateway, TreasuryPlan, TreasuryView } from "./treasury.js";
-import type { MandateGateway, MandatePreview } from "./mandates.js";
 import type { RegistryService } from "./registry-db.js";
 import type { PaymentService } from "./payments.js";
-import type { ConsoleDataService } from "./console-data.js";
 
 const transferCalldata = [
   0xa9, 0x05, 0x9c, 0xbb,
@@ -208,7 +202,6 @@ function testApp(options?: {
   if (options?.consoleRole === "member") auth.consoles.delete("session-admin");
   if (options?.sponsorshipReservation) auth.sponsorshipReservation = options.sponsorshipReservation;
 
-  let guardCalls = 0;
   const nearCalls = {
     sponsored: [] as Array<{ accountId: string; publicKey: string; amountYocto: string }>,
   };
@@ -225,91 +218,7 @@ function testApp(options?: {
       method === "get_agent" ? { role: "researcher", active: true, evm_address: Array(20).fill(1) } : 3,
     proxyRpc: async (method: string) => ({ proxiedMethod: method }),
   } as unknown as NearClient;
-  const guard = {
-    approve: async () => {
-      guardCalls += 1;
-      return { decision: "escalate", reasons: ["recipient not registered"] };
-    },
-  } as unknown as Guard;
-  const treasuryCalls = {
-    plans: [] as Array<{ organizationId: string; daoName: string }>,
-    registers: [] as Array<{ organizationId: string; actorId: string }>,
-    refreshes: [] as Array<{ organizationId: string; actorId: string }>,
-  };
-  const confirmationStatus = {
-    digest: "deployment-digest",
-    confirmedMemberIds: [admin.memberId, member.memberId],
-    requiredMemberIds: [admin.memberId, member.memberId],
-  };
-  const treasury: TreasuryGateway = {
-    plan: async (organizationId, input) => {
-      treasuryCalls.plans.push({ organizationId, daoName: input.daoName });
-      return {} as TreasuryPlan;
-    },
-    register: async (organizationId, actorId) => {
-      treasuryCalls.registers.push({ organizationId, actorId });
-      return {} as TreasuryView;
-    },
-    deployContracts: async () => ({ vaultTxHash: "v", relayTxHash: "r" }),
-    confirmNearDeployment: async () => confirmationStatus,
-    nearDeploymentConfirmations: async () => confirmationStatus,
-    refresh: async (organizationId, actorId) => {
-      treasuryCalls.refreshes.push({ organizationId, actorId });
-      return { status: "active" } as TreasuryView;
-    },
-    getTreasury: async () => ({ status: options?.treasuryStatus ?? "active" }) as TreasuryView,
-  };
-  const mandateCalls: Array<{ organizationId: string; role: string }> = [];
-  const mandates: MandateGateway = {
-    preview: async (organizationId: string, input: { role: string }) => {
-      mandateCalls.push({ organizationId, role: input.role });
-      return {} as MandatePreview;
-    },
-    zodiacProposal: async () => ({
-      receiverId: "dao.testnet",
-      methodName: "add_proposal",
-      description: "Zodiac",
-      args: {},
-      deposit: "0",
-    }),
-    budgetTokenStatus: async () => ({
-      environment: "uat",
-      tokenAccountId: "test-ft.testnet",
-      symbol: "TestUSDC",
-      decimals: 6,
-      daoAccountId: "dao.testnet",
-      vaultAccountId: "vault.testnet",
-      daoStorageRegistered: true,
-      vaultStorageRegistered: true,
-      daoBalance: "6000000",
-      storageDepositYocto: "1250000000000000000000",
-    }),
-    budgetTokenPlan: async () => ({
-      status: {
-        environment: "uat",
-        tokenAccountId: "test-ft.testnet",
-        symbol: "TestUSDC",
-        decimals: 6,
-        daoAccountId: "dao.testnet",
-        vaultAccountId: "vault.testnet",
-        daoStorageRegistered: true,
-        vaultStorageRegistered: true,
-        daoBalance: "6000000",
-        storageDepositYocto: "1250000000000000000000",
-      },
-      actions: [],
-    }),
-  };
-  const registry = {
-    loadRegistry: async () => ({
-      clientId: "acme",
-      registryVersion: 1,
-      network: "base-sepolia",
-      chainId: 84532,
-      token: { symbol: "USDC", address: "0x2222222222222222222222222222222222222222", decimals: 6 },
-      roles: {},
-    }),
-  } as unknown as RegistryService;
+  const registry = {} as unknown as RegistryService;
   const payments = {
     gasQuote: async () => ({
       gas: {
@@ -350,16 +259,7 @@ function testApp(options?: {
       nearTransactionHash,
       state: "CancellationRequested",
     }),
-    listEscalations: async () => [],
-    decideEscalation: async () => ({}),
   } as unknown as PaymentService;
-  const consoleData = {
-    overview: async () => ({}),
-    operations: async () => [],
-    operation: async () => null,
-    agentDetail: async () => null,
-    governance: async () => ({ proposals: [], delay: null }),
-  } as unknown as ConsoleDataService;
   const agentProvisioning = {
     provision: async () => ({
       status: "provisioned",
@@ -378,71 +278,19 @@ function testApp(options?: {
       attestation: { valid: true },
     }),
   } as unknown as AgentProvisioningService;
-  const governanceGas = {
-    gasQuote: {
-      gasLimit: "200000",
-      maxFeePerGas: "20000000000",
-      maxPriorityFeePerGas: "1000000000",
-      baseFeePerGas: "6333333333",
-      l1Fee: "1000",
-      senderBalance: "1000000000000000000",
-      requiredBalance: "4000000000001000",
-      sufficientBalance: true,
-    },
-    warnings: [],
-  };
-  const governance: GovernanceGateway = {
-    recordRelayExecution: async () => ({ opId: `0x${"01".repeat(32)}`, state: "PossiblySigned" }),
-    unblockProposal: async () => ({
-      receiverId: "dao.testnet",
-      methodName: "add_proposal",
-      description: "Unblock relay",
-      args: {},
-      deposit: "0",
-    }),
-    cancelUnderpricedProposal: async () => ({
-      receiverId: "dao.testnet",
-      methodName: "add_proposal",
-      description: "Cancel underpriced operation",
-      args: {},
-      deposit: "0",
-      ...governanceGas,
-    }),
-    swapOwnerProposal: async () => ({
-      receiverId: "dao.testnet",
-      methodName: "add_proposal",
-      description: "Swap Safe owner",
-      args: {},
-      deposit: "0",
-      ...governanceGas,
-    }),
-    addOwnerProposal: async () => ({
-      receiverId: "dao.testnet",
-      methodName: "add_proposal",
-      description: "Add Safe owner",
-      args: {},
-      deposit: "0",
-      ...governanceGas,
-    }),
-  };
   const app = createApp({
     near,
-    guard,
-    relayer: {} as BaseRelayer,
     auth,
     agentProvisioning,
-    treasury,
-    governance,
-    mandates,
+    treasuries: {
+      activeTreasury: async () => ({ status: options?.treasuryStatus ?? "active", daoAccountId: "dao.testnet", vaultAccountId: "vault-1.near" }),
+    },
     registry,
     payments,
-    consoleData,
     consoleOrigin,
     nearParentAccount: "mandateos.testnet",
-    nearSponsorDailyWalletLimit: 2,
-    nearSponsorWalletAmountYocto: "500000000000000000000000",
   });
-  return { app, auth, treasuryCalls, mandateCalls, nearCalls, guardCalls: () => guardCalls };
+  return { app, auth, nearCalls };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
@@ -560,16 +408,14 @@ describe("rate limiting", () => {
 });
 
 describe("agent detail", () => {
-  it("returns the stored agent and its on-chain state", async () => {
+  it("returns the stored agent", async () => {
     const { app } = testApp();
     const response = await app.request("/v1/console/agents/11111111-1111-4111-8111-111111111111", {
       headers: consoleHeaders({ cookie: "session-member" }),
     });
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { agent: { id: string }; onChain: { agent: unknown; nextEvmNonce: number } };
+    const body = (await response.json()) as { agent: { id: string } };
     expect(body.agent.id).toBe("11111111-1111-4111-8111-111111111111");
-    expect(body.onChain.nextEvmNonce).toBe(3);
-    expect(body.agent).toMatchObject({ evmAddress: "0x0101010101010101010101010101010101010101" });
   });
 
   it("does not expose another organization's agent", async () => {
@@ -578,30 +424,6 @@ describe("agent detail", () => {
       headers: consoleHeaders({ cookie: "session-member" }),
     });
     expect(response.status).toBe(404);
-  });
-});
-
-describe("treasury refresh", () => {
-  it("lets an admin re-run verification", async () => {
-    const { app, treasuryCalls } = testApp();
-    const response = await app.request("/v1/console/treasury/refresh", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({ environment: "uat" }),
-    });
-    expect(response.status).toBe(200);
-    expect(treasuryCalls.refreshes).toEqual([{ organizationId: "org-1", actorId: "user-admin" }]);
-  });
-
-  it("forbids a member from refreshing", async () => {
-    const { app, treasuryCalls } = testApp({ consoleRole: "member" });
-    const response = await app.request("/v1/console/treasury/refresh", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({ environment: "uat" }),
-    });
-    expect(response.status).toBe(403);
-    expect(treasuryCalls.refreshes).toEqual([]);
   });
 });
 
@@ -648,82 +470,6 @@ describe("console NEAR RPC proxy", () => {
   });
 });
 
-describe("founder wallet sponsorship", () => {
-  const nearPublicKey = "ed25519:11111111111111111111111111111111";
-  const nearAccountId = `w-${createHash("sha256").update(nearPublicKey).digest("hex").slice(0, 12)}.mandateos.testnet`;
-
-  it("funds the founder wallet only through the authenticated DAO-time route", async () => {
-    const { app, auth, nearCalls } = testApp();
-    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({ nearAccountId, nearPublicKey }),
-    });
-    expect(response.status).toBe(201);
-    expect(nearCalls.sponsored).toEqual([{
-      accountId: nearAccountId,
-      publicKey: nearPublicKey,
-      amountYocto: "500000000000000000000000",
-    }]);
-    expect(auth.completedSponsorships).toEqual([{ nearAccountId, succeeded: true }]);
-  });
-
-  it("enforces the durable daily sponsorship cap before funding", async () => {
-    const { app, nearCalls } = testApp({ sponsorshipReservation: "daily_limit" });
-    const response = await app.request("/v1/console/treasury/sponsor-founder-wallet", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({ nearAccountId, nearPublicKey }),
-    });
-    expect(response.status).toBe(429);
-    expect(await response.json()).toEqual({ error: "daily_sponsorship_limit" });
-    expect(nearCalls.sponsored).toEqual([]);
-  });
-});
-
-describe("mandate preview", () => {
-  it("previews a mandate for the session organization", async () => {
-    const { app, mandateCalls } = testApp();
-    const response = await app.request("/v1/console/mandates/preview", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        role: "researcher",
-        operations: ["pay"],
-        maxPerTx: "5000000",
-        budget: "6000000",
-        periodDays: 30,
-        recipients: ["0x1111111111111111111111111111111111111111"],
-        token: "0x2222222222222222222222222222222222222222",
-        gas: {
-          gasLimit: "200000",
-          maxFeePerGas: "20000000000",
-          maxPriorityFeePerGas: "1000000000",
-          maxTotalFee: "30000000000000000",
-        },
-      }),
-    });
-    expect(response.status).toBe(200);
-    expect(mandateCalls).toEqual([{ organizationId: "org-1", role: "researcher" }]);
-  });
-  it("returns UAT budget-token state and an unsigned member-executed plan", async () => {
-    const { app } = testApp();
-    const status = await app.request("/v1/console/treasury/budget-token", {
-      headers: consoleHeaders({ cookie: "session-member" }),
-    });
-    expect(status.status).toBe(200);
-    await expect(status.json()).resolves.toMatchObject({ decimals: 6, symbol: "TestUSDC" });
-
-    const plan = await app.request("/v1/console/treasury/budget-token/plan", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({ amount: "6000000" }),
-    });
-    expect(plan.status).toBe(200);
-  });
-
-});
-
 describe("console CSRF protection", () => {
   it("rejects a console request without an Origin header", async () => {
     const { app } = testApp();
@@ -760,51 +506,6 @@ describe("console CSRF protection", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe(consoleOrigin);
     expect(response.headers.get("access-control-allow-credentials")).toBe("true");
-  });
-});
-
-describe("treasury onboarding", () => {
-  it("builds a treasury plan for the session organization", async () => {
-    const { app, treasuryCalls } = testApp();
-    const response = await app.request("/v1/console/treasury/plan", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-admin" }),
-      body: JSON.stringify({ daoName: "acme", founderNearAccountId: "alice.testnet" }),
-    });
-    expect(response.status).toBe(200);
-    expect(treasuryCalls.plans).toEqual([{ organizationId: "org-1", daoName: "acme" }]);
-  });
-
-  it("returns the public sponsor balance without requiring admin role", async () => {
-    const { app } = testApp({ consoleRole: "member" });
-    const response = await app.request("/v1/console/treasury/sponsor-status", {
-      headers: consoleHeaders({ cookie: "session-member" }),
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      accountId: "mandateos.testnet",
-      balanceYocto: "832000000000000000000000",
-      storageUsage: 182,
-    });
-  });
-
-  it("forbids a non-admin from registering a treasury", async () => {
-    const { app, treasuryCalls } = testApp({ consoleRole: "member" });
-    const response = await app.request("/v1/console/treasury/register", {
-      method: "POST",
-      headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        daoAccountId: "acme.sputnikv2.testnet",
-        vaultAccountId: "acme-vault.alice.testnet",
-        relayAccountId: "acme-relay.alice.testnet",
-        safeAddress: "0x1111111111111111111111111111111111111111",
-        rolesAddress: "0x2222222222222222222222222222222222222222",
-        delayAddress: "0x3333333333333333333333333333333333333333",
-        govAddress: "0x4444444444444444444444444444444444444444",
-      }),
-    });
-    expect(response.status).toBe(403);
-    expect(treasuryCalls.registers).toEqual([]);
   });
 });
 

@@ -146,9 +146,13 @@ export class NearClient {
   }
 
   async getOperation(vaultAccountId: string, opId: number[]): Promise<VaultOperation> {
-    const operation = await this.callView<VaultOperation | null>(vaultAccountId, "get_operation", { op_id: opId });
-    if (!operation) throw new Error("operation not found");
-    return operation;
+    // Reads use final blocks: an operation the agent just prepared can take a couple of seconds to show up.
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const operation = await this.callView<VaultOperation | null>(vaultAccountId, "get_operation", { op_id: opId });
+      if (operation) return operation;
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+    }
+    throw new Error("operation not found");
   }
 
   async executeActions(

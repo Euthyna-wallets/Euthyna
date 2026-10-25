@@ -1,18 +1,18 @@
 import { bytesToHex, keccak256, type Hex } from "viem";
-import { serializeRelayStatusReport, serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
+import { serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
 import type { KmsSigner } from "./kms.js";
 import { bytes32ToHex, digestVaultTransaction, hexToByteArray } from "./evm.js";
-import { evaluateExactRules, type RegistryDecision } from "./registry.js";
-import type { GovernanceOperation, GuardVisa, Registry, RelayFinalStatus, RelayStatusReport, SignedPayload, StatusReport, VaultOperation } from "./types.js";
+import { evaluateOperation, type GuardContext } from "./registry.js";
+import type { GuardVisa, SignedPayload, StatusReport, VaultOperation } from "./types.js";
 
 export interface GuardApproval {
   decision: "approve";
-  vendorId: string;
-  vendorName: string;
+  vendorId: string | null;
+  vendorName: string | null;
   approval: { visa: GuardVisa; signature: string };
 }
 
-export type GuardResult = GuardApproval | Extract<RegistryDecision, { decision: "escalate" }>;
+export type GuardResult = GuardApproval | { decision: "refuse"; reasons: string[] };
 
 export class Guard {
   constructor(
@@ -20,16 +20,16 @@ export class Guard {
     private readonly statusSigner: KmsSigner,
   ) {}
 
-  async approve(operation: VaultOperation, registry: Registry): Promise<GuardResult> {
+  async approve(operation: VaultOperation, context: GuardContext): Promise<GuardResult> {
     if (operation.state !== "Prepared") {
-      return { decision: "escalate", reasons: [`operation state is ${operation.state}, expected Prepared`] };
+      return { decision: "refuse", reasons: [`operation state is ${operation.state}, expected Prepared`] };
     }
     const recomputed = digestVaultTransaction(operation);
     if (recomputed !== bytes32ToHex(operation.tx_digest)) {
-      return { decision: "escalate", reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"] };
+      return { decision: "refuse", reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"] };
     }
-    const decision = evaluateExactRules(registry, operation);
-    if (decision.decision === "escalate") return decision;
+    const decision = evaluateOperation(context, operation);
+    if (decision.decision === "refuse") return decision;
     const visa: GuardVisa = {
       client_id: operation.client_id,
       op_id: operation.op_id,
@@ -88,32 +88,6 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:status:v1",
       serializeStatusReport(report),
-      this.statusSigner,
-    );
-    return { report, signature };
-  }
-  async relayStatusReport(
-    clientId: string,
-    operation: GovernanceOperation,
-    txHash: Hex,
-    blockNumber: bigint,
-    finalStatus: RelayFinalStatus,
-  ): Promise<SignedPayload<RelayStatusReport>> {
-    if (!operation.signed_transaction) throw new Error("relay operation has no signed transaction");
-    const storedHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
-    if (storedHash !== txHash) throw new Error("receipt hash does not match the relay signed transaction");
-    if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Base block number exceeds safe integer range");
-    const report: RelayStatusReport = {
-      client_id: clientId,
-      op_id: operation.op_id,
-      final_status: finalStatus,
-      tx_hash: hexToByteArray(txHash),
-      report_nonce: randomSafeNonce(),
-      block_number: Number(blockNumber),
-    };
-    const signature = await signDomainPayload(
-      "mandateos:relay-status:v1",
-      serializeRelayStatusReport(report),
       this.statusSigner,
     );
     return { report, signature };

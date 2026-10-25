@@ -87,6 +87,8 @@ export function GovernancePage() {
     return result;
   }, {})).map((rules) => rules.slice().reverse());
   const settled = (data?.rules ?? []).filter((rule) => rule.state !== "Queued");
+  // Transactions voted outside any role, before they get their nonce.
+  const scheduled = (data?.transactions ?? []).filter((transaction) => transaction.state === "Scheduled");
 
   return (
     <div className="page">
@@ -148,9 +150,28 @@ export function GovernancePage() {
           )}
         </Card>
 
-        <Card title={`Approved — veto window (${groups.length})`}>
-          {groups.length === 0 ? <div className="state">No approved decision is waiting.</div> : (
+        <Card title={`Approved — veto window (${groups.length + scheduled.length})`}>
+          {groups.length + scheduled.length === 0 ? <div className="state">No approved decision is waiting.</div> : (
             <div className="stack">
+              {scheduled.map((transaction) => (
+                <article key={transaction.opId} className="decision">
+                  <header>
+                    <div>
+                      <span className="eyebrow">Transaction · {transaction.executesAt && Date.parse(transaction.executesAt) > now ? `signed ${relativeTime(transaction.executesAt, now)}` : "waiting for the wallet"}</span>
+                      <h3>{transaction.title}</h3>
+                    </div>
+                  </header>
+                  <SentenceList items={[{ title: transaction.details[0] ?? "", details: transaction.details.slice(1) }]} />
+                  <footer className="row">
+                    <span className="small muted">Any council member can stop it before it is signed.</span>
+                    <div className="spacer" />
+                    <button className="danger" disabled={!isMember || Boolean(busy)} onClick={() => void run(`veto-${transaction.opId}`, async () => {
+                      await signVaultCall(me, data!.vaultAccountId, "veto_operation", { op_id: hexToBytes(transaction.opId) });
+                      return "Transaction vetoed: it will not be signed.";
+                    })}>Veto</button>
+                  </footer>
+                </article>
+              ))}
               {groups.map((rules) => (
                 <RuleCard
                   key={rules[0]!.queueId}

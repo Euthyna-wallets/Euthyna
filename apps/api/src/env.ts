@@ -26,7 +26,6 @@ const schema = z.object({
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
-  BUDGET_TOKEN_ACCOUNT_ID: z.string().min(1),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(5_000),
   WORKER_CONFIRMATIONS: z.coerce.number().int().positive().max(100).default(5),
   WORKER_LEASE_MS: z.coerce.number().int().min(1_000).default(20_000),
@@ -34,15 +33,13 @@ const schema = z.object({
   WORKER_BROADCAST_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
   WORKER_RETRY_BASE_MS: z.coerce.number().int().min(100).default(1_000),
   WORKER_RETRY_MAX_MS: z.coerce.number().int().min(1_000).default(60_000),
-  BASE_GAS_WALLET_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
-  BASE_GAS_WALLET_MIN_BALANCE_WEI: z.string().regex(/^\d+$/).default("5000000000000000"),
   BASE_TX_GAS_LIMIT_CAP: z.string().regex(/^[1-9]\d*$/).default("300000"),
   BASE_TX_MAX_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000000"),
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
-  GOVERNANCE_MAX_FEE_FLOOR_WEI: z.string().regex(/^[1-9]\d*$/).default("100000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
+  ETHEREUM_SEPOLIA_RPC_URL: z.string().url().default("https://ethereum-sepolia-rpc.publicnode.com"),
   OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
-  OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("7000000000000000000000000"),
+  OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("8000000000000000000000000"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
 });
 
@@ -56,9 +53,6 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const parsed = schema.parse(input);
   if (BigInt(parsed.BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
     throw new Error("BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
-  }
-  if (BigInt(parsed.GOVERNANCE_MAX_FEE_FLOOR_WEI) > BigInt(parsed.BASE_TX_MAX_FEE_PER_GAS_CAP_WEI)) {
-    throw new Error("GOVERNANCE_MAX_FEE_FLOOR_WEI must not exceed BASE_TX_MAX_FEE_PER_GAS_CAP_WEI");
   }
   return {
     ...parsed,

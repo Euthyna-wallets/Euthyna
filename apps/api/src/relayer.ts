@@ -1,5 +1,4 @@
 import { bytesToHex, createPublicClient, http, keccak256, TransactionReceiptNotFoundError, type Address, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
 import type { Env } from "./env.js";
 import { Guard } from "./guard.js";
 import { NearClient } from "./near.js";
@@ -13,7 +12,8 @@ export class BaseRelayer {
     private readonly near: NearClient,
     private readonly guard: Guard,
   ) {
-    this.client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
+    // Chain-agnostic JSON-RPC: the same relayer serves Base and the other EVM chains.
+    this.client = createPublicClient({ transport: http(rpcUrl) });
   }
 
   transactionHash(operation: VaultOperation): Hex {
@@ -74,4 +74,9 @@ export class BaseRelayer {
 
 export function createBaseRelayer(env: Env, near: NearClient, guard: Guard): BaseRelayer {
   return new BaseRelayer(env.BASE_SEPOLIA_RPC_URL, near, guard);
+}
+
+/** Relayers for the other EVM chains a company wallet can act on, by chain id. */
+export function createChainRelayers(env: Env, near: NearClient, guard: Guard): Record<number, BaseRelayer> {
+  return { 11155111: new BaseRelayer(env.ETHEREUM_SEPOLIA_RPC_URL, near, guard) };
 }

@@ -13,7 +13,7 @@ use near_sdk::{
 use conditions::{EvaluationContext, ReservedAllowances};
 use omniroles_conditions::Consumption;
 pub use types::{
-    Allowance, AllowanceConsumption, ChainWallet, Eip1559Transaction, GuardApproval, GuardVisa,
+    Allowance, AllowanceConsumption, ChainWallet, DaoTransaction, Eip1559Transaction, GuardApproval, GuardVisa,
     Membership, MembershipKind, MpcSignature, Operation, OperationCheck, OperationRequest,
     OperationState, Permission, QueuedRuleChange, RoleConfig, RoleView, RuleChange,
     RuleChangeState, SignedStatusReport, StatusKind, StatusReport, VelocityConfig, VelocityState,
@@ -31,6 +31,9 @@ const MPC_CALLBACK_GAS: Gas = Gas::from_tgas(20);
 const MPC_DERIVE_GAS: Gas = Gas::from_tgas(10);
 const MPC_DERIVE_CALLBACK_GAS: Gas = Gas::from_tgas(10);
 const MPC_SIGN_DEPOSIT: NearToken = NearToken::from_yoctonear(1);
+/// Role name of the transactions voted by the DAO; no role can be created with it.
+pub const DAO_ROLE: &str = "__dao__";
+const MAX_DAO_TRANSACTIONS_PER_PROPOSAL: usize = 10;
 
 #[allow(dead_code)]
 #[ext_contract(ext_mpc)]
@@ -82,6 +85,11 @@ pub struct Vault {
     rule_queue_ids: LookupMap<u64, QueueId>,
     used_visa_nonces: LookupSet<u64>,
     used_report_nonces: LookupSet<u64>,
+    /// DAO transactions waiting for their veto window or for the wallet, in order.
+    dao_queue: Vec<OperationId>,
+    dao_sequence: u64,
+    /// Operation id of every DAO transaction, by sequence number (1-based).
+    dao_transactions: LookupMap<u64, OperationId>,
 }
 
 #[near]
@@ -141,6 +149,9 @@ impl Vault {
             rule_queue_ids: LookupMap::new(b"s".to_vec()),
             used_visa_nonces: LookupSet::new(b"v".to_vec()),
             used_report_nonces: LookupSet::new(b"q".to_vec()),
+            dao_queue: Vec::new(),
+            dao_sequence: 0,
+            dao_transactions: LookupMap::new(b"d".to_vec()),
         }
     }
 
@@ -743,7 +754,7 @@ impl Vault {
         require!(
             matches!(
                 operation.state,
-                OperationState::Prepared | OperationState::Queued
+                OperationState::Prepared | OperationState::Queued | OperationState::Scheduled
             ),
             "ERR_OPERATION_NOT_VETOABLE"
         );
@@ -753,6 +764,121 @@ impl Vault {
             hex::encode(op_id),
             env::predecessor_account_id()
         ));
+    }
+
+    /// Called by the DAO when members approve a transaction outside any role.
+    /// Each one waits for the veto window, then is signed in submission order.
+    pub fn submit_transactions(&mut self, transactions: Vec<DaoTransaction>) -> Vec<OperationId> {
+        self.assert_owner();
+        require!(
+            !transactions.is_empty() && transactions.len() <= MAX_DAO_TRANSACTIONS_PER_PROPOSAL,
+            "ERR_DAO_TRANSACTION_COUNT"
+        );
+        let now = env::block_timestamp();
+        let execute_after = now.saturating_add(self.rule_delay_ns);
+        let gas_config = Self::dao_gas_config();
+        let owner = self.owner_id.clone();
+        let mut ids = Vec::with_capacity(transactions.len());
+        for transaction in transactions {
+            let wallet = self.wallets.get(&transaction.chain_id).expect("ERR_WALLET_NOT_FOUND");
+            require!(wallet.address.is_some(), "ERR_WALLET_NOT_DERIVED");
+            self.dao_sequence = self.dao_sequence.saturating_add(1);
+            let request = OperationRequest {
+                chain_id: transaction.chain_id,
+                target: transaction.target,
+                value: transaction.value,
+                calldata: transaction.calldata,
+                allowance_amount: U128(0),
+                reference: format!("dao:{}", self.dao_sequence),
+                gas_limit: transaction.gas_limit,
+                max_fee_per_gas: transaction.max_fee_per_gas,
+                max_priority_fee_per_gas: transaction.max_priority_fee_per_gas,
+            };
+            // Same caps as when it is built, so a bad fee fails the vote, not later.
+            let (placeholder, _) = evm::build_transaction(&gas_config, 0, &request);
+            let op_id = self.next_operation_id(&owner, request.chain_id);
+            let operation = Operation {
+                op_id,
+                client_id: self.client_id.clone(),
+                member: owner.clone(),
+                role: DAO_ROLE.to_string(),
+                request,
+                permission_index: 0,
+                consumptions: Vec::new(),
+                measured_value: None,
+                policy_version: self.policy_version,
+                registry_version: self.registry_version,
+                evm_nonce: 0,
+                transaction: placeholder,
+                tx_digest: [0; 32],
+                created_at_ns: U64(now),
+                expires_at_ns: U64(execute_after.saturating_add(self.rule_expiration_ns)),
+                execute_after_ns: Some(U64(execute_after)),
+                visa_authorized: true,
+                cosigned_by: None,
+                possibly_signed_at_ns: None,
+                state: OperationState::Scheduled,
+                signature: None,
+                signed_transaction: None,
+                cancellation: None,
+            };
+            self.operations.insert(op_id, operation);
+            self.dao_queue.push(op_id);
+            self.dao_transactions.insert(self.dao_sequence, op_id);
+            env::log_str(&format!("OMNIROLES_DAO_TRANSACTION_SCHEDULED:{}", hex::encode(op_id)));
+            ids.push(op_id);
+        }
+        ids
+    }
+
+    /// Permissionless: once its veto window has passed and the wallet is free,
+    /// the oldest DAO transaction for this chain gets its nonce and is signed.
+    pub fn start_dao_transaction(&mut self, chain_id: u64) -> Promise {
+        self.assert_not_paused();
+        let position = self
+            .dao_queue
+            .iter()
+            .position(|op_id| self.operations.get(op_id).is_some_and(|operation| operation.request.chain_id == chain_id))
+            .unwrap_or_else(|| env::panic_str("ERR_NO_DAO_TRANSACTION"));
+        let op_id = self.dao_queue[position];
+        let mut operation = self.operations.get(&op_id).cloned().expect("ERR_OPERATION_NOT_FOUND");
+        require!(operation.state == OperationState::Scheduled, "ERR_NOT_SCHEDULED");
+        let now = env::block_timestamp();
+        require!(
+            now >= operation.execute_after_ns.expect("ERR_DELAY_NOT_CONFIGURED").0,
+            "ERR_VETO_WINDOW_OPEN"
+        );
+        require!(now <= operation.expires_at_ns.0, "ERR_OPERATION_EXPIRED");
+        let wallet = self.wallets.get_mut(&chain_id).expect("ERR_WALLET_NOT_FOUND");
+        require!(wallet.active_operation.is_none(), "ERR_WALLET_QUEUE_BUSY");
+        let nonce = wallet.next_nonce;
+        wallet.active_operation = Some(op_id);
+        let (transaction, tx_digest) = evm::build_transaction(&Self::dao_gas_config(), nonce, &operation.request);
+        operation.evm_nonce = nonce;
+        operation.transaction = transaction;
+        operation.tx_digest = tx_digest;
+        operation.expires_at_ns = U64(now.saturating_add(self.operation_ttl_ns));
+        operation.state = OperationState::Prepared;
+        self.operations.insert(op_id, operation);
+        self.dao_queue.remove(position);
+        env::log_str(&format!("OMNIROLES_DAO_TRANSACTION_STARTED:{}", hex::encode(op_id)));
+        self.request_operation_signature(op_id)
+    }
+
+    /// DAO transactions, newest first.
+    pub fn list_dao_transactions(&self, before: Option<u64>, limit: Option<u64>) -> Vec<Operation> {
+        let limit = limit.unwrap_or(20).min(50);
+        let start = before.unwrap_or(self.dao_sequence.saturating_add(1));
+        (1..start)
+            .rev()
+            .take(limit as usize)
+            .filter_map(|sequence| self.dao_transactions.get(&sequence))
+            .filter_map(|op_id| self.operations.get(op_id).cloned())
+            .collect()
+    }
+
+    pub fn dao_queue(&self) -> Vec<Base64VecU8> {
+        self.dao_queue.iter().map(|op_id| Base64VecU8(op_id.to_vec())).collect()
     }
 
     pub fn cancel_prepared(&mut self, op_id: OperationId) {
@@ -768,7 +894,7 @@ impl Vault {
         require!(
             matches!(
                 operation.state,
-                OperationState::Prepared | OperationState::Queued
+                OperationState::Prepared | OperationState::Queued | OperationState::Scheduled
             ),
             "ERR_NOT_CANCELLABLE"
         );
@@ -828,7 +954,7 @@ impl Vault {
             operation.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
-        let role = self.roles.get(&operation.role).expect("ERR_ROLE_NOT_FOUND");
+        let gas_config = self.gas_config(&operation.role);
         let previous_fee = operation
             .cancellation
             .as_ref()
@@ -841,7 +967,7 @@ impl Vault {
             .expect("ERR_WALLET_NOT_FOUND");
         let sender = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
         let (transaction, tx_digest) = evm::build_cancellation_transaction(
-            &role.config,
+            &gas_config,
             operation.request.chain_id,
             operation.evm_nonce,
             sender,
@@ -975,7 +1101,7 @@ impl Vault {
         require!(
             matches!(
                 operation.state,
-                OperationState::Prepared | OperationState::Queued
+                OperationState::Prepared | OperationState::Queued | OperationState::Scheduled
             ),
             "ERR_NOT_EXPIRABLE"
         );
@@ -1301,6 +1427,20 @@ impl Vault {
             ),
             "ERR_OPERATION_TERMINAL"
         );
+        if operation.role == DAO_ROLE {
+            // No role, budget or reference behind a DAO transaction.
+            self.dao_queue.retain(|queued| *queued != op_id);
+            let wallet = self
+                .wallets
+                .get_mut(&operation.request.chain_id)
+                .expect("ERR_WALLET_NOT_FOUND");
+            if wallet.active_operation == Some(op_id) {
+                wallet.active_operation = None;
+            }
+            operation.state = terminal;
+            self.operations.insert(op_id, operation);
+            return;
+        }
         let role_reservations = self
             .role_reservations
             .get_mut(&operation.role)
@@ -1385,6 +1525,7 @@ impl Vault {
     fn apply_rule_change(&mut self, change: RuleChange, now: u64) {
         match change {
             RuleChange::SetRole { role, config } => {
+                require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
                 require!(
                     self.role_reservations.get(&role).copied().unwrap_or(0) == 0,
                     "ERR_ROLE_IN_USE"
@@ -1495,6 +1636,7 @@ impl Vault {
     fn validate_rule_change(change: &RuleChange) {
         match change {
             RuleChange::SetRole { role, config } => {
+                require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
                 require!(!role.is_empty(), "ERR_EMPTY_ROLE");
                 require!(
                     config.max_priority_fee_per_gas.0 <= config.max_fee_per_gas.0,
@@ -1717,8 +1859,34 @@ impl Vault {
         env::sha256_array(bytes)
     }
 
-    fn wallet_path(chain_id: u64) -> String {
-        format!("omniroles/evm/{chain_id}")
+    /// Gas caps of DAO transactions: wide (members vote on the fees), but bounded.
+    fn dao_gas_config() -> RoleConfig {
+        RoleConfig {
+            enabled: true,
+            permissions: Vec::new(),
+            operation_delay_threshold: None,
+            operation_delay_ns: 0,
+            co_sign_threshold: None,
+            co_signer_role: None,
+            velocity: None,
+            gas_limit: U128(5_000_000),
+            max_fee_per_gas: U128(500_000_000_000),
+            max_priority_fee_per_gas: U128(100_000_000_000),
+            max_total_fee: U128(500_000_000_000_000_000),
+        }
+    }
+
+    fn gas_config(&self, role: &str) -> RoleConfig {
+        if role == DAO_ROLE {
+            return Self::dao_gas_config();
+        }
+        self.roles.get(role).expect("ERR_ROLE_NOT_FOUND").config.clone()
+    }
+
+    /// One key for every EVM chain: the company wallet has the same address
+    /// everywhere, so funds sent to it on another chain are never stranded.
+    fn wallet_path(_chain_id: u64) -> String {
+        String::from("omniroles/evm")
     }
 
     fn validate_council(council: &[AccountId]) {

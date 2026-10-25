@@ -9,6 +9,7 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "prepare",
   "authorize",
   "cancel_nonce",
+  "cancel_prepared",
   "renounce_role",
 ] as const;
 
@@ -98,6 +99,8 @@ export interface VaultGateway {
   prepare(intent: PaymentIntent): Promise<PreparedOperation>;
   authorize(opId: number[], approval: GuardApproval): Promise<string>;
   cancelNonce(opId: number[], fees: CancellationFees): Promise<string>;
+  /** Release a prepared operation the Guard refused, so the wallet is free again. */
+  cancelPrepared?(opId: number[]): Promise<string>;
 }
 
 export interface AgentApiGateway {
@@ -110,7 +113,6 @@ export interface AgentApiGateway {
 
 export type PayResult =
   | { outcome: "authorized"; opId: Hex; nearTransactionHash: string; visa: GuardApproval }
-  | { outcome: "escalated"; opId: Hex; escalationId: string | null; reasons: unknown }
   | { outcome: "refused"; opId: Hex; error: string; message: string };
 
 function isNumberArray(value: unknown): value is number[] {
@@ -162,15 +164,9 @@ export class MandateAgentClient {
     const prepared = await this.vault.prepare(completeIntent);
     const opId = operationIdHex(prepared.op_id);
     const visaResponse = await this.api.requestVisa(prepared.op_id, invoice);
-    if (visaResponse.status === 202) {
-      return {
-        outcome: "escalated",
-        opId,
-        escalationId: typeof visaResponse.body.escalationId === "string" ? visaResponse.body.escalationId : null,
-        reasons: visaResponse.body.reasons ?? [],
-      };
-    }
     if (visaResponse.status !== 200) {
+      // Refused: there is no human escalation. Free the wallet right away.
+      await this.vault.cancelPrepared?.(prepared.op_id).catch(() => undefined);
       return {
         outcome: "refused",
         opId,
@@ -459,6 +455,11 @@ export class NearVaultGateway implements VaultGateway {
 
   async authorize(opId: number[], approval: GuardApproval): Promise<string> {
     const outcome = await this.call("authorize", { op_id: opId, approval }, AGENT_GAS.authorize);
+    return outcome.transaction_outcome.id;
+  }
+
+  async cancelPrepared(opId: number[]): Promise<string> {
+    const outcome = await this.call("cancel_prepared", { op_id: opId }, AGENT_GAS.prepare);
     return outcome.transaction_outcome.id;
   }
 

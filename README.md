@@ -8,13 +8,13 @@ MandateOS is a NEAR control plane for chain-agnostic company wallets. **OmniRole
 
 | Block | Status |
 |---|---|
-| Invitation security and founder console, PR #36 | Implemented; awaiting user validation before merge |
-| OmniRoles task 1a | Implemented on `feat/omniroles-vault`; under test/UAT |
-| `contracts/omniroles-conditions` task 1b | Parallel work owned separately; this branch does not touch it |
-| Console OmniRoles cutover, issue #40 task 2 | Next PR after task 1a review |
+| OmniRoles vault (roles, allowances, veto window, MPC signing) | Merged; sandbox tests |
+| NEAR-wallet console (NEP-413 sign-in, members voted by the DAO) | Merged in PR #47 |
+| Guard refuses instead of escalating; voted transactions (multisig) and WalletConnect | `feat/multisig` |
+| One company address on every EVM chain (Base Sepolia, Ethereum Sepolia) | `feat/multisig` |
 | Paymaster, issue #39 | Later |
 
-Safe, Zodiac Roles, Zodiac Delay, the Base governance relay, `0xAAA`, and `0xGOV` are **not** part of the target architecture. Legacy console/deployment files remain only until issue #40 task 2 replaces that UI; they are not evidence of an OmniRoles deployment.
+The Safe/Zodiac stack (Safe, Zodiac Roles and Delay, the Base governance relay) has been removed from the code.
 
 ## Why
 
@@ -113,7 +113,13 @@ Until issue #39 provides a paymaster, the derived wallet holds a small ETH balan
 
 ## Human governance
 
-Sputnik/Trezu remains the human governance layer. A final vote calls `queue_rule_change`; it does not immediately mutate policy. OmniRoles itself enforces the waiting period and targeted council veto. Sandbox tests cover DAO authorization, delayed execution, direct-account rejection, and independent veto entries ([`dao_governance.rs`](./contracts/tests/tests/dao_governance.rs)).
+Sputnik is the human governance layer. Members vote on three kinds of things:
+
+- **Rules**: roles, budgets, memberships, pause. A final vote calls `queue_rule_change`; OmniRoles enforces the waiting period and the council veto itself ([`dao_governance.rs`](./contracts/tests/tests/dao_governance.rs)).
+- **Members**: `ChangePolicy` on the DAO (threshold `ceil(2n/3)`).
+- **Transactions outside any role** (multisig): a member proposes up to 10 EVM transactions (an Aave deposit, a bridge, a payment to a new recipient), from the Wallet page or from a dApp connected by WalletConnect. Once voted, they wait out the same veto window. Then the vault signs them in order through MPC, and the worker broadcasts them on their chain.
+
+An agent never escalates: what its role allows is signed, everything else is refused and logged. A member can turn a refused operation into a proposal ("Ask the members").
 
 ## Repository
 

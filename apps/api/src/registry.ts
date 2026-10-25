@@ -1,87 +1,44 @@
-import { readFile } from "node:fs/promises";
-import { bytesToHex, decodeFunctionData, getAddress, type Address } from "viem";
-import { z } from "zod";
+import { bytesToHex, decodeFunctionData, erc20Abi, getAddress, type Address } from "viem";
+
 import { bytesToAddress } from "./evm.js";
-import type { Registry, VaultOperation } from "./types.js";
+import type { VaultOperation } from "./types.js";
 
-const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
-const registrySchema = z.object({
-  clientId: z.string().min(1),
-  registryVersion: z.number().int().nonnegative(),
-  network: z.literal("base-sepolia"),
-  chainId: z.literal(84532),
-  token: z.object({ symbol: z.literal("USDC"), address: address.nullable(), decimals: z.literal(6) }),
-  roles: z.record(
-    z.string(),
-    z.object({
-      maximumPayment: z.string().regex(/^\d+$/),
-      vendors: z.array(
-        z.object({
-          id: z.string().min(1),
-          name: z.string().min(1),
-          addresses: z.array(
-            z.object({ address, maximumPayment: z.string().regex(/^\d+$/).optional() }),
-          ),
-        }),
-      ),
-    }),
-  ),
-});
-const erc20TransferAbi = [{
-  type: "function",
-  name: "transfer",
-  stateMutability: "nonpayable",
-  inputs: [
-    { name: "recipient", type: "address" },
-    { name: "amount", type: "uint256" },
-  ],
-  outputs: [{ type: "bool" }],
-}] as const;
-
-
-export async function loadRegistry(path: string): Promise<Registry> {
-  return registrySchema.parse(JSON.parse(await readFile(path, "utf8"))) as Registry;
+/**
+ * What the Guard knows that the vault does not: which addresses are real
+ * suppliers (names, four-eyes registry) and which is the company's own wallet.
+ * The vault already enforced the role (contracts, functions, parameters, budgets).
+ */
+export interface GuardContext {
+  suppliers: Array<{ id: string; name: string; address: Address }>;
+  companyWallet: Address | null;
 }
 
-export type RegistryDecision =
-  | { decision: "approve"; vendorId: string; vendorName: string }
-  | { decision: "escalate"; reasons: string[] };
+export type GuardDecision =
+  | { decision: "approve"; vendorId: string | null; vendorName: string | null }
+  | { decision: "refuse"; reasons: string[] };
 
-export function evaluateExactRules(registry: Registry, operation: VaultOperation): RegistryDecision {
-  const reasons: string[] = [];
-  if (operation.client_id !== registry.clientId) reasons.push("client_id mismatch");
-  if (operation.registry_version !== registry.registryVersion) reasons.push("registry_version mismatch");
-  if (operation.transaction.chain_id !== registry.chainId) reasons.push("chain_id mismatch");
-  const token = bytesToAddress(operation.request.target);
-  if (!registry.token.address) {
-    reasons.push("token not deployed");
-  } else if (token !== getAddress(registry.token.address)) {
-    reasons.push("token mismatch");
-  }
-  const role = registry.roles[operation.role];
-  if (!role) return { decision: "escalate", reasons: [...reasons, "role not registered"] };
-  let recipient: Address;
-  let amount: bigint;
+/**
+ * Off-chain second check before the Guard signs a visa. Either it passes or the
+ * operation is refused: there is no human escalation. Anything else must be
+ * voted by the DAO as a transaction proposal.
+ */
+export function evaluateOperation(context: GuardContext, operation: VaultOperation): GuardDecision {
+  let transfer: { recipient: Address; amount: bigint } | null = null;
   try {
-    const decoded = decodeFunctionData({
-      abi: erc20TransferAbi,
-      data: bytesToHex(Uint8Array.from(operation.request.calldata)),
-    });
-    if (decoded.functionName !== "transfer") throw new Error("not transfer");
-    [recipient, amount] = decoded.args;
+    const decoded = decodeFunctionData({ abi: erc20Abi, data: bytesToHex(Uint8Array.from(operation.request.calldata)) });
+    if (decoded.functionName === "transfer") transfer = { recipient: decoded.args[0], amount: decoded.args[1] };
   } catch {
-    return { decision: "escalate", reasons: [...reasons, "unrecognized payment calldata"] };
+    transfer = null;
   }
-  const match = role.vendors
-    .flatMap((vendor) => vendor.addresses.map((entry) => ({ vendor, entry })))
-    .find(({ entry }) => getAddress(entry.address) === recipient);
-  if (!match) return { decision: "escalate", reasons: [...reasons, "recipient not registered"] };
-  const maximum = BigInt(match.entry.maximumPayment ?? role.maximumPayment);
-  if (amount > maximum) reasons.push("amount exceeds exact vendor limit");
-  if (reasons.length > 0) return { decision: "escalate", reasons };
-  return { decision: "approve", vendorId: match.vendor.id, vendorName: match.vendor.name };
-}
-
-export function normalizeRegistryAddress(value: string): Address {
-  return getAddress(value);
+  // Swaps, approvals and other protocol calls are fully described by the role.
+  if (!transfer) return { decision: "approve", vendorId: null, vendorName: null };
+  const recipient = getAddress(transfer.recipient);
+  if (context.companyWallet && recipient === getAddress(context.companyWallet)) {
+    return { decision: "approve", vendorId: null, vendorName: "company wallet" };
+  }
+  const supplier = context.suppliers.find((item) => getAddress(item.address) === recipient);
+  if (!supplier) {
+    return { decision: "refuse", reasons: [`${recipient} is not a registered supplier (token ${bytesToAddress(operation.request.target)})`] };
+  }
+  return { decision: "approve", vendorId: supplier.id, vendorName: supplier.name };
 }

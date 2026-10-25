@@ -46,7 +46,7 @@ export function AgentsPage() {
       <Card title="Agents">
         <PageState loading={agents.isLoading} error={agents.error} empty={agents.data?.agents.length === 0} emptyContent={<div className="state">No agent yet.</div>}>
           <table>
-            <thead><tr><th>Name</th><th>NEAR account</th><th>Roles held</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>NEAR account</th><th>Roles held</th><th>Status</th></tr></thead>
             <tbody>
               {(agents.data?.agents ?? []).map((agent) => {
                 const held = rolesOf(agent.nearAccountId);
@@ -56,7 +56,6 @@ export function AgentsPage() {
                     <td className="mono small">{agent.nearAccountId}</td>
                     <td>{held.length ? held.join(", ") : <span className="small muted">none yet · <Link to={`/roles?new=1&role=${encodeURIComponent(agent.role)}`}>give it a role</Link></span>}</td>
                     <td><Status value={agent.active ? "active" : "revoked"} /></td>
-                    <td><Link to={`/agents/${agent.id}`}>Details</Link></td>
                   </tr>
                 );
               })}
