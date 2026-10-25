@@ -118,6 +118,23 @@ export async function connectNearWallet(): Promise<string[]> {
   return accounts;
 }
 
+/** Forget the wallet account in this browser (sign-out, or before picking another account). */
+export async function disconnectNearWallet(): Promise<void> {
+  if (e2eNear() || demoWalletsEnabled()) return;
+  const selector = await nearSelector();
+  if (!selector.isSignedIn()) return;
+  await (await selector.wallet()).signOut().catch(() => undefined);
+}
+
+/**
+ * Pick another account: the wallet selector only opens when no account is
+ * connected, so disconnect first. Meteor then offers its active account.
+ */
+export async function switchNearWallet(): Promise<string[]> {
+  await disconnectNearWallet();
+  return connectNearWallet();
+}
+
 export async function nearAccounts(): Promise<string[]> {
   const injected = e2eNear();
   if (injected) return (await injected.getAccounts()).map((account) => account.accountId);

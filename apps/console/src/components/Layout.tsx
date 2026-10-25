@@ -8,6 +8,7 @@ import { SigningInbox } from "./SigningInbox.js";
 import { WalletBar } from "./WalletBar.js";
 import { WalletProvider } from "../lib/wallet-context.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
+import { disconnectNearWallet } from "../wallets.js";
 
 type Organization = { id: string; name: string };
 
@@ -84,7 +85,7 @@ export function Layout() {
           </nav>
           <div className="spacer" />
           <div className="small muted">{session.data?.user.name}</div>
-          <button className="ghost" onClick={() => void authClient.signOut().then(() => navigate("/"))}>Sign out</button>
+          <button className="ghost" title="Sign out, then sign in with another member's wallet" onClick={() => void authClient.signOut().then(disconnectNearWallet).then(() => navigate("/"))}>Sign out</button>
         </aside>
         <div className="app-frame">
           <header className="app-topbar">
