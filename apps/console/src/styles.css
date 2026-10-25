@@ -316,3 +316,22 @@ button.block { width: 100%; min-height: 44px; font-size: 15px; }
 .auth-error { margin: 14px 0 0; overflow-wrap: anywhere; }
 .auth-foot { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #1f2731; font-size: 13px; color: #8b97a7; line-height: 1.5; }
 .role-steps { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+/* DeFi catalog (role builder) */
+.catalog-backdrop { position: fixed; inset: 0; background: rgba(8, 11, 15, 0.55); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.catalog { width: min(560px, 100%); background: #fff; color: #111827; border: 1px solid #e2e5ea; border-radius: 14px; padding: 22px; box-shadow: 0 24px 60px rgba(16, 24, 40, .25); }
+.catalog h3 { margin: 0 0 4px; color: #111827; }
+.catalog .muted { color: #6b7280; }
+.catalog-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.catalog .catalog-item { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px 16px; border-radius: 10px; background: #fafbfc; border: 1px solid #e2e5ea; color: #111827; }
+.catalog .catalog-item:hover:not(:disabled) { border-color: var(--accent-2); background: #f0faf8; }
+.catalog .catalog-item:disabled { opacity: 0.6; }
+.catalog-name { font-weight: 600; display: flex; gap: 10px; align-items: baseline; }
+.catalog-action { font-weight: 400; font-size: 12px; color: var(--accent-2); }
+.catalog-soon { position: absolute; top: 12px; right: 14px; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #d1d5db; color: #6b7280; }
+.catalog .ghost { color: #374151; border-color: #e2e5ea; background: #fff; }
+
+/* Checkboxes and radios keep the native look (the input rule above is for text fields). */
+input[type="checkbox"], input[type="radio"] { appearance: auto; background: none; border: none; padding: 0; min-width: 0; min-height: 0; accent-color: var(--accent); }
+/* The main area is light: native controls (checkboxes, selects, scrollbars) must be drawn light too. */
+.app-frame { color-scheme: light; }

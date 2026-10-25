@@ -157,7 +157,7 @@ export function OnboardingPage() {
                   A role lists what the agent may do with company funds. Everything else is refused by the vault.
                 </p>
                 <ol className="small muted role-steps">
-                  <li>Name the role <span className="mono">{activeAgents[0]?.role ?? "treasury"}</span> (the name the agent uses) and add what it allows: pay registered suppliers, or swap on Uniswap, each with a budget.</li>
+                  <li>Name the role <span className="mono">{activeAgents[0]?.role ?? "treasury"}</span> (the name the agent uses) and add what it allows: + Transfers to registered suppliers, or + DeFi from the catalog (Uniswap), each with a budget.</li>
                   <li>Preview, then submit it to the members' vote.</li>
                   <li>Members approve it in Decisions; it applies after the veto window.</li>
                 </ol>
