@@ -79,7 +79,7 @@ export type RoleView = {
 };
 
 export type ActivityItem = {
-  kind: "operation" | "refusal" | "allowed";
+  kind: "operation" | "refusal" | "allowed" | "request";
   at: string;
   agent: string;
   reference: string;

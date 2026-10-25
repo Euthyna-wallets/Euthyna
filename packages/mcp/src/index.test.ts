@@ -52,4 +52,40 @@ describe("MandateMcpTools", () => {
     })).resolves.toMatchObject({ nearTransactionHash: "near-cancel" });
     expect(calls).toEqual(["cancel_nonce", "record_cancellation"]);
   });
+
+  it("checks transfers and calls, reads the mandate and asks the members", async () => {
+    const checked: Array<Record<string, unknown>> = [];
+    const vault: VaultGateway = {
+      prepare: async () => { throw new Error("check must not prepare"); },
+      authorize: async () => { throw new Error("check must not authorize"); },
+      cancelNonce: async () => "",
+    };
+    const api: AgentApiGateway = {
+      gasQuote: async () => { throw new Error("check must not quote gas"); },
+      requestVisa: async () => ({ status: 500, body: {} }),
+      recordAuthorization: async () => ({}),
+      recordCancellation: async () => ({}),
+      status: async () => ({}),
+      check: async (request) => {
+        checked.push(request as unknown as Record<string, unknown>);
+        return { allowed: false, refusedBy: "guard", reason: "GUARD:guard_refused:x", explanation: "Guard: x", requires_delay: false, requires_cosign: false };
+      },
+      mandate: async () => ({ role: "suppliers", budgets: [] }),
+      askMembers: async (input) => ({ status: "waiting_for_members", reason: input.reason }),
+    };
+    const tools = new MandateMcpTools(new MandateAgentClient(vault, api));
+    await expect(tools.check({
+      token: "0x1111111111111111111111111111111111111111",
+      recipient: "0x2222222222222222222222222222222222222222",
+      amount: "5",
+      reference: "INV-2",
+    })).resolves.toMatchObject({ allowed: false, refusedBy: "guard" });
+    expect(checked[0]).toMatchObject({ chain_id: 84532, allowance_amount: "5", value: "0", reference: "INV-2" });
+    await tools.check({ to: "0x3333333333333333333333333333333333333333", data: "0x617ba037", allowanceAmount: "10", chainId: 11155111, reference: "AAVE-1" });
+    expect(checked[1]).toMatchObject({ chain_id: 11155111, calldata: [0x61, 0x7b, 0xa0, 0x37], allowance_amount: "10" });
+    await expect(tools.check({ reference: "nothing" })).rejects.toThrow(/token \+ recipient \+ amount/);
+    await expect(tools.mandate()).resolves.toEqual({ role: "suppliers", budgets: [] });
+    await expect(tools.askMembers({ chainId: 84532, to: "0x3333333333333333333333333333333333333333", reason: "new supplier" }))
+      .resolves.toMatchObject({ status: "waiting_for_members" });
+  });
 });

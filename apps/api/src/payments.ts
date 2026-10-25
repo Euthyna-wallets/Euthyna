@@ -9,7 +9,7 @@ import {
   type BaseGasQuoter,
 } from "./base-gas.js";
 import type { Guard, GuardResult } from "./guard.js";
-import type { GuardContext } from "./registry.js";
+import { evaluateOperation, type GuardContext } from "./registry.js";
 import type { NearClient } from "./near.js";
 import type { RegistryService } from "./registry-db.js";
 import type { VaultOperation } from "./types.js";
@@ -221,6 +221,35 @@ export class PaymentService {
       result.approval.signature,
     );
     return { status: 200, body: { visa: stored.visa, signature: stored.signature } };
+  }
+
+  /**
+   * What the Guard would answer for a request, without preparing or signing
+   * anything: lets an agent check before paying. The invoice checks need the
+   * invoice and only run on a real payment.
+   */
+  async preview(
+    organizationId: string,
+    agent: { vaultAccountId: string },
+    request: { chain_id: number; target: number[]; calldata: number[]; reference: string },
+  ): Promise<{ code: string; reasons: string[] } | null> {
+    if (request.reference && await this.registry.isConsumed(organizationId, request.reference)) {
+      return { code: "reference_consumed", reasons: [`reference ${request.reference} was already paid`] };
+    }
+    const decision = evaluateOperation({
+      suppliers: await this.registry.activeSupplierWallets(organizationId, request.chain_id),
+      companyWallet: await this.companyWallet(agent.vaultAccountId, request.chain_id),
+    }, { request } as unknown as VaultOperation);
+    return decision.decision === "refuse" ? { code: "guard_refused", reasons: decision.reasons } : null;
+  }
+
+  /** Recipients the Guard accepts on a chain: the registered suppliers and the company wallet. */
+  async recipients(organizationId: string, agent: { vaultAccountId: string }, chainId: number) {
+    const suppliers = await this.registry.activeSupplierWallets(organizationId, chainId);
+    return {
+      companyWallet: await this.companyWallet(agent.vaultAccountId, chainId).catch(() => null),
+      suppliers: suppliers.map((supplier) => ({ name: supplier.name, address: getAddress(supplier.address) })),
+    };
   }
 
   private async companyWallet(vaultAccountId: string, chainId: number): Promise<`0x${string}` | null> {

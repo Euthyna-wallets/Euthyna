@@ -12,3 +12,6 @@ dist-check/
 apps/console/test-results/
 apps/console/playwright-report/
 packages/sdk/.mandateos/
+
+# Agent keys created by the SDK or the MCP server
+*-key.json
