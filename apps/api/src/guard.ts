@@ -1,9 +1,9 @@
 import { bytesToHex, keccak256, type Hex } from "viem";
-import { serializeRelayStatusReport, serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
+import { serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
 import type { KmsSigner } from "./kms.js";
 import { bytes32ToHex, digestVaultTransaction, hexToByteArray } from "./evm.js";
 import { evaluateOperation, type GuardContext } from "./registry.js";
-import type { GovernanceOperation, GuardVisa, RelayFinalStatus, RelayStatusReport, SignedPayload, StatusReport, VaultOperation } from "./types.js";
+import type { GuardVisa, SignedPayload, StatusReport, VaultOperation } from "./types.js";
 
 export interface GuardApproval {
   decision: "approve";
@@ -88,32 +88,6 @@ export class Guard {
     const signature = await signDomainPayload(
       "mandateos:status:v1",
       serializeStatusReport(report),
-      this.statusSigner,
-    );
-    return { report, signature };
-  }
-  async relayStatusReport(
-    clientId: string,
-    operation: GovernanceOperation,
-    txHash: Hex,
-    blockNumber: bigint,
-    finalStatus: RelayFinalStatus,
-  ): Promise<SignedPayload<RelayStatusReport>> {
-    if (!operation.signed_transaction) throw new Error("relay operation has no signed transaction");
-    const storedHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
-    if (storedHash !== txHash) throw new Error("receipt hash does not match the relay signed transaction");
-    if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Base block number exceeds safe integer range");
-    const report: RelayStatusReport = {
-      client_id: clientId,
-      op_id: operation.op_id,
-      final_status: finalStatus,
-      tx_hash: hexToByteArray(txHash),
-      report_nonce: randomSafeNonce(),
-      block_number: Number(blockNumber),
-    };
-    const signature = await signDomainPayload(
-      "mandateos:relay-status:v1",
-      serializeRelayStatusReport(report),
       this.statusSigner,
     );
     return { report, signature };

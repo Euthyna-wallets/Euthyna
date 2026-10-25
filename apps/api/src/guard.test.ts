@@ -1,12 +1,12 @@
 import { getPublicKeyAsync, verifyAsync } from "@noble/ed25519";
 import { describe, expect, it } from "vitest";
 import { bytesToHex, concatHex, encodeFunctionData, hexToBytes, keccak256, stringToHex } from "viem";
-import { serializeRelayStatusReport, serializeStatusReport, serializeVisa } from "./canonical.js";
+import { serializeStatusReport, serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
 import type { GuardContext } from "./registry.js";
 import { Guard } from "./guard.js";
 import { EnvKmsSigner } from "./kms.js";
-import type { GovernanceOperation, VaultOperation } from "./types.js";
+import type { VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
 const recipient = "0x1111111111111111111111111111111111111111" as const;
@@ -142,42 +142,6 @@ describe("Guard exact rules", () => {
     await expect(
       guard.confirmationReport(operation, keccak256("0x0304"), 1n),
     ).rejects.toThrow("receipt hash does not match the stored signed transaction");
-  });
-  it("signs relay confirmations under the relay-only domain", async () => {
-    const privateKey = statusPrivateKey;
-    const guard = testGuard();
-    const operation: GovernanceOperation = {
-      op_id: Array(32).fill(4) as number[],
-      proposer: "dao.testnet",
-      target: Array(20).fill(5) as number[],
-      value: "0",
-      data: [1, 2, 3],
-      operation: 1,
-      evm_nonce: 0,
-      transaction: operationFor().transaction,
-      tx_digest: Array(32).fill(6) as number[],
-      possibly_signed_at_block: 10,
-      state: "PossiblySigned",
-      signature: null,
-      signed_transaction: [0x02, 0x01, 0x02],
-      cancellation: null,
-    };
-    if (!operation.signed_transaction) throw new Error("signed transaction missing");
-    const txHash = keccak256(bytesToHex(Uint8Array.from(operation.signed_transaction)));
-    const signed = await guard.relayStatusReport("acme", operation, txHash, 42n, "Vetoed");
-    if (!signed.report) throw new Error("relay report missing");
-    const message = concatHex([
-      stringToHex("mandateos:relay-status:v1"),
-      bytesToHex(serializeRelayStatusReport(signed.report)),
-    ]);
-    expect(
-      await verifyAsync(
-        Buffer.from(signed.signature, "base64"),
-        hexToBytes(message),
-        await getPublicKeyAsync(privateKey),
-      ),
-    ).toBe(true);
-    expect(signed.report.final_status).toBe("Vetoed");
   });
 
 });

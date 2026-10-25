@@ -489,44 +489,5 @@ describe("OperationWorker", () => {
     await expect(test.createWorker().tick()).resolves.toEqual({ leased: false, processed: 0 });
     expect(test.base.broadcasts).toEqual([]);
   });
-  it("runs governance jobs under the same worker lease", async () => {
-    const test = harness();
-    test.store.operation.nextAttemptAt = new Date("2030-01-01T00:00:00.000Z");
-    const governance = { tick: vi.fn(async () => 1) };
-    const worker = new OperationWorker(
-      test.store,
-      test.near,
-      test.base,
-      {
-        confirmationReport: async (current: VaultOperation, hash: Hex, blockNumber: bigint) => ({
-          report: {
-            client_id: current.client_id,
-            op_id: current.op_id,
-            kind: "Confirmed" as const,
-            tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
-            report_nonce: 1,
-            block_number: Number(blockNumber),
-          },
-          signature: "signed",
-        }),
-        failureReport: async (current: VaultOperation, hash: Hex, blockNumber: bigint) => ({
-          report: {
-            client_id: current.client_id,
-            op_id: current.op_id,
-            kind: "Failed" as const,
-            tx_hash: Array.from(Buffer.from(hash.slice(2), "hex")),
-            report_nonce: 2,
-            block_number: Number(blockNumber),
-          },
-          signature: "signed",
-        }),
-      },
-      config,
-      () => new Date(nowStart),
-      governance,
-    );
-    await expect(worker.tick()).resolves.toEqual({ leased: true, processed: 1 });
-    expect(governance.tick).toHaveBeenCalledOnce();
-  });
 
 });

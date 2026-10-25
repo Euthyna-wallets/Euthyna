@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 
 import { Card, PageState, Status, short } from "../components/ui.js";
 import { omni } from "../omniroles-api.js";
@@ -38,7 +37,6 @@ export function ActivityPage() {
                         : (
                         <span className="row wrap">
                           {item.txHash ? <a href={`https://sepolia.basescan.org/tx/${item.txHash}`} target="_blank" rel="noreferrer">Base tx {short(item.txHash)}</a> : <span className="muted">Not broadcast yet</span>}
-                          {item.opId ? <Link to={`/payments/${item.opId}`}>Trace</Link> : null}
                         </span>
                       )}
                   </td>

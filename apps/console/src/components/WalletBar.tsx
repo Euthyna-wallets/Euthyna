@@ -17,7 +17,7 @@ export function WalletBar() {
         <span className="wallet-network">NEAR</span>
         <strong className="mono">{wallets.nearAccountId ? short(wallets.nearAccountId, 14) : me ? short(me, 14) : "Not connected"}</strong>
         {!wallets.nearConnected || mismatch ? (
-          <button className="ghost compact" disabled={wallets.connecting !== null} onClick={() => void wallets.connectNear()}>
+          <button className="ghost compact" disabled={wallets.connecting} onClick={() => void wallets.connectNear()}>
             Connect wallet
           </button>
         ) : null}

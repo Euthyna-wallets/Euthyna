@@ -1623,19 +1623,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
-name = "governance-relay"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "bs58 0.5.1",
- "hex",
- "near-sdk",
- "omni-transaction",
- "schemars 0.8.22",
- "serde",
-]
-
-[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

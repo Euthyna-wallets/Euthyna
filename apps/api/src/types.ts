@@ -79,24 +79,6 @@ export interface VaultOperation {
   cancellation: CancellationAttempt | null;
 }
 
-export interface GovernanceOperation {
-  op_id: Bytes32;
-  proposer: string;
-  target: Bytes20;
-  value: string;
-  data: number[];
-  operation: 0 | 1;
-  evm_nonce: number;
-  transaction: VaultTransaction;
-  tx_digest: Bytes32;
-  possibly_signed_at_block: number;
-  state: "PossiblySigned" | "Confirmed" | "Cancelled" | "Executed" | "Vetoed" | "Expired" | "Failed";
-  signature: MpcSignature | null;
-  signed_transaction: number[] | null;
-  cancellation: CancellationAttempt | null;
-}
-
-
 export interface GuardVisa {
   client_id: string;
   op_id: Bytes32;
@@ -118,39 +100,9 @@ export interface StatusReport {
   report_nonce: number;
   block_number: number;
 }
-export type RelayFinalStatus = "Executed" | "Vetoed" | "Expired" | "Failed";
-
-export interface RelayStatusReport {
-  client_id: string;
-  op_id: Bytes32;
-  final_status: RelayFinalStatus;
-  tx_hash: Bytes32;
-  report_nonce: number;
-  block_number: number;
-}
-
-
 export interface SignedPayload<T> {
   report?: T;
   visa?: T;
   signature: string;
 }
 
-export interface Registry {
-  clientId: string;
-  registryVersion: number;
-  network: "base-sepolia";
-  chainId: 84532;
-  token: { symbol: "USDC"; address: Hex | null; decimals: 6 };
-  roles: Record<
-    string,
-    {
-      maximumPayment: string;
-      vendors: Array<{
-        id: string;
-        name: string;
-        addresses: Array<{ address: Hex; maximumPayment?: string }>;
-      }>;
-    }
-  >;
-}

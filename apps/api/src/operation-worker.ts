@@ -68,9 +68,6 @@ export interface WorkerStore {
   releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed"): Promise<void>;
   syncAgentEvmAddress(operation: WorkerOperationRecord, evmAddress: string): Promise<void>;
 }
-export interface GovernanceJobRunner {
-  tick(): Promise<number>;
-}
 
 
 export interface WorkerNearGateway {
@@ -252,7 +249,6 @@ export class OperationWorker {
     private readonly guard: Pick<Guard, "confirmationReport" | "failureReport">,
     private readonly config: WorkerConfig,
     private readonly now: () => Date = () => new Date(),
-    private readonly governance?: GovernanceJobRunner,
   ) {}
 
   async tick(): Promise<{ leased: boolean; processed: number }> {
@@ -280,9 +276,6 @@ export class OperationWorker {
         }
         processed += 1;
       }
-    }
-    if (this.governance && await this.store.acquireLease(this.now(), this.config.leaseMs)) {
-      processed += await this.governance.tick();
     }
     return { leased: true, processed };
   }

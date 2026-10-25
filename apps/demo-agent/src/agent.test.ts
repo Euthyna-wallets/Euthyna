@@ -42,11 +42,7 @@ class PolicyGateway implements ToolGateway {
       return Promise.resolve({ outcome: "refused", error: "recipient_not_allowed", visa: null });
     }
     if (args.claimedRecipient && args.claimedRecipient !== approvedRecipient) {
-      return Promise.resolve({
-        outcome: "escalated",
-        reasons: ["invoice payment details differ from the prepared registry recipient"],
-        visa: null,
-      });
+      return Promise.resolve({ outcome: "refused", error: "invoice_recipient_mismatch", visa: null });
     }
     return Promise.resolve({ outcome: "authorized", status: "Confirmed", visa: { signed: true } });
   }
@@ -78,14 +74,14 @@ describe("MandateOS LLM demo scenarios", () => {
     });
   });
 
-  it("changed payment details produce an escalation and no visa", async () => {
+  it("changed payment details are refused with no visa", async () => {
     const gateway = new PolicyGateway();
     const agent = new MandateDemoAgent(
       new ScriptedModel(paymentDecision({ claimedRecipient: attacker, invoiceText: "new IBAN/payment wallet" })),
       gateway,
     );
     await expect(agent.run("supplier changed bank details")).resolves.toMatchObject({
-      result: { outcome: "escalated", visa: null },
+      result: { outcome: "refused", error: "invoice_recipient_mismatch", visa: null },
     });
   });
 

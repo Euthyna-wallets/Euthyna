@@ -182,6 +182,12 @@ export class OmniRolesService {
   // Members: NEAR accounts entered by an admin before the DAO exists
   // -------------------------------------------------------------------------
 
+  /** The company treasury, for routes that need the vault (agents). */
+  async activeTreasury(organizationId: string) {
+    const treasury = await this.treasury(organizationId);
+    return treasury ? { status: treasury.status, daoAccountId: treasury.daoAccountId, vaultAccountId: treasury.vaultAccountId } : null;
+  }
+
   async members(organizationId: string) {
     const members = await this.prisma.member.findMany({
       where: { organizationId },
@@ -283,13 +289,6 @@ export class OmniRolesService {
         baseChainId: PROFILE.chainId,
         daoAccountId: plan.daoAccountId,
         vaultAccountId: plan.vaultAccountId,
-        // Safe-era columns, unused by OmniRoles.
-        relayAccountId: "",
-        safeAddress: "",
-        rolesAddress: "",
-        delayAddress: "",
-        govAddress: "",
-        relayWasmSha256: "",
         vaultWasmSha256: artifact.sha256,
         status: "wallet_pending",
       },
@@ -585,7 +584,7 @@ export class OmniRolesService {
   }
 
   async activateAllReadyRules(): Promise<void> {
-    const treasuries = await this.prisma.treasury.findMany({ where: { safeAddress: "" } });
+    const treasuries = await this.prisma.treasury.findMany();
     for (const treasury of treasuries) {
       await this.activateReadyRules(treasury.organizationId).catch((error: unknown) => {
         console.error(`rule activation failed for ${treasury.vaultAccountId}:`, error);

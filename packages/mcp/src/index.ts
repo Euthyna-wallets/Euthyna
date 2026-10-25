@@ -76,7 +76,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.pay(input)));
   server.registerTool("status", {
     title: "Read MandateOS operation status",
-    description: "Read the merged Vault, worker, receipt, visa, and escalation status.",
+    description: "Read the merged Vault, worker, receipt and visa status.",
     inputSchema: { opId },
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async (input) => result(await tools.status(input)));

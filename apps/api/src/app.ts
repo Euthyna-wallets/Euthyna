@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 
@@ -9,18 +8,11 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
 import { AgentProvisioningError, type AgentProvisioningService } from "./agent-provisioning.js";
-import { onChainAgentEvmAddress } from "./agent-chain.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway.js";
-import type { Guard } from "./guard.js";
-import { GovernanceError, type GovernanceGateway } from "./governance.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
-import { TreasuryError, type TreasuryGateway } from "./treasury.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
-import type { ConsoleDataService } from "./console-data.js";
-import type { MandateGateway } from "./mandates.js";
-import type { BaseRelayer } from "./relayer.js";
 
 const requestSchema = z.object({
   vaultAccountId: z.string().min(2),
@@ -72,101 +64,10 @@ const walletSchema = z.object({
   address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
-const contractUpdateSchema = z.object({
-  maxAmount: z.string().regex(/^\d+$/).optional(),
-  periodicity: z.enum(["monthly", "quarterly", "annual", "one_off"]).optional(),
-  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
-  role: z.string().min(1).max(80).optional(),
-});
-
-const contractSchema = z.object({
-  reference: z.string().min(1).max(120),
-  role: z.string().min(1).max(80),
-  supplierId: z.string().uuid(),
-  maxAmount: z.string().regex(/^\d+$/),
-  periodicity: z.enum(["monthly", "quarterly", "annual", "one_off"]),
-  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-});
-
-const mandateSchema = z.object({
-  role: z.string().regex(/^[a-z][a-z0-9-]{1,31}$/),
-  operations: z.array(z.enum(["pay", "swap", "bridge"])).min(1),
-  maxPerTx: z.string().regex(/^\d+$/),
-  budget: z.string().regex(/^\d+$/),
-  periodDays: z.number().int().min(1).max(365),
-  recipients: z.array(addressSchema).min(1),
-  token: addressSchema,
-  agent: z
-    .object({
-      nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-      mpcPath: z.string().min(1).max(200),
-      evmAddress: addressSchema.optional(),
-    })
-    .optional(),
-});
-
-const nearAccountSchema = z
-  .string()
-  .transform((value) => value.trim().split(/\s+/)[0]!.replace(/\(.*\)$/, ""))
-  .pipe(z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/));
-
 const paymentGasQuoteSchema = z.object({
   token: addressSchema,
   recipient: addressSchema,
   amount: z.string().regex(/^[1-9]\d*$/),
-});
-const evmAddressSchema = z
-  .string()
-  .transform((value) => value.trim().split(/\s+/)[0]!)
-  .pipe(z.string().regex(/^0x[0-9a-fA-F]{40}$/));
-
-const treasuryPlanSchema = z.object({
-  environment: z.string().min(1).default("uat"),
-  daoName: z.string().min(2).max(40),
-  founderNearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-});
-
-const treasuryRegisterSchema = z.object({
-  environment: z.string().min(1).default("uat"),
-  daoAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  vaultAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  relayAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  safeAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  rolesAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  delayAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  govAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-});
-
-const nearDeploymentAttestationSchema = treasuryRegisterSchema.pick({
-  environment: true,
-  daoAccountId: true,
-  vaultAccountId: true,
-  relayAccountId: true,
-  delayAddress: true,
-  govAddress: true,
-});
-
-const nearSponsorshipSchema = z.object({
-  nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/),
-  nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
-});
-const budgetTokenPlanSchema = z.object({
-  amount: z.string().regex(/^[1-9]\d*$/),
-});
-const governanceExecutionSchema = z.object({
-  proposalId: z.number().int().nonnegative(),
-  nearTransactionHash: z.string().min(32).max(64),
-  signerAccountId: nearAccountSchema,
-});
-const governanceUnblockSchema = z.object({
-  opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-});
-const governanceSwapOwnerSchema = z.object({
-  oldOwner: evmAddressSchema,
-  newOwner: evmAddressSchema,
-});
-const governanceAddOwnerSchema = z.object({
-  newOwner: evmAddressSchema,
 });
 const nearRpcProxySchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -175,37 +76,26 @@ const nearRpcProxySchema = z.object({
   params: z.unknown(),
 });
 
-
-
-
-
-function derivedWalletAccountId(publicKey: string, parent: string): string {
-  const suffix = createHash("sha256").update(publicKey).digest("hex").slice(0, 12);
-  return `w-${suffix}.${parent}`;
-}
-
 interface AppVariables {
   agent: AgentIdentity;
   console: ConsoleIdentity;
 }
 type AppContext = Context<{ Variables: AppVariables }>;
 
+/** The company treasury (DAO + vault) as the agent routes need it. */
+export interface TreasuryLookup {
+  activeTreasury(organizationId: string): Promise<{ status: string; daoAccountId: string; vaultAccountId: string } | null>;
+}
+
 export interface AppDependencies {
   near: NearClient;
-  guard: Guard;
-  relayer: BaseRelayer;
   auth: AuthGateway;
   agentProvisioning: AgentProvisioningService;
-  treasury: TreasuryGateway;
-  governance: GovernanceGateway;
-  mandates: MandateGateway;
+  treasuries: TreasuryLookup;
   registry: RegistryService;
   payments: PaymentService;
-  consoleData: ConsoleDataService;
   consoleOrigin: string;
   nearParentAccount: string;
-  nearSponsorDailyWalletLimit: number;
-  nearSponsorWalletAmountYocto: string;
   omniroles?: OmniRolesService;
 }
 
@@ -284,20 +174,13 @@ async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<
 
 export function createApp({
   near,
-  guard,
-  relayer,
   auth,
   agentProvisioning,
-  treasury,
-  governance,
-  mandates,
+  treasuries,
   registry: registryService,
   payments,
-  consoleData,
   consoleOrigin,
   nearParentAccount,
-  nearSponsorDailyWalletLimit,
-  nearSponsorWalletAmountYocto,
   omniroles,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -342,13 +225,6 @@ export function createApp({
         },
       });
     }
-  });
-
-
-  app.post("/v1/relayer/broadcast", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const input = await parseJson(context, requestSchema);
-    const operation = await near.getOperation(input.vaultAccountId, input.opId);
-    return context.json(await relayer.broadcastAndConfirm(input.vaultAccountId, operation));
   });
 
   app.post("/v1/emergency/cancel", requireConsole(auth, consoleLimiter), async (context) => {
@@ -396,7 +272,6 @@ export function createApp({
     return context.json({ nearTransactionHash, opId: input.opId });
   });
 
-
   app.post("/v1/operations/pay", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
     const input = await parseJson(context, opIdSchema);
@@ -408,7 +283,6 @@ export function createApp({
     const input = await parseJson(context, paymentGasQuoteSchema);
     return context.json(await payments.gasQuote(agent.organizationId, agent, input));
   });
-
 
   app.post("/v1/operations/:opId/authorization", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
@@ -445,65 +319,6 @@ export function createApp({
     const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
     return context.json(await payments.getOperation(agent.organizationId, agent.agentId, opId));
   });
-
-  app.get("/v1/console/overview", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json(await consoleData.overview(consoleIdentity.organizationId));
-  });
-
-  app.get("/v1/console/operations", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json({ operations: await consoleData.operations(consoleIdentity.organizationId) });
-  });
-
-  app.get("/v1/console/operations/:opId", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const raw = context.req.param("opId") ?? "";
-    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
-    const result = await consoleData.operation(consoleIdentity.organizationId, raw);
-    if (!result) return context.json({ error: "operation_not_found" }, 404);
-    return context.json(result);
-  });
-
-  app.get("/v1/console/agents/:id/detail", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const id = z.string().uuid().parse(context.req.param("id"));
-    const result = await consoleData.agentDetail(consoleIdentity.organizationId, id);
-    if (!result) return context.json({ error: "agent_not_found" }, 404);
-    return context.json(result);
-  });
-
-  app.get("/v1/console/governance", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json(await consoleData.governance(consoleIdentity.organizationId));
-  });
-
-  app.post("/v1/console/governance/relay-operation", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, governanceExecutionSchema);
-    return context.json(await governance.recordRelayExecution(consoleIdentity.organizationId, input));
-  });
-  app.post("/v1/console/governance/unblock-proposal", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, governanceUnblockSchema);
-    return context.json(await governance.unblockProposal(consoleIdentity.organizationId, input.opId));
-  });
-  app.post("/v1/console/governance/cancel-underpriced-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, governanceUnblockSchema);
-    return context.json(await governance.cancelUnderpricedProposal(consoleIdentity.organizationId, input.opId));
-  });
-  app.post("/v1/console/governance/swap-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, governanceSwapOwnerSchema);
-    return context.json(await governance.swapOwnerProposal(consoleIdentity.organizationId, input));
-  });
-  app.post("/v1/console/governance/add-owner-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, governanceAddOwnerSchema);
-    return context.json(await governance.addOwnerProposal(consoleIdentity.organizationId, input));
-  });
-
 
   app.get("/v1/console/registry", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
@@ -557,226 +372,6 @@ export function createApp({
     return context.json(result);
   });
 
-  app.post("/v1/console/contracts", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, contractSchema);
-    const change = await registryService.requestContract(consoleIdentity.organizationId, consoleIdentity.userId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "registry.contract.requested",
-      targetType: "registry_change",
-      targetId: change.id,
-    });
-    return context.json(change, 202);
-  });
-
-  app.patch("/v1/console/contracts/:id", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const id = z.string().uuid().parse(context.req.param("id"));
-    const input = await parseJson(context, contractUpdateSchema);
-    const change = await registryService.requestContractUpdate(consoleIdentity.organizationId, consoleIdentity.userId, {
-      contractId: id,
-      ...input,
-    });
-    return context.json(change, 202);
-  });
-
-
-  app.post("/v1/console/mandates/preview", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, mandateSchema);
-    const preview = await mandates.preview(consoleIdentity.organizationId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "mandate.previewed",
-      targetType: "role",
-      targetId: input.role,
-    });
-    return context.json(preview);
-  });
-  app.post("/v1/console/mandates/zodiac-proposal", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, mandateSchema);
-    return context.json(await mandates.zodiacProposal(consoleIdentity.organizationId, input));
-  });
-
-  app.get("/v1/console/treasury/budget-token", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json(await mandates.budgetTokenStatus(consoleIdentity.organizationId));
-  });
-
-  app.post("/v1/console/treasury/budget-token/plan", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, budgetTokenPlanSchema);
-    return context.json(await mandates.budgetTokenPlan(consoleIdentity.organizationId, input.amount));
-  });
-
-
-  app.get("/v1/console/treasury", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const environment = context.req.query("environment") ?? "uat";
-    return context.json({ treasury: await treasury.getTreasury(consoleIdentity.organizationId, environment) });
-  });
-
-  app.post("/v1/console/treasury/plan", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, treasuryPlanSchema);
-    return context.json(await treasury.plan(consoleIdentity.organizationId, input));
-  });
-
-  app.post("/v1/console/treasury/refresh", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(
-      context,
-      z.object({ environment: z.string().min(1).default("uat") }),
-    );
-    const refreshed = await treasury.refresh(
-      consoleIdentity.organizationId,
-      consoleIdentity.userId,
-      input.environment,
-    );
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "treasury.refresh.requested",
-      targetType: "treasury",
-      metadata: { environment: input.environment, status: refreshed.status },
-    });
-    return context.json(refreshed);
-  });
-
-  app.get("/v1/console/treasury/sponsor-status", requireConsole(auth, consoleLimiter), async (context) => {
-    const account = await near.getAccount(nearParentAccount);
-    return context.json({
-      accountId: nearParentAccount,
-      balanceYocto: account.amount,
-      storageUsage: account.storage_usage ?? null,
-    });
-  });
-  app.post(
-    "/v1/console/treasury/sponsor-founder-wallet",
-    requireConsoleAdmin(auth, consoleLimiter),
-    async (context) => {
-      const consoleIdentity = context.get("console");
-      const input = await parseJson(context, nearSponsorshipSchema);
-      const expectedAccountId = derivedWalletAccountId(input.nearPublicKey, nearParentAccount);
-      if (input.nearAccountId !== expectedAccountId) {
-        return context.json({ error: "near_account_mismatch", expectedAccountId }, 422);
-      }
-
-      const reservation = await auth.reserveNearWalletSponsorship({
-        organizationId: consoleIdentity.organizationId,
-        userId: consoleIdentity.userId,
-        nearAccountId: input.nearAccountId,
-        publicKey: input.nearPublicKey,
-        dailyLimit: nearSponsorDailyWalletLimit,
-      });
-      if (reservation === "already_sponsored") {
-        return context.json({ nearAccountId: input.nearAccountId, status: "already_sponsored" });
-      }
-      if (reservation === "daily_limit") {
-        return context.json({ error: "daily_sponsorship_limit" }, 429);
-      }
-      if (reservation === "in_progress") {
-        return context.json({ error: "sponsorship_in_progress" }, 409);
-      }
-      if (reservation === "member_mismatch") {
-        return context.json({ error: "founder_wallet_mismatch" }, 403);
-      }
-      if (reservation === "conflict") {
-        return context.json({ error: "sponsorship_conflict" }, 409);
-      }
-
-      try {
-        await near.createSubaccount(input.nearAccountId, input.nearPublicKey, nearSponsorWalletAmountYocto);
-        await auth.completeNearWalletSponsorship(input.nearAccountId, true);
-      } catch (cause) {
-        let alreadyCreatedForKey = false;
-        try {
-          const accessKeys = await near.getAccessKeys(input.nearAccountId);
-          alreadyCreatedForKey = accessKeys.keys.some((key) => {
-            if (!key || typeof key !== "object" || !("public_key" in key)) return false;
-            return key.public_key === input.nearPublicKey;
-          });
-        } catch {
-          // Account lookup failed; release the reservation below.
-        }
-        await auth.completeNearWalletSponsorship(input.nearAccountId, alreadyCreatedForKey);
-        if (!alreadyCreatedForKey) throw cause;
-      }
-
-      await auth.recordAudit({
-        organizationId: consoleIdentity.organizationId,
-        actorType: "console",
-        actorId: consoleIdentity.userId,
-        action: "near_wallet.sponsored",
-        targetType: "near_account",
-        targetId: input.nearAccountId,
-        metadata: { amountYocto: nearSponsorWalletAmountYocto },
-      });
-      return context.json({ nearAccountId: input.nearAccountId, status: "sponsored" }, 201);
-    },
-  );
-
-
-
-  app.post("/v1/console/treasury/deploy-contracts", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, treasuryPlanSchema);
-    const deployed = await treasury.deployContracts(consoleIdentity.organizationId, input);
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "treasury.contracts_deployed",
-      metadata: deployed,
-    });
-    return context.json(deployed);
-  });
-
-  app.post("/v1/console/treasury/deployment-confirmations/status", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, nearDeploymentAttestationSchema);
-    return context.json(await treasury.nearDeploymentConfirmations(consoleIdentity.organizationId, input));
-  });
-
-  app.post("/v1/console/treasury/deployment-confirmations/confirm", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, nearDeploymentAttestationSchema);
-    const status = await treasury.confirmNearDeployment(
-      consoleIdentity.organizationId,
-      consoleIdentity.memberId,
-      input,
-    );
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: "treasury.near_deployment_confirmed",
-      targetType: "member",
-      targetId: consoleIdentity.memberId,
-      metadata: { digest: status.digest },
-    });
-    return context.json(status);
-  });
-
-  app.post("/v1/console/treasury/register", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const input = await parseJson(context, treasuryRegisterSchema);
-    const registered = await treasury.register(consoleIdentity.organizationId, consoleIdentity.userId, input);
-    return context.json(registered, 201);
-  });
-
-  app.get("/v1/console/members", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json({ members: await auth.listMembers(consoleIdentity.organizationId) });
-  });
-
   app.post("/v1/console/agents/:id/provision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const agentId = z.string().uuid().parse(context.req.param("id"));
@@ -822,35 +417,9 @@ export function createApp({
     const consoleIdentity = context.get("console");
     const parsedId = agentIdSchema.safeParse(context.req.param());
     if (!parsedId.success) throw new HTTPException(400, { message: parsedId.error.message });
-    let agent = await auth.getAgent(consoleIdentity.organizationId, parsedId.data.id);
+    const agent = await auth.getAgent(consoleIdentity.organizationId, parsedId.data.id);
     if (!agent) return context.json({ error: "agent_not_found" }, 404);
-    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
-    let onChain: unknown = { status: "no_treasury" };
-    if (currentTreasury) {
-      try {
-        const chainAgent = await near.viewFunction<unknown>(currentTreasury.vaultAccountId, "get_agent", {
-          agent: agent.nearAccountId,
-        });
-        const derivedAddress = onChainAgentEvmAddress(chainAgent);
-        if (derivedAddress && derivedAddress !== agent.evmAddress) {
-          agent = await auth.setAgentEvmAddress(
-            consoleIdentity.organizationId,
-            agent.id,
-            derivedAddress,
-          ) ?? agent;
-        }
-        onChain = {
-          status: "ok",
-          agent: chainAgent,
-          nextEvmNonce: await near.viewFunction<number>(currentTreasury.vaultAccountId, "next_evm_nonce", {
-            agent: agent.nearAccountId,
-          }),
-        };
-      } catch (cause) {
-        onChain = { status: "unavailable", message: cause instanceof Error ? cause.message : String(cause) };
-      }
-    }
-    return context.json({ agent, onChain, treasury: currentTreasury });
+    return context.json({ agent });
   });
 
   app.get("/v1/console/agents", requireConsole(auth, consoleLimiter), async (context) => {
@@ -860,7 +429,7 @@ export function createApp({
 
   app.post("/v1/console/agents", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
-    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
+    const currentTreasury = await treasuries.activeTreasury(consoleIdentity.organizationId);
     if (!currentTreasury || currentTreasury.status !== "active") {
       return context.json(
         { error: "treasury_not_active", status: currentTreasury?.status ?? "missing" },
@@ -911,31 +480,6 @@ export function createApp({
       targetId: parsedId.data.id,
     });
     return context.json({ agentId: parsedId.data.id, active: false });
-  });
-
-  app.post("/v1/console/agents/:id/pause-proposal", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const id = z.string().uuid().parse(context.req.param("id"));
-    const agent = await auth.getAgent(consoleIdentity.organizationId, id);
-    if (!agent) return context.json({ error: "agent_not_found" }, 404);
-    const currentTreasury = await treasury.getTreasury(consoleIdentity.organizationId, "uat");
-    if (!currentTreasury) return context.json({ error: "treasury_missing" }, 409);
-    return context.json({
-      receiverId: currentTreasury.daoAccountId,
-      methodName: "add_proposal",
-      deposit: "100000000000000000000000",
-      args: {
-        proposal: {
-          description: `Pause Vault after agent ${agent.name} incident`,
-          kind: {
-            FunctionCall: {
-              receiver_id: currentTreasury.vaultAccountId,
-              actions: [{ method_name: "pause", args: "", gas: "50000000000000", deposit: "0" }],
-            },
-          },
-        },
-      },
-    });
   });
 
   if (omniroles) {
@@ -1048,12 +592,6 @@ export function createApp({
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof OmniRolesError) {
-      return context.json({ error: error.code, message: error.message }, error.status);
-    }
-    if (error instanceof TreasuryError) {
-      return context.json({ error: error.code, message: error.message }, error.status);
-    }
-    if (error instanceof GovernanceError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof AgentProvisioningError) {

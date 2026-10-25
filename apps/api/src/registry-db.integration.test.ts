@@ -56,31 +56,6 @@ describe.skipIf(!databaseUrl)("RegistryService against PostgreSQL", () => {
     await service.decideChange(organizationId, "reviewer", walletChange.id, "approve");
     expect(await service.version(organizationId)).toBe(2);
 
-    const contractChange = await service.requestContract(organizationId, "author", {
-      reference: "SUB-001",
-      role: "researcher",
-      supplierId: supplier.id,
-      maxAmount: "5000000",
-      periodicity: "monthly",
-      token: "0x418A2b47911dE05e21688F7490195F5324B49474",
-    });
-    await expect(
-      service.decideChange(organizationId, "author", contractChange.id, "approve"),
-    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
-    await service.decideChange(organizationId, "reviewer", contractChange.id, "approve");
-    expect(await service.version(organizationId)).toBe(3);
-    const contract = await prisma.contract.findFirstOrThrow({ where: { organizationId } });
-
-    const updateChange = await service.requestContractUpdate(organizationId, "author", {
-      contractId: contract.id,
-      maxAmount: "6000000",
-    });
-    await expect(
-      service.decideChange(organizationId, "author", updateChange.id, "approve"),
-    ).rejects.toMatchObject({ code: "four_eyes_self_approval" });
-    await service.decideChange(organizationId, "reviewer", updateChange.id, "approve");
-    expect(await service.version(organizationId)).toBe(4);
-
     const wallets = await service.activeSupplierWallets(organizationId, 84532);
     expect(wallets).toHaveLength(2);
 

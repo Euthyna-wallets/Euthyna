@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { KmsSigner } from "./kms.js";
-import type { GuardVisa, RelayFinalStatus, RelayStatusReport, StatusReport } from "./types.js";
+import type { GuardVisa, StatusReport } from "./types.js";
 
 const textEncoder = new TextEncoder();
 
@@ -66,27 +66,9 @@ export function serializeStatusReport(report: StatusReport): Uint8Array {
     u64(report.block_number),
   );
 }
-const relayFinalStatusIndex: Record<RelayFinalStatus, number> = {
-  Executed: 0,
-  Vetoed: 1,
-  Expired: 2,
-  Failed: 3,
-};
-
-export function serializeRelayStatusReport(report: RelayStatusReport): Uint8Array {
-  return concat(
-    string(report.client_id),
-    fixed(report.op_id, 32),
-    Uint8Array.of(relayFinalStatusIndex[report.final_status]),
-    fixed(report.tx_hash, 32),
-    u64(report.report_nonce),
-    u64(report.block_number),
-  );
-}
-
 
 export async function signDomainPayload(
-  domain: "mandateos:visa:v1" | "mandateos:status:v1" | "mandateos:relay-status:v1",
+  domain: "mandateos:visa:v1" | "mandateos:status:v1",
   payload: Uint8Array,
   signer: KmsSigner,
 ): Promise<string> {

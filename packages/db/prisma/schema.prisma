@@ -23,7 +23,6 @@ model User {
   updatedAt        DateTime                @updatedAt
   sessions         Session[]
   accounts         Account[]
-  passkeys         Passkey[]
   members          Member[]
   invitations      Invitation[]
   agent            Agent?                  @relation("AgentIdentity")
@@ -82,25 +81,6 @@ model Verification {
   @@map("verification")
 }
 
-model Passkey {
-  id           String    @id
-  name         String?
-  publicKey    String
-  userId       String
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  credentialID String
-  counter      Int
-  deviceType   String
-  backedUp     Boolean
-  transports   String?
-  createdAt    DateTime?
-  aaguid       String?
-
-  @@index([userId])
-  @@index([credentialID])
-  @@map("passkey")
-}
-
 model Organization {
   id                      String                           @id
   name                    String
@@ -110,23 +90,17 @@ model Organization {
   metadata                String?
   members                 Member[]
   invitations             Invitation[]
-  environments            OrganizationEnvironment[]
   agents                  Agent[]
   suppliers               Supplier[]
-  contracts               Contract[]
   consumedReferences      ConsumedReference[]
   registryChanges         RegistryChange[]
-  escalations             Escalation[]
   visas                   PaymentVisa[]
   registry                RegistryVersion?
-  policies                PolicySnapshot[]
   operations              Operation[]
   auditLogs               AuditLog[]
   treasuries              Treasury[]
   nearSponsorships        NearWalletSponsorship[]
-  deploymentConfirmations TreasuryDeploymentConfirmation[]
   agentProvisionings      AgentProvisioning[]
-  governanceOperations    GovernanceOperation[]
 
   @@unique([slug])
   @@map("organization")
@@ -149,8 +123,6 @@ model Member {
   nearProofPublicKey      String?
   nearProofSignature      String?
   evmProofSignature       String?
-  walletProofChallenges   WalletProofChallenge[]
-  deploymentConfirmations TreasuryDeploymentConfirmation[]
   createdAt               DateTime
 
   @@index([organizationId])
@@ -173,40 +145,6 @@ model Invitation {
   @@index([organizationId])
   @@index([email])
   @@map("invitation")
-}
-
-model WalletProofChallenge {
-  id            String    @id
-  memberId      String
-  member        Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  userId        String
-  nearAccountId String
-  evmAddress    String
-  message       String
-  nonceBase64   String
-  recipient     String
-  expiresAt     DateTime
-  consumedAt    DateTime?
-  createdAt     DateTime  @default(now())
-
-  @@index([memberId])
-  @@index([userId])
-  @@map("wallet_proof_challenge")
-}
-
-model TreasuryDeploymentConfirmation {
-  id             String       @id
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environment    String
-  memberId       String
-  member         Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  digest         String
-  confirmedAt    DateTime     @default(now())
-
-  @@unique([organizationId, environment, memberId])
-  @@index([organizationId, environment, digest])
-  @@map("treasury_deployment_confirmation")
 }
 
 model Apikey {
@@ -243,20 +181,6 @@ model Apikey {
 // MandateOS models
 // ---------------------------------------------------------------------------
 
-model OrganizationEnvironment {
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environment    String
-  nearNetwork    String
-  baseChainId    Int
-  vaultAccountId String?
-  safeAddress    String?
-  rolesAddress   String?
-  delayAddress   String?
-
-  @@id([organizationId, environment])
-}
-
 model Agent {
   id             String             @id
   organizationId String
@@ -289,7 +213,6 @@ model Supplier {
   contact        String?
   active         Boolean          @default(true)
   wallets        SupplierWallet[]
-  contracts      Contract[]
   createdAt      DateTime         @default(now())
 
   @@unique([organizationId, name])
@@ -328,25 +251,6 @@ model RegistryChange {
   @@map("registry_change")
 }
 
-model Contract {
-  id             String       @id @default(uuid())
-  organizationId String
-  reference      String
-  role           String
-  supplierId     String
-  maxAmount      Decimal      @db.Decimal(78, 0)
-  periodicity    String
-  token          String
-  active         Boolean      @default(true)
-  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
-
-  @@unique([organizationId, reference])
-  @@index([organizationId, role])
-  @@map("contract")
-}
-
 model ConsumedReference {
   organizationId String
   reference      String
@@ -368,26 +272,6 @@ model RegistryVersion {
   @@map("registry_version")
 }
 
-model Escalation {
-  id               String       @id @default(uuid())
-  organizationId   String
-  opId             String
-  agentId          String
-  environment      String
-  reasons          Json
-  invoice          Json?
-  registrySnapshot Json?
-  status           String       @default("pending")
-  decidedBy        String?
-  createdAt        DateTime     @default(now())
-  decidedAt        DateTime?
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, opId])
-  @@index([organizationId, status])
-  @@map("escalation")
-}
-
 model PaymentVisa {
   organizationId String
   opId           String
@@ -407,21 +291,6 @@ model WorkerLease {
   updatedAt DateTime @updatedAt
 
   @@map("worker_lease")
-}
-
-model PolicySnapshot {
-  organizationId  String
-  version         BigInt
-  registryVersion BigInt
-  status          String
-  document        Json
-  contentHash     String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt       DateTime     @default(now())
-
-  @@id([organizationId, version])
-  @@unique([organizationId, contentHash])
-  @@map("policy_snapshot")
 }
 
 model Operation {
@@ -461,59 +330,6 @@ model Operation {
   @@map("operation")
 }
 
-model GovernanceOperation {
-  organizationId        String
-  opId                  String
-  treasuryId            String
-  relayAccountId        String
-  clientId              String
-  proposalId            Int?
-  nearExecutionTxHash   String?
-  nearExecutionSignerId String?
-  nearCancellationTxHash   String?
-  nearCancellationSignerId String?
-  state                 String
-  finalStatus           String?
-  target                String
-  value                 String
-  data                  String
-  operation             Int
-  gasLimit              String?
-  maxFeePerGas          String?
-  maxPriorityFeePerGas  String?
-  txHash                String?
-  receiptBlock          BigInt?
-  queueNonce            BigInt?
-  queueCreatedAt        BigInt?
-  executionScannedThroughBlock BigInt?
-  vetoScannedThroughBlock      BigInt?
-  cooldownSeconds       BigInt?
-  expirationSeconds     BigInt?
-  executeRawTransaction String?
-  executeTxHash         String?
-  executeReceiptBlock   BigInt?
-  cancellationTxHash        String?
-  cancellationReceiptBlock  BigInt?
-  rolesVerification     Json?
-  reportNonce           BigInt?
-  broadcastAt           DateTime?
-  queuedAt              DateTime?
-  executedAt            DateTime?
-  lastAttemptAt         DateTime?
-  nextAttemptAt         DateTime?
-  attempts              Int          @default(0)
-  lastError             String?
-  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  treasury              Treasury     @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-
-  @@id([organizationId, opId])
-  @@index([state, nextAttemptAt])
-  @@index([treasuryId, updatedAt])
-  @@map("governance_operation")
-}
-
 model Treasury {
   id                   String                @id @default(uuid())
   organizationId       String
@@ -523,15 +339,8 @@ model Treasury {
   baseChainId          Int
   daoAccountId         String
   vaultAccountId       String
-  relayAccountId       String
-  safeAddress          String
-  rolesAddress         String
-  delayAddress         String
-  govAddress           String
   vaultWasmSha256      String
-  relayWasmSha256      String
   status               String                @default("active")
-  governanceOperations GovernanceOperation[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 

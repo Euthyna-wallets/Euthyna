@@ -4,18 +4,30 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { authClient } from "../auth.js";
 import { FourEyesActions } from "../components/FourEyesActions.js";
-import { Card, PageState, short } from "../components/ui.js";
-import { formatToken } from "../lib/format.js";
+import { Card, PageState } from "../components/ui.js";
 
 interface Registry {
   version: number;
   suppliers: Array<{ id: string; name: string; contact: string | null; wallets: Array<{ id: string; chainId: number; address: string }> }>;
-  contracts: Array<{ id: string; reference: string; role: string; supplierId: string; maxAmount: string; periodicity: string; token: string }>;
   pendingChanges: Array<{ id: string; kind: string; payload: Record<string, unknown>; authorId: string; status: string }>;
 }
 
-const token = "0x418A2b47911dE05e21688F7490195F5324B49474";
+const CHAIN_ID = 84532;
 
+function describeChange(change: Registry["pendingChanges"][number], suppliers: Registry["suppliers"]): string {
+  const payload = change.payload;
+  if (change.kind === "supplier_create") return `Add supplier ${String(payload.name)} paid at ${String(payload.address)}`;
+  if (change.kind === "wallet_add") {
+    const supplier = suppliers.find((item) => item.id === payload.supplierId);
+    return `Add wallet ${String(payload.address)} to ${supplier?.name ?? "a supplier"}`;
+  }
+  return change.kind;
+}
+
+/**
+ * Suppliers are the only transfer recipients the Guard accepts. Each change
+ * needs a second member: the author cannot approve their own request.
+ */
 export function SuppliersPage() {
   const session = authClient.useSession();
   const userId = session.data?.user.id ?? "";
@@ -25,9 +37,7 @@ export function SuppliersPage() {
   const [contact, setContact] = useState("");
   const [address, setAddress] = useState("");
   const [supplierId, setSupplierId] = useState("");
-  const [reference, setReference] = useState("");
-  const [role, setRole] = useState("researcher");
-  const [maxAmount, setMaxAmount] = useState("5000000");
+  const [walletAddress, setWalletAddress] = useState("");
   const refresh = () => client.invalidateQueries({ queryKey: ["registry"] });
   const request = useMutation({
     mutationFn: (input: { path: string; body: unknown }) => api(input.path, { method: "POST", body: JSON.stringify(input.body) }),
@@ -38,48 +48,29 @@ export function SuppliersPage() {
       api(`/v1/console/registry-changes/${id}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
     onSuccess: refresh,
   });
+  const validAddress = (value: string) => /^0x[0-9a-fA-F]{40}$/.test(value.trim());
 
   return (
     <div className="page">
-      <header className="page-head"><div><h1>Suppliers</h1><p className="muted">Registry version {query.data?.version ?? "—"}. Every change needs a second member.</p></div></header>
+      <header className="page-head">
+        <div>
+          <h1>Suppliers</h1>
+          <p className="muted">
+            The only addresses an agent may pay, on top of what its role allows. Every change needs a second member.
+          </p>
+        </div>
+      </header>
       <PageState loading={query.isLoading} error={query.error} empty={false}>
         {query.data ? (
           <>
-            <Card title="Suppliers and wallets">
-              <table>
-                <thead><tr><th>Name</th><th>Contact</th><th>Wallets</th></tr></thead>
-                <tbody>
-                  {query.data.suppliers.map((supplier) => (
-                    <tr key={supplier.id}>
-                      <td>{supplier.name}</td>
-                      <td>{supplier.contact ?? "—"}</td>
-                      <td className="mono small">{supplier.wallets.map((wallet) => short(wallet.address)).join(", ")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {query.data.suppliers.length === 0 ? <div className="state">No supplier yet.</div> : null}
-            </Card>
-            <Card title="Contracts">
-              <table>
-                <thead><tr><th>Reference</th><th>Role</th><th>Cap</th><th>Period</th></tr></thead>
-                <tbody>
-                  {query.data.contracts.map((contract) => (
-                    <tr key={contract.id}><td>{contract.reference}</td><td>{contract.role}</td><td className="mono">{formatToken(contract.maxAmount)}</td><td>{contract.periodicity}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-            <Card title="Pending changes (four-eyes)">
-              {query.data.pendingChanges.length === 0 ? <div className="state">No pending change.</div> : (
+            <Card title={`Waiting for a second member (${query.data.pendingChanges.length})`}>
+              {query.data.pendingChanges.length === 0 ? <div className="state">Nothing waiting.</div> : (
                 <table>
-                  <thead><tr><th>Kind</th><th>Payload</th><th>Author</th><th /></tr></thead>
                   <tbody>
                     {query.data.pendingChanges.map((change) => (
                       <tr key={change.id}>
-                        <td>{change.kind}</td>
-                        <td className="mono small">{JSON.stringify(change.payload)}</td>
-                        <td className="mono small">{short(change.authorId)}</td>
+                        <td className="small">{describeChange(change, query.data.suppliers)}</td>
+                        <td className="small muted">{change.authorId === userId ? "requested by you" : "requested by another member"}</td>
                         <td>
                           <FourEyesActions
                             authorId={change.authorId}
@@ -94,30 +85,50 @@ export function SuppliersPage() {
                 </table>
               )}
             </Card>
-            <Card title="Request a supplier">
-              <div className="row wrap">
-                <input placeholder="Name" value={name} onChange={(event) => setName(event.target.value)} />
-                <input placeholder="Contact" value={contact} onChange={(event) => setContact(event.target.value)} />
-                <input placeholder="0x wallet" value={address} onChange={(event) => setAddress(event.target.value)} />
-                <button className="primary" disabled={request.isPending} title={request.isPending ? "A supplier request is being submitted" : "Request four-eyes approval for this supplier"} onClick={() => request.mutate({ path: "/v1/console/suppliers", body: { name, contact, chainId: 84532, address } })}>Request supplier</button>
-              </div>
+            <Card title="Suppliers">
+              {query.data.suppliers.length === 0 ? <div className="state">No supplier yet.</div> : (
+                <table>
+                  <thead><tr><th>Name</th><th>Contact</th><th>Wallets (Base Sepolia)</th></tr></thead>
+                  <tbody>
+                    {query.data.suppliers.map((supplier) => (
+                      <tr key={supplier.id}>
+                        <td>{supplier.name}</td>
+                        <td>{supplier.contact ?? "—"}</td>
+                        <td className="mono small">{supplier.wallets.map((wallet) => wallet.address).join(", ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </Card>
-            <Card title="Request a wallet or contract">
+            <Card title="Request a change">
+              <div className="row wrap">
+                <input placeholder="Supplier name" value={name} onChange={(event) => setName(event.target.value)} />
+                <input placeholder="Contact (optional)" value={contact} onChange={(event) => setContact(event.target.value)} />
+                <input placeholder="0x… wallet" value={address} onChange={(event) => setAddress(event.target.value)} />
+                <button
+                  className="primary"
+                  disabled={request.isPending || !name.trim() || !validAddress(address)}
+                  onClick={() => request.mutate({ path: "/v1/console/suppliers", body: { name: name.trim(), ...(contact.trim() ? { contact: contact.trim() } : {}), chainId: CHAIN_ID, address: address.trim() } })}
+                >
+                  Request new supplier
+                </button>
+              </div>
               <div className="row wrap">
                 <select value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
                   <option value="">Supplier…</option>
                   {query.data.suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
                 </select>
-                <input placeholder="new wallet 0x…" value={address} onChange={(event) => setAddress(event.target.value)} />
-                <button className="ghost" disabled={!supplierId || request.isPending} title={!supplierId ? "Select a supplier first" : request.isPending ? "A supplier request is being submitted" : "Request approval for this wallet"} onClick={() => request.mutate({ path: `/v1/console/suppliers/${supplierId}/wallets`, body: { chainId: 84532, address } })}>Request wallet</button>
+                <input placeholder="0x… new wallet" value={walletAddress} onChange={(event) => setWalletAddress(event.target.value)} />
+                <button
+                  className="ghost"
+                  disabled={!supplierId || request.isPending || !validAddress(walletAddress)}
+                  onClick={() => request.mutate({ path: `/v1/console/suppliers/${supplierId}/wallets`, body: { chainId: CHAIN_ID, address: walletAddress.trim() } })}
+                >
+                  Request wallet
+                </button>
               </div>
-              <div className="row wrap">
-                <input placeholder="reference" value={reference} onChange={(event) => setReference(event.target.value)} />
-                <input placeholder="role" value={role} onChange={(event) => setRole(event.target.value)} />
-                <input placeholder="max amount" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} />
-                <button className="ghost" disabled={!supplierId || request.isPending} title={!supplierId ? "Select a supplier first" : request.isPending ? "A supplier request is being submitted" : "Request approval for this contract"} onClick={() => request.mutate({ path: "/v1/console/contracts", body: { reference, role, supplierId, maxAmount, periodicity: "monthly", token } })}>Request contract</button>
-              </div>
-              {request.error ? <div className="state error">{request.error.message}</div> : null}
+              {request.error ? <div className="alert error">{request.error.message}</div> : null}
             </Card>
           </>
         ) : null}
