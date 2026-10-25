@@ -622,6 +622,12 @@ export function createApp({
       const input = await parseJson(context, z.object({ chainId: z.number().int().positive(), amountNear: z.string().regex(/^\d+(\.\d{1,24})?$/) }));
       return context.json(await omniroles.proceedsProposals(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/directory", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.directory(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/registry", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ name: z.string().min(1).max(64), description: z.string().max(280).default("") }));
+      return context.json(await omniroles.registryProposal(orgOf(context), input));
+    });
     app.get("/v1/console/omniroles/members", requireConsole(auth, consoleLimiter), async (context) =>
       context.json({ ...(await omniroles.members(orgOf(context))), me: context.get("console").nearAccountId ?? null }));
     app.post("/v1/console/omniroles/members", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
