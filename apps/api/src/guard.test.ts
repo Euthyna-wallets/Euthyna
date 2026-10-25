@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { bytesToHex, concatHex, encodeFunctionData, hexToBytes, keccak256, stringToHex } from "viem";
 import { serializeRelayStatusReport, serializeStatusReport, serializeVisa } from "./canonical.js";
 import { digestVaultTransaction, hexToByteArray } from "./evm.js";
+import type { GuardContext } from "./registry.js";
 import { Guard } from "./guard.js";
 import { EnvKmsSigner } from "./kms.js";
-import type { GovernanceOperation, Registry, VaultOperation } from "./types.js";
+import type { GovernanceOperation, VaultOperation } from "./types.js";
 
 const token = "0x036CbD53842c5426634e7929541eC2318f3dCF7c" as const;
 const recipient = "0x1111111111111111111111111111111111111111" as const;
@@ -26,18 +27,9 @@ const erc20TransferAbi = [{
   inputs: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }],
   outputs: [{ type: "bool" }],
 }] as const;
-const registry: Registry = {
-  clientId: "acme",
-  registryVersion: 11,
-  network: "base-sepolia",
-  chainId: 84532,
-  token: { symbol: "USDC", address: token, decimals: 6 },
-  roles: {
-    researcher: {
-      maximumPayment: "5000000",
-      vendors: [{ id: "lab", name: "Research Lab", addresses: [{ address: recipient }] }],
-    },
-  },
+const registry: GuardContext = {
+  suppliers: [{ id: "lab", name: "Research Lab", address: recipient }],
+  companyWallet: "0x3333333333333333333333333333333333333333",
 };
 
 function addressBytes(address: `0x${string}`): number[] {
@@ -118,20 +110,26 @@ describe("Guard exact rules", () => {
     ).toBe(true);
   });
 
+  it("accepts a transfer back to the company wallet", async () => {
+    const result = await testGuard().approve(operationFor("0x3333333333333333333333333333333333333333"), registry);
+    expect(result.decision).toBe("approve");
+  });
+
   it("Guard refuses an uncovered recipient and emits no visa", async () => {
     const guard = testGuard();
     const result = await guard.approve(operationFor("0x2222222222222222222222222222222222222222"), registry);
-    expect(result).toEqual({ decision: "escalate", reasons: ["recipient not registered"] });
+    expect(result.decision).toBe("refuse");
+    expect(result.decision === "refuse" && result.reasons[0]).toContain("is not a registered supplier");
     expect("approval" in result).toBe(false);
   });
 
-  it("escalates when the persisted digest no longer matches the transaction", async () => {
+  it("refuses when the persisted digest no longer matches the transaction", async () => {
     const guard = testGuard();
     const operation = operationFor();
     operation.tx_digest[0] = (operation.tx_digest[0] ?? 0) ^ 1;
     const result = await guard.approve(operation, registry);
     expect(result).toEqual({
-      decision: "escalate",
+      decision: "refuse",
       reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"],
     });
   });

@@ -39,6 +39,10 @@ function fixture(apiStatus = 200) {
       calls.push("authorize");
       return "near-authorize-hash";
     },
+    cancelPrepared: async () => {
+      calls.push("cancel_prepared");
+      return "near-cancel-prepared";
+    },
     cancelNonce: async () => {
       calls.push("cancel_nonce");
       return "near-cancel-hash";
@@ -109,14 +113,10 @@ describe("MandateAgentClient", () => {
       "record_authorization:near-authorize-hash",
     ]);
   });
-  it("does not authorize an escalation or refusal", async () => {
-    const escalated = fixture(202);
-    await expect(escalated.client.pay(intent)).resolves.toMatchObject({ outcome: "escalated" });
-    expect(escalated.calls).toEqual(["prepare", "visa"]);
-
+  it("does not authorize a refusal and releases the prepared operation", async () => {
     const refused = fixture(422);
     await expect(refused.client.pay(intent)).resolves.toMatchObject({ outcome: "refused" });
-    expect(refused.calls).toEqual(["prepare", "visa"]);
+    expect(refused.calls).toEqual(["prepare", "visa", "cancel_prepared"]);
   });
 
   it("lets the agent call cancel_nonce and registers its NEAR hash", async () => {
@@ -184,6 +184,7 @@ describe("OmniRoles SDK", () => {
       "prepare",
       "authorize",
       "cancel_nonce",
+      "cancel_prepared",
       "renounce_role",
     ]);
   });

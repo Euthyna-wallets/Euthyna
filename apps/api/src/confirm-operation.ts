@@ -3,7 +3,6 @@ import { z } from "zod";
 import { Guard } from "./guard.js";
 import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
-import { loadRegistry } from "./registry.js";
 
 const env = z.object({
   NEAR_NETWORK_ID: z.string().default("testnet"),
@@ -12,7 +11,6 @@ const env = z.object({
   NEAR_RELAYER_PRIVATE_KEY: z.string().min(1),
   GUARD_VISA_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
   GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64: z.string().min(1),
-  VENDOR_REGISTRY_PATH: z.string().default("config/clients/acme/vendors.json"),
   VAULT_ACCOUNT_ID: z.string().min(1),
   OP_ID_HEX: z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform((value) => value as Hex),
   BASE_TX_HASH: z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform((value) => value as Hex),
@@ -20,7 +18,6 @@ const env = z.object({
 }).parse(process.env);
 
 const near = new NearClient(env);
-const registry = await loadRegistry(env.VENDOR_REGISTRY_PATH);
 const guard = new Guard(
   new EnvKmsSigner(Uint8Array.from(Buffer.from(env.GUARD_VISA_ED25519_PRIVATE_KEY_BASE64, "base64"))),
   new EnvKmsSigner(Uint8Array.from(Buffer.from(env.GUARD_STATUS_ED25519_PRIVATE_KEY_BASE64, "base64"))),

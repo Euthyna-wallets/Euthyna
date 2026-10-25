@@ -9,9 +9,10 @@ import {
   type BaseGasQuoter,
 } from "./base-gas.js";
 import type { Guard, GuardResult } from "./guard.js";
+import type { GuardContext } from "./registry.js";
 import type { NearClient } from "./near.js";
-import { RegistryError, type RegistryService } from "./registry-db.js";
-import type { Registry, VaultOperation } from "./types.js";
+import type { RegistryService } from "./registry-db.js";
+import type { VaultOperation } from "./types.js";
 
 
 const erc20TransferAbi = [{
@@ -46,7 +47,6 @@ export type OperationStatus =
   | "CancellationBroadcast"
   | "CancellationMined"
   | "Cancelled"
-  | "Escalated"
   | "Rejected"
   | "Reverted";
 
@@ -67,30 +67,6 @@ export class PaymentError extends Error {
 
 function opHex(opId: number[]): string {
   return bytesToHex(Uint8Array.from(opId));
-}
-
-function hardRuleFailure(operation: VaultOperation, registry: Registry): string | null {
-  const role = registry.roles[operation.role];
-  if (!role) return "role_not_in_registry";
-  const token = registry.token.address;
-  if (!token || bytesToHex(Uint8Array.from(operation.request.target)) !== token.toLowerCase()) {
-    return "token_mismatch";
-  }
-  try {
-    const decoded = decodeFunctionData({
-      abi: erc20TransferAbi,
-      data: bytesToHex(Uint8Array.from(operation.request.calldata)),
-    });
-    if (decoded.functionName !== "transfer") return "unrecognized_payment_calldata";
-    const [recipient, amount] = decoded.args;
-    if (amount > BigInt(role.maximumPayment)) return "amount_above_cap";
-    const allowed = role.vendors.some((vendor) =>
-      vendor.addresses.some((address) => getAddress(address.address) === recipient),
-    );
-    return allowed ? null : "recipient_not_allowed";
-  } catch {
-    return "unrecognized_payment_calldata";
-  }
 }
 
 function operationPayment(operation: VaultOperation): { recipient: string; amount: string } {
@@ -194,84 +170,62 @@ export class PaymentService {
       where: { organizationId_opId: { organizationId, opId: opHex(opId) } },
     });
     if (existingVisa) return { status: 200, body: { visa: existingVisa.visa, signature: existingVisa.signature } };
-    const existingEscalation = await this.prisma.escalation.findUnique({
-      where: { organizationId_opId: { organizationId, opId: opHex(opId) } },
-    });
-    if (existingEscalation) {
-      return {
-        status: existingEscalation.status === "rejected" ? 422 : 202,
-        body: {
-          escalationId: existingEscalation.id,
-          status: existingEscalation.status,
-          reasons: existingEscalation.reasons,
+    const refuse = async (code: string, reasons: string[]): Promise<PayResult> => {
+      // No human escalation: the request is refused and shows up in Activity with its reason.
+      await this.upsertOperation(organizationId, agent.agentId, operation, "Rejected");
+      await this.prisma.auditLog.create({
+        data: {
+          organizationId,
+          actorType: "agent",
+          actorId: agent.agentId,
+          action: "operation.refused",
+          targetType: "operation",
+          targetId: operation.request.reference,
+          metadata: {
+            reason: `GUARD:${code}:${reasons.join("; ")}`,
+            role: operation.role,
+            target: bytesToHex(Uint8Array.from(operation.request.target)),
+            value: operation.request.value,
+            calldata: bytesToHex(Uint8Array.from(operation.request.calldata.slice(0, 2048))),
+          },
         },
-      };
-    }
+      });
+      return { status: 422, body: { error: code, message: reasons.join("; "), reasons } };
+    };
 
-    let registry: Registry;
-    try {
-      registry = await this.registry.loadRegistry(organizationId, agent.role, operation.client_id);
-    } catch (error) {
-      if (error instanceof RegistryError) {
-        throw new PaymentError(422, error.code, error.message);
-      }
-      throw error;
-    }
-    const refusal = hardRuleFailure(operation, registry);
-    if (refusal) throw new PaymentError(422, refusal, refusal.replaceAll("_", " "));
     if (containsPromptInjection(invoice?.text)) {
-      throw new PaymentError(422, "prompt_injection_detected", "invoice contains instruction-like text");
+      return refuse("prompt_injection_detected", ["the invoice contains instruction-like text"]);
     }
     if (await this.registry.isConsumed(organizationId, operation.request.reference)) {
-      throw new PaymentError(422, "reference_consumed", "this reference is already consumed");
+      return refuse("reference_consumed", [`reference ${operation.request.reference} was already paid`]);
     }
-
-    const treasury = await this.prisma.treasury.findFirst({
-      where: { organizationId },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this organization");
-    const payment = operationPayment(operation);
     const claimedRecipient = invoice?.claimedRecipient?.toLowerCase();
-    const result: GuardResult = claimedRecipient && claimedRecipient !== payment.recipient
-      ? { decision: "escalate", reasons: ["invoice payment details differ from the prepared registry recipient"] }
-      : await this.guard.approve(operation, registry);
-    await this.upsertOperation(organizationId, agent.agentId, operation);
-    if (result.decision === "approve") {
-      const stored = await this.storeVisa(
-        organizationId,
-        opHex(opId),
-        operation.request.reference,
-        result.approval.visa as unknown as object,
-        result.approval.signature,
-      );
-      return { status: 200, body: { visa: stored.visa, signature: stored.signature } };
+    if (claimedRecipient) {
+      const payment = operationPayment(operation);
+      if (claimedRecipient !== payment.recipient) {
+        return refuse("invoice_recipient_mismatch", ["the invoice's payment details differ from the recipient the agent prepared"]);
+      }
     }
-
-    const escalation = await this.prisma.escalation.create({
-      data: {
-        organizationId,
-        opId: opHex(opId),
-        agentId: agent.agentId,
-        environment: treasury.environment,
-        reasons: result.reasons,
-        invoice: (invoice ?? payment) as unknown as object,
-        registrySnapshot: registry as unknown as object,
-        status: "pending",
-      },
-    });
-    await this.prisma.operation.update({
-      where: { organizationId_opId: { organizationId, opId: opHex(opId) } },
-      data: { state: "Escalated" },
-    });
-    return { status: 202, body: { escalationId: escalation.id, reasons: result.reasons } };
+    const context: GuardContext = {
+      suppliers: await this.registry.activeSupplierWallets(organizationId, operation.transaction.chain_id),
+      companyWallet: await this.companyWallet(agent.vaultAccountId, operation.transaction.chain_id),
+    };
+    const result: GuardResult = await this.guard.approve(operation, context);
+    if (result.decision === "refuse") return refuse("guard_refused", result.reasons);
+    await this.upsertOperation(organizationId, agent.agentId, operation);
+    const stored = await this.storeVisa(
+      organizationId,
+      opHex(opId),
+      operation.request.reference,
+      result.approval.visa as unknown as object,
+      result.approval.signature,
+    );
+    return { status: 200, body: { visa: stored.visa, signature: stored.signature } };
   }
 
-  async listEscalations(organizationId: string) {
-    return this.prisma.escalation.findMany({
-      where: { organizationId },
-      orderBy: { createdAt: "desc" },
-    });
+  private async companyWallet(vaultAccountId: string, chainId: number): Promise<`0x${string}` | null> {
+    const wallet = chainWalletSchema.parse(await this.near.viewFunction<unknown>(vaultAccountId, "get_wallet", { chain_id: chainId }));
+    return wallet.address ? getAddress(bytesToHex(Uint8Array.from(wallet.address))) : null;
   }
 
   async getOperation(organizationId: string, agentId: string, opId: number[]): Promise<Record<string, unknown>> {
@@ -280,9 +234,6 @@ export class PaymentService {
       where: { organizationId_opId: { organizationId, opId: hex } },
     });
     if (stored && stored.agentId !== agentId) throw new PaymentError(403, "agent_mismatch", "operation belongs to another agent");
-    const escalation = await this.prisma.escalation.findUnique({
-      where: { organizationId_opId: { organizationId, opId: hex } },
-    });
     const visa = await this.prisma.paymentVisa.findUnique({
       where: { organizationId_opId: { organizationId, opId: hex } },
     });
@@ -300,12 +251,11 @@ export class PaymentService {
         vaultState = null;
       }
     }
-    const status = this.mergeStatus(stored?.state ?? vaultState, escalation?.status ?? null, visa !== null);
+    const status = this.mergeStatus(stored?.state ?? vaultState, visa !== null);
     return {
       opId: hex,
       status,
       vaultState,
-      escalation: escalation ? { id: escalation.id, status: escalation.status, reasons: escalation.reasons } : null,
       visa: visa ? { visa: visa.visa, signature: visa.signature } : null,
       txHash: stored?.txHash ?? null,
       lastError: stored?.lastError ?? null,
@@ -393,68 +343,6 @@ export class PaymentService {
     };
   }
 
-  async decideEscalation(
-    organizationId: string,
-    reviewerId: string,
-    escalationId: string,
-    decision: "approve" | "reject",
-  ): Promise<Record<string, unknown>> {
-    const escalation = await this.prisma.escalation.findFirst({
-      where: { id: escalationId, organizationId },
-    });
-    if (!escalation) throw new PaymentError(404, "escalation_not_found", "escalation not found");
-    if (escalation.status !== "pending") throw new PaymentError(409, "escalation_decided", "escalation already decided");
-    if (decision === "reject") {
-      const rejected = await this.prisma.escalation.update({
-        where: { id: escalation.id },
-        data: { status: "rejected", decidedBy: reviewerId, decidedAt: new Date() },
-      });
-      await this.prisma.operation.updateMany({
-        where: { organizationId, opId: escalation.opId },
-        data: { state: "Rejected" },
-      });
-      return { escalation: rejected };
-    }
-
-    const treasury = await this.prisma.treasury.findUnique({
-      where: { organizationId_environment: { organizationId, environment: escalation.environment } },
-    });
-    if (!treasury) throw new PaymentError(409, "treasury_missing", "no treasury for this escalation environment");
-    const opBytes = Array.from(Buffer.from(escalation.opId.slice(2), "hex"));
-    const operation = await this.near.getOperation(treasury.vaultAccountId, opBytes);
-    if (operation.state !== "Prepared") {
-      throw new PaymentError(422, "not_prepared", "operation is no longer Prepared");
-    }
-    const registry = await this.registry.loadRegistry(organizationId, operation.role, operation.client_id);
-    const result = await this.guard.approve(operation, registry);
-    if (result.decision !== "approve") {
-      throw new PaymentError(422, "still_escalated", "the operation still does not match a rule");
-    }
-    const stored = await this.prisma.$transaction(async (tx) => {
-      const visa = await tx.paymentVisa.create({
-        data: {
-          organizationId,
-          opId: escalation.opId,
-          visa: result.approval.visa as unknown as object,
-          signature: result.approval.signature,
-        },
-      });
-      await tx.consumedReference.create({
-        data: { organizationId, reference: operation.request.reference, opId: escalation.opId },
-      });
-      await tx.escalation.update({
-        where: { id: escalation.id },
-        data: { status: "approved", decidedBy: reviewerId, decidedAt: new Date() },
-      });
-      await tx.operation.updateMany({
-        where: { organizationId, opId: escalation.opId },
-        data: { state: "Prepared" },
-      });
-      return visa;
-    });
-    return { escalation: { ...escalation, status: "approved" }, visa: stored.visa, signature: stored.signature };
-  }
-
   private async storeVisa(
     organizationId: string,
     opId: string,
@@ -483,9 +371,8 @@ export class PaymentService {
     }
   }
 
-  private mergeStatus(stored: string | null | undefined, escalationStatus: string | null, hasVisa: boolean): OperationStatus {
-    if (escalationStatus === "rejected") return "Rejected";
-    if (escalationStatus === "pending") return "Escalated";
+  private mergeStatus(stored: string | null | undefined, hasVisa: boolean): OperationStatus {
+    if (stored === "Rejected") return "Rejected";
     if (stored === "Confirmed") return "Confirmed";
     if (stored === "Cancelled") return "Cancelled";
     if (stored === "Reverted") return "Reverted";
@@ -494,13 +381,13 @@ export class PaymentService {
     return (stored as OperationStatus | undefined) ?? "Prepared";
   }
 
-  private async upsertOperation(organizationId: string, agentId: string, operation: VaultOperation) {
+  private async upsertOperation(organizationId: string, agentId: string, operation: VaultOperation, state = "Prepared") {
     const data = {
       organizationId,
       opId: opHex(operation.op_id),
       agentId,
       reference: operation.request.reference,
-      state: "Prepared",
+      state,
       txDigest: bytesToHex(Uint8Array.from(operation.tx_digest)),
       evmNonce: BigInt(operation.evm_nonce),
       amount: operation.request.allowance_amount,

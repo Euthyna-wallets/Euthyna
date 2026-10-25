@@ -81,10 +81,8 @@ describe.skipIf(!databaseUrl)("RegistryService against PostgreSQL", () => {
     await service.decideChange(organizationId, "reviewer", updateChange.id, "approve");
     expect(await service.version(organizationId)).toBe(4);
 
-    const registry = await service.loadRegistry(organizationId, "researcher", "acme");
-    expect(registry.registryVersion).toBe(4);
-    expect(registry.roles.researcher?.maximumPayment).toBe("6000000");
-    expect(registry.roles.researcher?.vendors[0]?.addresses).toHaveLength(2);
+    const wallets = await service.activeSupplierWallets(organizationId, 84532);
+    expect(wallets).toHaveLength(2);
 
     const other = await service.list(otherOrganizationId);
     expect(other.suppliers).toEqual([]);

@@ -62,43 +62,13 @@ export class RegistryService {
     return state?.version ?? 0;
   }
 
-  async loadRegistry(organizationId: string, role: string, clientId: string): Promise<Registry> {
-    const contracts = await this.prisma.contract.findMany({
-      where: { organizationId, role, active: true },
-      include: { supplier: { include: { wallets: true } } },
+  /** Active supplier wallets on a chain: what the Guard accepts as a transfer recipient. */
+  async activeSupplierWallets(organizationId: string, chainId: number) {
+    const wallets = await this.prisma.supplierWallet.findMany({
+      where: { organizationId, chainId, active: true, supplier: { active: true } },
+      include: { supplier: true },
     });
-    const version = await this.version(organizationId);
-    const token = contracts[0]?.token;
-    if (!token || contracts.length === 0) {
-      throw new RegistryError(422, "registry_empty", `no active contract for role ${role}`);
-    }
-    const vendors = contracts
-      .filter((contract) => contract.supplier.active)
-      .map((contract) => ({
-        id: contract.supplier.id,
-        name: contract.supplier.name,
-        addresses: contract.supplier.wallets
-          .filter((wallet) => wallet.active && wallet.chainId === 84532)
-          .map((wallet) => ({
-            address: getAddress(wallet.address),
-            maximumPayment: contract.maxAmount.toString(),
-          })),
-      }))
-      .filter((vendor) => vendor.addresses.length > 0);
-    const maximumPayment = contracts.reduce((max, contract) => {
-      const amount = BigInt(contract.maxAmount.toString());
-      return amount > max ? amount : max;
-    }, 0n);
-    return {
-      clientId,
-      registryVersion: version,
-      network: "base-sepolia",
-      chainId: 84532,
-      token: { symbol: "USDC", address: getAddress(token), decimals: 6 },
-      roles: {
-        [role]: { maximumPayment: maximumPayment.toString(), vendors },
-      },
-    };
+    return wallets.map((wallet) => ({ id: wallet.supplier.id, name: wallet.supplier.name, address: getAddress(wallet.address) }));
   }
 
   async list(organizationId: string) {

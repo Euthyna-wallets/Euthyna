@@ -583,31 +583,6 @@ export function createApp({
     return context.json(change, 202);
   });
 
-  app.get("/v1/console/escalations", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    return context.json({ escalations: await payments.listEscalations(consoleIdentity.organizationId) });
-  });
-
-  app.post("/v1/console/escalations/:id/decision", requireConsole(auth, consoleLimiter), async (context) => {
-    const consoleIdentity = context.get("console");
-    const id = z.string().uuid().parse(context.req.param("id"));
-    const input = await parseJson(context, z.object({ decision: z.enum(["approve", "reject"]) }));
-    const result = await payments.decideEscalation(
-      consoleIdentity.organizationId,
-      consoleIdentity.userId,
-      id,
-      input.decision,
-    );
-    await auth.recordAudit({
-      organizationId: consoleIdentity.organizationId,
-      actorType: "console",
-      actorId: consoleIdentity.userId,
-      action: input.decision === "approve" ? "escalation.approved" : "escalation.rejected",
-      targetType: "escalation",
-      targetId: id,
-    });
-    return context.json(result);
-  });
 
   app.post("/v1/console/mandates/preview", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
