@@ -75,15 +75,6 @@ export class MandateMcpTools {
     return this.client.mandate();
   }
 
-  askMembers(input: { chainId: number; to: string; value?: string | undefined; data?: string | undefined; reason: string }) {
-    return this.client.askMembers({
-      chainId: input.chainId,
-      to: input.to as `0x${string}`,
-      ...(input.value ? { value: input.value } : {}),
-      ...(input.data ? { data: input.data as `0x${string}` } : {}),
-      reason: input.reason,
-    });
-  }
 
   status(input: { opId: string }) {
     return this.client.status(input.opId as `0x${string}`);
@@ -107,7 +98,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       "Call `mandate` first to learn what your role allows, your remaining budgets and the recipients you may pay.",
       "Call `check` before `pay`: it answers allowed or refused, and why, without reserving anything.",
       "A refusal is final for you: there is no override and no human escalation. Never retry with a different recipient or amount than the task requires.",
-      "If the task needs something your role does not allow, call `ask_members` with the exact call and a short reason; members may put it to a vote.",
+      "If the task needs something your role does not allow, stop and report the refusal and its reason to whoever gave you the task. Do not ask the members yourself: only a member decides to put a refused operation to a vote.",
     ].join(" "),
   });
   server.registerTool("mandate", {
@@ -132,18 +123,6 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     },
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async (input) => result(await tools.check(input)));
-  server.registerTool("ask_members", {
-    title: "Ask the members for a vote",
-    description: "For something your role does not allow (a new recipient, a deposit on a protocol, a bigger amount): records the exact call and your reason. Members see it and decide whether to put it to a vote; nothing is executed now.",
-    inputSchema: {
-      chainId: z.number().int().positive(),
-      to: address,
-      value: uint.optional(),
-      data: z.string().regex(/^0x([0-9a-fA-F]{2})*$/).max(20_000).optional(),
-      reason: z.string().min(3).max(500),
-    },
-    annotations: { destructiveHint: false, idempotentHint: false },
-  }, async (input) => result(await tools.askMembers(input)));
   server.registerTool("pay", {
     title: "Pay through MandateOS",
     description: "Prepare a bounded Vault payment, request a Guard visa, authorize it on NEAR, and register the authorization for the worker.",

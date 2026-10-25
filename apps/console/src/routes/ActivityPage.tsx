@@ -14,7 +14,6 @@ export function ActivityPage() {
   const refused = items.filter((item) => item.kind === "refusal").length;
   const allowed = items.filter((item) => item.kind === "allowed").length;
   const executed = items.filter((item) => item.kind === "operation").length;
-  const requests = items.filter((item) => item.kind === "request").length;
   return (
     <div className="page">
       <header className="page-head">
@@ -22,7 +21,7 @@ export function ActivityPage() {
           <h1>Activity</h1>
           <p className="muted">Every operation agents asked for: what the vault signed, and what it refused and why.</p>
         </div>
-        <div className="pill">{allowed} allowed · {refused} refused · {executed} executed{requests ? ` · ${requests} asking the members` : ""}</div>
+        <div className="pill">{allowed} allowed · {refused} refused · {executed} executed</div>
       </header>
       <Card title="Operations">
         <PageState loading={query.isLoading} error={query.error} empty={items.length === 0} emptyContent={<div className="state">No operation yet. Agents' requests appear here, including the ones the vault refuses.</div>}>
@@ -34,17 +33,9 @@ export function ActivityPage() {
                   <td className="small">{new Date(item.at).toLocaleString()}</td>
                   <td>{item.agent}</td>
                   <td className="mono small">{item.reference || "—"}</td>
-                  <td><Status value={item.kind === "refusal" ? "rejected" : item.kind === "allowed" ? "approved" : item.kind === "request" ? "pending" : item.state} /></td>
+                  <td><Status value={item.kind === "refusal" ? "rejected" : item.kind === "allowed" ? "approved" : item.state} /></td>
                   <td className="small">
-                    {item.kind === "request"
-                      ? (
-                        <span>
-                          {item.summary ? <><strong>{item.summary}</strong><br /></> : null}
-                          <span className="muted">{item.reason}</span>
-                          {item.request ? <><br /><AskMembers request={item.request} title={`${item.agent} asks: ${item.summary ?? "a transaction"}`} /></> : null}
-                        </span>
-                      )
-                      : item.kind === "refusal"
+                    {item.kind === "refusal"
                       ? (
                         <span>
                           {item.summary ? <><strong>{item.summary}</strong><br /></> : null}Refused: {item.reason}

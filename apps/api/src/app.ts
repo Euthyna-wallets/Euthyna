@@ -621,17 +621,6 @@ export function createApp({
       const mandate = await omniroles.agentMandate(agent.organizationId, agent);
       return context.json({ ...mandate, recipients: await payments.recipients(agent.organizationId, agent, mandate.chainId) });
     });
-    app.post("/v1/operations/request", requireAgent(auth, agentLimiter), async (context) => {
-      const agent = context.get("agent");
-      const input = await parseJson(context, z.object({
-        chainId: z.number().int().positive(),
-        to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-        value: z.string().regex(/^\d+$/).default("0"),
-        data: z.string().regex(/^0x([0-9a-fA-F]{2})*$/).max(20_000).default("0x"),
-        reason: z.string().min(3).max(500),
-      }));
-      return context.json(await omniroles.requestFromAgent(agent.organizationId, agent, input), 202);
-    });
   }
 
   app.onError((error, context) => {

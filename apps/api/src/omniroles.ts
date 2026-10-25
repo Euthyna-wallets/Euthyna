@@ -939,42 +939,10 @@ export class OmniRolesService {
     };
   }
 
-  /**
-   * An agent asks the members to vote on something its role does not allow.
-   * Only recorded: a member decides whether to turn it into a proposal. The
-   * agent's reason is shown as the agent's words, never as a fact.
-   */
-  async requestFromAgent(
-    organizationId: string,
-    agent: { agentId: string; role: string },
-    input: { chainId: number; to: string; value: string; data: string; reason: string },
-  ) {
-    await this.requireTreasury(organizationId);
-    const entry = await this.prisma.auditLog.create({
-      data: {
-        organizationId,
-        actorType: "agent",
-        actorId: agent.agentId,
-        action: "operation.requested",
-        targetType: "operation",
-        targetId: null,
-        metadata: {
-          role: agent.role,
-          chainId: input.chainId,
-          target: getAddress(input.to),
-          value: input.value,
-          calldata: input.data,
-          agentReason: input.reason,
-        } as Prisma.InputJsonValue,
-      },
-    });
-    return { requestId: entry.id, status: "waiting_for_members", message: "Recorded. Members see it in Activity and decide whether to put it to a vote." };
-  }
-
   async activity(organizationId: string) {
     const [operations, refusals] = await Promise.all([
       this.prisma.operation.findMany({ where: { organizationId }, include: { agent: true }, orderBy: { createdAt: "desc" }, take: 50 }),
-      this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed", "operation.requested"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.auditLog.findMany({ where: { organizationId, action: { in: ["operation.refused", "operation.allowed"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
     ]);
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
     const labels = await this.labels(organizationId);
@@ -1015,20 +983,18 @@ export class OmniRolesService {
       ...refusals.map((refusal) => {
         const metadata = (refusal.metadata ?? {}) as Record<string, unknown>;
         const allowed = refusal.action === "operation.allowed";
-        const requested = refusal.action === "operation.requested";
         return {
-          kind: requested ? ("request" as const) : allowed ? ("allowed" as const) : ("refusal" as const),
+          kind: allowed ? ("allowed" as const) : ("refusal" as const),
           at: refusal.createdAt.toISOString(),
           agent: agentName(refusal.actorId),
           reference: refusal.targetId ?? "",
-          state: requested ? "Asks the members" : allowed ? "Allowed" : "Refused",
+          state: allowed ? "Allowed" : "Refused",
           amount: null as string | null,
           txHash: null as string | null,
           opId: null as string | null,
-          // The agent's own words: untrusted, shown quoted.
-          reason: requested ? `The agent says: "${String(metadata.agentReason ?? "").slice(0, 500)}"` : allowed ? null : explainRefusal(String(metadata.reason ?? "")),
+          reason: allowed ? null : explainRefusal(String(metadata.reason ?? "")),
           summary: describe(metadata),
-          // What the agent asked for: members can turn it into a vote.
+          // What the agent asked for: a member can turn a refusal into a vote.
           request: typeof metadata.target === "string" && typeof metadata.calldata === "string"
             ? { chainId: typeof metadata.chainId === "number" ? metadata.chainId : PROFILE.chainId, to: metadata.target, data: metadata.calldata, value: String(metadata.value ?? "0") }
             : null,

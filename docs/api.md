@@ -41,12 +41,6 @@ already paid). The response has `allowed`, `refusedBy` (`vault` or `guard`),
 `reason` and a readable `explanation`. Network fees are not checked. Both
 outcomes appear in Activity.
 
-### `POST /v1/operations/request`
-
-Asks the members for something the role does not allow. Body: `{ chainId, to,
-value?, data?, reason }`. The call and the reason are recorded, and nothing
-runs. Members see the request in Activity, with the agent's reason quoted as
-its own words, and can turn it into a proposal with one click. Returns `202`.
 
 ### `POST /v1/operations/gas-quote`
 
@@ -85,14 +79,15 @@ state, EVM hash, confirmations).
 
 `packages/mcp` exposes the agent API to any MCP client: Claude, Cursor, Codex.
 Its instructions tell the agent to read `mandate` first, `check` before `pay`,
-and to use `ask_members` instead of retrying when a call is refused.
+and, when a call is refused, to stop and report it: an agent never asks the
+members itself. Only a member can turn a refused operation into a proposal ("Ask the
+members" in Activity).
 
 | Tool | Does |
 | --- | --- |
 | `mandate` | role, budgets left, accepted recipients, company wallet |
 | `check` | dry run of a transfer (`token`, `recipient`, `amount`) or of any call (`to`, `data`, `value`, `allowanceAmount`) |
 | `pay` | prepare → Guard visa → authorize on NEAR |
-| `ask_members` | records a call for the members to vote on |
 | `status`, `cancel` | operation state; same-nonce cancellation |
 
 ```bash

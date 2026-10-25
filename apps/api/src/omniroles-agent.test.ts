@@ -59,25 +59,3 @@ describe("agent dry run", () => {
   });
 });
 
-describe("agent asking the members", () => {
-  it("records the exact call and the agent's reason, and executes nothing", async () => {
-    const { omniroles, audit } = service({ vault: { allowed: true, reason: null } });
-    const result = await omniroles.requestFromAgent("org-1", agent, {
-      chainId: 11155111,
-      to: "0x6ae43d3271ff6888e7fc43fd7321a503ff738951",
-      value: "0",
-      data: "0x617ba037",
-      reason: "Idle USDC should earn yield on Aave",
-    });
-    expect(result).toMatchObject({ requestId: "audit-1", status: "waiting_for_members" });
-    expect(audit[0]).toMatchObject({
-      action: "operation.requested",
-      metadata: {
-        chainId: 11155111,
-        target: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
-        calldata: "0x617ba037",
-        agentReason: "Idle USDC should earn yield on Aave",
-      },
-    });
-  });
-});
