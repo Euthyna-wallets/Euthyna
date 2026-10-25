@@ -578,6 +578,14 @@ export function createApp({
       const input = await parseJson(context, z.object({ members: z.array(z.string().min(2).max(64)).min(3).max(20) }));
       return context.json(await omniroles.membersProposals(orgOf(context), input.members));
     });
+    app.post("/v1/console/omniroles/proposals/fire", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ member: z.string().regex(/^[a-z0-9._-]{2,64}$/) }));
+      return context.json(await omniroles.fireProposal(orgOf(context), input.member));
+    });
+    app.post("/v1/console/omniroles/proposals/budget", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ key: z.string().regex(/^0x[0-9a-fA-F]{64}$/), amount: z.string().regex(/^\d+(\.\d+)?$/) }));
+      return context.json(await omniroles.budgetProposal(orgOf(context), input));
+    });
     app.post("/v1/console/omniroles/proposals/pause", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ pause: z.boolean() }));
       return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
