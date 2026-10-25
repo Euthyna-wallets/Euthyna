@@ -18,8 +18,8 @@ const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g
  * One button: the key pair is generated here, the agent's NEAR account is created
  * with a key limited to the vault, and this browser checks that key on chain.
  */
-export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; onReady: (agent: AgentReady) => void }) {
-  const [name, setName] = useState("Treasury bot");
+export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; defaultName?: string; onReady: (agent: AgentReady) => void }) {
+  const [name, setName] = useState(props.defaultName ?? "Treasury bot");
   const [role, setRole] = useState(props.defaultRole ?? "treasury");
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
     <div className="stack">
       <div className="row wrap">
         <label>Agent name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>Role it will use<input value={role} onChange={(event) => setRole(event.target.value.toLowerCase())} /></label>
+        <label>Job (role name)<input value={role} onChange={(event) => setRole(event.target.value.toLowerCase())} /></label>
       </div>
       <p className="small muted">
         The private key is generated in this browser and downloaded as a file. MandateOS only receives the public key.
@@ -73,15 +73,34 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
       {error ? <div className="alert error">{error}</div> : null}
       <div className="row">
         <button className="primary" disabled={!valid || Boolean(step)} onClick={() => void create()}>
-          {step ?? "Create agent"}
+          {step ?? "Hire agent"}
         </button>
       </div>
     </div>
   );
 }
 
-/** Shown once after creation: the API key and the environment the agent runs with. */
+/** Shown once after creation: the API key, as an MCP server for any agent, or as the demo agent's environment. */
 export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
+  const [mode, setMode] = useState<"mcp" | "env">("mcp");
+  const mcpEnv: Record<string, string> = {
+    MANDATEOS_API_URL: API_BASE,
+    MANDATEOS_AGENT_API_KEY: props.agent.apiKey,
+    AGENT_NEAR_ACCOUNT_ID: props.agent.nearAccountId,
+    AGENT_KEY_PATH: `/path/to/${props.agent.keyFile}`,
+    VAULT_ACCOUNT_ID: props.vaultAccountId,
+    AGENT_ROLE: props.agent.role,
+    NEAR_RPC_URL: "https://rpc.testnet.fastnear.com",
+  };
+  const mcp = JSON.stringify({
+    mcpServers: {
+      mandateos: {
+        command: "pnpm",
+        args: ["--dir", "/path/to/MandateOS", "--filter", "@mandateos/mcp", "start"],
+        env: mcpEnv,
+      },
+    },
+  }, null, 2);
   const env = [
     `MANDATEOS_API_URL=${API_BASE}`,
     `MANDATEOS_AGENT_API_KEY=${props.agent.apiKey}`,
@@ -98,16 +117,28 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
   ].join("\n");
   return (
     <section className="card secret">
-      <span className="eyebrow">{props.agent.name} is ready · shown once</span>
-      <h3>Run your agent</h3>
-      <ol className="small">
-        <li>Keep <code>{props.agent.keyFile}</code> (downloaded) next to the agent. Never upload it.</li>
-        <li>Save this as <code>.env</code>. It contains the agent's API key, which cannot be displayed again.</li>
-        <li>Start it: <code>pnpm --filter @mandateos/demo-agent start</code></li>
-      </ol>
-      <pre>{env}</pre>
+      <span className="eyebrow">{props.agent.name} is hired · shown once</span>
+      <h3>Plug in your agent</h3>
       <div className="row">
-        <button className="primary" onClick={() => void navigator.clipboard.writeText(env)}>Copy .env</button>
+        <button className={mode === "mcp" ? "primary" : "ghost"} onClick={() => setMode("mcp")}>Any agent (MCP)</button>
+        <button className={mode === "env" ? "primary" : "ghost"} onClick={() => setMode("env")}>Demo agent (.env)</button>
+      </div>
+      {mode === "mcp" ? (
+        <ol className="small">
+          <li>Keep <code>{props.agent.keyFile}</code> (downloaded) on the machine that runs the agent. Never upload it.</li>
+          <li>Add this server to Claude Desktop, Claude Code, Cursor or Codex (MCP settings), with your paths. It contains the agent's API key, which cannot be displayed again.</li>
+          <li>The agent then has the tools <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>share_revenue</code>, <code>status</code> and <code>cancel</code>, and nothing else.</li>
+        </ol>
+      ) : (
+        <ol className="small">
+          <li>Keep <code>{props.agent.keyFile}</code> (downloaded) next to the agent. Never upload it.</li>
+          <li>Save this as <code>.env</code>. It contains the agent's API key, which cannot be displayed again.</li>
+          <li>Start it: <code>pnpm --filter @mandateos/demo-agent start</code></li>
+        </ol>
+      )}
+      <pre>{mode === "mcp" ? mcp : env}</pre>
+      <div className="row">
+        <button className="primary" onClick={() => void navigator.clipboard.writeText(mode === "mcp" ? mcp : env)}>Copy</button>
         {props.onDone ? <button className="ghost" onClick={props.onDone}>I saved it</button> : null}
       </div>
       <p className="small muted">

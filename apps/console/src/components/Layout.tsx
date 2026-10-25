@@ -53,7 +53,7 @@ export function Layout() {
       <div className="app-shell">
         <aside className="app-sidebar">
           <div className="brand">MandateOS</div>
-          <div className="small muted">Company control plane</div>
+          <div className="small muted">AI company console</div>
           {active ? (
             <label className="org-select">
               <span className="small muted">Organization</span>

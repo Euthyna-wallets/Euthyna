@@ -209,7 +209,7 @@ button.compact { padding: 5px 8px !important; min-height: 28px; font-size: 11px;
 .eyebrow { display: block; margin-bottom: 6px; color: #0f766e; font: 600 11px "IBM Plex Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
 .app-main .card { background: #fff; color: #111827; border-color: #e2e5ea; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
 .app-main .card .muted { color: #5b6472; }
-.setup-progress { display: grid; grid-template-columns: repeat(6, minmax(100px, 1fr)); gap: 6px; margin: 0 0 22px; overflow-x: auto; }
+.setup-progress { display: grid; grid-template-columns: repeat(7, minmax(96px, 1fr)); gap: 6px; margin: 0 0 22px; overflow-x: auto; }
 .setup-progress > div { display: flex; align-items: center; gap: 7px; min-width: 100px; padding: 9px 10px; border: 1px solid #d7dce2; border-radius: 10px; background: #fff; color: #64748b; font-size: 12px; }
 .setup-progress > div span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #eef1f4; font: 600 10px "IBM Plex Mono", monospace; }
 .setup-progress > div.done { color: #0f766e; border-color: #b7ddd8; }
@@ -356,3 +356,10 @@ input[type="checkbox"], input[type="radio"] { appearance: auto; background: none
 .share-checks .bad { color: #92400e; }
 label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; margin: 0; }
 label.inline input { width: 110px; margin: 0; }
+
+/* Create your AI company: job picker */
+.job-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+.job-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 16px; border: 1px solid #e2e5ea; border-radius: 12px; background: #fff; color: #111827; cursor: pointer; white-space: normal; height: auto; }
+.job-card:hover:not(:disabled) { border-color: #0f766e; box-shadow: 0 0 0 1px #0f766e inset; }
+.job-card:disabled { opacity: 0.55; cursor: not-allowed; }
+.job-card strong { font-size: 16px; }
