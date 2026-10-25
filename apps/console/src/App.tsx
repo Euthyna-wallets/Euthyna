@@ -7,6 +7,7 @@ import { Layout } from "./components/Layout.js";
 import { queryClient } from "./lib/query.js";
 import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
+import { SharesPage } from "./routes/SharesPage.js";
 import { OnboardingPage } from "./routes/OnboardingPage.js";
 import { SignIn } from "./routes/SignIn.js";
 import { WalletPage } from "./routes/WalletPage.js";
@@ -49,6 +50,7 @@ export function App() {
               <Route path="/mandate" element={<Navigate to="/roles" replace />} />
               <Route path="/payments" element={<Navigate to="/activity" replace />} />
               <Route path="/governance" element={<GovernancePage />} />
+              <Route path="/shares" element={<SharesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />

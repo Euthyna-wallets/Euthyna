@@ -32,6 +32,14 @@ sentences, what each budget has left this period, the recipients the Guard
 accepts (registered suppliers and the company wallet), and the company wallet
 address. The data is read from the vault.
 
+### `GET /v1/agent/share-revenue?amountWei=`
+
+The Omni Bridge call that sends `amountWei` of ETH from the company wallet to
+the company's shares contract on NEAR: `to`, `data`, `value` (amount plus the
+bridge fee from the Omni Bridge API), `allowanceAmount` and the network fees.
+The agent prepares it like any other operation. The vault signs it only if the
+agent's role has a revenue-sharing budget for exactly this recipient.
+
 ### `POST /v1/operations/check`
 
 A dry run with nothing reserved. Body: `{ request }`, the vault
@@ -88,6 +96,7 @@ members" in Activity).
 | `mandate` | role, budgets left, accepted recipients, company wallet |
 | `check` | dry run of a transfer (`token`, `recipient`, `amount`) or of any call (`to`, `data`, `value`, `allowanceAmount`) |
 | `pay` | prepare → Guard visa → authorize on NEAR |
+| `share_revenue` | the same for ETH sent to the shareholders (`amountWei`) |
 | `status`, `cancel` | operation state; same-nonce cancellation |
 
 Build once, then point stdio clients directly at the compiled entry point:
@@ -163,6 +172,25 @@ The console's **Wallet** page also acts as a WalletConnect wallet. A dApp
 connects to the company address, and every `eth_sendTransaction` becomes a
 proposal. Off-chain signatures (`personal_sign`, `eth_signTypedData_v4`) are
 refused.
+
+### Shares
+
+See [shares.md](./shares.md).
+
+- `GET /v1/console/omniroles/shares`: the shares contract next to the vault
+  (supply, price, revenue shared), whether its account is keyless, whether the
+  DAO counts locked shares and has the `shareholders` role, and the signed-in
+  member's position.
+- `POST /v1/console/omniroles/shares` (admin): `{ name, symbol, totalSupply,
+  priceNear, allocations: [{ accountId, shares }] }`. It deploys the contract
+  on an account with no access key, then returns the proposals that turn it on.
+- `POST /v1/console/omniroles/proposals/shares`: the proposals still missing
+  (`SetStakingContract`, the shareholders role).
+- `POST /v1/console/omniroles/proposals/revenue`: `{ amountNear }`. It returns
+  a `FunctionCall` to `deposit_revenue`, paid from the DAO.
+
+Buying, locking, unlocking and claiming are wallet calls to the contract. The
+API is not involved.
 
 ### Governance and activity
 

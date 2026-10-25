@@ -179,10 +179,18 @@ Observed jury UAT using the exact artifact in [`deployments/omniroles-base-sepol
 
 See [`.env.example`](./.env.example) for variable names. Never use faucet rotation or IP rotation.
 
+## Shares
+
+A company can sell shares on NEAR. Shareholders vote with their locked shares
+on company calls and transfers in the Sputnik DAO. Revenue (NEAR, or Base ETH
+bridged by Omni Bridge) is split by epoch among the holders who voted. Members keep
+their two-thirds vote and their veto on vault changes. See
+[docs/shares.md](./docs/shares.md).
+
 ## Attack suite
 
 ```bash
-pnpm attack:all       # 39 attacks: vault in a NEAR sandbox + Guard
+pnpm attack:all       # 45 attacks: vault in a NEAR sandbox + Guard
 pnpm attack:testnet   # the live testnet vault, view calls only
 ```
 

@@ -25,7 +25,18 @@ import {
   type DaoTransactionDraft,
   councilPolicy,
   describePolicyChange,
+  describeSharesProposal,
+  hasShareholdersRole,
   membersProposalArgs,
+  MAX_BRIDGE_FEE_WEI,
+  nearRecipient,
+  parseNear,
+  proposalOf,
+  shareRevenueCall,
+  stringHash,
+  revenueProposalKind,
+  sharesInitArgs,
+  sharesProposalKinds,
   proposalArgs,
   PROPOSAL_MARKER,
   hexOf,
@@ -60,6 +71,14 @@ export interface OmniRolesConfig {
   accountParent: string;
   daoCreateDepositYocto: string;
   vaultDepositYocto: string;
+  /** Funds the shares account: contract storage (~2.2 NEAR) and holder registrations. */
+  sharesDepositYocto?: string;
+  /** Revenue epoch of new shares contracts, in seconds. */
+  sharesEpochSeconds?: number;
+  /** Omni Bridge API (transfer fees). Default: the testnet one. */
+  omniBridgeApi?: string;
+  /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
+  sharesRevenueToken?: string | null;
   baseRpcUrl: string;
   /** RPC per extra EVM chain the company wallet can act on (same address everywhere). */
   extraRpcUrls?: Record<number, string>;
@@ -193,6 +212,47 @@ type LedgerOperation = DaoOperation & { member: string; role: string; signed_tra
 
 /** Most recent operations the activity page looks up on chain. */
 const ACTIVITY_LIMIT = 30;
+
+type EpochView = { near: string; token: string; voted_shares: string };
+
+type SharesInfoView = {
+  epoch_ns: string;
+  current_epoch: number;
+  current_epoch_ends_ns: string;
+  current: EpochView;
+  last: EpochView;
+  dao_id: string;
+  name: string;
+  symbol: string;
+  total_supply: string;
+  unsold: string;
+  price_per_share: string;
+  unlock_period_ns: string;
+  revenue_token: string | null;
+  near_distributed: string;
+  token_distributed: string;
+};
+
+type SharesHolderView = {
+  balance: string;
+  locked: string;
+  cooling: string;
+  cooling_until_ns: string;
+  transferable: string;
+  claimable_near: string;
+  claimable_token: string;
+  steady_now: string;
+  provable_last_epoch: string;
+  proofs: Array<{ epoch: number; shares: string; verified: boolean }>;
+};
+
+export type SharesDraft = {
+  name: string;
+  symbol: string;
+  totalSupply: number;
+  priceNear: string;
+  allocations: Array<{ accountId: string; shares: number }>;
+};
 
 type DaoProposal = {
   id: number;
@@ -379,11 +439,167 @@ export class OmniRolesService {
     return { daoTransaction, vaultTransaction };
   }
 
-  private daoPolicy(plan: { council: Array<{ nearAccountId: string }> }) {
+  private daoPolicy(plan: { council: Array<{ nearAccountId: string }> }, options: { shareholders?: boolean } = {}) {
     return councilPolicy(plan.council.map((member) => member.nearAccountId), {
       proposalBond: this.config.proposalBondYocto,
       proposalPeriodNs: this.config.proposalPeriodNs,
+    }, options);
+  }
+
+  // -------------------------------------------------------------------------
+  // Shares
+  // -------------------------------------------------------------------------
+
+  /** One shares contract per company, next to its vault. */
+  private sharesAccountOf(treasury: { vaultAccountId: string }): string {
+    return treasury.vaultAccountId.replace(/-vault\./, "-shares.");
+  }
+
+  async shares(organizationId: string, viewer: string | null) {
+    const treasury = await this.requireTreasury(organizationId);
+    const accountId = this.sharesAccountOf(treasury);
+    if (!(await this.accountExists(accountId))) return { accountId, deployed: false as const };
+    const [info, keys, staking, policy, lockedTotal] = await Promise.all([
+      this.view<SharesInfoView>(accountId, "info"),
+      this.cached("keys", accountId),
+      this.view<string>(treasury.daoAccountId, "get_staking_contract"),
+      this.view<{ roles: Parameters<typeof hasShareholdersRole>[0]["roles"] }>(treasury.daoAccountId, "get_policy"),
+      this.view<string>(treasury.daoAccountId, "delegation_total_supply").catch(() => "0"),
+    ]);
+    if (info.dao_id !== treasury.daoAccountId) {
+      throw new OmniRolesError(409, "shares_foreign", `${accountId} belongs to ${info.dao_id}, not to this company`);
+    }
+    const me = viewer
+      ? {
+        accountId: viewer,
+        holder: await this.view<SharesHolderView | null>(accountId, "holder_of", { account_id: viewer }),
+        votes: await this.view<string>(treasury.daoAccountId, "delegation_balance_of", { account_id: viewer }).catch(() => "0"),
+        lastEpochVote: await this.lastEpochVote(treasury.daoAccountId, viewer, info),
+      }
+      : null;
+    const revenueToken = info.revenue_token
+      ? await this.view<{ symbol: string; decimals: number }>(info.revenue_token, "ft_metadata")
+        .then((metadata) => ({ accountId: info.revenue_token!, symbol: metadata.symbol, decimals: metadata.decimals }))
+        .catch(() => ({ accountId: info.revenue_token!, symbol: info.revenue_token!, decimals: 0 }))
+      : null;
+    return {
+      accountId,
+      deployed: true as const,
+      keyless: keys.keys.length === 0,
+      revenueToken,
+      daoAccountId: treasury.daoAccountId,
+      info,
+      votesCounted: staking === accountId,
+      shareholdersVote: hasShareholdersRole(policy),
+      lockedTotal,
+      me,
+    };
+  }
+
+  /**
+   * A proposal submitted during the last epoch that the viewer voted on: what
+   * `prove_vote` needs. Null when there is none.
+   */
+  private async lastEpochVote(daoAccountId: string, viewer: string, info: SharesInfoView): Promise<number | null> {
+    if (info.current_epoch === 0) return null;
+    const end = BigInt(info.current_epoch_ends_ns) - BigInt(info.epoch_ns);
+    const start = end - BigInt(info.epoch_ns);
+    const lastId = await this.view<number>(daoAccountId, "get_last_proposal_id");
+    if (lastId === 0) return null;
+    const proposals = await this.view<DaoProposal[]>(daoAccountId, "get_proposals", { from_index: Math.max(0, lastId - 100), limit: 100 });
+    const voted = proposals.find((proposal) => {
+      const submitted = BigInt(proposal.submission_time);
+      return submitted >= start && submitted < end && viewer in proposal.votes;
     });
+    return voted?.id ?? null;
+  }
+
+  /**
+   * Deploys the shares contract on an account with no access key, then returns
+   * the two votes that turn it on. Nothing changes for the company until the
+   * members approve them.
+   */
+  async createShares(organizationId: string, input: SharesDraft) {
+    const treasury = await this.requireTreasury(organizationId);
+    const accountId = this.sharesAccountOf(treasury);
+    if (await this.accountExists(accountId)) throw new OmniRolesError(409, "shares_exist", `${accountId} already exists`);
+    let initArgs: ReturnType<typeof sharesInitArgs>;
+    try {
+      initArgs = sharesInitArgs(treasury.daoAccountId, {
+        name: input.name,
+        symbol: input.symbol,
+        totalSupply: input.totalSupply,
+        pricePerShareYocto: parseNear(input.priceNear),
+        // Longer than a proposal: unlocked shares cannot vote twice on one proposal.
+        unlockPeriodNs: (BigInt(this.config.proposalPeriodNs) * 2n).toString(),
+        epochNs: (BigInt(this.config.sharesEpochSeconds ?? 3600) * 1_000_000_000n).toString(),
+        revenueToken: this.config.sharesRevenueToken ?? null,
+        allocations: input.allocations.map((allocation) => [allocation.accountId, allocation.shares]),
+      });
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_shares", error instanceof Error ? error.message : String(error));
+    }
+    for (const allocation of input.allocations) {
+      if (!(await this.accountExists(allocation.accountId))) {
+        throw new OmniRolesError(422, "account_not_found", `${allocation.accountId} does not exist on NEAR ${this.config.nearNetwork}`);
+      }
+    }
+    const artifact = await this.artifact("shares.wasm");
+    // No AddKey action: nobody can sign for the shares account.
+    const transaction = await this.near.executeActions(accountId, [
+      { type: "CreateAccount" },
+      { type: "Transfer", depositYocto: this.config.sharesDepositYocto ?? "2900000000000000000000000" },
+      { type: "DeployContract", codeBase64: artifact.base64 },
+      { type: "FunctionCall", methodName: "new", args: initArgs, gasTgas: 50 },
+    ]);
+    this.forget(accountId);
+    return { accountId, transaction, wasmSha256: artifact.sha256, ...(await this.sharesProposals(organizationId)) };
+  }
+
+  /** The votes still missing to turn shares on. */
+  async sharesProposals(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const accountId = this.sharesAccountOf(treasury);
+    const [staking, policy] = await Promise.all([
+      this.near.viewFunction<string>(treasury.daoAccountId, "get_staking_contract", {}),
+      this.near.viewFunction<{ roles: Parameters<typeof hasShareholdersRole>[0]["roles"] }>(treasury.daoAccountId, "get_policy", {}),
+    ]);
+    const [stakingVote, roleVote] = sharesProposalKinds(accountId);
+    const missing = [
+      ...(staking ? [] : [stakingVote!]),
+      ...(hasShareholdersRole(policy) ? [] : [roleVote!]),
+    ];
+    if (staking && staking !== accountId) {
+      throw new OmniRolesError(409, "staking_taken", `the DAO already counts votes from ${staking}`);
+    }
+    return { proposals: missing.map((vote) => this.daoProposal(treasury, vote.title, vote.kind, accountId)) };
+  }
+
+  /** Share NEAR from the DAO account with every shareholder. */
+  async revenueProposal(organizationId: string, amountNear: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const accountId = this.sharesAccountOf(treasury);
+    let amount: string;
+    try {
+      amount = parseNear(amountNear);
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_amount", error instanceof Error ? error.message : String(error));
+    }
+    if (BigInt(amount) === 0n) throw new OmniRolesError(400, "invalid_amount", "the amount must be above zero");
+    const info = await this.view<SharesInfoView>(accountId, "info").catch(() => null);
+    if (!info) throw new OmniRolesError(409, "shares_missing", "this company has no shares yet");
+    const kind = revenueProposalKind(accountId, amount);
+    return this.daoProposal(treasury, describeSharesProposal(kind, accountId)!.title, kind, accountId);
+  }
+
+  private daoProposal(treasury: { daoAccountId: string }, title: string, kind: unknown, sharesAccountId: string) {
+    return {
+      receiverId: treasury.daoAccountId,
+      args: proposalOf(title, kind),
+      deposit: this.config.proposalBondYocto,
+      title,
+      summary: [describeSharesProposal(kind, sharesAccountId) ?? { title, details: [] }],
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -531,6 +747,11 @@ export class OmniRolesService {
 
   async roleProposal(organizationId: string, draft: RoleDraft) {
     const treasury = await this.requireTreasury(organizationId);
+    for (const block of draft.blocks) {
+      if (block.kind === "share-revenue" && block.sharesAccountId !== this.sharesAccountOf(treasury)) {
+        throw new OmniRolesError(400, "invalid_role", `revenue can only go to this company's shares contract, ${this.sharesAccountOf(treasury)}`);
+      }
+    }
     let changes: RuleChange[];
     try {
       changes = compileRole(draft, PROFILE);
@@ -571,8 +792,9 @@ export class OmniRolesService {
       if (!(await this.accountExists(accountId))) throw new OmniRolesError(422, "account_not_found", `${accountId} does not exist on NEAR ${this.config.nearNetwork}`);
     }
     let policy: ReturnType<typeof councilPolicy>;
+    const current = await this.near.viewFunction<{ roles: Parameters<typeof hasShareholdersRole>[0]["roles"] }>(treasury.daoAccountId, "get_policy", {});
     try {
-      policy = this.daoPolicy({ council: members.map((nearAccountId) => ({ nearAccountId })) });
+      policy = this.daoPolicy({ council: members.map((nearAccountId) => ({ nearAccountId })) }, { shareholders: hasShareholdersRole(current) });
     } catch (error) {
       throw new OmniRolesError(400, "invalid_members", error instanceof Error ? error.message : String(error));
     }
@@ -649,12 +871,13 @@ export class OmniRolesService {
   async governance(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
-    const [lastId, policy, rules, paused, daoTransactions] = await Promise.all([
+    const [lastId, policy, rules, paused, daoTransactions, lockedShares] = await Promise.all([
       this.view<number>(treasury.daoAccountId, "get_last_proposal_id"),
       this.view<{ default_vote_policy: { threshold: unknown }; roles: Array<{ kind: unknown }>; proposal_period: string }>(treasury.daoAccountId, "get_policy"),
       this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 }),
       this.view<boolean>(treasury.vaultAccountId, "is_paused"),
       this.view<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => [] as DaoOperation[]),
+      this.view<string>(treasury.daoAccountId, "delegation_total_supply").catch(() => "0"),
     ]);
     const proposals = lastId === 0
       ? []
@@ -670,7 +893,13 @@ export class OmniRolesService {
     const context = { profile: PROFILE, labels, budgets: budgetsOf(allChanges, PROFILE) };
     const now = nowNs();
     return {
-      dao: { accountId: treasury.daoAccountId, members, threshold: policy.default_vote_policy.threshold, proposalPeriodNs: policy.proposal_period },
+      dao: {
+        accountId: treasury.daoAccountId,
+        members,
+        threshold: policy.default_vote_policy.threshold,
+        proposalPeriodNs: policy.proposal_period,
+        shareholders: hasShareholdersRole(policy as unknown as Parameters<typeof hasShareholdersRole>[0]) ? { lockedShares } : null,
+      },
       vaultAccountId: treasury.vaultAccountId,
       paused,
       proposals: proposals
@@ -691,6 +920,7 @@ export class OmniRolesService {
             proposer: proposal.proposer,
             status: proposal.status,
             votes: proposal.votes,
+            voteCounts: proposal.vote_counts,
             kind: proposal.kind,
             submittedAt: new Date(Number(BigInt(proposal.submission_time) / NANOS_PER_MS)).toISOString(),
             expiresAt: new Date(Number((BigInt(proposal.submission_time) + BigInt(policy.proposal_period)) / NANOS_PER_MS)).toISOString(),
@@ -698,9 +928,12 @@ export class OmniRolesService {
               ? calls.map((call) => describeVaultCall(call, context))
               : (() => {
                 const policyChange = describePolicyChange(proposal.kind);
+                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury));
                 return policyChange
                   ? [{ title: policyChange.title, details: policyChange.details }]
-                  : [{ title: "Not a vault change", details: [JSON.stringify(proposal.kind).slice(0, 300)] }];
+                  : sharesChange
+                    ? [sharesChange]
+                    : [{ title: "Not a vault change", details: [JSON.stringify(proposal.kind).slice(0, 300)] }];
               })(),
           };
         }),
@@ -961,6 +1194,58 @@ export class OmniRolesService {
   }
 
   /**
+   * The call an agent sends to share revenue with the company's shareholders:
+   * ETH from the company wallet to the shares contract, through the Omni
+   * Bridge. Built here for convenience; the vault only signs it if the agent's
+   * role allows exactly this recipient and budget.
+   */
+  async shareRevenueOperation(organizationId: string, amountWei: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const sharesAccountId = this.sharesAccountOf(treasury);
+    if (!(await this.accountExists(sharesAccountId))) throw new OmniRolesError(409, "shares_missing", "this company has no shares yet");
+    const bridge = PROFILE.omniBridge;
+    if (!bridge) throw new OmniRolesError(409, "bridge_missing", `no Omni Bridge known on ${PROFILE.name}`);
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: PROFILE.chainId }).catch(() => null);
+    if (!wallet?.address) throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${PROFILE.name} yet`);
+    const from = getAddress(hexOf(wallet.address));
+    const amount = BigInt(amountWei);
+    if (amount <= 0n) throw new OmniRolesError(400, "invalid_amount", "the amount must be above zero");
+    const recipient = nearRecipient(sharesAccountId);
+    const feeUrl = new URL("/api/v3/transfer-fee", this.config.omniBridgeApi ?? "https://testnet.api.bridge.nearone.org");
+    feeUrl.search = new URLSearchParams({ sender: `base:${from}`, recipient, token: "base:0x0000000000000000000000000000000000000000", amount: amount.toString() }).toString();
+    let bridgeFee: bigint;
+    try {
+      const response = await fetch(feeUrl, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      bridgeFee = BigInt(((await response.json()) as { native_token_fee?: string | null }).native_token_fee ?? "0");
+    } catch (error) {
+      throw new OmniRolesError(503, "bridge_fee_unavailable", `the Omni Bridge fee API did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (bridgeFee > MAX_BRIDGE_FEE_WEI) {
+      throw new OmniRolesError(422, "bridge_fee_too_high", `the bridge asks ${formatUnits(bridgeFee, 18)} ETH, above the ${formatUnits(MAX_BRIDGE_FEE_WEI, 18)} ETH the role accepts`);
+    }
+    const call = shareRevenueCall(bridge, sharesAccountId, amount, bridgeFee);
+    let fees;
+    try {
+      fees = await this.chain.fees({ chainId: PROFILE.chainId, from, calls: [{ to: call.to, value: BigInt(call.value), data: call.data }] });
+    } catch (error) {
+      if (!(error instanceof GasEstimateError)) throw error;
+      if (error.code === "would_revert") throw new OmniRolesError(422, "would_revert", `the bridge call would fail: ${error.message}`);
+      throw new OmniRolesError(503, "gas_estimate_unavailable", `no ${PROFILE.name} RPC could estimate the bridge call: ${error.message}`);
+    }
+    return {
+      chainId: PROFILE.chainId,
+      ...call,
+      gasLimit: fees.gasLimits[0]!.toString(),
+      maxFeePerGas: fees.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+      recipient,
+      bridgeFee: bridgeFee.toString(),
+      sharesAccountId,
+    };
+  }
+
+  /**
    * What happened, as the chains record it. Operations come from the vault on
    * NEAR (who, which role, what, its state) and are confirmed on the EVM chain
    * (mined, success or reverted). The database only says which operations to
@@ -1127,6 +1412,9 @@ export class OmniRolesService {
     if (treasury) {
       const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null);
       if (wallet?.address) labels[getAddress(hexOf(wallet.address))] = "company wallet";
+      // Bridge recipients are compared by hash: name the company's shares contract.
+      const shares = this.sharesAccountOf(treasury);
+      labels[stringHash(nearRecipient(shares))] = `${nearRecipient(shares)} (company shares)`;
     }
     return labels;
   }
@@ -1150,25 +1438,27 @@ export class OmniRolesService {
     }
   }
 
-  private artifactCache: { base64: string; sha256: string } | null = null;
+  private artifactCache = new Map<string, { base64: string; sha256: string }>();
 
-  private async artifact(): Promise<{ base64: string; sha256: string }> {
-    if (this.artifactCache) return this.artifactCache;
+  private async artifact(name = "vault.wasm"): Promise<{ base64: string; sha256: string }> {
+    const cached = this.artifactCache.get(name);
+    if (cached) return cached;
     const candidates = [
-      resolve(this.config.artifactsDir, "vault.wasm"),
-      resolve(process.cwd(), "contracts/res/vault.wasm"),
-      resolve(process.cwd(), "../../contracts/res/vault.wasm"),
+      resolve(this.config.artifactsDir, name),
+      resolve(process.cwd(), "contracts/res", name),
+      resolve(process.cwd(), "../../contracts/res", name),
     ];
     for (const candidate of candidates) {
       try {
         const wasm = await readFile(candidate);
-        this.artifactCache = { base64: wasm.toString("base64"), sha256: createHash("sha256").update(wasm).digest("hex") };
-        return this.artifactCache;
+        const artifact = { base64: wasm.toString("base64"), sha256: createHash("sha256").update(wasm).digest("hex") };
+        this.artifactCache.set(name, artifact);
+        return artifact;
       } catch {
         // next candidate
       }
     }
-    throw new OmniRolesError(500, "artifact_missing", "vault.wasm not found");
+    throw new OmniRolesError(500, "artifact_missing", `${name} not found`);
   }
 }
 

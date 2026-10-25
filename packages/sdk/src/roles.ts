@@ -9,7 +9,7 @@
  *
  * Browser-safe: depends on viem only.
  */
-import { decodeFunctionData, encodeAbiParameters, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
+import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
 
 // ---------------------------------------------------------------------------
 // Vault JSON types (contracts/vault/src/types.rs)
@@ -82,7 +82,12 @@ export type ChainProfile = {
   name: string;
   tokens: Token[];
   protocols: Record<ProtocolId, { name: string; router: Hex }>;
+  /** NEAR Omni Bridge on this chain: sends ETH to a NEAR account. */
+  omniBridge?: Hex;
 };
+
+/** ETH itself, for budgets on the value a call sends. */
+export const NATIVE_ETH: Token = { address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 };
 
 export const BASE_SEPOLIA: ChainProfile = {
   chainId: 84532,
@@ -99,6 +104,8 @@ export const BASE_SEPOLIA: ChainProfile = {
     "uniswap-v3": { name: "Uniswap V3", router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" },
     "uniswap-v2": { name: "Uniswap V2", router: "0x1689E7B1F10000AE47eBfE339a4f69dECd19F602" },
   },
+  // github.com/Near-One/omni-bridge README, testnet deployment on Base Sepolia.
+  omniBridge: "0xa56b860017152cD296ad723E8409Abd6e5D86d4d",
 };
 
 export const SELECTORS = {
@@ -106,6 +113,8 @@ export const SELECTORS = {
   approve: "0x095ea7b3",
   exactInputSingle: "0x04e45aaf",
   swapExactTokensForTokens: "0x38ed1739",
+  /** initTransfer(address,uint128,uint128,uint128,string,string) on the Omni Bridge. */
+  initTransfer: "0xdeb915b8",
 } as const;
 
 // Parameter names of the functions the sheets scope, for descriptions.
@@ -123,6 +132,10 @@ const FUNCTIONS: Record<string, { name: string; params: string[]; tuple?: { inde
   [SELECTORS.swapExactTokensForTokens]: {
     name: "swap (swapExactTokensForTokens)",
     params: ["amount sold", "minimum received", "route", "recipient", "deadline"],
+  },
+  [SELECTORS.initTransfer]: {
+    name: "bridge to NEAR (initTransfer)",
+    params: ["token", "amount", "fee in token", "bridge fee", "NEAR recipient", "message", "ETH sent"],
   },
 };
 
@@ -223,6 +236,61 @@ export function uniswapV3Sheet(router: Hex, tokenIn: Hex, tokensOut: Hex[], key:
   };
 }
 
+/** The Omni Bridge recipient string for a NEAR account. */
+export function nearRecipient(accountId: string): string {
+  return `near:${accountId}`;
+}
+
+/** What the vault compares a string parameter with: keccak256 of its bytes. */
+export function stringHash(text: string): Hex {
+  return keccak256(toBytes(text));
+}
+
+/** Largest bridge fee (paid in ETH to the Omni Bridge relayer) a revenue transfer may carry. */
+export const MAX_BRIDGE_FEE_WEI = 1_000_000_000_000_000n; // 0.001 ETH
+
+/**
+ * ETH from the company wallet to the company's shares contract on NEAR, through
+ * the Omni Bridge, and nowhere else: native ETH, no token fee, the recipient
+ * fixed to `near:<shares account>`, no message. The ETH sent (amount + bridge
+ * fee) is counted against the budget.
+ */
+export function shareRevenueSheet(bridge: Hex, sharesAccountId: string, key: number[], maxBridgeFeeWei = MAX_BRIDGE_FEE_WEI): Sheet {
+  return {
+    target: bridge,
+    selector: SELECTORS.initTransfer,
+    conditions: [
+      node(0, Encoding.AbiEncoded, Operator.Matches),
+      node(0, Encoding.Static, Operator.EqualTo, addressWord(NATIVE_ETH.address)),
+      node(0, Encoding.Static, Operator.GreaterThan, word(0n)),
+      node(0, Encoding.Static, Operator.EqualTo, word(0n)),
+      node(0, Encoding.Static, Operator.LessThan, word(maxBridgeFeeWei + 1n)),
+      node(0, Encoding.Dynamic, Operator.EqualTo, stringHash(nearRecipient(sharesAccountId))),
+      node(0, Encoding.Dynamic, Operator.EqualTo, stringHash("")),
+      node(0, Encoding.EtherValue, Operator.WithinAllowance, hexOf(key)),
+    ],
+  };
+}
+
+const INIT_TRANSFER_ABI = parseAbi([
+  "function initTransfer(address tokenAddress, uint128 amount, uint128 fee, uint128 nativeFee, string recipient, string message)",
+]);
+
+/** The call an agent sends to share revenue: what the role above allows. */
+export function shareRevenueCall(bridge: Hex, sharesAccountId: string, amountWei: bigint, bridgeFeeWei: bigint) {
+  const value = amountWei + bridgeFeeWei;
+  return {
+    to: getAddress(bridge),
+    data: encodeFunctionData({
+      abi: INIT_TRANSFER_ABI,
+      functionName: "initTransfer",
+      args: [NATIVE_ETH.address, amountWei, 0n, bridgeFeeWei, nearRecipient(sharesAccountId), ""],
+    }),
+    value: value.toString(),
+    allowanceAmount: value.toString(),
+  };
+}
+
 /** keccak256 of `length || elements` of an ABI-encoded address[] (EqualTo on arrays). */
 export function routeHash(path: Hex[]): Hex {
   const encoded = encodeAbiParameters([{ type: "address[]" }], [path.map((hop) => getAddress(hop))]);
@@ -260,6 +328,8 @@ export type Recipient = { address: Hex; label: string };
 
 export type RoleBlock =
   | { kind: "payments"; token: Hex; recipients: Recipient[]; budget: Budget }
+  /** Send ETH to the company's shareholders, through the Omni Bridge. Budget in ETH. */
+  | { kind: "share-revenue"; sharesAccountId: string; budget: Budget }
   | {
       kind: "swap";
       tokenIn: Hex;
@@ -284,6 +354,13 @@ const DEFAULT_GAS = {
   max_fee_per_gas: "100000000000",
   max_priority_fee_per_gas: "10000000000",
   max_total_fee: "30000000000000000",
+};
+
+const BRIDGE_GAS = {
+  gas_limit: "1000000",
+  max_fee_per_gas: "20000000000",
+  max_priority_fee_per_gas: "2000000000",
+  max_total_fee: "20000000000000000",
 };
 
 const NS_PER_DAY = 86_400_000_000_000;
@@ -314,7 +391,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
-    const token = tokenOf(profile, block.kind === "payments" ? block.token : block.tokenIn);
+    const token = block.kind === "share-revenue" ? NATIVE_ETH : tokenOf(profile, block.kind === "payments" ? block.token : block.tokenIn);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
@@ -329,6 +406,10 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
     });
     if (block.kind === "payments") {
       permissions.push(toPermission(erc20TransferSheet(token.address, block.recipients.map((item) => item.address), key)));
+    } else if (block.kind === "share-revenue") {
+      if (!profile.omniBridge) throw new Error(`no Omni Bridge known on ${profile.name}`);
+      if (!/^[a-z0-9._-]{2,64}$/.test(block.sharesAccountId)) throw new Error("shares account is not a NEAR account id");
+      permissions.push({ ...toPermission(shareRevenueSheet(profile.omniBridge, block.sharesAccountId, key)), allow_value: true });
     } else {
       requireNonEmpty(block.protocols, "protocol");
       tokensOutCheck(block, profile);
@@ -357,6 +438,8 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
         co_signer_role: null,
         velocity: null,
         ...DEFAULT_GAS,
+        // A bridge transfer needs more gas than a token transfer; the total fee stays capped.
+        ...(draft.blocks.some((block) => block.kind === "share-revenue") ? BRIDGE_GAS : {}),
         ...draft.gas,
       },
     },
@@ -470,12 +553,162 @@ export function councilThreshold(members: number): number {
   return Math.ceil((2 * members) / 3);
 }
 
-/** The only policy MandateOS creates: one council group, two-thirds threshold. */
-export function councilPolicy(members: string[], settings: { proposalBond: string; proposalPeriodNs: string }): DaoPolicy {
+// ---------------------------------------------------------------------------
+// Shares
+// ---------------------------------------------------------------------------
+
+export const SHAREHOLDERS_ROLE = "shareholders";
+/** What shareholders vote on: company calls (the vault: roles, transactions) and NEAR transfers. */
+export const SHAREHOLDER_KINDS = ["call", "transfer"] as const;
+const SHAREHOLDER_ACTIONS = ["AddProposal", "VoteApprove", "VoteReject", "Finalize"] as const;
+const TOKEN_MAJORITY = { weight_kind: "TokenWeight", quorum: "0", threshold: [1, 2] };
+
+/**
+ * Shareholders vote with their locked shares: a company call or transfer passes
+ * with more than half of all locked shares. Members still pass anything by two
+ * thirds, and any member can veto a vault change during the veto window.
+ */
+export function shareholdersRole(): DaoPolicy["roles"][number] {
+  return {
+    name: SHAREHOLDERS_ROLE,
+    kind: { Member: "1" },
+    permissions: SHAREHOLDER_KINDS.flatMap((kind) => SHAREHOLDER_ACTIONS.map((action) => `${kind}:${action}`)),
+    vote_policy: Object.fromEntries(SHAREHOLDER_KINDS.map((kind) => [kind, { ...TOKEN_MAJORITY }])),
+  };
+}
+
+/** Sputnik returns permissions and vote policies in any order: compare their content. */
+function isShareholdersRole(role: DaoPolicy["roles"][number]): boolean {
+  const expected = shareholdersRole();
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
+  const votes = Object.entries(role.vote_policy ?? {});
+  return role.name === expected.name
+    && JSON.stringify(role.kind) === JSON.stringify(expected.kind)
+    && sameSet(role.permissions ?? [], expected.permissions)
+    && sameSet(votes.map(([kind]) => kind), Object.keys(expected.vote_policy))
+    && votes.every(([, vote]) => JSON.stringify(vote) === JSON.stringify(TOKEN_MAJORITY));
+}
+
+/** True when a DAO policy (as returned by `get_policy`) already lets shareholders vote. */
+export function hasShareholdersRole(policy: { roles: DaoPolicy["roles"] }): boolean {
+  return policy.roles.some(isShareholdersRole);
+}
+
+export type SharesConfig = {
+  name: string;
+  symbol: string;
+  totalSupply: number;
+  /** Price of one share, in yoctoNEAR. */
+  pricePerShareYocto: string;
+  unlockPeriodNs: string;
+  /** Revenue is split by epoch among the holders who voted: 1 hour on testnet, 7 days in production. */
+  epochNs: string;
+  revenueToken: string | null;
+  allocations: Array<[string, number]>;
+};
+
+/** Init arguments of the shares contract. */
+export function sharesInitArgs(daoAccountId: string, config: SharesConfig) {
+  if (!/^[A-Z0-9]{2,8}$/.test(config.symbol)) throw new Error("symbol must be 2 to 8 capital letters or digits");
+  if (!Number.isInteger(config.totalSupply) || config.totalSupply < 1) throw new Error("total supply must be a positive whole number");
+  const allocated = config.allocations.reduce((sum, [, amount]) => sum + amount, 0);
+  if (allocated > config.totalSupply) throw new Error("allocations exceed the total supply");
+  return {
+    dao_id: daoAccountId,
+    name: config.name,
+    symbol: config.symbol,
+    total_supply: String(config.totalSupply),
+    price_per_share: config.pricePerShareYocto,
+    unlock_period_ns: config.unlockPeriodNs,
+    epoch_ns: config.epochNs,
+    revenue_token: config.revenueToken,
+    allocations: config.allocations.map(([account, amount]) => [account, String(amount)]),
+  };
+}
+
+/** The two votes that turn shares on: the DAO counts them, and shareholders get a role. */
+export function sharesProposalKinds(sharesAccountId: string) {
+  return [
+    { title: `Count locked shares of ${sharesAccountId} as votes`, kind: { SetStakingContract: { staking_id: sharesAccountId } } },
+    { title: "Let shareholders vote on company calls and transfers", kind: { ChangePolicyAddOrUpdateRole: { role: shareholdersRole() } } },
+  ];
+}
+
+export function proposalOf(title: string, kind: unknown) {
+  return { proposal: { description: `${PROPOSAL_MARKER} ${title}`, kind } };
+}
+
+const YOCTO = 10n ** 24n;
+export function formatNear(yocto: string | bigint): string {
+  const value = BigInt(yocto);
+  const whole = value / YOCTO;
+  const fraction = (value % YOCTO).toString().padStart(24, "0").slice(0, 4).replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction} NEAR` : `${whole} NEAR`;
+}
+
+export function parseNear(amount: string): string {
+  const match = /^(\d+)(?:\.(\d{1,24}))?$/.exec(amount.trim());
+  if (!match) throw new Error(`${amount} is not a NEAR amount`);
+  return (BigInt(match[1]!) * YOCTO + BigInt((match[2] ?? "").padEnd(24, "0"))).toString();
+}
+
+/** Share the DAO's NEAR with shareholders: a call to the shares contract, paid from the DAO. */
+export function revenueProposalKind(sharesAccountId: string, amountYocto: string) {
+  return {
+    FunctionCall: {
+      receiver_id: sharesAccountId,
+      actions: [{ method_name: "deposit_revenue", args: btoa("{}"), deposit: amountYocto, gas: "30000000000000" }],
+    },
+  };
+}
+
+/** Describe the proposals about shares; null for anything else. */
+export function describeSharesProposal(kind: unknown, sharesAccountId: string | null): { title: string; details: string[] } | null {
+  const staking = (kind as { SetStakingContract?: { staking_id?: string } })?.SetStakingContract;
+  if (staking) {
+    const known = staking.staking_id === sharesAccountId;
+    return {
+      title: "Votes count locked shares",
+      details: [
+        `vote weight comes from ${staking.staking_id}`,
+        "can be set only once for this DAO",
+        ...(known ? [] : ["⚠ this is not the company's shares contract"]),
+      ],
+    };
+  }
+  const role = (kind as { ChangePolicyAddOrUpdateRole?: { role?: DaoPolicy["roles"][number] } })?.ChangePolicyAddOrUpdateRole?.role;
+  if (role) {
+    const standard = isShareholdersRole(role);
+    return {
+      title: standard ? "Shareholders vote on company calls and transfers" : `Add or change role "${role.name}"`,
+      details: standard
+        ? ["passes with more than half of all locked shares", "members still decide by two thirds and can veto vault changes"]
+        : [`⚠ role "${role.name}" open to ${JSON.stringify(role.kind)} with ${role.permissions.join(", ")}`],
+    };
+  }
+  const call = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; deposit: string }> } })?.FunctionCall;
+  if (call && sharesAccountId && call.receiver_id === sharesAccountId && call.actions?.length === 1 && call.actions[0]?.method_name === "deposit_revenue") {
+    return {
+      title: `Share ${formatNear(call.actions[0].deposit)} with shareholders`,
+      details: ["paid from the DAO account", "goes to this epoch's revenue: split among the holders who vote, pro rata of their locked shares"],
+    };
+  }
+  return null;
+}
+
+/** The only policy MandateOS creates: one council group, two-thirds threshold, and shareholders once shares exist. */
+export function councilPolicy(
+  members: string[],
+  settings: { proposalBond: string; proposalPeriodNs: string },
+  options: { shareholders?: boolean } = {},
+): DaoPolicy {
   if (members.length < 3) throw new Error("at least three members are needed");
   if (new Set(members).size !== members.length) throw new Error("a member is listed twice");
   return {
-    roles: [{ name: COUNCIL_ROLE, kind: { Group: members }, permissions: [...COUNCIL_PERMISSIONS], vote_policy: {} }],
+    roles: [
+      { name: COUNCIL_ROLE, kind: { Group: members }, permissions: [...COUNCIL_PERMISSIONS], vote_policy: {} },
+      ...(options.shareholders ? [shareholdersRole()] : []),
+    ],
     default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: String(councilThreshold(members.length)) },
     proposal_bond: settings.proposalBond,
     proposal_period: settings.proposalPeriodNs,
@@ -498,8 +731,10 @@ export function describePolicyChange(kind: unknown): { title: string; details: s
   if (!policy || !Array.isArray(policy.roles)) return null;
   const members = policy.roles.flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
   const warnings: string[] = [];
-  if (policy.roles.length !== 1 || policy.roles[0]?.name !== COUNCIL_ROLE) warnings.push(`⚠ unusual roles: ${policy.roles.map((role) => role.name).join(", ")}`);
-  for (const role of policy.roles) {
+  const others = policy.roles.filter((role) => role.name !== COUNCIL_ROLE && !isShareholdersRole(role));
+  const councils = policy.roles.filter((role) => role.name === COUNCIL_ROLE);
+  if (councils.length !== 1 || others.length) warnings.push(`⚠ unusual roles: ${policy.roles.map((role) => role.name).join(", ")}`);
+  for (const role of [...councils, ...others]) {
     if ((role.kind as { Group?: unknown })?.Group === undefined) warnings.push(`⚠ role "${role.name}" is open to ${JSON.stringify(role.kind)}`);
     const extra = role.permissions.filter((permission) => !COUNCIL_PERMISSIONS.includes(permission));
     if (extra.length) warnings.push(`⚠ role "${role.name}" gets extra permissions: ${extra.join(", ")}`);
@@ -510,10 +745,12 @@ export function describePolicyChange(kind: unknown): { title: string; details: s
   if (vote?.weight_kind !== "RoleWeight" || threshold !== String(councilThreshold(members.length))) {
     warnings.push(`⚠ vote rule ${JSON.stringify(vote)} instead of ${councilThreshold(members.length)} of ${members.length}`);
   }
+  const shareholders = policy.roles.some(isShareholdersRole);
   return {
     title: `Members become: ${members.join(", ")}`,
     details: [
       `a decision will need ${threshold} of ${members.length} approvals`,
+      ...(shareholders ? ["shareholders keep their vote on company calls and transfers"] : []),
       "applies as soon as it is approved",
       ...warnings,
     ],
@@ -659,6 +896,9 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         } else if (selector === SELECTORS.swapExactTokensForTokens) {
           token = approvedTokenFor(target);
           kind = "swaps";
+        } else if (selector === SELECTORS.initTransfer) {
+          token = NATIVE_ETH;
+          kind = "revenue";
         }
         const key = condition.compValue.toLowerCase();
         const existing = result[key];
@@ -696,6 +936,7 @@ export function describePermission(permission: Permission, context: DescribeCont
     return fn?.params[fieldIndex] ?? `parameter ${fieldIndex + 1}`;
   };
   const amountToken = (name: string): Token | undefined => {
+    if (selector === SELECTORS.initTransfer && (name === "bridge fee" || name === "ETH sent" || name === "amount")) return NATIVE_ETH;
     if (name.includes("amount") || name.includes("minimum")) return tokenIn ?? (selector === SELECTORS.transfer || selector === SELECTORS.approve ? targetToken : undefined);
     return undefined;
   };
@@ -713,8 +954,15 @@ export function describePermission(permission: Permission, context: DescribeCont
       case Operator.EqualTo:
         if (item.paramType === Encoding.Array) {
           rules.push(`${name} must be ${routeName(item.compValue, context) ?? "an approved route"}`);
+        } else if (item.paramType === Encoding.Static && /^0x0{64}$/i.test(item.compValue)) {
+          rules.push(name === "token" ? "token must be ETH itself (native)" : `${name} must be zero`);
         } else if (item.paramType === Encoding.Static && /^0x0{24}/i.test(item.compValue)) {
           rules.push(`${name} must be ${labelAddress(wordToAddress(item.compValue), context)}`);
+        } else if (item.paramType === Encoding.Dynamic) {
+          const text = item.compValue.toLowerCase() === stringHash("").toLowerCase()
+            ? "empty"
+            : Object.entries(context.labels ?? {}).find(([candidate]) => candidate.toLowerCase() === item.compValue.toLowerCase())?.[1];
+          rules.push(text ? (text === "empty" ? `${name} must be empty` : `${name} must be ${text}`) : `${name} must be the text whose hash is ${item.compValue}`);
         } else {
           rules.push(`${name} must equal ${item.compValue}`);
         }

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { singleRoleTitle } from "../lib/role-summary.js";
 
-import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
 
 import { api } from "../api.js";
 import { Card, PageState, Status } from "../components/ui.js";
@@ -62,6 +62,10 @@ export function GovernancePage() {
   const me = wallets.nearAccountId;
   const isMember = Boolean(data && me && data.dao.members.includes(me));
   const needed = data ? approvalsNeeded(data.dao.threshold, data.dao.members.length) : 0;
+  // Shareholders vote with their locked shares on company calls and transfers.
+  const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares, enabled: Boolean(data?.dao.shareholders), staleTime: 15_000 });
+  const myShareVotes = shares.data?.deployed ? BigInt(shares.data.me?.votes ?? "0") : 0n;
+  const lockedShares = data?.dao.shareholders ? BigInt(data.dao.shareholders.lockedShares) : 0n;
 
   async function run(label: string, action: () => Promise<string | void>) {
     setBusy(label);
@@ -136,7 +140,8 @@ export function GovernancePage() {
                   vaultAccountId={data!.vaultAccountId}
                   needed={needed}
                   me={me}
-                  canVote={isMember && !(me in proposal.votes)}
+                  canVote={(isMember || (myShareVotes > 0n && shareholderKind(proposal.kind))) && !(me in proposal.votes)}
+                  lockedShares={data?.dao.shareholders && shareholderKind(proposal.kind) ? lockedShares : null}
                   busy={busy}
                   now={now}
                   onVote={(action) => run(`vote-${proposal.id}`, async () => {
@@ -272,6 +277,8 @@ function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, staleTime: 60_000 });
   const policyChange = describePolicyChange(proposal.kind);
   if (policyChange) return [{ title: policyChange.title, details: policyChange.details }];
+  const sharesChange = describeSharesProposal(proposal.kind, vaultAccountId.replace(/-vault\./, "-shares."));
+  if (sharesChange) return [sharesChange];
   const calls = decodeVaultCalls(proposal.kind as Parameters<typeof decodeVaultCalls>[0], vaultAccountId);
   if (!calls) return null;
   const labels: Record<string, string> = {};
@@ -282,15 +289,23 @@ function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string
     if (change.kind === "supplier_create" && typeof change.payload.address === "string") labels[change.payload.address] = `${String(change.payload.name)} (new supplier)`;
   }
   if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
+  const shares = vaultAccountId.replace(/-vault\./, "-shares.");
+  labels[stringHash(nearRecipient(shares))] = `${nearRecipient(shares)} (company shares)`;
   const changes = calls.flatMap((call) => (call.method === "queue_rule_change" ? [call.change as RuleChange] : []));
   const context = { profile: BASE_SEPOLIA, labels, budgets: budgetsOf(changes, BASE_SEPOLIA), fullAddresses: true };
   return calls.map((call) => describeVaultCall(call, context));
+}
+
+/** Sputnik labels: shareholders vote on FunctionCall ("call") and Transfer ("transfer") proposals. */
+function shareholderKind(kind: unknown): boolean {
+  return typeof kind === "object" && kind !== null && ("FunctionCall" in kind || "Transfer" in kind);
 }
 
 function ProposalCard(props: {
   proposal: GovernanceProposal;
   vaultAccountId: string;
   needed: number;
+  lockedShares?: bigint | null;
   me: string;
   canVote: boolean;
   busy: string | null;
@@ -311,6 +326,11 @@ function ProposalCard(props: {
         <div className="votes">
           <strong>{approvals} / {props.needed}</strong>
           <span className="small muted">approvals{rejections ? ` · ${rejections} against` : ""}</span>
+          {props.lockedShares !== null && props.lockedShares !== undefined ? (
+            <span className="small muted">
+              or shareholders: {proposal.voteCounts?.shareholders?.[0] ?? "0"} / {(props.lockedShares / 2n + 1n).toString()} locked shares
+            </span>
+          ) : null}
         </div>
       </header>
       {verified ? (

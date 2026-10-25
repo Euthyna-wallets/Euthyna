@@ -502,6 +502,11 @@ export function createApp({
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
             maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
           }),
+          z.object({
+            kind: z.literal("share-revenue"),
+            sharesAccountId: z.string().regex(/^[a-z0-9._-]{2,64}$/),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+          }),
         ])).min(1).max(10),
         members: z.array(z.object({
           accountId: z.string().min(2).max(64),
@@ -577,6 +582,34 @@ export function createApp({
       const input = await parseJson(context, z.object({ pause: z.boolean() }));
       return context.json(await omniroles.pauseProposal(orgOf(context), input.pause));
     });
+    app.get("/v1/console/omniroles/shares", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.shares(orgOf(context), context.get("console").nearAccountId ?? null)));
+    app.post("/v1/console/omniroles/shares", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        name: z.string().min(2).max(60),
+        symbol: z.string().regex(/^[A-Z0-9]{2,8}$/),
+        totalSupply: z.number().int().min(1).max(1_000_000_000),
+        priceNear: z.string().regex(/^\d+(\.\d{1,24})?$/),
+        allocations: z.array(z.object({ accountId: z.string().min(2).max(64), shares: z.number().int().min(1) })).max(20),
+      }));
+      const result = await omniroles.createShares(orgOf(context), input);
+      await auth.recordAudit({
+        organizationId: orgOf(context),
+        actorType: "console",
+        actorId: context.get("console").userId,
+        action: "shares.created",
+        targetType: "shares",
+        targetId: result.accountId,
+        metadata: { transaction: result.transaction, wasmSha256: result.wasmSha256, symbol: input.symbol, totalSupply: input.totalSupply },
+      });
+      return context.json(result);
+    });
+    app.post("/v1/console/omniroles/proposals/shares", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.sharesProposals(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/revenue", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ amountNear: z.string().regex(/^\d+(\.\d{1,24})?$/) }));
+      return context.json(await omniroles.revenueProposal(orgOf(context), input.amountNear));
+    });
     app.get("/v1/console/omniroles/members", requireConsole(auth, consoleLimiter), async (context) =>
       context.json({ ...(await omniroles.members(orgOf(context))), me: context.get("console").nearAccountId ?? null }));
     app.post("/v1/console/omniroles/members", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -615,6 +648,11 @@ export function createApp({
           })
           : undefined,
       ));
+    });
+    app.get("/v1/agent/share-revenue", requireAgent(auth, agentLimiter), async (context) => {
+      const amountWei = context.req.query("amountWei") ?? "";
+      if (!/^\d{1,30}$/.test(amountWei)) return context.json({ error: "invalid_amount", message: "amountWei must be a whole number of wei" }, 400);
+      return context.json(await omniroles.shareRevenueOperation(context.get("agent").organizationId, amountWei));
     });
     app.get("/v1/agent/mandate", requireAgent(auth, agentLimiter), async (context) => {
       const agent = context.get("agent");

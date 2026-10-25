@@ -79,6 +79,7 @@ export function Layout() {
             <NavLink to="/activity">Activity</NavLink>
             <NavLink to="/wallet">Wallet</NavLink>
             <NavLink to="/governance">Decisions</NavLink>
+            <NavLink to="/shares">Shares</NavLink>
             <NavLink to="/suppliers">Suppliers</NavLink>
             <NavLink to="/settings">Settings</NavLink>
             {setupRequired ? <NavLink className="setup-link" to="/onboarding">Finish setup</NavLink> : null}

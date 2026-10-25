@@ -203,3 +203,38 @@ describe("OmniRoles SDK", () => {
     expect(BigInt(`0x${Buffer.from(request.calldata.slice(36)).toString("hex")}`)).toBe(1_000_000n);
   });
 });
+
+describe("revenue sharing by an agent", () => {
+  it("prepares exactly the bridge call the API built, then asks the Guard and authorizes", async () => {
+    const prepared: unknown[] = [];
+    const vault = {
+      prepare: async () => { throw new Error("not a transfer"); },
+      prepareRequest: async (request: unknown) => { prepared.push(request); return { op_id: Array(32).fill(7), state: "Prepared" }; },
+      authorize: async () => "near-tx",
+      cancelNonce: async () => "x",
+    };
+    const api = {
+      gasQuote: async () => { throw new Error("unused"); },
+      requestVisa: async () => ({ status: 200, body: { visa: { op: 1 }, signature: "sig" } }),
+      recordAuthorization: async () => ({}),
+      recordCancellation: async () => ({}),
+      status: async () => ({}),
+      shareRevenue: async (amountWei: string) => ({
+        chainId: 84532,
+        to: "0xa56b860017152cD296ad723E8409Abd6e5D86d4d" as const,
+        data: "0xdeb915b8" as const,
+        value: (BigInt(amountWei) + 10n).toString(),
+        allowanceAmount: (BigInt(amountWei) + 10n).toString(),
+        gasLimit: "500000",
+        maxFeePerGas: "1000000",
+        maxPriorityFeePerGas: "1000",
+        recipient: "near:acme-shares.testnet",
+        bridgeFee: "10",
+        sharesAccountId: "acme-shares.testnet",
+      }),
+    };
+    const result = await new MandateAgentClient(vault, api).shareRevenue("1000", "REV-1");
+    expect(result).toMatchObject({ outcome: "authorized", recipient: "near:acme-shares.testnet", bridgeFee: "10" });
+    expect(prepared[0]).toMatchObject({ chain_id: 84532, value: "1010", allowance_amount: "1010", reference: "REV-1", calldata: [0xde, 0xb9, 0x15, 0xb8] });
+  });
+});

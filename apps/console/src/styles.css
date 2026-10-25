@@ -344,3 +344,15 @@ input[type="checkbox"], input[type="radio"] { appearance: auto; background: none
 .evm-status { font-weight: 600; }
 .evm-status.ok { color: #0f6e66; }
 .evm-status.bad { color: #b42318; }
+
+/* Shares */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
+.form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #5b6472; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.metric-grid > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #e2e5ea; border-radius: 10px; background: #fafbfc; }
+.metric-grid strong { font-size: 18px; color: #111827; }
+.share-checks { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; font-size: 14px; }
+.share-checks .ok { color: #047857; }
+.share-checks .bad { color: #92400e; }
+label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; margin: 0; }
+label.inline input { width: 110px; margin: 0; }
