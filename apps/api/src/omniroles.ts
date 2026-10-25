@@ -77,6 +77,11 @@ export interface OmniRolesChain {
   fees(input: { chainId: number; from: Hex; to: Hex; value: bigint; data: Hex; gas?: bigint | undefined }): Promise<{ gasLimit: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
 }
 
+/** NEAR storage: 1e19 yocto per byte; top the vault up below 0.5 NEAR free. */
+const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
+const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
+const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
+
 /** Gas limit (before headroom) of a voted call that cannot be estimated. */
 const FALLBACK_GAS = 1_000_000n;
 
@@ -680,6 +685,7 @@ export class OmniRolesService {
   /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
     const treasury = await this.requireTreasury(organizationId);
+    await this.keepStorageFunded(treasury.vaultAccountId);
     const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
     const now = nowNs();
     const ready = rules
@@ -693,6 +699,21 @@ export class OmniRolesService {
     hashes.push(...await this.startDaoTransactions(organizationId, treasury));
     if (hashes.length) this.forget(treasury.vaultAccountId);
     return hashes;
+  }
+
+  /**
+   * Every operation the vault keeps (and every MPC signature it stores) costs
+   * NEAR storage. When the vault runs short, the MPC callback cannot store the
+   * signature and the operation sticks: top it up from the relayer first.
+   * Only NEAR for storage moves here, never company funds.
+   */
+  private async keepStorageFunded(vaultAccountId: string): Promise<void> {
+    const account = await this.near.getAccount(vaultAccountId).catch(() => null);
+    if (!account) return;
+    const free = BigInt(account.amount) - BigInt(account.storage_usage ?? 0) * STORAGE_PRICE_PER_BYTE;
+    if (free >= STORAGE_LOW_YOCTO) return;
+    await this.near.executeActions(vaultAccountId, [{ type: "Transfer", depositYocto: STORAGE_TOP_UP_YOCTO.toString() }]);
+    console.log(JSON.stringify({ event: "omniroles.vault_storage_topped_up", vaultAccountId, freeYocto: free.toString() }));
   }
 
   /**
