@@ -190,7 +190,7 @@ their two-thirds vote and their veto on vault changes. See
 ## Attack suite
 
 ```bash
-pnpm attack:all       # 39 attacks: vault in a NEAR sandbox + Guard
+pnpm attack:all       # 45 attacks: vault in a NEAR sandbox + Guard
 pnpm attack:testnet   # the live testnet vault, view calls only
 ```
 

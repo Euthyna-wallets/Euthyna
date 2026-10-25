@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { singleRoleTitle } from "../lib/role-summary.js";
 
-import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeSharesProposal, describeVaultCall, type RuleChange } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
 
 import { api } from "../api.js";
 import { Card, PageState, Status } from "../components/ui.js";
@@ -289,6 +289,8 @@ function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string
     if (change.kind === "supplier_create" && typeof change.payload.address === "string") labels[change.payload.address] = `${String(change.payload.name)} (new supplier)`;
   }
   if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
+  const shares = vaultAccountId.replace(/-vault\./, "-shares.");
+  labels[stringHash(nearRecipient(shares))] = `${nearRecipient(shares)} (company shares)`;
   const changes = calls.flatMap((call) => (call.method === "queue_rule_change" ? [call.change as RuleChange] : []));
   const context = { profile: BASE_SEPOLIA, labels, budgets: budgetsOf(changes, BASE_SEPOLIA), fullAddresses: true };
   return calls.map((call) => describeVaultCall(call, context));

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
-import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, nearRecipient, stringHash, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
@@ -157,7 +157,8 @@ function RoleCard({ role }: { role: RoleView }) {
 
 type BlockDraft =
   | { kind: "payments"; token: string; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number }
-  | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string };
+  | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string }
+  | { kind: "share-revenue"; sharesAccountId: string; amount: string; periodDays: number };
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
@@ -167,6 +168,8 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents") });
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status });
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry") });
+  const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares });
+  const sharesAccountId = shares.data?.deployed ? shares.data.accountId : null;
   const [name, setName] = useState(initialName);
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
   const [members, setMembers] = useState<string[]>([]);
@@ -192,6 +195,11 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
     setPreview(null);
     setCatalogOpen(false);
   };
+  const addShareRevenue = () => {
+    if (!sharesAccountId) return;
+    setBlocks((current) => [...current, { kind: "share-revenue", sharesAccountId, amount: "0.01", periodDays: 7 }]);
+    setPreview(null);
+  };
   const supplierOptions = (registry.data?.suppliers ?? []).flatMap((supplier) =>
     supplier.wallets.filter((wallet) => wallet.chainId === PROFILE.chainId).map((wallet) => ({ address: wallet.address, label: supplier.name })));
 
@@ -204,7 +212,9 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
     name,
     blocks: blocks.map((block): RoleBlock => block.kind === "payments"
       ? { kind: "payments", token: block.token as `0x${string}`, recipients: block.recipients.map((item) => ({ address: item.address as `0x${string}`, label: item.label })), budget: { amount: block.amount, periodDays: block.periodDays } }
-      : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
+      : block.kind === "share-revenue"
+        ? { kind: "share-revenue", sharesAccountId: block.sharesAccountId, budget: { amount: block.amount, periodDays: block.periodDays } }
+        : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
     members: members.map((accountId) => ({ accountId, kind: "Agent" as const })),
   });
 
@@ -226,6 +236,7 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
     const labels: Record<string, string> = Object.fromEntries(supplierOptions.map((option) => [option.address, option.label]));
     for (const block of role.blocks) if (block.kind === "payments") for (const recipient of block.recipients) labels[recipient.address] ??= recipient.label ?? recipient.address;
     if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
+    if (sharesAccountId) labels[stringHash(nearRecipient(sharesAccountId))] = `${nearRecipient(sharesAccountId)} (company shares)`;
     const context = { profile: PROFILE, labels, budgets: budgetsOf(changes, PROFILE), fullAddresses: true };
     return { ...draft, summary: expected.map((call) => describeVaultCall(call, context)) };
   }
@@ -243,12 +254,14 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
   }
 
   const ready = validRoleName(name) && blocks.length > 0 && blocks.every((block) =>
-    Number(block.amount) > 0 && (block.kind === "payments" ? block.recipients.length > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0));
+    Number(block.amount) > 0 && (block.kind === "payments"
+      ? block.recipients.length > 0
+      : block.kind === "share-revenue" || (block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
   // Say what is missing instead of a silently disabled button.
   const missing = !validRoleName(name)
     ? "Give the role a name."
     : blocks.length === 0
-      ? "Add what this role allows: + Transfers or + DeFi…"
+      ? "Add what this role allows: + Transfers, + DeFi… or + Share revenue"
       : blocks.some((block) => block.kind === "payments" && block.recipients.length === 0)
         ? "Pick at least one recipient for the transfers."
         : blocks.some((block) => block.kind === "swap" && (block.tokensOut.length === 0 || block.protocols.length === 0))
@@ -270,10 +283,21 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
         {blocks.map((block, index) => (
           <div className="block" key={index}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Transfers" : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
+              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
               <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
             </div>
-            {block.kind === "payments" ? (
+            {block.kind === "share-revenue" ? (
+              <>
+                <div className="row wrap">
+                  <label>Budget (ETH)<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
+                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                </div>
+                <p className="small muted">
+                  ETH from the company wallet, through the Omni Bridge, to <code>{block.sharesAccountId}</code> only: the holders who vote receive it.
+                  The bridge fee counts against the budget.
+                </p>
+              </>
+            ) : block.kind === "payments" ? (
               <>
                 <div className="row wrap">
                   <label>Token<TokenSelect value={block.token} onChange={(token) => update(index, { token })} /></label>
@@ -345,6 +369,13 @@ function RoleBuilder({ onClose, initialName = "" }: { onClose: () => void; initi
         <div className="row wrap">
           <button onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
           <button onClick={() => setCatalogOpen(true)} title="Pick a protocol from the catalog">+ DeFi…</button>
+          <button
+            onClick={addShareRevenue}
+            disabled={!sharesAccountId || blocks.some((block) => block.kind === "share-revenue")}
+            title={sharesAccountId ? "Let the agent send ETH to the company's shareholders, within a budget" : "Issue shares first (Shares page)"}
+          >
+            + Share revenue
+          </button>
         </div>
 
         <div>

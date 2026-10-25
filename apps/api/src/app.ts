@@ -502,6 +502,11 @@ export function createApp({
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
             maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
           }),
+          z.object({
+            kind: z.literal("share-revenue"),
+            sharesAccountId: z.string().regex(/^[a-z0-9._-]{2,64}$/),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+          }),
         ])).min(1).max(10),
         members: z.array(z.object({
           accountId: z.string().min(2).max(64),
@@ -643,6 +648,11 @@ export function createApp({
           })
           : undefined,
       ));
+    });
+    app.get("/v1/agent/share-revenue", requireAgent(auth, agentLimiter), async (context) => {
+      const amountWei = context.req.query("amountWei") ?? "";
+      if (!/^\d{1,30}$/.test(amountWei)) return context.json({ error: "invalid_amount", message: "amountWei must be a whole number of wei" }, 400);
+      return context.json(await omniroles.shareRevenueOperation(context.get("agent").organizationId, amountWei));
     });
     app.get("/v1/agent/mandate", requireAgent(auth, agentLimiter), async (context) => {
       const agent = context.get("agent");

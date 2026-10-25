@@ -6,7 +6,7 @@ make the agent sign anything its NEAR key can sign. The suite plays that
 attacker, and a few others, and shows which lock refuses each attack.
 
 ```bash
-pnpm attack:all       # vault in a NEAR sandbox + Guard, 39 attacks
+pnpm attack:all       # vault in a NEAR sandbox + Guard, 45 attacks
 pnpm attack:testnet   # the live testnet vault, view calls only, nothing moves
 ```
 
@@ -58,6 +58,12 @@ relies on the Guard for what it can check itself.
 | agent keeps paying after a pause; agent unpauses | pause; only the DAO resumes | `ERR_PAUSED`, `ERR_OWNER_ONLY` |
 | revoked agent keeps paying | role membership | `ERR_MEMBERSHIP_REVOKED` |
 | stolen server or deployer key signs as the vault | the vault account has no access key | 0 keys |
+| revenue role: ETH sent to the attacker's NEAR account | bridge recipient fixed to the shares contract | `parameterNotAllowed` |
+| revenue role: ETH bridged back to an attacker's EVM address | bridge recipient fixed to the shares contract | `parameterNotAllowed` |
+| revenue role: bridge message forwards the ETH elsewhere | bridge message must be empty | `parameterNotAllowed` |
+| revenue role: the whole value paid as a bridge fee | bridge fee cap | `parameterGreaterThanAllowed` |
+| revenue role: above the ETH budget | ETH budget | `allowanceExceeded` |
+| revenue role: declares less ETH than it sends | ETH measured from the value | `ERR_ALLOWANCE_AMOUNT_MISMATCH` |
 
 **The Guard** (off-chain, `apps/api/src/attacks.test.ts`). It knows what the
 vault cannot: who the real suppliers are, which invoices were paid, what the

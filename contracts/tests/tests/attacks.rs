@@ -25,6 +25,10 @@ use vault_common::{
 };
 
 const ATTACKER: [u8; 20] = [0xba; 20];
+const BRIDGE: [u8; 20] = [0xb7; 20];
+const SHARES: &str = "near:acme-shares.testnet";
+const REVENUE_KEY: [u8; 32] = [0x77; 32];
+const REVENUE_BUDGET: u128 = 10_000_000_000_000_000; // 0.01 ETH
 
 /// Asserts the chain refused with `code`, and prints the line the runner collects.
 fn blocked(attack: &str, lock: &str, outcome: &ExecutionFinalResult, code: &str) {
@@ -433,5 +437,143 @@ async fn kill_switch_and_no_key_on_the_vault() -> Result<()> {
         &try_prepare(&fixture, &fixture.agent, request("REVOKED-1", 100)).await?,
         "ERR_MEMBERSHIP_REVOKED",
     );
+    Ok(())
+}
+
+fn word(value: u128) -> String {
+    format!("0x{:064x}", value)
+}
+
+fn keccak_hex(data: &[u8]) -> String {
+    use sha3::{Digest as _, Keccak256};
+    format!("0x{}", hex::encode(Keccak256::digest(data)))
+}
+
+/// initTransfer(address,uint128,uint128,uint128,string,string), ABI-encoded by hand.
+fn init_transfer(token: [u8; 20], amount: u128, fee: u128, native_fee: u128, recipient: &str, message: &str) -> Vec<u8> {
+    let pad = |bytes: &[u8]| {
+        let mut out = bytes.to_vec();
+        out.resize(bytes.len().div_ceil(32) * 32, 0);
+        out
+    };
+    let num = |value: u128| {
+        let mut out = vec![0u8; 16];
+        out.extend_from_slice(&value.to_be_bytes());
+        out
+    };
+    let mut data = vec![0xde, 0xb9, 0x15, 0xb8];
+    let mut address = vec![0u8; 12];
+    address.extend_from_slice(&token);
+    data.extend(address);
+    data.extend(num(amount));
+    data.extend(num(fee));
+    data.extend(num(native_fee));
+    let recipient_tail = [num(recipient.len() as u128), pad(recipient.as_bytes())].concat();
+    data.extend(num(6 * 32));
+    data.extend(num((6 * 32 + recipient_tail.len()) as u128));
+    data.extend(recipient_tail);
+    data.extend(num(message.len() as u128));
+    data.extend(pad(message.as_bytes()));
+    data
+}
+
+fn revenue_request(reference: &str, calldata: Vec<u8>, value: u128) -> Value {
+    json!({
+        "chain_id": CHAIN_ID,
+        "target": BRIDGE,
+        "value": value.to_string(),
+        "calldata": calldata,
+        "allowance_amount": value.to_string(),
+        "reference": reference,
+        "gas_limit": "500000",
+        "max_fee_per_gas": "2000000000",
+        "max_priority_fee_per_gas": "1000000"
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn revenue_role_only_reaches_the_shareholders() -> Result<()> {
+    let fixture = setup().await?;
+    // Same tree as packages/sdk `shareRevenueSheet`.
+    let conditions = json!([
+        {"parent": 0, "paramType": 5, "operator": 5, "compValue": "0x"},
+        {"parent": 0, "paramType": 1, "operator": 16, "compValue": word(0)},
+        {"parent": 0, "paramType": 1, "operator": 17, "compValue": word(0)},
+        {"parent": 0, "paramType": 1, "operator": 16, "compValue": word(0)},
+        {"parent": 0, "paramType": 1, "operator": 18, "compValue": word(1_000_000_000_000_001)},
+        {"parent": 0, "paramType": 2, "operator": 16, "compValue": keccak_hex(SHARES.as_bytes())},
+        {"parent": 0, "paramType": 2, "operator": 16, "compValue": keccak_hex(b"")},
+        {"parent": 0, "paramType": 6, "operator": 28, "compValue": format!("0x{}", hex::encode(REVENUE_KEY))}
+    ]);
+    for change in [
+        json!({"SetAllowance": {"key": REVENUE_KEY, "balance": REVENUE_BUDGET.to_string(), "refill": REVENUE_BUDGET.to_string(), "max_refill": REVENUE_BUDGET.to_string(), "period_ns": 604_800_000_000_000u64}}),
+        json!({"SetRole": {"role": "revenue", "config": {
+            "enabled": true,
+            "permissions": [{"chain_id": CHAIN_ID, "target": BRIDGE, "selector": [0xde, 0xb9, 0x15, 0xb8], "conditions": conditions, "allow_value": true}],
+            "operation_delay_threshold": null, "operation_delay_ns": 0, "co_sign_threshold": null, "co_signer_role": null, "velocity": null,
+            "gas_limit": "1000000", "max_fee_per_gas": "20000000000", "max_priority_fee_per_gas": "2000000000", "max_total_fee": "20000000000000000"
+        }}}),
+        json!({"GrantMembership": {"role": "revenue", "member": fixture.agent.id(), "kind": "Agent", "starts_at_ns": "0", "ends_at_ns": null, "max_uses": null}}),
+    ] {
+        apply_rule_change(&fixture.owner, &fixture.outsider, &fixture.worker, &fixture.vault, change).await?;
+    }
+    let prepare_revenue = |request: Value| {
+        fixture
+            .agent
+            .call(fixture.vault.id(), "prepare")
+            .args_json(json!({"role": "revenue", "request": request}))
+            .gas(Gas::from_tgas(100))
+            .transact()
+    };
+    let (amount, fee) = (5_000_000_000_000_000u128, 4_249_821_508_237u128);
+
+    blocked(
+        "revenue sent to the attacker's NEAR account",
+        "vault: bridge recipient fixed to the shares contract",
+        &prepare_revenue(revenue_request("REV-ATK-1", init_transfer([0; 20], amount, 0, fee, "near:attacker.testnet", ""), amount + fee)).await?,
+        "parameterNotAllowed",
+    );
+    blocked(
+        "revenue bridged back to an attacker's EVM address",
+        "vault: bridge recipient fixed to the shares contract",
+        &prepare_revenue(revenue_request("REV-ATK-2", init_transfer([0; 20], amount, 0, fee, "base:0xbabababababababababababababababababababa", ""), amount + fee)).await?,
+        "parameterNotAllowed",
+    );
+    blocked(
+        "bridge message forwards the ETH elsewhere",
+        "vault: bridge message must be empty",
+        &prepare_revenue(revenue_request("REV-ATK-3", init_transfer([0; 20], amount, 0, fee, SHARES, "attacker.testnet"), amount + fee)).await?,
+        "parameterNotAllowed",
+    );
+    blocked(
+        "whole value paid as a bridge fee",
+        "vault: bridge fee cap",
+        &prepare_revenue(revenue_request("REV-ATK-4", init_transfer([0; 20], 1, 0, 2_000_000_000_000_000, SHARES, ""), 2_000_000_000_000_001)).await?,
+        "parameterGreaterThanAllowed",
+    );
+    blocked(
+        "revenue above the budget",
+        "vault: ETH budget",
+        &prepare_revenue(revenue_request("REV-ATK-5", init_transfer([0; 20], REVENUE_BUDGET, 0, fee, SHARES, ""), REVENUE_BUDGET + fee)).await?,
+        "allowanceExceeded",
+    );
+    blocked(
+        "agent declares less ETH than it sends",
+        "vault: ETH measured from the value",
+        &prepare_revenue({
+            let mut request = revenue_request("REV-ATK-6", init_transfer([0; 20], amount, 0, fee, SHARES, ""), amount + fee);
+            request["allowance_amount"] = json!("1");
+            request
+        }).await?,
+        "ERR_ALLOWANCE_AMOUNT_MISMATCH",
+    );
+
+    // The honest call passes and reserves the ETH sent.
+    let operation: Value = prepare_revenue(revenue_request("REV-1", init_transfer([0; 20], amount, 0, fee, SHARES, ""), amount + fee))
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(operation["consumptions"][0]["amount"], (amount + fee).to_string());
     Ok(())
 }

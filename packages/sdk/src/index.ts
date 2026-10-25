@@ -97,6 +97,8 @@ export interface InvoiceContext {
 
 export interface VaultGateway {
   prepare(intent: PaymentIntent): Promise<PreparedOperation>;
+  /** Any call the role allows (not only a token transfer). */
+  prepareRequest?(request: OmniRolesOperationRequest): Promise<PreparedOperation>;
   authorize(opId: number[], approval: GuardApproval): Promise<string>;
   cancelNonce(opId: number[], fees: CancellationFees): Promise<string>;
   /** Release a prepared operation the Guard refused, so the wallet is free again. */
@@ -113,6 +115,23 @@ export interface AgentApiGateway {
   check?(request: OmniRolesOperationRequest): Promise<OperationCheckResult>;
   /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
   mandate?(): Promise<Record<string, unknown>>;
+  /** The bridge call that sends `amountWei` of revenue to the company's shareholders. */
+  shareRevenue?(amountWei: string): Promise<ShareRevenueOperation>;
+}
+
+/** ETH to the company's shares contract on NEAR, through the Omni Bridge. */
+export interface ShareRevenueOperation {
+  chainId: number;
+  to: Hex;
+  data: Hex;
+  value: string;
+  allowanceAmount: string;
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
+  recipient: string;
+  bridgeFee: string;
+  sharesAccountId: string;
 }
 
 export interface OperationCheckResult {
@@ -186,7 +205,38 @@ export class MandateAgentClient {
         max_priority_fee_per_gas: quote.gas.maxPriorityFeePerGas,
       };
     }
-    const prepared = await this.vault.prepare(completeIntent);
+    return this.submit(await this.vault.prepare(completeIntent), invoice);
+  }
+
+  /** Any call the role allows: prepare, Guard visa, authorize. */
+  async call(request: OmniRolesOperationRequest): Promise<PayResult> {
+    if (!this.vault.prepareRequest) throw new Error("this vault gateway only prepares token transfers");
+    return this.submit(await this.vault.prepareRequest(request));
+  }
+
+  /**
+   * Send `amountWei` of ETH from the company wallet to the shareholders. The
+   * API builds the bridge call; the vault signs it only if the role allows
+   * exactly this recipient and what is left of the budget.
+   */
+  async shareRevenue(amountWei: string, reference: string): Promise<PayResult & { recipient?: string; bridgeFee?: string }> {
+    if (!this.api.shareRevenue) throw new Error("this API does not support revenue sharing");
+    const operation = await this.api.shareRevenue(amountWei);
+    const result = await this.call({
+      chain_id: operation.chainId,
+      target: evmAddressBytes(operation.to),
+      value: operation.value,
+      calldata: Array.from(hexToBytes(operation.data)),
+      allowance_amount: operation.allowanceAmount,
+      reference,
+      gas_limit: operation.gasLimit,
+      max_fee_per_gas: operation.maxFeePerGas,
+      max_priority_fee_per_gas: operation.maxPriorityFeePerGas,
+    });
+    return { ...result, recipient: operation.recipient, bridgeFee: operation.bridgeFee };
+  }
+
+  private async submit(prepared: PreparedOperation, invoice?: InvoiceContext): Promise<PayResult> {
     const opId = operationIdHex(prepared.op_id);
     const visaResponse = await this.api.requestVisa(prepared.op_id, invoice);
     if (visaResponse.status !== 200) {
@@ -358,6 +408,12 @@ export class HttpAgentApi implements AgentApiGateway {
     return result.body;
   }
 
+  async shareRevenue(amountWei: string): Promise<ShareRevenueOperation> {
+    const result = await this.request(`/v1/agent/share-revenue?amountWei=${encodeURIComponent(amountWei)}`, { method: "GET" });
+    if (result.status !== 200) throw new Error(String(result.body.message ?? result.body.error ?? "revenue transfer could not be prepared"));
+    return result.body as unknown as ShareRevenueOperation;
+  }
+
 
   private async request(path: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
     const response = await this.fetcher(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
@@ -502,7 +558,10 @@ export class NearVaultGateway implements VaultGateway {
   }
 
   async prepare(intent: PaymentIntent): Promise<PreparedOperation> {
-    const request = omniRolesPaymentRequest(intent, this.chainId);
+    return this.prepareRequest(omniRolesPaymentRequest(intent, this.chainId));
+  }
+
+  async prepareRequest(request: OmniRolesOperationRequest): Promise<PreparedOperation> {
     const outcome = await this.call("prepare", { role: this.role, request }, AGENT_GAS.prepare);
     const operation = decodeNearSuccessValue(outcome);
     if (

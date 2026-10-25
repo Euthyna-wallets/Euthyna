@@ -75,6 +75,10 @@ export class MandateMcpTools {
     return this.client.mandate();
   }
 
+  shareRevenue(input: { amountWei: string; reference: string }) {
+    return this.client.shareRevenue(input.amountWei, input.reference);
+  }
+
 
   status(input: { opId: string }) {
     return this.client.status(input.opId as `0x${string}`);
@@ -97,6 +101,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       "You act inside a role on a company wallet governed by MandateOS.",
       "Call `mandate` first to learn what your role allows, your remaining budgets and the recipients you may pay.",
       "Call `check` before `pay`: it answers allowed or refused, and why, without reserving anything.",
+      "If your role has a revenue-sharing budget, `share_revenue` sends ETH to the company's shareholders; nothing else can receive it.",
       "A refusal is final for you: there is no override and no human escalation. Never retry with a different recipient or amount than the task requires.",
       "If the task needs something your role does not allow, stop and report the refusal and its reason to whoever gave you the task. Do not ask the members yourself: only a member decides to put a refused operation to a vote.",
     ].join(" "),
@@ -139,6 +144,15 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async (input) => result(await tools.pay(input)));
+  server.registerTool("share_revenue", {
+    title: "Share revenue with the shareholders",
+    description: "Send ETH from the company wallet to the company's shares contract on NEAR, through the Omni Bridge. Holders who voted that epoch receive it. Only works if your role has a revenue-sharing budget; the bridge fee (paid in ETH) counts against it too.",
+    inputSchema: {
+      amountWei: uint.describe("ETH to share, in wei (1 ETH = 10^18 wei), bridge fee not included."),
+      reference: z.string().min(1).max(120),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async (input) => result(await tools.shareRevenue(input)));
   server.registerTool("status", {
     title: "Read MandateOS operation status",
     description: "Read the merged Vault, worker, receipt and visa status.",

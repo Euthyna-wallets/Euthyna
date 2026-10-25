@@ -63,6 +63,7 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   sharesDepositYocto: env.OMNIROLES_SHARES_DEPOSIT_YOCTO,
   sharesEpochSeconds: env.OMNIROLES_SHARES_EPOCH_SECONDS ?? (env.NEAR_NETWORK_ID === "testnet" ? 3600 : 7 * 24 * 3600),
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,
+  omniBridgeApi: env.OMNI_BRIDGE_API_URL,
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
   extraRpcUrls: { 11155111: env.ETHEREUM_SEPOLIA_RPC_URL },
   ruleDelayNs: env.OMNIROLES_RULE_DELAY_SECONDS * 1_000_000_000,

@@ -9,7 +9,7 @@
  *
  * Browser-safe: depends on viem only.
  */
-import { decodeFunctionData, encodeAbiParameters, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
+import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, toBytes, toHex, type Hex } from "viem";
 
 // ---------------------------------------------------------------------------
 // Vault JSON types (contracts/vault/src/types.rs)
@@ -82,7 +82,12 @@ export type ChainProfile = {
   name: string;
   tokens: Token[];
   protocols: Record<ProtocolId, { name: string; router: Hex }>;
+  /** NEAR Omni Bridge on this chain: sends ETH to a NEAR account. */
+  omniBridge?: Hex;
 };
+
+/** ETH itself, for budgets on the value a call sends. */
+export const NATIVE_ETH: Token = { address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 };
 
 export const BASE_SEPOLIA: ChainProfile = {
   chainId: 84532,
@@ -99,6 +104,8 @@ export const BASE_SEPOLIA: ChainProfile = {
     "uniswap-v3": { name: "Uniswap V3", router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" },
     "uniswap-v2": { name: "Uniswap V2", router: "0x1689E7B1F10000AE47eBfE339a4f69dECd19F602" },
   },
+  // github.com/Near-One/omni-bridge README, testnet deployment on Base Sepolia.
+  omniBridge: "0xa56b860017152cD296ad723E8409Abd6e5D86d4d",
 };
 
 export const SELECTORS = {
@@ -106,6 +113,8 @@ export const SELECTORS = {
   approve: "0x095ea7b3",
   exactInputSingle: "0x04e45aaf",
   swapExactTokensForTokens: "0x38ed1739",
+  /** initTransfer(address,uint128,uint128,uint128,string,string) on the Omni Bridge. */
+  initTransfer: "0xdeb915b8",
 } as const;
 
 // Parameter names of the functions the sheets scope, for descriptions.
@@ -123,6 +132,10 @@ const FUNCTIONS: Record<string, { name: string; params: string[]; tuple?: { inde
   [SELECTORS.swapExactTokensForTokens]: {
     name: "swap (swapExactTokensForTokens)",
     params: ["amount sold", "minimum received", "route", "recipient", "deadline"],
+  },
+  [SELECTORS.initTransfer]: {
+    name: "bridge to NEAR (initTransfer)",
+    params: ["token", "amount", "fee in token", "bridge fee", "NEAR recipient", "message", "ETH sent"],
   },
 };
 
@@ -223,6 +236,61 @@ export function uniswapV3Sheet(router: Hex, tokenIn: Hex, tokensOut: Hex[], key:
   };
 }
 
+/** The Omni Bridge recipient string for a NEAR account. */
+export function nearRecipient(accountId: string): string {
+  return `near:${accountId}`;
+}
+
+/** What the vault compares a string parameter with: keccak256 of its bytes. */
+export function stringHash(text: string): Hex {
+  return keccak256(toBytes(text));
+}
+
+/** Largest bridge fee (paid in ETH to the Omni Bridge relayer) a revenue transfer may carry. */
+export const MAX_BRIDGE_FEE_WEI = 1_000_000_000_000_000n; // 0.001 ETH
+
+/**
+ * ETH from the company wallet to the company's shares contract on NEAR, through
+ * the Omni Bridge, and nowhere else: native ETH, no token fee, the recipient
+ * fixed to `near:<shares account>`, no message. The ETH sent (amount + bridge
+ * fee) is counted against the budget.
+ */
+export function shareRevenueSheet(bridge: Hex, sharesAccountId: string, key: number[], maxBridgeFeeWei = MAX_BRIDGE_FEE_WEI): Sheet {
+  return {
+    target: bridge,
+    selector: SELECTORS.initTransfer,
+    conditions: [
+      node(0, Encoding.AbiEncoded, Operator.Matches),
+      node(0, Encoding.Static, Operator.EqualTo, addressWord(NATIVE_ETH.address)),
+      node(0, Encoding.Static, Operator.GreaterThan, word(0n)),
+      node(0, Encoding.Static, Operator.EqualTo, word(0n)),
+      node(0, Encoding.Static, Operator.LessThan, word(maxBridgeFeeWei + 1n)),
+      node(0, Encoding.Dynamic, Operator.EqualTo, stringHash(nearRecipient(sharesAccountId))),
+      node(0, Encoding.Dynamic, Operator.EqualTo, stringHash("")),
+      node(0, Encoding.EtherValue, Operator.WithinAllowance, hexOf(key)),
+    ],
+  };
+}
+
+const INIT_TRANSFER_ABI = parseAbi([
+  "function initTransfer(address tokenAddress, uint128 amount, uint128 fee, uint128 nativeFee, string recipient, string message)",
+]);
+
+/** The call an agent sends to share revenue: what the role above allows. */
+export function shareRevenueCall(bridge: Hex, sharesAccountId: string, amountWei: bigint, bridgeFeeWei: bigint) {
+  const value = amountWei + bridgeFeeWei;
+  return {
+    to: getAddress(bridge),
+    data: encodeFunctionData({
+      abi: INIT_TRANSFER_ABI,
+      functionName: "initTransfer",
+      args: [NATIVE_ETH.address, amountWei, 0n, bridgeFeeWei, nearRecipient(sharesAccountId), ""],
+    }),
+    value: value.toString(),
+    allowanceAmount: value.toString(),
+  };
+}
+
 /** keccak256 of `length || elements` of an ABI-encoded address[] (EqualTo on arrays). */
 export function routeHash(path: Hex[]): Hex {
   const encoded = encodeAbiParameters([{ type: "address[]" }], [path.map((hop) => getAddress(hop))]);
@@ -260,6 +328,8 @@ export type Recipient = { address: Hex; label: string };
 
 export type RoleBlock =
   | { kind: "payments"; token: Hex; recipients: Recipient[]; budget: Budget }
+  /** Send ETH to the company's shareholders, through the Omni Bridge. Budget in ETH. */
+  | { kind: "share-revenue"; sharesAccountId: string; budget: Budget }
   | {
       kind: "swap";
       tokenIn: Hex;
@@ -284,6 +354,13 @@ const DEFAULT_GAS = {
   max_fee_per_gas: "100000000000",
   max_priority_fee_per_gas: "10000000000",
   max_total_fee: "30000000000000000",
+};
+
+const BRIDGE_GAS = {
+  gas_limit: "1000000",
+  max_fee_per_gas: "20000000000",
+  max_priority_fee_per_gas: "2000000000",
+  max_total_fee: "20000000000000000",
 };
 
 const NS_PER_DAY = 86_400_000_000_000;
@@ -314,7 +391,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
-    const token = tokenOf(profile, block.kind === "payments" ? block.token : block.tokenIn);
+    const token = block.kind === "share-revenue" ? NATIVE_ETH : tokenOf(profile, block.kind === "payments" ? block.token : block.tokenIn);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
@@ -329,6 +406,10 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
     });
     if (block.kind === "payments") {
       permissions.push(toPermission(erc20TransferSheet(token.address, block.recipients.map((item) => item.address), key)));
+    } else if (block.kind === "share-revenue") {
+      if (!profile.omniBridge) throw new Error(`no Omni Bridge known on ${profile.name}`);
+      if (!/^[a-z0-9._-]{2,64}$/.test(block.sharesAccountId)) throw new Error("shares account is not a NEAR account id");
+      permissions.push({ ...toPermission(shareRevenueSheet(profile.omniBridge, block.sharesAccountId, key)), allow_value: true });
     } else {
       requireNonEmpty(block.protocols, "protocol");
       tokensOutCheck(block, profile);
@@ -357,6 +438,8 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
         co_signer_role: null,
         velocity: null,
         ...DEFAULT_GAS,
+        // A bridge transfer needs more gas than a token transfer; the total fee stays capped.
+        ...(draft.blocks.some((block) => block.kind === "share-revenue") ? BRIDGE_GAS : {}),
         ...draft.gas,
       },
     },
@@ -813,6 +896,9 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         } else if (selector === SELECTORS.swapExactTokensForTokens) {
           token = approvedTokenFor(target);
           kind = "swaps";
+        } else if (selector === SELECTORS.initTransfer) {
+          token = NATIVE_ETH;
+          kind = "revenue";
         }
         const key = condition.compValue.toLowerCase();
         const existing = result[key];
@@ -850,6 +936,7 @@ export function describePermission(permission: Permission, context: DescribeCont
     return fn?.params[fieldIndex] ?? `parameter ${fieldIndex + 1}`;
   };
   const amountToken = (name: string): Token | undefined => {
+    if (selector === SELECTORS.initTransfer && (name === "bridge fee" || name === "ETH sent" || name === "amount")) return NATIVE_ETH;
     if (name.includes("amount") || name.includes("minimum")) return tokenIn ?? (selector === SELECTORS.transfer || selector === SELECTORS.approve ? targetToken : undefined);
     return undefined;
   };
@@ -867,8 +954,15 @@ export function describePermission(permission: Permission, context: DescribeCont
       case Operator.EqualTo:
         if (item.paramType === Encoding.Array) {
           rules.push(`${name} must be ${routeName(item.compValue, context) ?? "an approved route"}`);
+        } else if (item.paramType === Encoding.Static && /^0x0{64}$/i.test(item.compValue)) {
+          rules.push(name === "token" ? "token must be ETH itself (native)" : `${name} must be zero`);
         } else if (item.paramType === Encoding.Static && /^0x0{24}/i.test(item.compValue)) {
           rules.push(`${name} must be ${labelAddress(wordToAddress(item.compValue), context)}`);
+        } else if (item.paramType === Encoding.Dynamic) {
+          const text = item.compValue.toLowerCase() === stringHash("").toLowerCase()
+            ? "empty"
+            : Object.entries(context.labels ?? {}).find(([candidate]) => candidate.toLowerCase() === item.compValue.toLowerCase())?.[1];
+          rules.push(text ? (text === "empty" ? `${name} must be empty` : `${name} must be ${text}`) : `${name} must be the text whose hash is ${item.compValue}`);
         } else {
           rules.push(`${name} must equal ${item.compValue}`);
         }

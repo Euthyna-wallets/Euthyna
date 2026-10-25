@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAddress, type Hex } from "viem";
+import { getAddress, toFunctionSelector, type Hex } from "viem";
 
 import fixture from "./fixtures/presets.json" with { type: "json" };
 import {
@@ -11,6 +11,11 @@ import {
   describePolicyChange,
   describeSharesProposal,
   formatNear,
+  hexOf,
+  nearRecipient,
+  SELECTORS,
+  shareRevenueCall,
+  stringHash,
   hasShareholdersRole,
   parseNear,
   revenueProposalKind,
@@ -267,5 +272,40 @@ describe("shares governance", () => {
     expect(() => sharesInitArgs("dao.testnet", { ...base, symbol: "acme" })).toThrow();
     expect(() => sharesInitArgs("dao.testnet", { ...base, allocations: [["a.testnet", 1001]] })).toThrow();
     expect(formatNear(parseNear("0.1"))).toBe("0.1 NEAR");
+  });
+});
+
+describe("share revenue role", () => {
+  const shares = "acme-ai-shares.mandateos.testnet";
+  const draft = { name: "revenue", blocks: [{ kind: "share-revenue" as const, sharesAccountId: shares, budget: { amount: "0.01", periodDays: 7 } }], members: [] };
+
+  it("uses the real initTransfer selector", () => {
+    expect(SELECTORS.initTransfer).toBe(toFunctionSelector("initTransfer(address,uint128,uint128,uint128,string,string)"));
+  });
+
+  it("allows ETH to the shares contract only, counted in ETH", () => {
+    const changes = compileRole(draft, BASE_SEPOLIA);
+    const role = changes.find((change) => "SetRole" in change) as Extract<RuleChange, { SetRole: unknown }>;
+    const permission = role.SetRole.config.permissions[0]!;
+    expect(permission.allow_value).toBe(true);
+    expect(hexOf(permission.target).toLowerCase()).toBe(BASE_SEPOLIA.omniBridge!.toLowerCase());
+    expect(role.SetRole.config.gas_limit).toBe("1000000");
+    const allowance = changes.find((change) => "SetAllowance" in change) as Extract<RuleChange, { SetAllowance: unknown }>;
+    expect(allowance.SetAllowance.balance).toBe("10000000000000000");
+    const call = shareRevenueCall(BASE_SEPOLIA.omniBridge!, shares, 5_000_000_000_000_000n, 4_249_821_508_237n);
+    expect(call.value).toBe((5_000_000_000_000_000n + 4_249_821_508_237n).toString());
+    expect(call.data.startsWith(SELECTORS.initTransfer)).toBe(true);
+  });
+
+  it("describes the role in plain words", () => {
+    const changes = compileRole(draft, BASE_SEPOLIA);
+    const labels = { [stringHash(nearRecipient(shares))]: `${nearRecipient(shares)} (company shares)` };
+    const context = { profile: BASE_SEPOLIA, labels, budgets: budgetsOf(changes, BASE_SEPOLIA) };
+    const text = JSON.stringify(changes.map((change) => describeChange(change, context)));
+    expect(text).toContain("token must be ETH itself (native)");
+    expect(text).toContain(`NEAR recipient must be near:${shares} (company shares)`);
+    expect(text).toContain("message must be empty");
+    expect(text).toContain("bridge fee at most 0.001 ETH");
+    expect(text).toContain("ETH sent is counted against the revenue budget");
   });
 });

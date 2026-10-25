@@ -28,8 +28,12 @@ import {
   describeSharesProposal,
   hasShareholdersRole,
   membersProposalArgs,
+  MAX_BRIDGE_FEE_WEI,
+  nearRecipient,
   parseNear,
   proposalOf,
+  shareRevenueCall,
+  stringHash,
   revenueProposalKind,
   sharesInitArgs,
   sharesProposalKinds,
@@ -71,6 +75,8 @@ export interface OmniRolesConfig {
   sharesDepositYocto?: string;
   /** Revenue epoch of new shares contracts, in seconds. */
   sharesEpochSeconds?: number;
+  /** Omni Bridge API (transfer fees). Default: the testnet one. */
+  omniBridgeApi?: string;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
   sharesRevenueToken?: string | null;
   baseRpcUrl: string;
@@ -741,6 +747,11 @@ export class OmniRolesService {
 
   async roleProposal(organizationId: string, draft: RoleDraft) {
     const treasury = await this.requireTreasury(organizationId);
+    for (const block of draft.blocks) {
+      if (block.kind === "share-revenue" && block.sharesAccountId !== this.sharesAccountOf(treasury)) {
+        throw new OmniRolesError(400, "invalid_role", `revenue can only go to this company's shares contract, ${this.sharesAccountOf(treasury)}`);
+      }
+    }
     let changes: RuleChange[];
     try {
       changes = compileRole(draft, PROFILE);
@@ -1183,6 +1194,58 @@ export class OmniRolesService {
   }
 
   /**
+   * The call an agent sends to share revenue with the company's shareholders:
+   * ETH from the company wallet to the shares contract, through the Omni
+   * Bridge. Built here for convenience; the vault only signs it if the agent's
+   * role allows exactly this recipient and budget.
+   */
+  async shareRevenueOperation(organizationId: string, amountWei: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const sharesAccountId = this.sharesAccountOf(treasury);
+    if (!(await this.accountExists(sharesAccountId))) throw new OmniRolesError(409, "shares_missing", "this company has no shares yet");
+    const bridge = PROFILE.omniBridge;
+    if (!bridge) throw new OmniRolesError(409, "bridge_missing", `no Omni Bridge known on ${PROFILE.name}`);
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: PROFILE.chainId }).catch(() => null);
+    if (!wallet?.address) throw new OmniRolesError(409, "wallet_missing", `the company wallet is not created on ${PROFILE.name} yet`);
+    const from = getAddress(hexOf(wallet.address));
+    const amount = BigInt(amountWei);
+    if (amount <= 0n) throw new OmniRolesError(400, "invalid_amount", "the amount must be above zero");
+    const recipient = nearRecipient(sharesAccountId);
+    const feeUrl = new URL("/api/v3/transfer-fee", this.config.omniBridgeApi ?? "https://testnet.api.bridge.nearone.org");
+    feeUrl.search = new URLSearchParams({ sender: `base:${from}`, recipient, token: "base:0x0000000000000000000000000000000000000000", amount: amount.toString() }).toString();
+    let bridgeFee: bigint;
+    try {
+      const response = await fetch(feeUrl, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      bridgeFee = BigInt(((await response.json()) as { native_token_fee?: string | null }).native_token_fee ?? "0");
+    } catch (error) {
+      throw new OmniRolesError(503, "bridge_fee_unavailable", `the Omni Bridge fee API did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (bridgeFee > MAX_BRIDGE_FEE_WEI) {
+      throw new OmniRolesError(422, "bridge_fee_too_high", `the bridge asks ${formatUnits(bridgeFee, 18)} ETH, above the ${formatUnits(MAX_BRIDGE_FEE_WEI, 18)} ETH the role accepts`);
+    }
+    const call = shareRevenueCall(bridge, sharesAccountId, amount, bridgeFee);
+    let fees;
+    try {
+      fees = await this.chain.fees({ chainId: PROFILE.chainId, from, calls: [{ to: call.to, value: BigInt(call.value), data: call.data }] });
+    } catch (error) {
+      if (!(error instanceof GasEstimateError)) throw error;
+      if (error.code === "would_revert") throw new OmniRolesError(422, "would_revert", `the bridge call would fail: ${error.message}`);
+      throw new OmniRolesError(503, "gas_estimate_unavailable", `no ${PROFILE.name} RPC could estimate the bridge call: ${error.message}`);
+    }
+    return {
+      chainId: PROFILE.chainId,
+      ...call,
+      gasLimit: fees.gasLimits[0]!.toString(),
+      maxFeePerGas: fees.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+      recipient,
+      bridgeFee: bridgeFee.toString(),
+      sharesAccountId,
+    };
+  }
+
+  /**
    * What happened, as the chains record it. Operations come from the vault on
    * NEAR (who, which role, what, its state) and are confirmed on the EVM chain
    * (mined, success or reverted). The database only says which operations to
@@ -1349,6 +1412,9 @@ export class OmniRolesService {
     if (treasury) {
       const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null);
       if (wallet?.address) labels[getAddress(hexOf(wallet.address))] = "company wallet";
+      // Bridge recipients are compared by hash: name the company's shares contract.
+      const shares = this.sharesAccountOf(treasury);
+      labels[stringHash(nearRecipient(shares))] = `${nearRecipient(shares)} (company shares)`;
     }
     return labels;
   }
