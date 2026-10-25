@@ -6,7 +6,7 @@ from the browser; the MandateOS API is not involved.
 | Page | What it reads |
 | --- | --- |
 | `/explore` | the landing, then `list_companies` on the registry (`docs/registry.md`) |
-| `/c/<dao>` | `get_company` on the registry; `get_policy` and the balance of the DAO; the vault's access keys, pause state, wallets (`get_wallet`), executed rule changes and allowances (AI employees and their budgets); `info` of the shares contract |
+| `/c/<dao>` | `get_company` on the registry; the vault's access keys and wallets; the treasury: NEAR in the DAO, ETH, USDC and wNEAR in the company wallets on Base and Ethereum, valued at CoinGecko market prices; revenue paid to voters from `info` of the shares contract |
 
 The registry is `VITE_MANDATEOS_REGISTRY_ID` (default `registry.mandateos.testnet`)
 and the RPC is `VITE_NEAR_RPC_URL`.

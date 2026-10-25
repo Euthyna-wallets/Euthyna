@@ -3,7 +3,9 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { chainView } from "../../lib/chain-view.js";
-import { companyProfile, REGISTRY_ID, type DirectoryEntry, type Employee } from "../../lib/directory.js";
+import { formatUnits } from "viem";
+
+import { companyProfile, REGISTRY_ID, treasuryOf, type DirectoryEntry } from "../../lib/directory.js";
 
 const NAVY = "#0F2A5C";
 const INK = "#0F1E3D";
@@ -13,7 +15,7 @@ const sans = "'IBM Plex Sans', sans-serif";
 const card: CSSProperties = { background: "#FFFFFF", color: INK, borderRadius: "20px", padding: "28px", display: "flex", flexDirection: "column", gap: "16px" };
 const chip = (bg: string, fg: string): CSSProperties => ({ background: bg, color: fg, borderRadius: "999px", padding: "5px 11px", fontSize: "12px", fontFamily: mono });
 
-function Section({ title, tag, children }: { title: string; tag?: string; children: ReactNode }) {
+function Section({ title, tag, children }: { title: string; tag?: string | undefined; children: ReactNode }) {
   return (
     <section style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
@@ -25,39 +27,8 @@ function Section({ title, tag, children }: { title: string; tag?: string; childr
   );
 }
 
-function EmployeeCard({ employee }: { employee: Employee }) {
-  return (
-    <article style={{ border: "1px solid #DCE5F0", borderRadius: "16px", padding: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#127F95" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3" /><path d="M12 4v4M9.5 13h.01M14.5 13h.01" /></svg>
-          <h3 style={{ margin: 0, fontFamily: mono, fontSize: "18px" }}>{employee.role}</h3>
-        </div>
-        <span style={employee.enabled ? chip("#DDF4F8", "#0B5E73") : chip("#EEF2F8", MUTED)}>{employee.enabled ? "on staff" : "suspended"}</span>
-      </div>
-      <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", fontWeight: 600 }}>{employee.title}</p>
-      {employee.details.length ? (
-        <ul style={{ margin: 0, paddingLeft: "18px", fontFamily: sans, fontSize: "14px", lineHeight: 1.6, color: MUTED }}>
-          {employee.details.slice(0, 6).map((detail) => <li key={detail}>{detail}</li>)}
-        </ul>
-      ) : null}
-      {employee.budgets.map((budget) => {
-        const max = Number(budget.max ?? 0);
-        const left = Number(budget.available ?? 0);
-        const used = max > 0 ? Math.min(100, Math.max(0, ((max - left) / max) * 100)) : 0;
-        return (
-          <div key={budget.label} style={{ display: "flex", flexDirection: "column", gap: "6px", fontFamily: mono, fontSize: "12px", color: MUTED }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-              <span>{budget.label}{budget.periodDays ? ` · every ${budget.periodDays} days` : ""}</span>
-              <span style={{ color: INK }}>{budget.available ?? "?"} {budget.token ?? ""} left of {budget.max ?? "?"} {budget.token ?? ""}</span>
-            </div>
-            <div style={{ height: "8px", background: "#E4EAF4", borderRadius: "999px", overflow: "hidden" }}><div style={{ width: `${used}%`, height: "100%", background: "#F2B544" }} /></div>
-          </div>
-        );
-      })}
-    </article>
-  );
-}
+const usd = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value < 100 ? 2 : 0 });
+const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: value < 1 ? 6 : 2 });
 
 export function CompanyPublicPage() {
   const { dao = "" } = useParams();
@@ -71,6 +42,12 @@ export function CompanyPublicPage() {
     enabled: Boolean(entry.data),
   });
   const company = profile.data;
+  const treasury = useQuery({
+    queryKey: ["company-treasury", dao],
+    queryFn: () => treasuryOf(company!),
+    enabled: Boolean(company),
+    refetchInterval: 60_000,
+  });
 
   return (
     <div style={{ fontFamily: mono, color: "#F2F6FC", background: NAVY, minHeight: "100vh" }}>
@@ -100,10 +77,8 @@ export function CompanyPublicPage() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "12px", flex: "0 1 420px", minWidth: "260px" }}>
               {[
-                ["AI EMPLOYEES", company ? String(company.employees.filter((e) => e.enabled).length) : "…", "#4FD1E8"],
-                ["SECURITY COUNCIL", company ? String(company.council.length) : "…", "#F2F6FC"],
-                ["TREASURY (DAO)", company ? company.daoBalanceNear : "…", "#F2B544"],
-                ["SHARE PRICE", company ? (company.shares ? company.shares.priceNear : "no shares") : "…", "#F2F6FC"],
+                ["TREASURY", treasury.data?.totalUsd != null ? usd(treasury.data.totalUsd) : "…", "#F2B544"],
+                ["PAID TO OWNERS", company ? (company.shares ? company.shares.distributedNear : "not yet") : "…", "#4FD1E8"],
               ].map(([label, value, color]) => (
                 <div key={label} style={{ background: NAVY, borderRadius: "14px", padding: "14px 16px" }}>
                   <div style={{ fontSize: "11px", color: "#A9BCE0" }}>{label}</div>
@@ -114,43 +89,47 @@ export function CompanyPublicPage() {
           </section>
         ) : null}
 
-        {profile.isLoading ? <p>Reading the vault, the DAO and the shares on NEAR…</p> : null}
+        {profile.isLoading ? <p>Reading the company on NEAR…</p> : null}
         {profile.error ? <p style={{ color: "#F7A99D" }}>{profile.error.message}</p> : null}
         {company ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "24px", alignItems: "flex-start" }}>
-            <div style={{ flex: "999 1 620px", minWidth: 0, display: "flex", flexDirection: "column", gap: "24px" }}>
-              <Section title="AI employees" tag="job contracts read from the vault">
-                {company.employees.length === 0 ? <p style={{ margin: 0, fontFamily: sans, color: MUTED }}>No AI employee hired yet.</p> : null}
-                {company.employees.map((employee) => <EmployeeCard key={employee.role} employee={employee} />)}
+            <div style={{ flex: "1 1 520px", minWidth: 0 }}>
+              <Section title="Treasury" tag={treasury.data?.pricedAt ? "USD at market prices" : undefined}>
+                {treasury.isLoading ? <p style={{ margin: 0, fontFamily: sans, color: MUTED }}>Reading balances on NEAR, Base and Ethereum…</p> : null}
+                {treasury.data ? (
+                  <>
+                    <div style={{ fontSize: "40px", fontWeight: 700, color: NAVY }}>{treasury.data.totalUsd != null ? usd(treasury.data.totalUsd) : "price unavailable"}</div>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      {treasury.data.holdings.length === 0 ? <p style={{ margin: 0, fontFamily: sans, color: MUTED }}>Nothing yet.</p> : null}
+                      {treasury.data.holdings.map((holding) => (
+                        <div key={`${holding.symbol}-${holding.place}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <span style={{ fontSize: "16px", fontWeight: 600 }}>{amount(holding.amount)} {holding.symbol}</span>
+                            <span style={{ fontFamily: sans, fontSize: "13px", color: MUTED }}>{holding.place}</span>
+                          </div>
+                          <span style={{ fontSize: "15px", color: MUTED }}>{holding.usd != null ? usd(holding.usd) : ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p style={{ margin: 0, fontFamily: sans, fontSize: "12px", color: MUTED }}>Testnet tokens valued at mainnet prices (CoinGecko), for reference.</p>
+                  </>
+                ) : null}
               </Section>
-              {company.shares ? (
-                <Section title="Revenue for voters" tag={`1 epoch = ${company.shares.epochHours} h`}>
-                  <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", lineHeight: 1.6, color: MUTED }}>Each epoch, shareholders who voted split what the company shares. Those who did not vote leave their part to those who did.</p>
-                  <div style={{ fontSize: "14px" }}>Paid to voters so far: <strong>{company.shares.distributedNear}</strong></div>
-                </Section>
-              ) : null}
             </div>
-            <aside style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: "24px" }}>
-              {company.shares ? (
-                <Section title={`Shares · ${company.shares.symbol}`}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px" }}><span style={{ color: MUTED }}>Price</span><span>{company.shares.priceNear}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px" }}><span style={{ color: MUTED }}>Sold</span><span>{company.shares.sold} / {company.shares.total}</span></div>
-                  <div style={{ height: "8px", background: "#E4EAF4", borderRadius: "999px", overflow: "hidden" }}><div style={{ width: `${(Number(company.shares.sold) / Number(company.shares.total)) * 100}%`, height: "100%", background: NAVY }} /></div>
-                  <a href="/shares" style={{ textAlign: "center", background: NAVY, color: "#F2F6FC", textDecoration: "none", fontWeight: 600, padding: "14px", borderRadius: "999px" }}>Buy and lock to vote</a>
-                </Section>
-              ) : null}
-              <Section title="Security council">
-                <p style={{ margin: 0, fontFamily: sans, fontSize: "14px", color: MUTED }}>Votes the mandates. Any member can pause every agent; only a vote resumes them.</p>
-                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "13px", lineHeight: 1.8, wordBreak: "break-all" }}>{company.council.map((member) => <li key={member}>{member}</li>)}</ul>
+            <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+              <Section title="Revenue" tag={company.shares ? `shared every ${company.shares.epochHours} h` : undefined}>
+                {company.shares ? (
+                  <>
+                    <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", lineHeight: 1.6, color: MUTED }}>Paid so far to the owners who voted.</p>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}><span>NEAR</span><strong>{amount(Number(formatUnits(BigInt(company.shares.distributedNearRaw), 24)))}</strong></div>
+                      {company.shares.revenueToken ? <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}><span>ETH (bridged from Base)</span><strong>{amount(Number(formatUnits(BigInt(company.shares.distributedToken), 18)))}</strong></div> : null}
+                    </div>
+                    <a href="/shares" style={{ textAlign: "center", background: NAVY, color: "#F2F6FC", textDecoration: "none", fontWeight: 600, padding: "14px", borderRadius: "999px" }}>Buy shares · {company.shares.priceNear}</a>
+                  </>
+                ) : <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", lineHeight: 1.6, color: MUTED }}>This company has not issued shares yet, so it shares no revenue.</p>}
               </Section>
-              <Section title="On chain">
-                {[["DAO", company.dao_id], ["Vault", company.vault_id], ...(company.shares_id ? [["Shares", company.shares_id]] : []), ...company.wallets.map((wallet) => [wallet.name, wallet.address])].map(([label, value]) => (
-                  <div key={label} style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "13px" }}>
-                    <span style={{ color: MUTED }}>{label}</span><span style={{ wordBreak: "break-all" }}>{value}</span>
-                  </div>
-                ))}
-              </Section>
-            </aside>
+            </div>
           </div>
         ) : null}
       </main>
