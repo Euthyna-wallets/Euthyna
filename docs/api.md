@@ -90,10 +90,19 @@ members" in Activity).
 | `pay` | prepare → Guard visa → authorize on NEAR |
 | `status`, `cancel` | operation state; same-nonce cancellation |
 
+Build once, then point stdio clients directly at the compiled entry point:
+
 ```bash
+pnpm --filter @mandateos/sdk build
+pnpm --filter @mandateos/mcp build
+
 MANDATEOS_API_URL=… MANDATEOS_AGENT_API_KEY=… AGENT_NEAR_ACCOUNT_ID=… \
-VAULT_ACCOUNT_ID=… AGENT_ROLE=… pnpm --filter @mandateos/mcp start
+VAULT_ACCOUNT_ID=… AGENT_ROLE=… node packages/mcp/dist/server.js
 ```
+
+Do not put `pnpm … start` in an MCP stdio client command: package-manager
+banners are not JSON-RPC. The server also routes NEAR transaction logs to
+stderr; stdout is reserved exclusively for the MCP protocol.
 
 ## Console routes
 

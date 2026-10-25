@@ -1,3 +1,5 @@
+import { reserveStdoutForMcp } from "./stdio-logging.js";
+
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
@@ -9,6 +11,7 @@ import {
 } from "@mandateos/sdk";
 
 import { createMandateMcpServer, MandateMcpTools } from "./index.js";
+reserveStdoutForMcp();
 
 const env = z.object({
   MANDATEOS_API_URL: z.string().url().default("http://localhost:3000"),
