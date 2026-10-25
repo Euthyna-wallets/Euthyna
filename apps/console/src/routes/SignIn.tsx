@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { API_BASE } from "../api.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
-import { connectNearWallet, nearAccounts, signNearMessage } from "../wallets.js";
+import { connectNearWallet, nearAccounts, signNearMessage, switchNearWallet } from "../wallets.js";
 
 async function authPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}/api/auth${path}`, {
@@ -79,7 +79,9 @@ export function SignIn() {
                 <span className="account-label">Connected wallet</span>
                 <span className="account-id mono">{shortAccount(account)}</span>
               </span>
-              <button className="link-button" type="button" disabled={busy} onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}>Change</button>
+              {demo ? null : (
+                <button className="link-button" type="button" disabled={busy} onClick={() => { setAccount(null); void switchNearWallet().catch((cause: unknown) => setError(String(cause))); }}>Change</button>
+              )}
             </div>
             <button className="primary block" disabled={busy} onClick={() => void signIn(account)}>
               {busy ? "Confirm in your wallet…" : "Sign in"}
