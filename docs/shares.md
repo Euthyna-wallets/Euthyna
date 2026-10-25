@@ -85,8 +85,8 @@ reads itself: the company wallet from the vault (whose owner must be the DAO),
 the members from the DAO, the storage prices from the bridge. Only the bridge
 fee comes from the server, and the browser refuses it above 5% of the amount.
 
-The DAO is the sender on the bridge. If the transfer cannot complete, the
-bridge refunds the DAO, not a member.
+The DAO is the sender on the bridge. If `ft_transfer_call` fails (as in the
+first try below), wrap.testnet refunds the wNEAR to the DAO, not to a member.
 
 ### Proof on testnet (2026-10-25)
 
