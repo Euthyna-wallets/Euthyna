@@ -90,8 +90,9 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
     <div className="stack">
       <div className="row wrap">
         <label>Agent name<input value={name} onChange={(event) => { setName(event.target.value); setAccount(null); }} /></label>
-        <label>Role<input value={role} onChange={(event) => setRole(event.target.value.toLowerCase())} /></label>
+        <label>Role<input value={role} placeholder="yield-manager" onChange={(event) => setRole(event.target.value.toLowerCase().replace(/\s+/g, "-"))} /></label>
       </div>
+      {role && !/^[a-z0-9_-]{1,32}$/.test(role) ? <p className="small" style={{ color: "var(--error)" }}>Role: lowercase letters, digits, "-" or "_", up to 32 characters.</p> : null}
       <fieldset className="key-mode">
         <legend>Where the agent's key lives</legend>
         <label className="check">
