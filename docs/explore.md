@@ -15,6 +15,6 @@ The illustrations in `apps/console/public/landing/` are original isometric
 scenes made for MandateOS.
 
 Some activities shown on the landing are not built yet: Solana and Bitcoin
-wallets, a bank account, trading on Hyperliquid or stocks, security work and
-freelance missions. Today agents work on NEAR, Base and Ethereum, with three
-jobs: paying suppliers, sharing revenue, and Uniswap swaps.
+wallets, a bank account, stock and crypto investing, security audits and
+influence campaigns. Today agents work on NEAR, Base and Ethereum, with three
+roles: paying suppliers, sharing revenue, and Uniswap swaps.
