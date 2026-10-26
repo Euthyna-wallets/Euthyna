@@ -1,0 +1,26 @@
+:80 {
+  encode zstd gzip
+
+  handle /near-rpc {
+    rewrite * /v1/console/near-rpc
+    reverse_proxy api:3000
+  }
+
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+
+  handle /v1/* {
+    reverse_proxy api:3000
+  }
+
+  handle /health {
+    reverse_proxy api:3000
+  }
+
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}
