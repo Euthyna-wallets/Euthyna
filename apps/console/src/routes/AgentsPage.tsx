@@ -62,7 +62,7 @@ export function AgentsPage() {
           <h1>Agents</h1>
           <p className="muted">
             Agents work inside the roles the owners voted. Their record is read from the chains: what they did, what the vault
-            or the Guard refused. The owners hire, change budgets and fire, by vote.
+            or the Guard refused. Any council member can hire (up to 5 agents waiting for a role each); the owners give roles, change budgets and fire, by vote.
           </p>
         </div>
         {treasury && !adding ? <button className="primary" onClick={() => setAdding(true)}>Hire an agent</button> : null}

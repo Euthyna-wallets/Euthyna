@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { createApp } from "./app.js";
+import { createApp, MAX_PENDING_HIRES_PER_MEMBER } from "./app.js";
 import type { AgentProvisioningService } from "./agent-provisioning.js";
 import { MemoryRateLimiter } from "./rate-limit.js";
 import type {
@@ -100,6 +100,7 @@ class FakeAuth implements AuthGateway {
   readonly audits: AuditEvent[] = [];
   readonly listedOrganizations: string[] = [];
   readonly created: CreateAgentInput[] = [];
+  readonly listed: AgentView[] = [];
   readonly revoked: Array<{ organizationId: string; agentId: string }> = [];
   sponsorshipReservation: import("./auth-gateway.js").NearSponsorshipReservation = "reserved";
   readonly completedSponsorships: Array<{ nearAccountId: string; succeeded: boolean }> = [];
@@ -120,7 +121,7 @@ class FakeAuth implements AuthGateway {
 
   listAgents(organizationId: string): Promise<AgentView[]> {
     this.listedOrganizations.push(organizationId);
-    return Promise.resolve([]);
+    return Promise.resolve(this.listed.filter(() => organizationId === "org-1"));
   }
 
   setAgentEvmAddress(organizationId: string, agentId: string, evmAddress: string) {
@@ -143,6 +144,7 @@ class FakeAuth implements AuthGateway {
       evmAddress: null,
       mpcPath: "agents/researcher/base",
       active: true,
+      createdByUserId: "user-admin",
       createdAt: new Date(0),
     });
   }
@@ -160,6 +162,7 @@ class FakeAuth implements AuthGateway {
         evmAddress: null,
         mpcPath: input.mpcPath,
         active: true,
+        createdByUserId: input.createdByUserId,
         createdAt: new Date(0),
       },
       apiKey: "mdo_secret",
@@ -561,22 +564,74 @@ describe("console isolation and emergency", () => {
     expect(auth.created).not.toContainEqual(expect.objectContaining({ nearAccountId: "agent-c.near" }));
   });
 
-  it("forbids a member from creating agent credentials", async () => {
+  const hireBody = (name: string) => JSON.stringify({
+    name,
+    role: "researcher",
+    nearAccountId: proposedAgentAccountId(name, "mandateos.testnet", "org-1"),
+    nearPublicKey: "ed25519:11111111111111111111111111111111",
+    vaultAccountId: "vault-1.near",
+    mpcPath: "agents/researcher/base",
+  });
+  const pendingHire = (n: number, createdByUserId: string): AgentView => ({
+    id: `pending-${createdByUserId}-${n}`,
+    name: `Pending ${n}`,
+    role: "researcher",
+    nearAccountId: `pending-${n}.mandateos.testnet`,
+    nearPublicKey: "ed25519:11111111111111111111111111111111",
+    vaultAccountId: "vault-1.near",
+    evmAddress: null,
+    mpcPath: "agents/researcher/base",
+    active: true,
+    createdByUserId,
+    createdAt: new Date(0),
+  });
+
+  it("lets a council member hire an agent, recorded as theirs", async () => {
     const { app, auth } = testApp({ consoleRole: "member" });
     const response = await app.request("/v1/console/agents", {
       method: "POST",
       headers: consoleHeaders({ cookie: "session-member" }),
-      body: JSON.stringify({
-        name: "Research agent",
-        role: "researcher",
-        nearAccountId: "agent-c.near",
-        nearPublicKey: "ed25519:11111111111111111111111111111111",
-        vaultAccountId: "vault-1.near",
-        mpcPath: "agents/researcher/base",
-      }),
+      body: hireBody("Member agent"),
     });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(201);
+    expect(auth.created).toEqual([expect.objectContaining({ organizationId: "org-1", createdByUserId: "user-member" })]);
+  });
+
+  it(`caps a member at ${MAX_PENDING_HIRES_PER_MEMBER} hires waiting for a role`, async () => {
+    const { app, auth } = testApp({ consoleRole: "member" });
+    for (let n = 0; n < MAX_PENDING_HIRES_PER_MEMBER; n += 1) auth.listed.push(pendingHire(n, "user-member"));
+    auth.listed.push(pendingHire(99, "user-other"));
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-member" }),
+      body: hireBody("One too many"),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({ error: "too_many_pending_hires", limit: MAX_PENDING_HIRES_PER_MEMBER }));
     expect(auth.created).toEqual([]);
+  });
+
+  it("does not cap an admin", async () => {
+    const { app, auth } = testApp();
+    for (let n = 0; n < MAX_PENDING_HIRES_PER_MEMBER + 2; n += 1) auth.listed.push(pendingHire(n, "user-admin"));
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: hireBody("Admin agent"),
+    });
+    expect(response.status).toBe(201);
+  });
+
+  it("forbids a member from provisioning or revoking an agent someone else hired", async () => {
+    const { app, auth } = testApp({ consoleRole: "member" });
+    for (const action of ["provision", "revoke"]) {
+      const response = await app.request(`/v1/console/agents/11111111-1111-4111-8111-111111111111/${action}`, {
+        method: "POST",
+        headers: consoleHeaders({ cookie: "session-member" }),
+      });
+      expect(response.status).toBe(403);
+    }
+    expect(auth.revoked).toEqual([]);
   });
 
   it("tells the console which account an agent will get, so its key can be made in euthyna-signer first", async () => {
@@ -590,7 +645,7 @@ describe("console isolation and emergency", () => {
     const invalid = await app.request("/v1/console/agents/proposed-account?name=%20", { headers: consoleHeaders({ cookie: "session-admin" }) });
     expect(invalid.status).toBe(422);
     const member = await app.request("/v1/console/agents/proposed-account?name=x1", { headers: consoleHeaders({ cookie: "session-member" }) });
-    expect(member.status).toBe(403);
+    expect(member.status).toBe(200);
   });
 
   it("creates an agent inside the session organization", async () => {
@@ -643,8 +698,6 @@ describe("console isolation and emergency", () => {
       headers: consoleHeaders({ cookie: "session-admin" }),
     });
     expect(response.status).toBe(404);
-    expect(auth.revoked).toEqual([
-      { organizationId: "org-1", agentId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
-    ]);
+    expect(auth.revoked).toEqual([]);
   });
 });

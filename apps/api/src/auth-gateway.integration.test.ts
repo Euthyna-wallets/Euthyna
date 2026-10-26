@@ -75,6 +75,7 @@ describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
       nearPublicKey: "ed25519:11111111111111111111111111111111",
       vaultAccountId: "vault.testnet",
       mpcPath: "agents/researcher/base",
+      createdByUserId: userId,
     });
     expect(created.apiKey.length).toBeGreaterThan(20);
 
