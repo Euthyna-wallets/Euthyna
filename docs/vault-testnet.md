@@ -59,7 +59,7 @@ The machine-readable manifests are [`deployments/near-testnet.json`](../deployme
 | Base payment | `0x0bf66f0c192ee3874d8f69af9fc704d0abd616f8162390521fbaed088d8e4ea4` |
 | NEAR confirmation | `8u2G2cZrxwviWYnKqnGm4W59XMeCK9K2QrFVCM9qGTmK` |
 
-The live MPC call used 1 yoctoNEAR and returned a valid secp256k1 signature. Base Sepolia included the signed EIP-1559 transaction successfully; Zodiac transferred 1 TestUSDC (token de test) from the Safe to the registered recipient. The Guard-signed report then moved the Vault operation from `PossiblySigned` to `Confirmed`.
+The live MPC call used 1 yoctoNEAR and returned a valid secp256k1 signature. Base Sepolia included the signed EIP-1559 transaction successfully; 1 TestUSDC (token de test) moved from the Safe to the registered recipient. The Guard-signed report then moved the Vault operation from `PossiblySigned` to `Confirmed`.
 
 The DAO-owned governance relay is `gov-relay-v1.mandateos-root-20261021.testnet`, with no access keys. It derives `0xGOV = 0xC9635C52861f6a68e4E27FaD8f3c663d4c11FDBb`, which is the sole Delay module. Proposal `19` raised the researcher allowance to 10 TestUSDC (token de test) after the 300-second Sepolia cooldown. Proposal `23` attempted a 1 000 TestUSDC (token de test) allowance; the Safe council vetoed it with `setTxNonce(3)`, and the post-veto execution reverted.
 

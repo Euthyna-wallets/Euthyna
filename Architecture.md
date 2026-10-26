@@ -2,7 +2,7 @@
 
 ## Decision
 
-MandateOS uses **OmniRoles**, a keyless NEAR contract, as the single policy engine and wallet authority. Safe, Zodiac Roles, Zodiac Delay, the governance relay, `0xAAA`, and `0xGOV` are no longer part of the target architecture. The November demo executes on NEAR testnet and Base Sepolia; other chains and off-chain signatures follow the same wallet/policy model later ([issue #40](https://github.com/joindefi/MandateOS/issues/40), [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs)).
+MandateOS uses **OmniRoles**, a keyless NEAR contract, as the single policy engine and wallet authority. Safe, the previous EVM role and delay modules, the governance relay, `0xAAA`, and `0xGOV` are no longer part of the target architecture. The November demo executes on NEAR testnet and Base Sepolia; other chains and off-chain signatures follow the same wallet/policy model later ([issue #40](https://github.com/joindefi/MandateOS/issues/40), [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs)).
 
 The company has one MPC-derived wallet per chain. For Base Sepolia, the path is `omniroles/evm/84532`. The NEAR vault account and path determine the EVM address; no human or server holds its private key ([Chain Signatures](https://docs.near.org/chain-abstraction/chain-signatures), [`contracts/vault/src/lib.rs`](./contracts/vault/src/lib.rs)).
 

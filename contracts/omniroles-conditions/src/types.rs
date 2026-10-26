@@ -1,10 +1,7 @@
 //! Core types of the OmniRoles permission engine.
 //!
-//! The numeric values of [`Encoding`] and [`Operator`] follow the public
-//! Zodiac Roles v3 condition format (see the Roles documentation, "Conditions"),
-//! so that permissions authored with the Zodiac Roles SDK can be flattened and
-//! evaluated here. This crate is an independent implementation: it does not
-//! contain code from the Roles contracts.
+//! [`Encoding`] and [`Operator`] define how a flattened condition tree decodes
+//! calldata and compares each value.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -228,7 +225,7 @@ pub enum Operation {
 
 /// Periodic quota (token amount, native value or number of calls).
 ///
-/// Same fields and accrual rule as Zodiac allowances: every elapsed `period`
+/// Accrual rule: every elapsed `period`
 /// adds `refill` to `balance`, up to `max_refill`; `period == 0` means a one-time
 /// allowance.
 #[derive(

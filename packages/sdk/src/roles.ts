@@ -61,7 +61,7 @@ export type RuleChange =
   | { SetStatusPublicKey: { status_public_key: number[] } }
   | { SetVersions: { policy_version: number; registry_version: number } };
 
-// Encodings and operators (Zodiac Roles v3 numbering).
+// Encodings and operators of the OmniRoles condition format.
 export const Encoding = { None: 0, Static: 1, Dynamic: 2, Tuple: 3, Array: 4, AbiEncoded: 5, EtherValue: 6 } as const;
 export const Operator = {
   Pass: 0, And: 1, Or: 2, Empty: 4, Matches: 5, ArraySome: 6, ArrayEvery: 7,
