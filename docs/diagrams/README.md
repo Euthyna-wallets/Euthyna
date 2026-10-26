@@ -1,8 +1,14 @@
 # Diagrams
 
-Mermaid sources of the README diagrams, rendered in a hand-drawn style with the
-Virgil font (installed locally) and `style.json`:
+- `product.png`, `technical.png`: drawn by `tiles.py` (SVG), rendered with
+  Playwright. Fonts: Comic Shanns, installed locally.
 
-```bash
-mmdc -i product.mmd -o product.png -c style.json -b white -s 2
-```
+  ```bash
+  mkdir -p t && python3 tiles.py t && node render.js technical product
+  ```
+
+- `payment.png`: Mermaid source `payment.mmd`, hand-drawn look (`style.json`):
+
+  ```bash
+  mmdc -i payment.mmd -o payment.png -c style.json -b white -s 2
+  ```
