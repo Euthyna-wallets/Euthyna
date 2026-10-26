@@ -551,3 +551,7 @@ button.primary:hover:not(:disabled) { background: var(--navy-2); }
 .staff-card button.secondary:disabled { color: #9AA8C2 !important; border-color: #E4EAF4 !important; opacity: 1; }
 .staff-card button.danger:disabled { opacity: 0.5; }
 @media (max-width: 1100px) { .app-topbar { flex-direction: row; flex-wrap: wrap; align-items: center; } }
+.key-mode { border: 1px solid #E4EAF4; border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.key-mode legend { padding: 0 6px; font-weight: 600; color: var(--ink); font-size: 14px; }
+.key-mode label.check { align-items: flex-start; gap: 10px; color: var(--ink); }
+.key-mode label.check input { margin-top: 3px; }

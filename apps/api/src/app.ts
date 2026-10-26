@@ -372,6 +372,17 @@ export function createApp({
     return context.json(result);
   });
 
+  /** The NEAR account an agent of this name will get: euthyna-signer creates its key for it before hiring. */
+  app.get("/v1/console/agents/proposed-account", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const name = context.req.query("name") ?? "";
+    try {
+      return context.json({ accountId: proposedAgentAccountId(name, nearParentAccount, consoleIdentity.organizationId) });
+    } catch (error) {
+      return context.json({ error: "invalid_agent_name", message: error instanceof Error ? error.message : String(error) }, 422);
+    }
+  });
+
   app.post("/v1/console/agents/:id/provision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const agentId = z.string().uuid().parse(context.req.param("id"));

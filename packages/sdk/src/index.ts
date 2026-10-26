@@ -3,6 +3,10 @@ import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { KeyPair, Near, keyStores, type Account } from "near-api-js";
+
+import type { AgentNearSigner, SignerSocket } from "./signer-socket.js";
+
+export { SignerError, SignerSocket, SocketNearSigner, type AgentNearSigner } from "./signer-socket.js";
 import { bytesToHex, encodeFunctionData, getAddress, hexToBytes, keccak256, stringToHex, type Hex } from "viem";
 
 export const AGENT_FUNCTION_CALL_METHODS = [
@@ -415,7 +419,7 @@ export class HttpAgentApi implements AgentApiGateway {
   }
 
 
-  private async request(path: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
+  protected async request(path: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
     const response = await this.fetcher(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
       ...init,
       headers: {
@@ -426,6 +430,23 @@ export class HttpAgentApi implements AgentApiGateway {
     });
     const body = await response.json().catch(() => ({})) as Record<string, unknown>;
     return { status: response.status, body };
+  }
+}
+
+/**
+ * The agent API through euthyna-signer: the signer holds the agent's API key
+ * and forwards only the agent endpoints, so this process has no secret.
+ */
+export class SignerAgentApi extends HttpAgentApi {
+  constructor(private readonly socket: SignerSocket, private readonly agentAccountId: string) {
+    super("", "");
+  }
+
+  protected override async request(path: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
+    const method = (init.method ?? "GET").toUpperCase();
+    const body = typeof init.body === "string" && init.body ? JSON.parse(init.body) as unknown : undefined;
+    const reply = await this.socket.call({ op: "api", agent: this.agentAccountId, method, path, ...(body === undefined ? {} : { body }) });
+    return { status: Number(reply.status), body: (reply.body ?? {}) as Record<string, unknown> };
   }
 }
 
@@ -537,18 +558,23 @@ export class NearVaultGateway implements VaultGateway {
     networkId: string;
     rpcUrl: string;
     accountId: string;
-    privateKey: string;
     vaultAccountId: string;
     role: string;
     chainId: number;
-  }): Promise<NearVaultGateway> {
-    const keyStore = new keyStores.InMemoryKeyStore();
-    await keyStore.setKey(
-      input.networkId,
-      input.accountId,
-      KeyPair.fromString(input.privateKey as `ed25519:${string}`),
-    );
-    const near = new Near({ networkId: input.networkId, nodeUrl: input.rpcUrl, keyStore });
+  } & ({ privateKey: string; signer?: undefined } | { signer: AgentNearSigner; privateKey?: undefined })): Promise<NearVaultGateway> {
+    let near: Near;
+    if (input.signer) {
+      // The key lives in euthyna-signer; this process only gets signatures.
+      near = new Near({ networkId: input.networkId, nodeUrl: input.rpcUrl, signer: input.signer as never });
+    } else {
+      const keyStore = new keyStores.InMemoryKeyStore();
+      await keyStore.setKey(
+        input.networkId,
+        input.accountId,
+        KeyPair.fromString(input.privateKey as `ed25519:${string}`),
+      );
+      near = new Near({ networkId: input.networkId, nodeUrl: input.rpcUrl, keyStore });
+    }
     return new NearVaultGateway(
       await near.account(input.accountId),
       input.vaultAccountId,
