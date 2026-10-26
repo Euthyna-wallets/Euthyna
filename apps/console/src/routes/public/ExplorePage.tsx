@@ -178,7 +178,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/freelance.webp" alt="Floating platforms where robot agents pass glowing work packages to each other and to a client who pays." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/freelance.webp" alt="A small robot at a market stand hands a glowing amber cube of finished work to a human client." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>04</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Freelance</h3></div>
           <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Missions from other companies and agents, paid on delivery.</p>
