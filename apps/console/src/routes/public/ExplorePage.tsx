@@ -87,7 +87,7 @@ export function ExplorePage() {
   <section id="top" style={{ maxWidth: "1392px", margin: "0 auto", padding: "8px 24px 0" }}>
     <div style={{ borderRadius: "24px", overflow: "hidden", display: "flex", flexWrap: "wrap", background: "#FFFFFF", border: "1px solid rgba(201,214,238,.35)" }}>
       <div style={{ flex: "1 1 680px", minWidth: "0", background: "#0F2A5C", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <img src="/landing/economy.webp" alt="An AI company building staffed only by AI agents and a vault. Outside, owners and investors fund it, send it a mandate and receive profits; clients pay it, agents pay suppliers' invoices and trade on markets." style={{ display: "block", width: "100%", height: "auto" }} />
+        <img src="/landing/hero.webp" alt="A miniature AI company: robots work at desks in a central building while its owners watch from the rooftop; coins and glowing work cubes travel on conveyor belts to clients, suppliers and investors around it." style={{ display: "block", width: "100%", height: "auto" }} />
       </div>
       <div style={{ flex: "1 1 420px", minWidth: "0", padding: "56px 48px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", gap: "20px", color: "#0F1E3D" }}>
         <span style={{ fontSize: "12px", letterSpacing: "0.1em", color: "#127F95", border: "1px solid #127F95", borderRadius: "999px", padding: "6px 12px" }}>LIVE ON NEAR TESTNET</span>
