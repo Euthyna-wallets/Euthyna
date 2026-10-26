@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { decodeVaultCalls } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
-import { Card, PageState, Status, short } from "../components/ui.js";
+import { Avatar, BudgetGauge, StateDot, agentState, ago, feedOf, type AgentState } from "../components/ops.js";
+import { Card, PageState, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -83,13 +84,15 @@ export function AgentsPage() {
         </Card>
       ) : null}
       <PageState loading={agents.isLoading} error={agents.error} empty={agents.data?.agents.length === 0} emptyContent={<div className="state">No agent yet.</div>}>
-        <div className="stack">
+        <div className="staff-grid">
           {(agents.data?.agents ?? []).slice().sort((a, b) => Number(b.active) - Number(a.active)).map((agent) => {
             const jobs = (roles.data?.roles ?? []).filter((role) => role.members.some((member) => member.member === agent.nearAccountId));
             const isAgent = (actor: string) => actor === agent.name || actor === agent.nearAccountId;
             const done = (activity.data?.operations ?? []).filter((operation) => isAgent(operation.actor));
             const executed = done.filter((operation) => operation.evm?.status === "success");
             const refused = (activity.data?.requests ?? []).filter((request) => request.kind === "refusal" && isAgent(request.agent));
+            const feed = feedOf(activity.data);
+            const lastItem = feed.find((item) => isAgent(item.actor));
             return (
               <StaffCard
                 key={agent.id}
@@ -98,7 +101,8 @@ export function AgentsPage() {
                 allJobs={roles.data?.roles ?? []}
                 executed={executed.length}
                 refused={refused.length}
-                last={executed[0]?.summary ?? null}
+                last={lastItem ? `${lastItem.ok ? "" : "Refused · "}${lastItem.title} · ${ago(lastItem.at)}` : null}
+                state={agentState(agent, roles.data?.roles ?? [], feed, status.data?.paused ?? false)}
                 busy={busy}
                 canPropose={Boolean(me) && !busy}
                 onFire={() => void propose(`fire-${agent.id}`, () => omni.fireProposal(agent.nearAccountId), (proposal) =>
@@ -130,6 +134,7 @@ function StaffCard(props: {
   executed: number;
   refused: number;
   last: string | null;
+  state: AgentState;
   busy: string | null;
   canPropose: boolean;
   onFire: () => void;
@@ -140,38 +145,36 @@ function StaffCard(props: {
   const [hireFor, setHireFor] = useState("");
   const [budgets, setBudgets] = useState<Record<string, string>>({});
   const openJobs = props.allJobs.filter((job) => !jobs.some((held) => held.name === job.name));
-  const state = !agent.active ? "revoked" : jobs.length ? "active" : "pending";
   return (
-    <article className="decision staff">
-      <header>
-        <div>
-          <span className="eyebrow">{jobs.length ? jobs.map((job) => job.name).join(" · ") : "no job"}</span>
+    <article className={`staff-card${agent.active ? "" : " fired"}`}>
+      <header className="staff-head">
+        <Avatar name={agent.name} seed={agent.nearAccountId} size={48} />
+        <div className="staff-who">
           <h3>{agent.name}</h3>
-          <span className="mono small muted">{short(agent.nearAccountId, 18)}</span>
+          <span className="mono small muted" title={agent.nearAccountId}>{short(agent.nearAccountId, 18)}</span>
+          <span className="chips">{jobs.length ? jobs.map((job) => <span key={job.name} className="chip-role">{job.name}</span>) : <span className="chip-role none">no role</span>}</span>
         </div>
-        <Status value={state} />
+        <StateDot state={props.state} />
       </header>
-      <div className="metric-grid">
-        <div><span className="eyebrow">Done</span><strong>{props.executed}</strong><span className="small muted">operations confirmed on chain</span></div>
-        <div><span className="eyebrow">Refused</span><strong>{props.refused}</strong><span className="small muted">by the vault or the Guard</span></div>
-        <div><span className="eyebrow">Last</span><span className="small">{props.last ?? "—"}</span></div>
+      <div className="staff-stats">
+        <div><strong>{props.executed}</strong><span>done on chain</span></div>
+        <div className={props.refused ? "bad" : ""}><strong>{props.refused}</strong><span>refused</span></div>
+        <div className="staff-last"><span>Last</span><p>{props.last ?? "No activity yet"}</p></div>
       </div>
       {jobs.flatMap((job) => job.budgets.map((budget) => (
-        <div className="row wrap" key={`${job.name}-${budget.key}`}>
-          <span className="small">
-            <strong>{job.name}</strong> · {budget.label}: {budget.available ?? "?"} of {budget.max ?? "?"} {budget.token ?? ""} left
-            {budget.periodDays ? ` · every ${budget.periodDays} day${budget.periodDays === 1 ? "" : "s"}` : ""}
-          </span>
-          <div className="spacer" />
-          <label className="inline">New budget
-            <input inputMode="decimal" placeholder={budget.max ?? ""} value={budgets[budget.key] ?? ""} onChange={(event) => setBudgets({ ...budgets, [budget.key]: event.target.value })} />
-          </label>
-          <button className="secondary" disabled={!props.canPropose || !(Number(budgets[budget.key]) > 0)} onClick={() => props.onBudget(budget.key, budgets[budget.key]!)}>
-            {props.busy === `budget-${agent.id}` ? "Signing…" : "Propose"}
-          </button>
+        <div className="staff-budget" key={`${job.name}-${budget.key}`}>
+          <BudgetGauge role={job.name} budget={budget} />
+          {agent.active ? (
+            <div className="row">
+              <input aria-label={`New ${budget.label} budget`} inputMode="decimal" placeholder={`new budget (${budget.max ?? ""})`} value={budgets[budget.key] ?? ""} onChange={(event) => setBudgets({ ...budgets, [budget.key]: event.target.value })} />
+              <button className="secondary" disabled={!props.canPropose || !(Number(budgets[budget.key]) > 0)} onClick={() => props.onBudget(budget.key, budgets[budget.key]!)}>
+                {props.busy === `budget-${agent.id}` ? "Signing…" : "Propose"}
+              </button>
+            </div>
+          ) : null}
         </div>
       )))}
-      {agent.active ? <footer className="row wrap">
+      {agent.active ? <footer className="staff-actions">
         {openJobs.length ? (
           <>
             <select value={hireFor} onChange={(event) => setHireFor(event.target.value)}>
@@ -183,7 +186,7 @@ function StaffCard(props: {
             </button>
           </>
         ) : null}
-        {!jobs.length ? <Link className="text-action" to={`/roles?new=1&role=${encodeURIComponent(agent.role)}`}>Write a new job for it →</Link> : null}
+        {!jobs.length ? <Link className="text-action" to={`/roles?new=1&role=${encodeURIComponent(agent.role)}`}>Write a role for it →</Link> : null}
         <div className="spacer" />
         {jobs.length ? (
           <button className="danger" disabled={!props.canPropose} onClick={props.onFire}>
