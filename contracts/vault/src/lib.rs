@@ -18,8 +18,8 @@ pub use types::{
     Allowance, AllowanceConsumption, ChainWallet, DaoTransaction, Eip1559Transaction,
     GuardApproval, GuardVisa, ListAddress, Membership, MembershipKind, MpcSignature, Operation,
     OperationCheck, OperationRequest, OperationState, Permission, QueuedRuleChange, RoleConfig,
-    RoleView, RuleChange, RuleChangeState, SettlementAttempt, SettlementConfig, SignedStatusReport,
-    StatusKind, StatusReport, VelocityConfig, VelocityState,
+    RoleView, RuleChange, RuleChangeState, SettlementConfig, SignedStatusReport, StatusKind,
+    StatusReport, VelocityConfig, VelocityState,
 };
 use types::{
     AllowanceKey, MembershipKey, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId,
@@ -63,9 +63,9 @@ trait ExtSelf {
     fn on_settle_verified(
         &mut self,
         op_id: OperationId,
+        cancellation: bool,
         tx_hash: [u8; 32],
         expected_payload_hash: [u8; 32],
-        cancellation: bool,
     );
 }
 
@@ -624,7 +624,6 @@ impl Vault {
             signature: None,
             signed_transaction: None,
             cancellation: None,
-            settlement: None,
         };
         self.references.insert(reference_key, op_id);
         self.wallets
@@ -854,7 +853,6 @@ impl Vault {
                 signature: None,
                 signed_transaction: None,
                 cancellation: None,
-                settlement: None,
             };
             self.operations.insert(op_id, operation);
             self.dao_queue.push(op_id);
@@ -991,13 +989,7 @@ impl Vault {
         operation.signed_transaction = Some(signed_transaction);
     }
 
-    pub fn cancel_nonce(
-        &mut self,
-        op_id: OperationId,
-        gas_limit: U128,
-        max_fee_per_gas: U128,
-        max_priority_fee_per_gas: U128,
-    ) -> Promise {
+    pub fn cancel_nonce(&mut self, op_id: OperationId) -> Promise {
         let mut operation = self
             .operations
             .get(&op_id)
@@ -1007,7 +999,6 @@ impl Vault {
             operation.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
-        require!(operation.settlement.is_none(), "ERR_SETTLEMENT_IN_FLIGHT");
         require!(
             operation.cancellation.is_none(),
             "ERR_CANCELLATION_ALREADY_REQUESTED"
@@ -1022,38 +1013,20 @@ impl Vault {
             "ERR_CANCEL_TOO_EARLY"
         );
         let gas_config = self.gas_config(&operation.role);
-        let previous_fee = operation
-            .cancellation
-            .as_ref()
-            .map_or(operation.transaction.max_fee_per_gas.0, |attempt| {
-                attempt.transaction.max_fee_per_gas.0
-            });
         let wallet = self
             .wallets
             .get(&operation.request.chain_id)
             .expect("ERR_WALLET_NOT_FOUND");
         let sender = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
-        let (transaction, tx_digest) = evm::build_cancellation_transaction(
-            &gas_config,
-            operation.request.chain_id,
-            operation.evm_nonce,
-            sender,
-            previous_fee,
-            gas_limit,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-        );
-        let request_count = operation
-            .cancellation
-            .as_ref()
-            .map_or(1, |attempt| attempt.request_count.saturating_add(1));
+        let (transaction, tx_digest) =
+            evm::build_cancellation_transaction(&gas_config, &operation.transaction, sender);
         operation.cancellation = Some(types::CancellationAttempt {
             transaction,
             tx_digest,
             signature: None,
             signed_transaction: None,
             requested_at_ns: env::block_timestamp(),
-            request_count,
+            request_count: 1,
         });
         self.operations.insert(op_id, operation.clone());
         let path = wallet.mpc_path.clone();
@@ -1232,7 +1205,6 @@ impl Vault {
             report.tx_hash == env::keccak256_array(&signed_transaction),
             "ERR_REPORT_TX_HASH"
         );
-        require!(operation.settlement.is_none(), "ERR_SETTLEMENT_IN_FLIGHT");
         self.used_report_nonces.insert(report.report_nonce);
         match report.kind {
             StatusKind::Confirmed => {
@@ -1545,7 +1517,6 @@ impl Vault {
             ),
             "ERR_OPERATION_TERMINAL"
         );
-        operation.settlement = None;
         if operation.role == DAO_ROLE {
             // No role, budget or reference behind a DAO transaction.
             self.dao_queue.retain(|queued| *queued != op_id);

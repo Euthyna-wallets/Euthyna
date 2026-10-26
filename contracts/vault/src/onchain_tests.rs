@@ -107,17 +107,41 @@ fn signed(v: &mut Vault, id: OperationId) {
     let _ = v.authorize(id, None);
     v.operations.get_mut(&id).unwrap().signed_transaction = Some(vec![2, 4, 6]);
 }
+fn response(payload_hash: [u8; 32]) -> foreign::VerifyResponse {
+    from_value(json!({"payload_hash":hex::encode(payload_hash),"signature":{"scheme":"Secp256k1","big_r":{"affine_point":"00"},"s":{"scalar":"00"},"recovery_id":0}})).unwrap()
+}
+fn proof_args(v: &Vault, id: OperationId, cancel: bool) -> ([u8; 32], [u8; 32]) {
+    let op = v.operations.get(&id).unwrap();
+    let raw = if cancel {
+        op.cancellation
+            .as_ref()
+            .unwrap()
+            .signed_transaction
+            .as_ref()
+            .unwrap()
+    } else {
+        op.signed_transaction.as_ref().unwrap()
+    };
+    let tx_hash = env::keccak256_array(raw);
+    (tx_hash, foreign::payload_hash(6, tx_hash, [9; 32]))
+}
 fn verify(v: &mut Vault, id: OperationId, cancel: bool, valid: bool) {
     let _ = if cancel {
         v.settle_cancellation(id, [9; 32])
     } else {
         v.settle(id, [9; 32])
     };
-    let a = v.operations.get(&id).unwrap().settlement.clone().unwrap();
-    let response=from_value(json!({"payload_hash":if valid {hex::encode(a.expected_payload_hash)}else{hex::encode([0;32])},"signature":{"scheme":"Secp256k1","big_r":{"affine_point":"00"},"s":{"scalar":"00"},"recovery_id":0}})).unwrap();
+    let (tx_hash, expected) = proof_args(v, id, cancel);
     context("vault.testnet", 3);
-    v.on_settle_verified(id, a.tx_hash, a.expected_payload_hash, cancel, Ok(response));
+    v.on_settle_verified(
+        id,
+        cancel,
+        tx_hash,
+        expected,
+        Ok(response(if valid { expected } else { [0; 32] })),
+    );
 }
+
 #[test]
 fn unguarded_success_spends_and_frees() {
     let (mut v, id) = fixture(false, false);
@@ -145,7 +169,6 @@ fn wrong_proof_cannot_refund() {
         v.operations.get(&id).unwrap().state,
         OperationState::PossiblySigned
     );
-    assert!(v.operations.get(&id).unwrap().settlement.is_none());
     assert_eq!(v.allowances.get(&[5; 32]).unwrap().reserved.0, 10);
 }
 #[test]
@@ -153,7 +176,7 @@ fn cancellation_proof_refunds() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
     context("stranger.testnet", 3_600_000_000_003);
-    let _ = v.cancel_nonce(id, U128(21000), U128(4), U128(2));
+    let _ = v.cancel_nonce(id);
     v.operations
         .get_mut(&id)
         .unwrap()
@@ -200,16 +223,36 @@ fn early_release_fails() {
 fn early_cancel_fails() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
-    let _ = v.cancel_nonce(id, U128(21000), U128(4), U128(2));
+    let _ = v.cancel_nonce(id);
 }
 #[test]
-#[should_panic(expected = "ERR_SETTLEMENT_IN_FLIGHT")]
-fn concurrent_settle_fails() {
+fn bogus_proofs_do_not_block_valid_proof_and_success_is_idempotent() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
-    let _ = v.settle(id, [9; 32]);
-    let _ = v.settle_cancellation(id, [9; 32]);
+    for i in 0..20 {
+        context("attacker.testnet", 10 + i);
+        let _ = v.settle(id, [i as u8; 32]);
+    }
+    let (hash, expected) = proof_args(&v, id, false);
+    verify(&mut v, id, false, true);
+    v.on_settle_verified(id, false, hash, expected, Ok(response(expected)));
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Confirmed
+    );
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 90);
+    assert_eq!(
+        v.memberships
+            .get(&MembershipKey {
+                role: "payments".into(),
+                member: "agent.testnet".parse().unwrap()
+            })
+            .unwrap()
+            .used_uses,
+        1
+    );
 }
+
 #[test]
 fn lists_go_through_delay_and_veto() {
     let (mut v, _) = fixture(false, true);
@@ -239,18 +282,26 @@ fn cancel_only_once() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
     context("stranger.testnet", 3_600_000_000_003);
-    let _ = v.cancel_nonce(id, U128(21000), U128(4), U128(2));
-    let _ = v.cancel_nonce(id, U128(21000), U128(8), U128(4));
+    let _ = v.cancel_nonce(id);
+    let _ = v.cancel_nonce(id);
 }
 #[test]
-#[should_panic(expected = "ERR_SETTLEMENT_IN_FLIGHT")]
-fn cannot_timeout_inflight() {
+fn bogus_proofs_do_not_block_timeout() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
-    let _ = v.settle(id, [9; 32]);
+    for i in 0..20 {
+        context("attacker.testnet", 10 + i);
+        let _ = v.settle(id, [i as u8; 32]);
+    }
     context("stranger.testnet", 21_600_000_000_003);
     v.release_unconfirmed(id);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Unconfirmed
+    );
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 90);
 }
+
 #[test]
 #[should_panic(expected = "ERR_CANCELLATION_PROOF_REQUIRED")]
 fn trusted_cancellation_cannot_refund() {
@@ -312,30 +363,23 @@ fn list_name_limit() {
     });
 }
 #[test]
-fn response_binding_rejects_other_chain_and_tx() {
+fn wrong_hash_and_response_do_not_change_state() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
-    let _ = v.settle(id, [9; 32]);
-    let a = v.operations.get(&id).unwrap().settlement.clone().unwrap();
+    let (hash, expected) = proof_args(&v, id, false);
     context("vault.testnet", 4);
-    v.on_settle_verified(
-        id,
-        [0; 32],
-        a.expected_payload_hash,
-        false,
-        Err(PromiseError::Failed),
+    v.on_settle_verified(id, false, [0; 32], expected, Ok(response(expected)));
+    v.on_settle_verified(id, false, hash, expected, Ok(response([0; 32])));
+    v.on_settle_verified(id, false, hash, expected, Err(PromiseError::Failed));
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::PossiblySigned
     );
-    assert!(v.operations.get(&id).unwrap().settlement.is_some());
-    v.on_settle_verified(id, a.tx_hash, [1; 32], false, Err(PromiseError::Failed));
-    assert!(v.operations.get(&id).unwrap().settlement.is_some());
-    v.on_settle_verified(
-        id,
-        a.tx_hash,
-        a.expected_payload_hash,
-        false,
-        Err(PromiseError::Failed),
+    verify(&mut v, id, false, true);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Confirmed
     );
-    assert!(v.operations.get(&id).unwrap().settlement.is_none());
 }
 
 #[test]
@@ -372,18 +416,33 @@ fn supplied_visa_is_verified_and_nonce_consumed() {
 }
 
 #[test]
-fn stale_verification_can_atomically_free_the_queue() {
+fn bogus_proofs_do_not_block_cancellation_and_late_success_does_nothing() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
-    let _ = v.settle(id, [9; 32]);
+    for i in 0..20 {
+        context("attacker.testnet", 10 + i);
+        let _ = v.settle(id, [i as u8; 32]);
+    }
+    context("stranger.testnet", 3_600_000_000_003);
+    let _ = v.cancel_nonce(id);
+    let op = v.operations.get_mut(&id).unwrap();
+    let cancel = op.cancellation.as_mut().unwrap();
+    assert_eq!(cancel.transaction.max_fee_per_gas.0, 4);
+    assert_eq!(cancel.transaction.max_priority_fee_per_gas.0, 2);
+    assert_eq!(cancel.transaction.nonce, op.transaction.nonce);
+    cancel.signed_transaction = Some(vec![8, 9]);
+    let (hash, expected) = proof_args(&v, id, true);
     context("stranger.testnet", 21_600_000_000_003);
-    v.clear_stale_settlement(id);
+    v.release_unconfirmed(id);
+    context("vault.testnet", 21_600_000_000_004);
+    v.on_settle_verified(id, true, hash, expected, Ok(response(expected)));
     assert_eq!(
         v.operations.get(&id).unwrap().state,
         OperationState::Unconfirmed
     );
     assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 90);
 }
+
 #[test]
 #[should_panic(expected = "ERR_CONDITIONS_CHANGED")]
 fn removed_supplier_is_rechecked_before_signature() {
@@ -443,4 +502,28 @@ fn migration_batch_is_one_queued_rule() {
     context("stranger.testnet", 16);
     v.execute_rule_change(rule.queue_id);
     assert_eq!(v.get_address_list("suppliers".into()).len(), 3);
+}
+
+#[test]
+fn zero_original_tip_still_produces_a_replaceable_cancellation() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    v.operations
+        .get_mut(&id)
+        .unwrap()
+        .transaction
+        .max_priority_fee_per_gas = U128(0);
+    context("attacker.testnet", 3_600_000_000_003);
+    let _ = v.cancel_nonce(id);
+    let cancellation = v
+        .operations
+        .get_mut(&id)
+        .unwrap()
+        .cancellation
+        .as_mut()
+        .unwrap();
+    assert_eq!(cancellation.transaction.max_priority_fee_per_gas.0, 1);
+    cancellation.signed_transaction = Some(vec![8, 9]);
+    verify(&mut v, id, true, true);
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 100);
 }

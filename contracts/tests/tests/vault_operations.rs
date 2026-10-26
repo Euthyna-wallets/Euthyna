@@ -1,7 +1,5 @@
 mod vault_common;
 
-use std::time::Duration;
-
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use near_workspaces::types::Gas;
@@ -257,8 +255,15 @@ async fn tracks_allowance_reservation_spend_and_refill() -> Result<()> {
     assert_eq!(spent["balance"], "900");
     assert_eq!(spent["reserved"], "0");
 
-    tokio::time::sleep(Duration::from_secs(11)).await;
-    fixture.worker.fast_forward(1).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        spent["timestamp_ns"]
+            .as_str()
+            .expect("allowance timestamp")
+            .parse::<u64>()?
+            + 10_000_000_000,
+    )
+    .await?;
     let refilled: Value = fixture
         .vault
         .view("get_allowance")
@@ -301,7 +306,16 @@ async fn queues_rule_changes_and_vetoes_only_the_selected_entry() -> Result<()> 
         .transact()
         .await?
         .into_result()?;
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_rule_change")
@@ -353,7 +367,14 @@ async fn requires_cosignature_and_delays_high_value_operations_before_mpc() -> R
         .transact()
         .await?;
     assert_failure_contains(&early, "ERR_OPERATION_DELAY");
-    fixture.worker.fast_forward(15).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        operation["execute_after_ns"]
+            .as_str()
+            .expect("operation timestamp")
+            .parse()?,
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_queued_operation")
@@ -991,7 +1012,16 @@ async fn dao_transactions_wait_for_the_veto_window_then_run_in_order() -> Result
 
     // Veto window still open.
     assert_failure_contains(&start_dao(&fixture).await?, "ERR_VETO_WINDOW_OPEN");
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
 
     start_dao(&fixture).await?.into_result()?;
     let first = operation_by_id(&fixture, &ids[0]).await?;
@@ -1036,7 +1066,16 @@ async fn council_vetoes_a_dao_transaction_and_agents_keep_working() -> Result<()
         .await?
         .into_result()?;
     assert_eq!(operation_by_id(&fixture, &ids[0]).await?["state"], "Vetoed");
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     assert_failure_contains(&start_dao(&fixture).await?, "ERR_NO_DAO_TRANSACTION");
     // The wallet was never held: an agent can still prepare.
     let operation = prepare(&fixture, "AFTER-VETO", 100).await?;

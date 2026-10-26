@@ -21,11 +21,7 @@ const requestSchema = z.object({
   opId: z.array(z.number().int().min(0).max(255)).length(32),
 });
 
-const cancellationSchema = requestSchema.extend({
-  gasLimit: z.string().regex(/^\d+$/),
-  maxFeePerGas: z.string().regex(/^\d+$/),
-  maxPriorityFeePerGas: z.string().regex(/^\d+$/),
-});
+const cancellationSchema = requestSchema;
 
 const createAgentSchema = z.object({
   name: z.string().min(1).max(80),
@@ -341,9 +337,6 @@ export function createApp({
     const nearTransactionHash = await near.cancelNonce(
       input.vaultAccountId,
       input.opId,
-      input.gasLimit,
-      input.maxFeePerGas,
-      input.maxPriorityFeePerGas,
     );
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,

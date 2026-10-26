@@ -57,7 +57,16 @@ async fn dao_vote_queues_rule_then_permissionless_execution_waits_for_delay() ->
         .transact()
         .await?;
     assert_failure_contains(&early, "ERR_RULE_DELAY");
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_rule_change")
@@ -136,7 +145,16 @@ async fn only_dao_can_queue_rules_but_one_council_member_can_target_veto() -> Re
         .transact()
         .await?
         .into_result()?;
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_rule_change")
@@ -209,7 +227,16 @@ async fn final_vote_and_rule_execution_gas_are_measured() -> Result<()> {
     let vote_outcome = vote(&fixture, &fixture.council[1], proposal_id, kind).await?;
     let vote_gas = vote_outcome.total_gas_burnt.as_gas();
     vote_outcome.into_result()?;
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     let execute = fixture
         .outsider
         .call(fixture.vault.id(), "execute_rule_change")

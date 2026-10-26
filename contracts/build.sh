@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+export RUSTUP_TOOLCHAIN=1.99.1
 
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path vault/Cargo.toml
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path dao-factory/Cargo.toml
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path mock-mpc/Cargo.toml
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path test-ft/Cargo.toml
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path shares/Cargo.toml
-RUSTUP_TOOLCHAIN=1.99.1 cargo near build non-reproducible-wasm --manifest-path registry/Cargo.toml
+# cargo near validates the SDK's minimum protocol and embeds the contract ABI.
+for contract in vault dao-factory mock-mpc test-ft shares registry; do
+  cargo near build non-reproducible-wasm --locked --manifest-path "$contract/Cargo.toml"
+done
 
-cp target/near/vault/vault.wasm res/vault.wasm
-cp target/near/dao_factory/dao_factory.wasm res/dao_factory.wasm
-cp target/near/mock_mpc/mock_mpc.wasm res/mock_mpc.wasm
-cp target/near/test_ft/test_ft.wasm res/test_ft.wasm
-cp target/near/shares/shares.wasm res/shares.wasm
-cp target/near/registry/registry.wasm res/registry.wasm
-
+build_target_dir=$(cargo metadata --format-version 1 --no-deps --manifest-path Cargo.toml | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+mkdir -p res
+for contract in vault dao_factory mock_mpc test_ft shares registry; do
+  cp "$build_target_dir/near/$contract/$contract.wasm" "res/$contract.wasm"
+done
+sha256sum res/vault.wasm res/dao_factory.wasm res/mock_mpc.wasm res/test_ft.wasm res/shares.wasm res/registry.wasm

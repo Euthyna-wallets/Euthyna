@@ -81,13 +81,7 @@ export interface WorkerNearGateway {
   releaseUnconfirmed?(vaultAccountId: string, opId: number[]): Promise<string>;
   reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string>;
   expireOperation(vaultAccountId: string, opId: number[]): Promise<string>;
-  cancelNonce(
-    vaultAccountId: string,
-    opId: number[],
-    gasLimit: string,
-    maxFeePerGas: string,
-    maxPriorityFeePerGas: string,
-  ): Promise<string>;
+  cancelNonce(vaultAccountId: string, opId: number[]): Promise<string>;
   viewFunction<T>(accountId: string, methodName: string, args?: Record<string, unknown>): Promise<T>;
 }
 
@@ -96,6 +90,7 @@ export interface WorkerBaseGateway {
   broadcastRaw(rawTransaction: number[] | null): Promise<Hex>;
   receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash?: Hex } | null>;
   blockNumber(): Promise<bigint>;
+  finalizedBlockNumber(): Promise<bigint>;
 }
 
 export interface WorkerConfig {
@@ -119,9 +114,6 @@ function nextRetry(config: WorkerConfig, attempts: number, now: Date): Date {
   return new Date(now.getTime() + delay);
 }
 
-function bumpedFee(value: bigint): bigint {
-  return value + (value / 8n > 0n ? value / 8n : 1n);
-}
 
 export class PrismaWorkerStore implements WorkerStore {
   constructor(
@@ -509,6 +501,10 @@ export class OperationWorker {
       await this.schedule(record, "Broadcast");
       return;
     }
+    if (receipt.blockNumber > await this.base.finalizedBlockNumber()) {
+      await this.schedule(record, "Broadcast", "waiting for foreign-chain finality");
+      return;
+    }
     if (!receipt.blockHash || !this.near.settle) throw new Error("MPC settlement gateway requires a receipt block hash");
     await this.near.settle(record.vaultAccountId, opBytes(record.opId), receipt.blockHash);
     const settled = await this.near.getOperation(record.vaultAccountId, opBytes(record.opId));
@@ -589,6 +585,10 @@ export class OperationWorker {
       });
       return;
     }
+    if (receipt.blockNumber > await this.base.finalizedBlockNumber()) {
+      await this.schedule(record, "CancellationBroadcast", "waiting for foreign-chain finality");
+      return;
+    }
     if (!receipt.blockHash || !this.near.settle) throw new Error("MPC settlement gateway requires a receipt block hash");
     await this.near.settle(record.vaultAccountId, opBytes(record.opId), receipt.blockHash, true);
     await this.store.update(record, {
@@ -612,30 +612,7 @@ export class OperationWorker {
       await this.schedule(record, record.txHash ? "Broadcast" : "PossiblySigned", "waiting for cancellation timeout or existing cancellation proof");
       return;
     }
-    const role = await this.near.viewFunction<{ config: {gas_limit:string;max_fee_per_gas:string;max_priority_fee_per_gas:string;max_total_fee:string} }>(record.vaultAccountId, "get_role", { role: operation.role });
-
-    const previous = operation.transaction;
-    const maximumFee = BigInt(role.config.max_fee_per_gas);
-    const maximumPriority = BigInt(role.config.max_priority_fee_per_gas);
-    const gasLimit = 21_000n;
-    if (gasLimit > BigInt(role.config.gas_limit)) {
-      throw new Error("cancellation gas limit exceeds governed role limit");
-    }
-    const maxFee = bumpedFee(BigInt(previous.max_fee_per_gas));
-    const maxPriority = bumpedFee(BigInt(previous.max_priority_fee_per_gas));
-    if (maxFee > maximumFee || maxPriority > maximumPriority) {
-      throw new Error("cancellation fee bump exceeds governed role limits");
-    }
-    if (maxFee * gasLimit > BigInt(role.config.max_total_fee)) {
-      throw new Error("cancellation total fee exceeds governed role limit");
-    }
-    const nearTransactionHash = await this.near.cancelNonce(
-      record.vaultAccountId,
-      opId,
-      gasLimit.toString(),
-      maxFee.toString(),
-      maxPriority.toString(),
-    );
+    const nearTransactionHash = await this.near.cancelNonce(record.vaultAccountId, opId);
     await this.store.update(record, {
       state: "CancellationRequested",
       nearCancellationTxHash: nearTransactionHash,

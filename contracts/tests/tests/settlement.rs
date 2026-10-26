@@ -78,3 +78,101 @@ async fn latest_finality_is_rejected_by_mock_verifier() -> Result<()> {
     assert_failure_contains(&result, "ERR_FINALITY");
     Ok(())
 }
+
+async fn signed_operation(f: &Fixture, reference: &str) -> Result<Value> {
+    let op = prepare(f, reference, 100).await?;
+    f.agent
+        .call(f.vault.id(), "authorize")
+        .args_json(json!({"op_id": op["op_id"], "approval": null}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    get_operation(f, &op).await
+}
+async fn pending_bogus_proofs(f: &Fixture, op: &Value) -> Result<()> {
+    f.mpc
+        .call("set_mode")
+        .args_json(json!({"mode":"Timeout"}))
+        .transact()
+        .await?
+        .into_result()?;
+    for i in 0..5 {
+        let _pending = f
+            .outsider
+            .call(f.vault.id(), "settle")
+            .args_json(json!({"op_id":op["op_id"],"block_hash":vec![i;32]}))
+            .gas(Gas::from_tgas(100))
+            .transact_async()
+            .await?;
+    }
+    tests::wait_until_timestamp(
+        &f.worker,
+        f.worker.view_block().await?.timestamp() + 1_000_000_000,
+    )
+    .await?;
+    assert!(
+        f.mpc
+            .view("has_pending_verification")
+            .await?
+            .json::<bool>()?
+    );
+    f.mpc
+        .call("set_mode")
+        .args_json(json!({"mode":"Success"}))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+#[tokio::test]
+#[serial]
+async fn unresolved_bogus_proofs_do_not_block_valid_settlement() -> Result<()> {
+    let f = setup().await?;
+    let op = signed_operation(&f, "CONCURRENT-PROOFS").await?;
+    pending_bogus_proofs(&f, &op).await?;
+    prove(&f, &op, false).await?;
+    assert_eq!(get_operation(&f, &op).await?["state"], "Confirmed");
+    Ok(())
+}
+#[tokio::test]
+#[serial]
+async fn zero_tip_input_cannot_poison_cancellation_or_refund() -> Result<()> {
+    let f = setup().await?;
+    apply_rule_change(&f.owner,&f.outsider,&f.worker,&f.vault,json!({"SetSettlementConfig":{"config":{"cancel_after_ns":"1","unconfirmed_after_ns":"3600000000001","foreign_tx_domain_id":3,"mainnet":false}}})).await?;
+    let op = signed_operation(&f, "CANCEL-ZERO-TIP").await?;
+    pending_bogus_proofs(&f, &op).await?;
+    let attack=f.outsider.call(f.vault.id(),"cancel_nonce").args_json(json!({"op_id":op["op_id"],"gas_limit":"0","max_fee_per_gas":"0","max_priority_fee_per_gas":"0"})).gas(Gas::from_tgas(100)).transact().await?;
+    if attack.is_failure() {
+        assert!(get_operation(&f, &op).await?["cancellation"].is_null());
+        f.outsider
+            .call(f.vault.id(), "cancel_nonce")
+            .args_json(json!({"op_id":op["op_id"]}))
+            .gas(Gas::from_tgas(100))
+            .transact()
+            .await?
+            .into_result()?;
+    }
+    let cancelled = get_operation(&f, &op).await?;
+    let original_tip: u128 = cancelled["transaction"]["max_priority_fee_per_gas"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    let tip: u128 = cancelled["cancellation"]["transaction"]["max_priority_fee_per_gas"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    assert!(tip >= original_tip + original_tip.div_ceil(8).max(1));
+    assert!(cancelled["cancellation"]["signed_transaction"].is_array());
+    prove(&f, &cancelled, true).await?;
+    assert_eq!(get_operation(&f, &op).await?["state"], "Cancelled");
+    let allowance: Value = f
+        .vault
+        .view("get_allowance")
+        .args_json(json!({"key":ALLOWANCE_KEY}))
+        .await?
+        .json()?;
+    assert_eq!(allowance["reserved"], "0");
+    assert_eq!(allowance["balance"], ALLOWANCE_BALANCE.to_string());
+    Ok(())
+}

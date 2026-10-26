@@ -1,5 +1,5 @@
 import { bytesToHex, encodeFunctionData, erc20Abi, hexToBytes, type Hex } from "viem";
-import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type CancellationFees, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
+import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
 
 export interface DirectVault {
   identity(): { member: string; role: string; chain_id: number };
@@ -13,7 +13,6 @@ export interface DirectOperation extends Record<string, unknown> {
   state: string; signed_transaction: number[] | null;
   cancellation: { signed_transaction: number[] | null } | null;
   possibly_signed_at_ns: string | null;
-  settlement: unknown | null;
 }
 export type Rpc = <T>(method: string, params: unknown[]) => Promise<T>;
 export function publicRpc(url: string): Rpc {
@@ -77,40 +76,42 @@ export class OnchainAgentClient {
     if (op.state !== "PossiblySigned") return op;
     const config = await this.vault.view<{ cancel_after_ns: string; unconfirmed_after_ns: string }>("get_settlement_config");
     const age = BigInt(Date.now()) * 1_000_000n - BigInt(op.possibly_signed_at_ns ?? "0");
-    if (op.settlement) {
-      if (age >= BigInt(config.unconfirmed_after_ns)) {
-        await this.vault.action("clear_stale_settlement", { op_id });
-        op = await this.vault.view<DirectOperation>("get_operation", { op_id });
-        if (op.state !== "PossiblySigned") return op;
-      }
-      else return op;
-    }
-    const cancellation = Boolean(op.cancellation?.signed_transaction);
-    const raw = cancellation ? op.cancellation?.signed_transaction : op.signed_transaction;
-    if (raw) {
-      const hex = bytesToHex(Uint8Array.from(raw));
-      // eth_sendRawTransaction may reject an already-known transaction; obtain its hash locally.
-      const { keccak256 } = await import("viem");
-      const hash = keccak256(hex);
+    const candidates = [
+      { raw: op.signed_transaction, cancellation: false },
+      { raw: op.cancellation?.signed_transaction, cancellation: true },
+    ].filter((candidate) => candidate.raw);
+    const { keccak256 } = await import("viem");
+    const inspected = await Promise.all(candidates.map(async (candidate) => {
+      const raw = bytesToHex(Uint8Array.from(candidate.raw!));
+      const hash = keccak256(raw);
       const receipt = await this.rpc<{ blockHash: Hex; status: Hex } | null>("eth_getTransactionReceipt", [hash]);
-      if (!receipt) {
-        try { await this.rpc("eth_sendRawTransaction", [hex]); } catch (error) {
-          if (age < BigInt(config.unconfirmed_after_ns)) throw error;
-        }
-      } else if (receipt.status === "0x1") {
-        const finalized = await this.rpc<{ hash: Hex; number: Hex }>("eth_getBlockByNumber", ["finalized", false]);
-        const block = await this.rpc<{ number: Hex }>("eth_getBlockByHash", [receipt.blockHash, false]);
-        if (BigInt(finalized.number) >= BigInt(block.number)) {
-          await this.vault.action(cancellation ? "settle_cancellation" : "settle", { op_id, block_hash: Array.from(hexToBytes(receipt.blockHash)) });
-          return this.vault.view<DirectOperation>("get_operation", { op_id });
-        }
+      return { ...candidate, raw, hash, receipt };
+    }));
+    // The original can win even after a cancellation has been signed.
+    for (const candidate of inspected) {
+      const receipt = candidate.receipt;
+      if (receipt?.status !== "0x1") continue;
+      const finalized = await this.rpc<{ number: Hex }>("eth_getBlockByNumber", ["finalized", false]);
+      const block = await this.rpc<{ number: Hex }>("eth_getBlockByHash", [receipt.blockHash, false]);
+      if (BigInt(finalized.number) >= BigInt(block.number)) {
+        await this.vault.action(candidate.cancellation ? "settle_cancellation" : "settle", { op_id, block_hash: Array.from(hexToBytes(receipt.blockHash)) });
+        const updated = await this.vault.view<DirectOperation>("get_operation", { op_id });
+        if (updated.state !== "PossiblySigned") return updated;
+      }
+    }
+    // Broadcast the cancellation preferentially, but only after inspecting both receipts.
+    const pending = inspected.find((candidate) => candidate.cancellation) ?? inspected[0];
+    if (pending && !pending.receipt && !inspected.some((candidate) => candidate.receipt)) {
+      try { await this.rpc("eth_sendRawTransaction", [pending.raw]); } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+        if (age < BigInt(config.unconfirmed_after_ns) && !message.includes("already known") && !message.includes("already imported")) throw error;
       }
     }
     if (age >= BigInt(config.unconfirmed_after_ns)) await this.vault.action("release_unconfirmed", { op_id });
     return this.vault.view<DirectOperation>("get_operation", { op_id });
   }
-  async cancel(id: Hex, fees: CancellationFees) {
-    await this.vault.cancelNonce(operationIdBytes(id), fees);
+  async cancel(id: Hex) {
+    await this.vault.cancelNonce(operationIdBytes(id));
     return this.status(id);
   }
   async call(request: import("./index.js").OmniRolesOperationRequest) {

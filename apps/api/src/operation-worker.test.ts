@@ -132,7 +132,6 @@ class FakeNear implements WorkerNearGateway {
   settlements = 0;
   cancellations = 0;
   queuedExecutions = 0;
-  cancellationFees: Array<{ gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> = [];
   settleFailsAfterCommit = false;
   status: NearTransactionStatus = {};
   walletState: Record<string, unknown> = { address: Array(20).fill(0x11) };
@@ -198,12 +197,9 @@ class FakeNear implements WorkerNearGateway {
   cancelNonce(
     _vault: string,
     _opId: number[],
-    gasLimit: string,
-    maxFeePerGas: string,
-    maxPriorityFeePerGas: string,
   ): Promise<string> {
     this.cancellations += 1;
-    this.cancellationFees.push({ gasLimit, maxFeePerGas, maxPriorityFeePerGas });
+
     this.operation = {
       ...this.operation,
       cancellation: {
@@ -211,9 +207,9 @@ class FakeNear implements WorkerNearGateway {
           ...this.operation.transaction,
           to: Array(20).fill(9),
           input: [],
-          gas_limit: gasLimit,
-          max_fee_per_gas: maxFeePerGas,
-          max_priority_fee_per_gas: maxPriorityFeePerGas,
+          gas_limit: "21000",
+          max_fee_per_gas: "40",
+          max_priority_fee_per_gas: "20",
         },
         tx_digest: Array(32).fill(8),
         signature: null,
@@ -247,6 +243,7 @@ class FakeBase implements WorkerBaseGateway {
   broadcasts: Array<number[] | null> = [];
   receipts = new Map<Hex, { status: "success" | "reverted"; blockNumber: bigint } | null>();
   head = 104n;
+  finalized = 104n;
 
   rawTransactionHash(raw: number[] | null): Hex {
     return raw?.[0] === 9 ? cancellationHash : originalHash;
@@ -261,6 +258,8 @@ class FakeBase implements WorkerBaseGateway {
     const receipt = this.receipts.get(hash);
     return Promise.resolve(receipt ? { ...receipt, blockHash: `0x${"09".repeat(32)}` as Hex } : null);
   }
+
+  finalizedBlockNumber(): Promise<bigint> { return Promise.resolve(this.finalized); }
 
   blockNumber(): Promise<bigint> {
     return Promise.resolve(this.head);
@@ -406,11 +405,7 @@ describe("OperationWorker", () => {
       state: "CancellationRequested",
       nearCancellationTxHash: "near-cancel-1",
     });
-    expect(test.near.cancellationFees).toEqual([{
-      gasLimit: "21000",
-      maxFeePerGas: "22",
-      maxPriorityFeePerGas: "11",
-    }]);
+
 
     test.near.operation.cancellation!.signature = {
       big_r: [2, ...Array(32).fill(3)],
@@ -505,3 +500,26 @@ describe("OperationWorker", () => {
 
 });
 
+
+
+describe("worker finality", () => {
+  it("waits for finalized state before asking MPC to verify a receipt", async () => {
+    const test=harness();test.store.operation.txHash=originalHash;test.store.operation.broadcastAt=new Date(nowStart);
+    test.base.receipts.set(originalHash,{status:"success",blockNumber:99n});test.base.finalized=98n;
+    await test.createWorker().tick();expect(test.near.settlements).toBe(0);
+    expect(test.store.operation.lastError).toBe("waiting for foreign-chain finality");
+    test.base.finalized=99n;test.advance(1_000);await test.createWorker().tick();expect(test.near.settlements).toBe(1);
+  });
+});
+
+it("waits for cancellation finality before asking MPC", async () => {
+  const test=harness();
+  await test.near.cancelNonce("vault.testnet",Array(32).fill(1));
+  test.near.operation.cancellation!.signature={big_r:[2,...Array(32).fill(3)],s:Array(32).fill(4),recovery_id:0};
+  test.near.operation.cancellation!.signed_transaction=[9,1];
+  test.store.operation.cancellationTxHash=cancellationHash;
+  test.base.receipts.set(cancellationHash,{status:"success",blockNumber:100n});test.base.finalized=99n;
+  await test.createWorker().tick();expect(test.near.settlements).toBe(0);
+  expect(test.store.operation.lastError).toBe("waiting for foreign-chain finality");
+  test.base.finalized=100n;test.advance(1_000);await test.createWorker().tick();expect(test.near.settlements).toBe(1);
+});

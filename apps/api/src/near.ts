@@ -311,24 +311,8 @@ export class NearClient {
     }
   }
 
-  async cancelNonce(
-    vaultAccountId: string,
-    opId: number[],
-    gasLimit: string,
-    maxFeePerGas: string,
-    maxPriorityFeePerGas: string,
-  ): Promise<string> {
-    return this.functionCall(
-      vaultAccountId,
-      "cancel_nonce",
-      {
-        op_id: opId,
-        gas_limit: gasLimit,
-        max_fee_per_gas: maxFeePerGas,
-        max_priority_fee_per_gas: maxPriorityFeePerGas,
-      },
-      "120000000000000",
-    );
+  async cancelNonce(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "cancel_nonce", { op_id: opId }, "120000000000000");
   }
 
   /** Function call signed by the relayer (MandateOS pays gas and deposits). */

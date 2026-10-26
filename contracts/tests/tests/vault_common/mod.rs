@@ -486,7 +486,14 @@ pub async fn apply_rule_change(
         .await?
         .into_result()?
         .json()?;
-    worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        worker,
+        queued["execute_after_ns"]
+            .as_str()
+            .expect("queued timestamp")
+            .parse()?,
+    )
+    .await?;
     executor
         .call(vault.id(), "execute_rule_change")
         .args_json(json!({"queue_id": queued["queue_id"]}))

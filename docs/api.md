@@ -18,7 +18,7 @@ The MCP server uses NEAR RPC and an EVM RPC directly; no API key or server is re
 
 Call `prepare`, then `authorize` with `approval: null`. Read `get_operation` to obtain the exact signed transaction, broadcast it, and resume through the MCP `status` tool. It waits for finalized foreign-chain state before calling `settle`. Queued operations can be resumed after their delay; any configured human co-signature is still required. `cancel` requests the same-nonce self transaction after the on-chain timeout; `status` broadcasts and settles it. After the unconfirmed deadline, `release_unconfirmed` frees the wallet with budget spent.
 
-Vault settlement methods accept `{ op_id: number[32], block_hash: number[32] }`. The untrusted block-hash hint lets the vault calculate the exact MPC V1 expected payload hash; MPC must verify finalized success for that transaction and chain. Failed transactions do not produce refund proofs. `settle_cancellation` uses the stored cancellation transaction. `get_settlement_config` exposes the configured delays. `clear_stale_settlement` can clear a lost verification callback after ten minutes.
+Vault settlement methods accept `{ op_id: number[32], block_hash: number[32] }`. The untrusted block-hash hint lets the vault calculate the exact MPC V1 expected payload hash; MPC must verify finalized success for that transaction and chain. Failed transactions do not produce refund proofs. `settle_cancellation` uses the stored cancellation transaction. `get_settlement_config` exposes the configured delays. There is no in-flight lock: concurrent proof requests never block cancellation, another proof or timeout release. The first valid callback wins; callbacks after a terminal state do nothing, including a cancellation proof received after Unconfirmed.
 
 `get_address_list({ list: "suppliers" })` returns `{address: number[20], label: string}[]`. Supplier changes use DAO proposals and `queue_rule_change`, not the database approval mechanism. `GET /v1/console/omniroles/suppliers` reads this list; `POST /v1/console/omniroles/proposals/suppliers` accepts `{ entries: [{address: "0x…", label}], migrate?: boolean }` and returns the unsigned DAO proposal. Migration loads active database suppliers and is refused when the on-chain list is already populated. The browser independently checks the proposal before signing.
 
@@ -284,8 +284,7 @@ request.
 
 ### Emergency
 
-`POST /v1/emergency/cancel` (`{ vaultAccountId, opId, gasLimit, maxFeePerGas,
-maxPriorityFeePerGas }`) replaces a signed but unconfirmed operation with a
+`POST /v1/emergency/cancel` (`{ vaultAccountId, opId }`) replaces a signed but unconfirmed operation with a
 0-value transaction at the same nonce. This works only in state
 `PossiblySigned`.
 
@@ -305,3 +304,12 @@ The API keeps each vault's NEAR storage funded: when it has less than 0.5 NEAR
 free, the API sends it 1 NEAR from the relayer. This NEAR pays for storage
 only; company funds never move.
 
+
+
+### Cancellation fees and finality
+
+The vault method `cancel_nonce` accepts only `{ op_id }`; the MCP `cancel` tool accepts only `{ opId }`. The vault sets gas to 21,000 and computes twice the original fee cap and priority fee, bounded by the role's per-gas and total-fee caps. Both fields must increase by at least 12.5%, rounded up with a minimum increment of one. Insufficient policy headroom rejects the call before recording a cancellation. No caller can poison the one-shot cancellation with a zero priority fee.
+
+Both the direct SDK and worker wait until the receipt block is at or below `eth_getBlockByNumber("finalized")` before requesting MPC verification. When a cancellation exists, SDK `status` checks both original and cancellation receipts and proves whichever finalized successfully.
+
+Build/validation versions: Rust 1.99.1, cargo-near 0.22.0, near-sdk / near-contract-standards 5.29.1 (SDK minimum protocol 84), near-workspaces 0.23.0, nearcore sandbox 2.14.0. Build checked-in WASM through `contracts/build.sh`; see `Architecture.md` and the contract CI workflow for the verified image digest, sandbox archive checksum and `NEAR_SANDBOX_BIN_PATH` setup.

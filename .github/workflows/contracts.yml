@@ -1,0 +1,98 @@
+name: Contract validation
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: sourcescan/cargo-near:0.22.0-rust-1.99.1@sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb
+      options: --ulimit nofile=65535:65535
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_BUILD_JOBS: '2'
+      RUSTUP_TOOLCHAIN: 1.99.1
+      NEAR_SANDBOX_BIN_PATH: /tmp/mandateos-near-2.14.0/Linux-x86_64/near-sandbox
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain and build dependencies
+        run: |
+          apt-get update
+          apt-get install -y pkg-config libssl-dev clang cmake python3 curl
+          rustup component add rustfmt clippy --toolchain 1.99.1
+          rustup target add wasm32-unknown-unknown --toolchain 1.99.1
+          cargo near --version
+          rustc --version
+      - name: Install and verify nearcore 2.14.0 sandbox
+        run: |
+          mkdir -p /tmp/mandateos-near-2.14.0
+          curl --fail --location --silent --show-error https://s3-us-west-1.amazonaws.com/build.nearprotocol.com/nearcore/Linux-x86_64/2.14.0/near-sandbox.tar.gz -o /tmp/near-sandbox.tar.gz
+          echo 'a0ba004218b218bd74351795e7ce2eda4a2b6af5cd3e252bd5e8bfe3c8f2e691  /tmp/near-sandbox.tar.gz' | sha256sum --check
+          tar --no-same-owner -xzf /tmp/near-sandbox.tar.gz -C /tmp/mandateos-near-2.14.0
+          ulimit -n 65535
+          "$NEAR_SANDBOX_BIN_PATH" --version
+      - name: Build all contracts with cargo near
+        working-directory: contracts
+        run: bash build.sh
+      - name: Format, Clippy and all unit tests
+        working-directory: contracts
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --workspace --lib
+          cargo test -p omniroles-conditions
+      - name: Complete sandbox suite
+        working-directory: contracts
+        run: |
+          ulimit -n 65535
+          set -o pipefail
+          cargo test -p tests --no-fail-fast -- --test-threads=1 2>&1 | tee /tmp/sandbox-results.log
+      - name: Report results per file
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,re
+          source=Path('/tmp/sandbox-results.log')
+          if source.exists():
+              current=''
+              lines=['| Test file | Result |','| --- | --- |']
+              for line in source.read_text().splitlines():
+                  if 'Running ' in line: current=line.strip().split('Running ',1)[1].split(' (',1)[0]
+                  if line.startswith('test result:'): lines.append(f'| {current} | {line} |')
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f: f.write('\n'.join(lines)+'\n')
+          PY
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: nearcore-2.14.0-sandbox-results
+          path: /tmp/sandbox-results.log
+          if-no-files-found: ignore
+  javascript:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Install pnpm 12 and workspace
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile
+      - name: Typecheck then API, console, MCP and SDK tests
+        run: |
+          pnpm typecheck
+          pnpm --filter @mandateos/api test
+          pnpm --filter @mandateos/console test
+          pnpm --filter @mandateos/mcp test
+          pnpm --filter @mandateos/sdk test

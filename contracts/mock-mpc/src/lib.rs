@@ -76,6 +76,14 @@ impl MockMpc {
         require!(evm.len() == 1, "ERR_CHAIN");
         let body = evm.values().next().unwrap();
         require!(body["finality"] == "Finalized", "ERR_FINALITY");
+        // A real mismatching proof may never be answered. Simulate an unresolved
+        // verification without letting it prevent other requests from completing.
+        if self.mode == Mode::Timeout {
+            let (promise, id) =
+                Promise::new_yield("on_foreign_yield", b"{}", Gas::from_tgas(5), GasWeight(1));
+            self.pending_foreign = Some(id);
+            return PromiseOrValue::Promise(promise);
+        }
         require!(
             Some(&request.to_string()) == self.foreign_request.as_ref(),
             "ERR_REQUEST_BINDING"
@@ -88,13 +96,11 @@ impl MockMpc {
                 .expect("ERR_FIXTURE_JSON"),
             ),
             Mode::Fail => env::panic_str("ERR_MOCK_VERIFY"),
-            Mode::Timeout => {
-                let (promise, id) =
-                    Promise::new_yield("on_foreign_yield", b"{}", Gas::from_tgas(5), GasWeight(1));
-                self.pending_foreign = Some(id);
-                PromiseOrValue::Promise(promise)
-            }
+            Mode::Timeout => unreachable!(),
         }
+    }
+    pub fn has_pending_verification(&self) -> bool {
+        self.pending_foreign.is_some()
     }
     pub fn respond_verify_foreign_tx(&mut self) {
         let id = self.pending_foreign.take().expect("ERR_NO_PENDING_VERIFY");

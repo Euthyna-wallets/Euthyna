@@ -44,12 +44,7 @@ describe("MandateMcpTools", () => {
       reference: "INV-1",
     })).resolves.toMatchObject({ outcome: "authorized" });
     await expect(tools.status({ opId: `0x${"01".repeat(32)}` })).resolves.toEqual({ status: "Broadcast" });
-    await expect(tools.cancel({
-      opId: `0x${"01".repeat(32)}`,
-      gasLimit: "21000",
-      maxFeePerGas: "30000000000",
-      maxPriorityFeePerGas: "2000000000",
-    })).resolves.toMatchObject({ nearTransactionHash: "near-cancel" });
+    await expect(tools.cancel({ opId: `0x${"01".repeat(32)}`    })).resolves.toMatchObject({ nearTransactionHash: "near-cancel" });
     expect(calls).toEqual(["cancel_nonce", "record_cancellation"]);
   });
 
@@ -86,3 +81,4 @@ describe("MandateMcpTools", () => {
     await expect(tools.mandate()).resolves.toEqual({ role: "suppliers", budgets: [] });
   });
 });
+

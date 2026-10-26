@@ -346,22 +346,23 @@ async fn unlocked_shares_cannot_vote_twice() -> Result<()> {
         .as_str()
         .unwrap_or_default()
         .parse()?;
-    while fixture.worker.view_block().await?.timestamp() < cooling_until {
-        fixture.worker.fast_forward(50).await?;
-    }
+    tests::wait_until_timestamp(&fixture.worker, cooling_until).await?;
     transfer("300").await?.into_result()?;
     assert_eq!(holder(&fixture, &fixture.carol).await?["balance"], "300");
     Ok(())
 }
 
-async fn epoch(fixture: &Fixture) -> Result<u64> {
-    let info: Value = fixture.shares.view("info").await?.json()?;
-    Ok(info["current_epoch"].as_u64().unwrap_or_default())
-}
-
 async fn advance_to_epoch(fixture: &Fixture, target: u64) -> Result<()> {
-    while epoch(fixture).await? < target {
-        fixture.worker.fast_forward(10).await?;
+    let info: Value = fixture.shares.view("info").await?.json()?;
+    let current = info["current_epoch"].as_u64().expect("current epoch");
+    if current < target {
+        let end: u64 = info["current_epoch_ends_ns"]
+            .as_str()
+            .expect("epoch end")
+            .parse()?;
+        let epoch_ns: u64 = info["epoch_ns"].as_str().expect("epoch duration").parse()?;
+        tests::wait_until_timestamp(&fixture.worker, end + (target - current - 1) * epoch_ns)
+            .await?;
     }
     Ok(())
 }

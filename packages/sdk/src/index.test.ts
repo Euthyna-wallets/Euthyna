@@ -121,11 +121,7 @@ describe("MandateAgentClient", () => {
 
   it("lets the agent call cancel_nonce and registers its NEAR hash", async () => {
     const { client, calls } = fixture();
-    await expect(client.cancel(opId, {
-      gasLimit: "21000",
-      maxFeePerGas: "30000000000",
-      maxPriorityFeePerGas: "2000000000",
-    })).resolves.toMatchObject({ nearTransactionHash: "near-cancel-hash" });
+    await expect(client.cancel(opId)).resolves.toMatchObject({ nearTransactionHash: "near-cancel-hash" });
     expect(calls).toEqual(["cancel_nonce", "record_cancellation:near-cancel-hash"]);
   });
 
@@ -187,7 +183,6 @@ describe("OmniRoles SDK", () => {
       "settle",
       "settle_cancellation",
       "release_unconfirmed",
-      "clear_stale_settlement",
       "execute_queued_operation",
       "cancel_prepared",
       "renounce_role",

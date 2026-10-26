@@ -5,7 +5,6 @@ import {
   evmAddressBytes,
   MandateAgentClient,
   OnchainAgentClient,
-  type CancellationFees,
   type PaymentRequest,
 } from "@mandateos/sdk";
 
@@ -89,8 +88,8 @@ export class MandateMcpTools {
     return this.client.status(input.opId as `0x${string}`);
   }
 
-  cancel(input: { opId: string } & CancellationFees) {
-    return this.client.cancel(input.opId as `0x${string}`, input);
+  cancel(input: { opId: string }) {
+    return this.client.cancel(input.opId as `0x${string}`);
   }
 }
 
@@ -171,13 +170,8 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.status(input)));
   server.registerTool("cancel", {
     title: "Cancel a stuck payment nonce",
-    description: "Ask the Vault, as the agent, to sign a higher-fee same-nonce cancellation and register its NEAR hash for the worker.",
-    inputSchema: {
-      opId,
-      gasLimit: uint,
-      maxFeePerGas: uint,
-      maxPriorityFeePerGas: uint,
-    },
+    description: "After the vault timeout, request a same-nonce self transaction. The vault computes replacement fees from the original under role caps; callers choose no fees.",
+    inputSchema: { opId },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async (input) => result(await tools.cancel(input)));
   return server;

@@ -286,7 +286,6 @@ pub struct Operation {
     pub signature: Option<MpcSignature>,
     pub signed_transaction: Option<Vec<u8>>,
     pub cancellation: Option<CancellationAttempt>,
-    pub settlement: Option<SettlementAttempt>,
 }
 
 #[derive(Clone, Debug)]
@@ -489,12 +488,4 @@ impl Default for SettlementConfig {
             mainnet: false,
         }
     }
-}
-#[derive(Clone, Debug)]
-#[near(serializers = [borsh, json])]
-pub struct SettlementAttempt {
-    pub started_at_ns: U64,
-    pub tx_hash: Digest,
-    pub expected_payload_hash: Digest,
-    pub cancellation: bool,
 }

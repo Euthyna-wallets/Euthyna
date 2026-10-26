@@ -16,7 +16,6 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "settle",
   "settle_cancellation",
   "release_unconfirmed",
-  "clear_stale_settlement",
   "execute_queued_operation",
   "cancel_prepared",
   "renounce_role",
@@ -93,11 +92,7 @@ export interface GuardApproval {
   signature: string;
 }
 
-export interface CancellationFees {
-  gasLimit: string;
-  maxFeePerGas: string;
-  maxPriorityFeePerGas: string;
-}
+
 
 export interface InvoiceContext {
   text?: string;
@@ -109,7 +104,7 @@ export interface VaultGateway {
   /** Any call the role allows (not only a token transfer). */
   prepareRequest?(request: OmniRolesOperationRequest): Promise<PreparedOperation>;
   authorize(opId: number[], approval: GuardApproval | null): Promise<string>;
-  cancelNonce(opId: number[], fees: CancellationFees): Promise<string>;
+  cancelNonce(opId: number[]): Promise<string>;
   /** Release a prepared operation the Guard refused, so the wallet is free again. */
   cancelPrepared?(opId: number[]): Promise<string>;
 }
@@ -307,12 +302,12 @@ export class MandateAgentClient {
   }
 
 
-  async cancel(opId: Hex | number[], fees: CancellationFees): Promise<{
+  async cancel(opId: Hex | number[]): Promise<{
     opId: Hex;
     nearTransactionHash: string;
   }> {
     const bytes = Array.isArray(opId) ? opId : operationIdBytes(opId);
-    const nearTransactionHash = await this.vault.cancelNonce(bytes, fees);
+    const nearTransactionHash = await this.vault.cancelNonce(bytes);
     await this.api.recordCancellation(bytes, nearTransactionHash);
     return { opId: operationIdHex(bytes), nearTransactionHash };
   }
@@ -627,12 +622,9 @@ export class NearVaultGateway implements VaultGateway {
     return outcome.transaction_outcome.id;
   }
 
-  async cancelNonce(opId: number[], fees: CancellationFees): Promise<string> {
+  async cancelNonce(opId: number[]): Promise<string> {
     const outcome = await this.call("cancel_nonce", {
       op_id: opId,
-      gas_limit: fees.gasLimit,
-      max_fee_per_gas: fees.maxFeePerGas,
-      max_priority_fee_per_gas: fees.maxPriorityFeePerGas,
     }, AGENT_GAS.authorize);
     return outcome.transaction_outcome.id;
   }

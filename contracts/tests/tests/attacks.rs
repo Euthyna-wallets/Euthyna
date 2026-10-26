@@ -402,7 +402,16 @@ async fn only_a_dao_vote_changes_rules_or_moves_funds_outside_roles() -> Result<
         .transact()
         .await?
         .into_result()?;
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     blocked(
         "vetoed rule executed anyway",
         "vault: council veto",
@@ -453,7 +462,16 @@ async fn kill_switch_and_no_key_on_the_vault() -> Result<()> {
     );
 
     // A revoked agent is out for good.
-    fixture.worker.fast_forward(1).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(1_000_000_000),
+    )
+    .await?;
     apply_rule_change(
         &fixture.owner,
         &fixture.outsider,

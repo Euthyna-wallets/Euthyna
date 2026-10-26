@@ -53,6 +53,10 @@ export class BaseRelayer {
     }
   }
 
+  async finalizedBlockNumber(): Promise<bigint> {
+    return (await this.client.getBlock({ blockTag: "finalized" })).number;
+  }
+
   async blockNumber(): Promise<bigint> {
     return this.client.getBlockNumber();
   }
@@ -66,6 +70,7 @@ export class BaseRelayer {
     const hash = await this.broadcast(operation);
     const receipt = await this.client.waitForTransactionReceipt({ hash, confirmations: 1 });
     if (receipt.status !== "success") throw new Error(`Base transaction ${hash} reverted`);
+    if (receipt.blockNumber > await this.finalizedBlockNumber()) throw new Error("Transaction is not finalized; resume settlement later");
     const nearTransactionHash = await this.near.settle(vaultAccountId, operation.op_id, receipt.blockHash);
     return { hash, blockNumber: receipt.blockNumber.toString(), nearTransactionHash };
   }
