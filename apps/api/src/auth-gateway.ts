@@ -38,6 +38,7 @@ export interface AgentView {
   evmAddress: string | null;
   mpcPath: string;
   active: boolean;
+  createdByUserId: string | null;
   createdAt: Date;
 }
 
@@ -63,6 +64,7 @@ export interface CreateAgentInput {
   nearPublicKey: string;
   vaultAccountId: string;
   mpcPath: string;
+  createdByUserId: string;
 }
 
 export interface CreatedAgent {
@@ -123,6 +125,7 @@ function toAgentView(agent: {
   evmAddress: string | null;
   mpcPath: string;
   active: boolean;
+  createdByUserId: string | null;
   createdAt: Date;
 }): AgentView {
   return {
@@ -135,6 +138,7 @@ function toAgentView(agent: {
     evmAddress: agent.evmAddress,
     mpcPath: agent.mpcPath,
     active: agent.active,
+    createdByUserId: agent.createdByUserId,
     createdAt: agent.createdAt,
   };
 }
@@ -398,6 +402,7 @@ export class BetterAuthGateway implements AuthGateway {
           nearPublicKey: input.nearPublicKey,
           vaultAccountId: input.vaultAccountId,
           mpcPath: input.mpcPath,
+          createdByUserId: input.createdByUserId,
         },
       }),
     ]);

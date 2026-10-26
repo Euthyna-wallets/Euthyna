@@ -103,6 +103,18 @@ function isAdmin(identity: ConsoleIdentity): boolean {
   return identity.role === "admin" || identity.role === "owner";
 }
 
+/**
+ * Any council member may hire: hiring grants nothing, an agent acts only once a
+ * role is voted. To bound the NEAR accounts our relayer pays for, a member may
+ * have this many hires without a role at a time; admins are not capped.
+ */
+export const MAX_PENDING_HIRES_PER_MEMBER = 5;
+
+/** Members manage only the agents they hired; admins manage all. */
+function canManageAgent(identity: ConsoleIdentity, agent: { createdByUserId: string | null }): boolean {
+  return isAdmin(identity) || agent.createdByUserId === identity.userId;
+}
+
 function requireAgent(auth: AuthGateway, limiter: RateLimiter) {
   return async (context: AppContext, next: Next) => {
     const identity = await auth.identifyAgent(context.req.header("x-api-key"));
@@ -187,6 +199,20 @@ export function createApp({
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
   const agentProvisionLimiter = new MemoryRateLimiter(10, 60 * 60_000);
+
+  /** Active agents this member hired that hold no voted role yet; null when the vault cannot be read. */
+  async function pendingHiresOf(organizationId: string, userId: string): Promise<number | null> {
+    const mine = (await auth.listAgents(organizationId)).filter((agent) => agent.active && agent.createdByUserId === userId);
+    if (mine.length === 0) return 0;
+    if (!omniroles) return mine.length;
+    try {
+      const { roles } = await omniroles.roles(organizationId);
+      const withRole = new Set(roles.flatMap((role) => role.members.map((member) => member.member)));
+      return mine.filter((agent) => !withRole.has(agent.nearAccountId)).length;
+    } catch {
+      return null;
+    }
+  }
   app.use(
     "*",
     cors({
@@ -373,7 +399,16 @@ export function createApp({
   });
 
   /** The NEAR account an agent of this name will get: euthyna-signer creates its key for it before hiring. */
-  app.get("/v1/console/agents/proposed-account", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  /** The agent if this console user may manage it, else an HTTP error. */
+  async function managedAgent(context: AppContext, agentId: string) {
+    const identity = context.get("console");
+    const agent = await auth.getAgent(identity.organizationId, agentId);
+    if (!agent) throw new HTTPException(404, { message: "agent_not_found" });
+    if (!canManageAgent(identity, agent)) throw new HTTPException(403, { message: "only the member who hired this agent, or an admin, can do this" });
+    return agent;
+  }
+
+  app.get("/v1/console/agents/proposed-account", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const name = context.req.query("name") ?? "";
     try {
@@ -383,9 +418,10 @@ export function createApp({
     }
   });
 
-  app.post("/v1/console/agents/:id/provision", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/agents/:id/provision", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const agentId = z.string().uuid().parse(context.req.param("id"));
+    await managedAgent(context, agentId);
     if (!agentProvisionLimiter.allow(`agent-provision:${consoleIdentity.organizationId}:${consoleIdentity.userId}`)) {
       return context.json({ error: "agent_provision_rate_limited" }, 429);
     }
@@ -408,9 +444,10 @@ export function createApp({
     return context.json(await agentProvisioning.status(consoleIdentity.organizationId, agentId));
   });
 
-  app.post("/v1/console/agents/:id/provision-confirm", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/agents/:id/provision-confirm", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const agentId = z.string().uuid().parse(context.req.param("id"));
+    await managedAgent(context, agentId);
     const confirmed = await agentProvisioning.confirm(consoleIdentity.organizationId, agentId);
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
@@ -438,7 +475,7 @@ export function createApp({
     return context.json({ agents: await auth.listAgents(consoleIdentity.organizationId) });
   });
 
-  app.post("/v1/console/agents", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/agents", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const currentTreasury = await treasuries.activeTreasury(consoleIdentity.organizationId);
     if (!currentTreasury || currentTreasury.status !== "active") {
@@ -448,6 +485,19 @@ export function createApp({
       );
     }
     const input = await parseJson(context, createAgentSchema);
+    if (!isAdmin(consoleIdentity)) {
+      const pending = await pendingHiresOf(consoleIdentity.organizationId, consoleIdentity.userId);
+      if (pending === null) {
+        return context.json({ error: "roles_unavailable", message: "Could not read the vault's roles; try again." }, 503);
+      }
+      if (pending >= MAX_PENDING_HIRES_PER_MEMBER) {
+        return context.json({
+          error: "too_many_pending_hires",
+          message: `You already have ${pending} hired agents without a voted role (limit ${MAX_PENDING_HIRES_PER_MEMBER}). Give them a role or revoke some first.`,
+          limit: MAX_PENDING_HIRES_PER_MEMBER,
+        }, 409);
+      }
+    }
     const expectedAccountId = proposedAgentAccountId(input.name, nearParentAccount, consoleIdentity.organizationId);
     if (input.nearAccountId && input.nearAccountId !== expectedAccountId) {
       return context.json({ error: "agent_account_mismatch", expectedAccountId }, 422);
@@ -460,6 +510,7 @@ export function createApp({
       nearPublicKey: input.nearPublicKey,
       vaultAccountId: input.vaultAccountId,
       mpcPath: input.mpcPath,
+      createdByUserId: consoleIdentity.userId,
     });
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
@@ -476,10 +527,11 @@ export function createApp({
     return context.json(created, 201);
   });
 
-  app.post("/v1/console/agents/:id/revoke", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+  app.post("/v1/console/agents/:id/revoke", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const parsedId = agentIdSchema.safeParse(context.req.param());
     if (!parsedId.success) throw new HTTPException(400, { message: parsedId.error.message });
+    await managedAgent(context, parsedId.data.id);
     const revoked = await auth.revokeAgent(consoleIdentity.organizationId, parsedId.data.id);
     if (!revoked) return context.json({ error: "agent_not_found" }, 404);
     await auth.recordAudit({

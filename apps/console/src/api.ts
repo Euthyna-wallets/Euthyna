@@ -23,5 +23,7 @@ export type AgentRow = {
   evmAddress: string | null;
   mpcPath: string;
   active: boolean;
+  /** The console user who hired it; only they or an admin can provision or revoke it. */
+  createdByUserId: string | null;
   createdAt: string;
 };

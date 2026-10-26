@@ -195,6 +195,8 @@ model Agent {
   mpcPath        String
   evmAddress     String?
   active         Boolean            @default(true)
+  /// The console user who hired it: members may hire, and manage only their own hires.
+  createdByUserId String?
   operations     Operation[]
   provisioning   AgentProvisioning?
   createdAt      DateTime           @default(now())
@@ -202,6 +204,7 @@ model Agent {
 
   @@unique([organizationId, nearAccountId])
   @@index([organizationId])
+  @@index([organizationId, createdByUserId])
   @@map("agent")
 }
 
