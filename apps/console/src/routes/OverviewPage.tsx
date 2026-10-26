@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { Card, PageState, Status, short } from "../components/ui.js";
+import { Card, PageState, Status, everyDays, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni } from "../omniroles-api.js";
 import { TreasuryChecks } from "./TreasurySetup.js";
@@ -65,7 +65,7 @@ export function OverviewPage() {
                       <tr key={`${role.name}-${budget.key}`}>
                         <td>{budget.label}</td>
                         <td>{Number(budget.available ?? 0).toLocaleString()} / {Number(budget.max ?? 0).toLocaleString()} {budget.token ?? ""}</td>
-                        <td className="small muted">every {budget.periodDays} days</td>
+                        <td className="small muted">{everyDays(budget.periodDays)}</td>
                       </tr>
                     )))}
                   </tbody>

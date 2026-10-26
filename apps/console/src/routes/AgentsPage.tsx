@@ -60,7 +60,7 @@ export function AgentsPage() {
           <span className="eyebrow">Staff</span>
           <h1>Agents</h1>
           <p className="muted">
-            Agents work inside the jobs the owners voted. Their record is read from the chains: what they did, what the vault
+            Agents work inside the roles the owners voted. Their record is read from the chains: what they did, what the vault
             or the Guard refused. The owners hire, change budgets and fire, by vote.
           </p>
         </div>
@@ -175,7 +175,7 @@ function StaffCard(props: {
         {openJobs.length ? (
           <>
             <select value={hireFor} onChange={(event) => setHireFor(event.target.value)}>
-              <option value="">Hire for a job…</option>
+              <option value="">Hire for a role…</option>
               {openJobs.map((job) => <option key={job.name} value={job.name}>{job.name}</option>)}
             </select>
             <button className="secondary" disabled={!props.canPropose || !hireFor} onClick={() => props.onHire(hireFor)}>

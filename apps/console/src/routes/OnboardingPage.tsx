@@ -20,7 +20,7 @@ const STEPS: Array<{ id: Exclude<Stage, "done">; label: string }> = [
   { id: "wallet", label: "Wallet" },
   { id: "shares", label: "Shares" },
   { id: "agent", label: "First hire" },
-  { id: "role", label: "Job contract" },
+  { id: "role", label: "Role" },
 ];
 
 const confirmedKey = (organizationId: string) => `mandateos.members-confirmed.${organizationId}`;
@@ -102,7 +102,7 @@ export function OnboardingPage() {
     wallet: "Founders vote to open the company wallet",
     shares: "Open the company to shareholders, or skip",
     agent: "Hire the first agent",
-    role: "Write its job contract",
+    role: "Write its role",
     done: "Your AI company is live",
   };
 
@@ -114,7 +114,7 @@ export function OnboardingPage() {
           <h1>{active?.name ?? "Your AI company"}</h1>
           <p className="muted">
             Agents do the work. Founders and shareholders own the company and vote on the rules. The vault on NEAR
-            enforces them: an agent cannot sign anything its job does not allow.
+            enforces them: an agent cannot sign anything its role does not allow.
           </p>
           {!loading ? <p className="setup-actor">{waitingFor[stage]}</p> : null}
         </div>
@@ -199,10 +199,10 @@ export function OnboardingPage() {
                 <h2>Hire the {job!.agentName.toLowerCase()}</h2>
                 <p className="muted">
                   The agent gets its own NEAR account. It can only ask the vault for operations, and only those its voted
-                  job contract allows.
+                  role allows.
                 </p>
                 <NewAgent vaultAccountId={treasury.vaultAccountId} defaultName={job!.agentName} defaultRole={job!.role} onReady={setNewAgent} />
-                <button className="ghost" onClick={() => setJob(null)}>← Another job</button>
+                <button className="ghost" onClick={() => setJob(null)}>← Another role</button>
               </section>
             )
           ) : null}
@@ -210,14 +210,14 @@ export function OnboardingPage() {
           {stage === "role" ? (
             <section className="card empty-action">
               <div>
-                <span className="eyebrow">Job contract</span>
+                <span className="eyebrow">Role</span>
                 <h2>What {firstAgent?.name ?? "the agent"} may do</h2>
                 <p className="muted">
                   {contractJob ? `${contractJob.allows}. ` : ""}Everything else is refused by the vault. You set the budget;
                   the founders vote on it.
                 </p>
                 <ol className="small muted role-steps">
-                  <li>The job <span className="mono">{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
+                  <li>The role <span className="mono">{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
                   <li>Preview, then submit it to the founders' vote.</li>
                   <li>They approve it in Decisions; it applies after the veto window, and the agent can start.</li>
                 </ol>
@@ -226,7 +226,7 @@ export function OnboardingPage() {
                 className="button primary"
                 to={`/roles?new=1&role=${encodeURIComponent(firstAgent?.role ?? "treasury")}${contractJob ? `&job=${contractJob.id}` : ""}`}
               >
-                Write the job contract
+                Write the role
               </Link>
             </section>
           ) : null}
@@ -261,7 +261,7 @@ function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
     <section className="card">
       <span className="eyebrow">First hire</span>
       <h2>What should your first agent do?</h2>
-      <p className="muted">Pick a job. You set its budget next, and the founders vote on it.</p>
+      <p className="muted">Pick a role. You set its budget next, and the founders vote on it.</p>
       <div className="job-grid">
         {JOBS.map((item) => {
           const blocked = item.needsShares && !props.hasShares;
