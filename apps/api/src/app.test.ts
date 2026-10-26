@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { createApp, MAX_PENDING_HIRES_PER_MEMBER } from "./app.js";
+import { MemoryPairingStore } from "./pairings.js";
 import type { AgentProvisioningService } from "./agent-provisioning.js";
 import { MemoryRateLimiter } from "./rate-limit.js";
 import type {
@@ -198,6 +199,7 @@ function testApp(options?: {
   sponsorshipReservation?: import("./auth-gateway.js").NearSponsorshipReservation;
 }) {
   const auth = new FakeAuth();
+  const pairings = new MemoryPairingStore();
   auth.agents.set("key-a", agentA);
   auth.agents.set("key-b", agentB);
   auth.consoles.set("session-admin", admin);
@@ -292,8 +294,9 @@ function testApp(options?: {
     payments,
     consoleOrigin,
     nearParentAccount: "mandateos.testnet",
+    pairings,
   });
-  return { app, auth, nearCalls };
+  return { app, auth, nearCalls, pairings };
 }
 
 const headers = (extra: Record<string, string>) => ({ "content-type": "application/json", ...extra });
@@ -699,5 +702,93 @@ describe("console isolation and emergency", () => {
     });
     expect(response.status).toBe(404);
     expect(auth.revoked).toEqual([]);
+  });
+});
+
+describe("agent pairing", () => {
+  const signerKey = "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp";
+  const pair = (app: ReturnType<typeof testApp>["app"], code: string, publicKey = signerKey) =>
+    app.request("/v1/agents/pair", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, publicKey, hostname: "build-box" }),
+    });
+  const newCode = async (app: ReturnType<typeof testApp>["app"], cookie = "session-member", name = "Mario") => {
+    const response = await app.request("/v1/console/agents/pairings", {
+      method: "POST",
+      headers: consoleHeaders({ cookie }),
+      body: JSON.stringify({ name, role: "yield-manager", vaultAccountId: "vault-1.near" }),
+    });
+    return { response, body: (await response.json()) as { code: string; pairingId: string; accountId: string; status: string } };
+  };
+
+  it("hires the agent when the signer redeems the code, and gives the API key only to the signer", async () => {
+    const { app, auth, pairings } = testApp({ consoleRole: "member" });
+    const { response, body } = await newCode(app);
+    expect(response.status).toBe(201);
+    expect(body.code).toMatch(/^EUT-[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{1,4})+$/);
+    expect(body.status).toBe("waiting");
+    expect(pairings.rows[0]).not.toHaveProperty("code");
+
+    const redeemed = await pair(app, body.code.toLowerCase());
+    expect(redeemed.status).toBe(201);
+    expect(await redeemed.json()).toEqual({
+      agentId: "created-agent",
+      accountId: body.accountId,
+      vaultAccountId: "vault-1.near",
+      networkId: "testnet",
+      role: "yield-manager",
+      apiKey: "mdo_secret",
+    });
+    expect(auth.created).toEqual([expect.objectContaining({ nearPublicKey: signerKey, createdByUserId: "user-member", role: "yield-manager" })]);
+
+    const status = await app.request(`/v1/console/agents/pairings/${body.pairingId}`, { headers: consoleHeaders({ cookie: "session-member" }) });
+    const view = (await status.json()) as Record<string, unknown>;
+    expect(view).toEqual(expect.objectContaining({ status: "paired", agentId: "created-agent", publicKey: signerKey, hostname: "build-box" }));
+    expect(view).not.toHaveProperty("apiKey");
+    expect(view).not.toHaveProperty("code");
+  });
+
+  it("accepts a code once", async () => {
+    const { app, auth } = testApp();
+    const { body } = await newCode(app, "session-admin");
+    expect((await pair(app, body.code)).status).toBe(201);
+    const again = await pair(app, body.code, "ed25519:8xKjb6kRuw3eNHUCRpTgSyB7zmpPHAo4LVNmV4PVhNH6");
+    expect(again.status).toBe(404);
+    expect(auth.created).toHaveLength(1);
+  });
+
+  it("refuses an unknown or expired code", async () => {
+    const { app, pairings } = testApp();
+    expect((await pair(app, "EUT-0000-0000-0000-0000-0000-0000-00")).status).toBe(404);
+    const { body } = await newCode(app, "session-admin");
+    pairings.rows[0]!.expiresAt = new Date(Date.now() - 1);
+    expect((await pair(app, body.code)).status).toBe(404);
+  });
+
+  it("counts open codes toward a member's cap", async () => {
+    const { app } = testApp({ consoleRole: "member" });
+    for (let n = 0; n < MAX_PENDING_HIRES_PER_MEMBER; n += 1) {
+      expect((await newCode(app, "session-member", `Agent ${n}`)).response.status).toBe(201);
+    }
+    const over = await newCode(app, "session-member", "One more");
+    expect(over.response.status).toBe(409);
+  });
+
+  it("does not show a member another member's pairing", async () => {
+    const { app } = testApp();
+    const { body } = await newCode(app, "session-admin");
+    const response = await app.request(`/v1/console/agents/pairings/${body.pairingId}`, { headers: consoleHeaders({ cookie: "session-member" }) });
+    expect(response.status).toBe(404);
+  });
+
+  it("rejects a role the vault cannot use", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents/pairings", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ name: "Mario", role: "yield manager", vaultAccountId: "vault-1.near" }),
+    });
+    expect(response.status).toBe(400);
   });
 });

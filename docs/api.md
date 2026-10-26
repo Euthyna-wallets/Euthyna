@@ -99,7 +99,16 @@ members" in Activity).
 | `share_revenue` | the same for ETH sent to the shareholders (`amountWei`) |
 | `status`, `cancel` | operation state; same-nonce cancellation |
 
-Build once, then point stdio clients directly at the compiled entry point:
+With euthyna-signer, the config is one line and holds no secret: the socket is
+found by itself, and the vault, role and network are read from the signer.
+
+```bash
+claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y @euthyna/mcp
+```
+
+`@euthyna/mcp` is this server bundled in one file (`pnpm --filter @mandateos/mcp
+bundle`, published from `packages/mcp/npm`). From the repository, with a local
+key instead:
 
 ```bash
 pnpm --filter @mandateos/sdk build
@@ -241,6 +250,22 @@ request.
   creates the agent's NEAR account with a function-call key restricted to the
   vault's agent methods.
 - `POST /v1/console/agents/:id/revoke`
+- Any council member may hire; only the member who hired an agent, or an admin,
+  provisions or revokes it. A member may hold 5 agents without a voted role,
+  open pairing codes included.
+
+### Pairing with euthyna-signer
+
+- `POST /v1/console/agents/pairings` `{ name, role, vaultAccountId }` → a
+  one-time `code` (128 bits, valid 10 minutes, shown once; only its hash is
+  stored) and the account the agent will get.
+- `GET /v1/console/agents/pairings/:id` → `waiting | paired | expired`, with
+  the signer's public key and hostname once paired. The console then
+  provisions the agent as above.
+- `POST /v1/agents/pair` `{ code, publicKey, hostname }` (called by
+  `euthyna-signer pair`, no session): hires the agent with that public key and
+  returns `{ agentId, accountId, vaultAccountId, networkId, role, apiKey }`
+  to the signer only. A code works once.
 
 ### Emergency
 

@@ -13,6 +13,7 @@ import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
+import { PAIRING_TTL_MS, newPairingCode, pairingCodeHash, type PairingRecord, type PairingStore } from "./pairings.js";
 
 const requestSchema = z.object({
   vaultAccountId: z.string().min(2),
@@ -35,6 +36,18 @@ const createAgentSchema = z.object({
 });
 
 const agentIdSchema = z.object({ id: z.string().uuid() });
+
+const agentRoleSchema = z.string().regex(/^[a-z0-9_-]{1,32}$/, "role: lowercase letters, digits, - or _, up to 32 characters");
+const createPairingSchema = z.object({
+  name: z.string().min(1).max(80),
+  role: agentRoleSchema,
+  vaultAccountId: z.string().min(2).max(64),
+});
+const redeemPairingSchema = z.object({
+  code: z.string().min(10).max(64),
+  publicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/),
+  hostname: z.string().max(64).transform((value) => value.replace(/[^\w.-]/g, "").slice(0, 64)).default(""),
+});
 
 const addressSchema = z
   .string()
@@ -96,6 +109,7 @@ export interface AppDependencies {
   payments: PaymentService;
   consoleOrigin: string;
   nearParentAccount: string;
+  pairings: PairingStore;
   omniroles?: OmniRolesService;
 }
 
@@ -193,12 +207,15 @@ export function createApp({
   payments,
   consoleOrigin,
   nearParentAccount,
+  pairings,
   omniroles,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
   const agentProvisionLimiter = new MemoryRateLimiter(10, 60 * 60_000);
+  const pairingLimiter = new MemoryRateLimiter(20, 60_000);
+  const networkId = nearParentAccount.endsWith(".testnet") ? "testnet" : "mainnet";
 
   /** Active agents this member hired that hold no voted role yet; null when the vault cannot be read. */
   async function pendingHiresOf(organizationId: string, userId: string): Promise<number | null> {
@@ -212,6 +229,47 @@ export function createApp({
     } catch {
       return null;
     }
+  }
+
+  /** Why this console user may not hire now, or null. Open pairing codes count as hires. */
+  async function hiringRefusal(identity: ConsoleIdentity): Promise<{ status: 409 | 503; body: Record<string, unknown> } | null> {
+    const currentTreasury = await treasuries.activeTreasury(identity.organizationId);
+    if (!currentTreasury || currentTreasury.status !== "active") {
+      return { status: 409, body: { error: "treasury_not_active", status: currentTreasury?.status ?? "missing" } };
+    }
+    if (isAdmin(identity)) return null;
+    const pending = await pendingHiresOf(identity.organizationId, identity.userId);
+    if (pending === null) {
+      return { status: 503, body: { error: "roles_unavailable", message: "Could not read the vault's roles; try again." } };
+    }
+    const open = await pairings.countOpen(identity.organizationId, identity.userId, new Date());
+    if (pending + open >= MAX_PENDING_HIRES_PER_MEMBER) {
+      return {
+        status: 409,
+        body: {
+          error: "too_many_pending_hires",
+          message: `You already have ${pending + open} hired agents without a voted role (limit ${MAX_PENDING_HIRES_PER_MEMBER}). Give them a role or revoke some first.`,
+          limit: MAX_PENDING_HIRES_PER_MEMBER,
+        },
+      };
+    }
+    return null;
+  }
+
+  function pairingView(pairing: PairingRecord) {
+    const status = pairing.agentId ? "paired" : pairing.redeemedAt ? "pairing" : pairing.expiresAt <= new Date() ? "expired" : "waiting";
+    return {
+      pairingId: pairing.id,
+      status,
+      name: pairing.name,
+      role: pairing.role,
+      accountId: pairing.nearAccountId,
+      vaultAccountId: pairing.vaultAccountId,
+      expiresAt: pairing.expiresAt.toISOString(),
+      agentId: pairing.agentId,
+      publicKey: pairing.publicKey,
+      hostname: pairing.hostname,
+    };
   }
   app.use(
     "*",
@@ -408,6 +466,111 @@ export function createApp({
     return agent;
   }
 
+  // Pairing: the console makes a one-time code, `euthyna-signer pair <code>` redeems it
+  // with the agent's public key and receives the API key. Nothing is copied by hand.
+  app.post("/v1/console/agents/pairings", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const input = await parseJson(context, createPairingSchema);
+    const refusal = await hiringRefusal(consoleIdentity);
+    if (refusal) return context.json(refusal.body, refusal.status);
+    let nearAccountId: string;
+    try {
+      nearAccountId = proposedAgentAccountId(input.name, nearParentAccount, consoleIdentity.organizationId);
+    } catch (error) {
+      return context.json({ error: "invalid_agent_name", message: error instanceof Error ? error.message : String(error) }, 422);
+    }
+    const taken = (await auth.listAgents(consoleIdentity.organizationId)).some((agent) => agent.nearAccountId === nearAccountId);
+    if (taken) {
+      return context.json({ error: "agent_name_taken", message: `An agent already uses ${nearAccountId}: pick another name.` }, 409);
+    }
+    const code = newPairingCode();
+    const pairing = await pairings.create({
+      organizationId: consoleIdentity.organizationId,
+      createdByUserId: consoleIdentity.userId,
+      name: input.name,
+      role: input.role,
+      nearAccountId,
+      vaultAccountId: input.vaultAccountId,
+      mpcPath: `agents/${input.role}/base`,
+      codeHash: pairingCodeHash(code),
+      expiresAt: new Date(Date.now() + PAIRING_TTL_MS),
+    });
+    await auth.recordAudit({
+      organizationId: consoleIdentity.organizationId,
+      actorType: "console",
+      actorId: consoleIdentity.userId,
+      action: "agent.pairing_created",
+      targetType: "agent_pairing",
+      targetId: pairing.id,
+      metadata: { nearAccountId, role: input.role },
+    });
+    // The code is shown once, here; only its hash is kept.
+    return context.json({ ...pairingView(pairing), code }, 201);
+  });
+
+  app.get("/v1/console/agents/pairings/:id", requireConsole(auth, consoleLimiter), async (context) => {
+    const consoleIdentity = context.get("console");
+    const id = z.string().uuid().safeParse(context.req.param("id"));
+    if (!id.success) return context.json({ error: "pairing_not_found" }, 404);
+    const pairing = await pairings.get(consoleIdentity.organizationId, id.data);
+    if (!pairing) return context.json({ error: "pairing_not_found" }, 404);
+    if (!isAdmin(consoleIdentity) && pairing.createdByUserId !== consoleIdentity.userId) {
+      return context.json({ error: "pairing_not_found" }, 404);
+    }
+    return context.json(pairingView(pairing));
+  });
+
+  app.post("/v1/agents/pair", async (context) => {
+    const caller = context.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "direct";
+    if (!pairingLimiter.allow(`pair:${caller}`) || !pairingLimiter.allow("pair:all")) {
+      return context.json({ error: "rate_limited" }, 429);
+    }
+    const input = await parseJson(context, redeemPairingSchema);
+    const unusable = { error: "pairing_invalid", message: "This pairing code is unknown, already used or expired. Get a new one in the console." };
+    const now = new Date();
+    const pairing = await pairings.findOpen(pairingCodeHash(input.code), now);
+    if (!pairing) return context.json(unusable, 404);
+    const currentTreasury = await treasuries.activeTreasury(pairing.organizationId);
+    if (!currentTreasury || currentTreasury.status !== "active") {
+      return context.json({ error: "treasury_not_active", message: "The company treasury is not active yet." }, 409);
+    }
+    // Single use: of two signers racing with the same code, only one gets past this.
+    if (!(await pairings.claim(pairing.id, input.publicKey, input.hostname, now))) return context.json(unusable, 404);
+    let created;
+    try {
+      created = await auth.createAgent({
+        organizationId: pairing.organizationId,
+        name: pairing.name,
+        role: pairing.role,
+        nearAccountId: pairing.nearAccountId,
+        nearPublicKey: input.publicKey,
+        vaultAccountId: pairing.vaultAccountId,
+        mpcPath: pairing.mpcPath,
+        createdByUserId: pairing.createdByUserId,
+      });
+    } catch {
+      return context.json({ error: "agent_not_created", message: `Could not hire ${pairing.nearAccountId}; is the name already used? Get a new code with another name.` }, 409);
+    }
+    await pairings.attachAgent(pairing.id, created.agent.id);
+    await auth.recordAudit({
+      organizationId: pairing.organizationId,
+      actorType: "console",
+      actorId: pairing.createdByUserId,
+      action: "agent.created",
+      targetType: "agent",
+      targetId: created.agent.id,
+      metadata: { nearAccountId: created.agent.nearAccountId, role: created.agent.role, via: "pairing", hostname: input.hostname },
+    });
+    return context.json({
+      agentId: created.agent.id,
+      accountId: created.agent.nearAccountId,
+      vaultAccountId: created.agent.vaultAccountId,
+      networkId,
+      role: created.agent.role,
+      apiKey: created.apiKey,
+    }, 201);
+  });
+
   app.get("/v1/console/agents/proposed-account", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
     const name = context.req.query("name") ?? "";
@@ -477,27 +640,9 @@ export function createApp({
 
   app.post("/v1/console/agents", requireConsole(auth, consoleLimiter), async (context) => {
     const consoleIdentity = context.get("console");
-    const currentTreasury = await treasuries.activeTreasury(consoleIdentity.organizationId);
-    if (!currentTreasury || currentTreasury.status !== "active") {
-      return context.json(
-        { error: "treasury_not_active", status: currentTreasury?.status ?? "missing" },
-        409,
-      );
-    }
+    const refusal = await hiringRefusal(consoleIdentity);
+    if (refusal) return context.json(refusal.body, refusal.status);
     const input = await parseJson(context, createAgentSchema);
-    if (!isAdmin(consoleIdentity)) {
-      const pending = await pendingHiresOf(consoleIdentity.organizationId, consoleIdentity.userId);
-      if (pending === null) {
-        return context.json({ error: "roles_unavailable", message: "Could not read the vault's roles; try again." }, 503);
-      }
-      if (pending >= MAX_PENDING_HIRES_PER_MEMBER) {
-        return context.json({
-          error: "too_many_pending_hires",
-          message: `You already have ${pending} hired agents without a voted role (limit ${MAX_PENDING_HIRES_PER_MEMBER}). Give them a role or revoke some first.`,
-          limit: MAX_PENDING_HIRES_PER_MEMBER,
-        }, 409);
-      }
-    }
     const expectedAccountId = proposedAgentAccountId(input.name, nearParentAccount, consoleIdentity.organizationId);
     if (input.nearAccountId && input.nearAccountId !== expectedAccountId) {
       return context.json({ error: "agent_account_mismatch", expectedAccountId }, 422);
