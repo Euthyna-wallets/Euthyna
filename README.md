@@ -90,6 +90,30 @@ pnpm --filter @mandateos/api worker     # broadcasts what the vault signed
 pnpm --filter @mandateos/console dev    # console on :5173
 ```
 
+### Docker Compose
+
+Docker runs PostgreSQL, the one-shot Prisma schema sync, API, worker and static
+console. Copy and fill `.env` first; it is mounted at runtime and excluded from
+the image build.
+
+```bash
+cp env.example .env
+docker compose up --build -d
+docker compose logs -f api worker
+```
+
+Open `http://localhost:8088`. PostgreSQL is exposed on `127.0.0.1:5434` for
+local diagnostics. Override either host port without changing the containers:
+
+```bash
+MANDATEOS_HTTP_PORT=8081 MANDATEOS_POSTGRES_PORT=5435 docker compose up --build -d
+```
+
+Stop the stack while preserving PostgreSQL data with `docker compose down`.
+`docker compose down --volumes` also deletes the database and is destructive.
+Private keys and Guard secrets belong only in `.env` or a Docker secret; never
+copy them into an image.
+
 Checks:
 
 ```bash

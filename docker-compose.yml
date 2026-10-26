@@ -1,0 +1,89 @@
+name: mandateos
+
+x-app: &app
+  image: mandateos-app:local
+  build:
+    context: .
+    target: runtime
+  env_file:
+    - .env
+  environment: &app-environment
+    DATABASE_URL: postgresql://mandateos:${POSTGRES_PASSWORD:-mandateos}@postgres:5432/mandateos
+    PORT: "3000"
+    BETTER_AUTH_URL: http://localhost:${MANDATEOS_HTTP_PORT:-8088}
+    CONSOLE_ORIGIN: http://localhost:${MANDATEOS_HTTP_PORT:-8088}
+    CONTRACT_ARTIFACTS_DIR: /app/contracts/res
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mandateos
+      POSTGRES_USER: mandateos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mandateos}
+    ports:
+      - "127.0.0.1:${MANDATEOS_POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mandateos -d mandateos"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  db-init:
+    <<: *app
+    command: ["pnpm", "--filter", "@mandateos/db", "exec", "prisma", "db", "push"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["node", "apps/api/dist/server.js"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["node", "apps/api/dist/worker.js"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  console:
+    image: mandateos-console:local
+    build:
+      context: .
+      target: console
+      args:
+        VITE_API_URL: ""
+        VITE_NEAR_RPC_URL: ${NEAR_RPC_URL:-https://rpc.testnet.fastnear.com}
+        VITE_BASE_SEPOLIA_RPC_URL: ${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
+        VITE_ETHEREUM_SEPOLIA_RPC_URL: ${ETHEREUM_SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}
+        VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
+        VITE_MANDATEOS_REGISTRY_ID: ${OMNIROLES_REGISTRY_ID:-registry.mandateos.testnet}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MANDATEOS_HTTP_PORT:-8088}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
