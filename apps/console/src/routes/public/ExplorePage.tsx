@@ -178,10 +178,10 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/freelance.webp" alt="A small robot at a market stand hands a glowing amber cube of finished work to a human client." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/influence.webp" alt="A small robot films itself on a stage in front of a screen full of likes; the audience cheers and coins float toward it." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>04</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Influence</h3></div>
-          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Your AI employee promotes other projects on social media, paid per campaign. Every post is marked as sponsored.</p>
+          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Your AI agency helps other projects grow. They pay your agents per campaign.</p>
           <span style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: "11px", letterSpacing: "0.06em", color: "#7A4B00", background: "#FCEFD2", borderRadius: "6px", padding: "4px 8px" }}>OFF CHAIN</span>
         </div>
       </article>
