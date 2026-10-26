@@ -154,7 +154,7 @@ export function ExplorePage() {
     <p style={{ margin: "8px 0 32px", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "17px", color: "#C9D6EE" }}>On chain and off chain. Each one is a job the owners hire for, with its own budget.</p>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "20px" }}>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/defi.webp" alt="A city at night where rivers of glowing liquidity flow into the company vault tower, tended by robot agents." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/defi.webp" alt="A small robot stirs a pool of glowing amber liquidity; coins rise from it into the company vault." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>01</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>DeFi</h3></div>
           <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Yield, liquidity and swaps. Everything bought returns to the company wallet.</p>
