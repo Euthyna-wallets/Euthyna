@@ -1,0 +1,3 @@
+{"look":"handDrawn","handDrawnSeed":7,"theme":"base","fontFamily":"Virgil, cursive",
+ "themeVariables":{"fontFamily":"Virgil, cursive","fontSize":"17px","primaryColor":"#E6F7FB","primaryBorderColor":"#1E1E1E","primaryTextColor":"#1E1E1E","lineColor":"#1E1E1E","clusterBkg":"#FFF8E6","clusterBorder":"#1E1E1E","edgeLabelBackground":"#FFFFFF","tertiaryColor":"#FFFFFF"},
+ "flowchart":{"curve":"basis","padding":18,"nodeSpacing":50,"rankSpacing":60}}

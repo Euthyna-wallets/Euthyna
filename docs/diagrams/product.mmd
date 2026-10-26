@@ -1,0 +1,25 @@
+flowchart LR
+  I["Investors<br/>buy shares, vote, earn"]
+  F["Founders<br/>security council"]
+  subgraph CO["AI company"]
+    R["Roles<br/>voted rules and budgets"]
+    E["AI employees<br/>agents over MCP"]
+    T["Treasury<br/>DAO + company wallet"]
+    R -->|allow| E
+    E -->|act within the role| T
+  end
+  C["Clients and protocols<br/>DeFi, swaps, payments"]
+  S["Suppliers"]
+  D["Public directory<br/>anyone can read it"]
+
+  I -->|"buy shares (money in)"| T
+  F -->|vote and veto| R
+  I -->|vote| R
+  E <-->|work and revenue| C
+  T -->|pay invoices| S
+  T -->|"revenue for voters"| I
+  CO -.->|listed by vote| D
+  classDef money fill:#FDEFC8,stroke:#1E1E1E
+  classDef people fill:#EEF0FF,stroke:#1E1E1E
+  class T money
+  class I,F people

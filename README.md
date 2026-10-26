@@ -22,30 +22,7 @@ a role, by vote, and every change waits out a veto window.
 
 ## Product architecture
 
-```mermaid
-flowchart LR
-  I["Investors<br/>buy shares, vote, earn"]
-  F["Founders<br/>security council"]
-  subgraph CO["AI company"]
-    direction TB
-    R["Roles<br/>voted rules and budgets"]
-    E["AI employees<br/>agents over MCP"]
-    T["Treasury<br/>DAO + company wallet"]
-    R -->|allow| E
-    E -->|act within the role| T
-  end
-  C["Clients and protocols<br/>DeFi, swaps, payments"]
-  S["Suppliers"]
-  D["Public directory<br/>anyone can read it"]
-
-  I -->|"buy shares (money in)"| T
-  F -->|vote and veto| R
-  I -->|vote| R
-  E <-->|work and revenue| C
-  T -->|pay invoices| S
-  T -->|"revenue for voters"| I
-  CO -.->|listed by vote| D
-```
+![Product architecture: investors and founders outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
 
 1. **Raise**: founders create the company; investors buy shares and the proceeds go to the treasury.
 2. **Hire**: the owners vote a role for each AI employee. The agent plugs in over MCP.
@@ -55,45 +32,7 @@ flowchart LR
 
 ## Technical architecture
 
-```mermaid
-flowchart TB
-  subgraph OFF["Off chain"]
-    direction LR
-    AG["Agent<br/>MCP server + SDK"]
-    UI["Console and public pages<br/>React"]
-    API["API<br/>Guard, supplier registry, proposals"]
-    WK["Worker<br/>broadcasts signed transactions"]
-  end
-  subgraph NEAR["NEAR"]
-    direction LR
-    FAC["DAO factory"]
-    DAO["Sputnik DAO<br/>owners vote"]
-    V["OmniRoles vault<br/>roles, budgets, veto window,<br/>nonces, no access key"]
-    CND["Condition engine<br/>calldata rules"]
-    SH["Shares<br/>sale, votes, revenue"]
-    REG["Registry<br/>public directory"]
-    MPC["NEAR MPC<br/>Chain Signatures"]
-  end
-  subgraph EVM["Base · Ethereum"]
-    W["Company wallet<br/>MPC-derived address"]
-    TGT["Target contracts<br/>USDC, Uniswap, Omni Bridge"]
-  end
-
-  FAC -->|creates| DAO
-  DAO -->|owns, changes roles| V
-  DAO -->|registers| REG
-  SH --- DAO
-  AG -->|prepare, authorize| V
-  AG -->|visa request| API
-  V --- CND
-  V -->|sign| MPC
-  MPC -->|signature| V
-  WK -->|raw transaction| W
-  W --> TGT
-  UI -->|read| REG
-  UI -->|read| W
-  UI -->|proposals| API
-```
+![Technical architecture: off-chain agent, console, API and worker; NEAR contracts (DAO factory, Sputnik DAO, OmniRoles vault, condition engine, shares, registry, MPC); company wallet and target contracts on Base and Ethereum](./docs/diagrams/technical.png)
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
@@ -102,28 +41,11 @@ flowchart TB
 | OmniRoles vault, registry, DAO factory | no access key after deployment |
 | Company wallet | no private key exists; NEAR MPC signs only what the vault asks |
 
-Contract invariants and the full key model: [Architecture.md](./Architecture.md).
+Contract invariants and the full key model: [Architecture.md](./Architecture.md). Diagram sources: [docs/diagrams](./docs/diagrams).
 
 ## How an agent's payment goes through
 
-```mermaid
-sequenceDiagram
-  participant A as Agent (MCP)
-  participant V as Vault · NEAR
-  participant G as Guard
-  participant M as NEAR MPC
-  participant B as Company wallet · Base
-
-  A->>V: prepare(role, call)
-  V->>V: role, conditions, budget, velocity, fees
-  A->>G: visa for this exact transaction
-  G->>G: registered supplier? invoice reused or injected?
-  G-->>A: signed visa
-  A->>V: authorize(visa)
-  V->>M: sign the EIP-1559 transaction
-  M-->>V: signature
-  V-->>B: broadcast, then confirmed on the vault
-```
+![Sequence of an agent payment: prepare on the vault, visa from the Guard, authorize, MPC signature, broadcast to Base](./docs/diagrams/payment.png)
 
 The vault checks the role before any visa exists, so a stolen Guard key still
 cannot leave the role. Without the Guard, agents stop, but founders can still

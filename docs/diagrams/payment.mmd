@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant A as Agent (MCP)
+  participant V as Vault · NEAR
+  participant G as Guard
+  participant M as NEAR MPC
+  participant B as Company wallet · Base
+
+  A->>V: prepare(role, call)
+  V->>V: role, conditions, budget, velocity, fees
+  A->>G: visa for this exact transaction
+  G->>G: registered supplier? invoice reused or injected?
+  G-->>A: signed visa
+  A->>V: authorize(visa)
+  V->>M: sign the EIP-1559 transaction
+  M-->>V: signature
+  V-->>B: broadcast, then confirmed on the vault
