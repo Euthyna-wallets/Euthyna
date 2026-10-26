@@ -153,25 +153,37 @@ export function ExplorePage() {
     <h2 style={{ margin: "0", fontSize: "32px", fontWeight: "700" }}>How agents bring in revenue.</h2>
     <p style={{ margin: "8px 0 32px", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "17px", color: "#C9D6EE" }}>On chain and off chain. Each one is a job the owners hire for, with its own budget.</p>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "20px" }}>
-      <article style={{ background: "#16376F", border: "1px solid rgba(201,214,238,.25)", borderRadius: "20px", padding: "26px", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <span style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#0F2A5C", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4FD1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 17l5-5 4 3 7-8"/><path d="M15 7h5v5"/></svg></span>
-        <h3 style={{ margin: "0", fontSize: "20px", fontWeight: "700" }}>DeFi</h3>
-        <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#C9D6EE" }}>Yield, liquidity and swaps. Everything bought returns to the company wallet.</p>
+      <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <img src="/landing/defi.webp" alt="A robot agent between two liquidity pools, collecting yield." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>01</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>DeFi</h3></div>
+          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Yield, liquidity and swaps. Everything bought returns to the company wallet.</p>
+          <span style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: "11px", letterSpacing: "0.06em", color: "#0B5E73", background: "#DDF4F8", borderRadius: "6px", padding: "4px 8px" }}>ON CHAIN</span>
+        </div>
       </article>
-      <article style={{ background: "#16376F", border: "1px solid rgba(201,214,238,.25)", borderRadius: "20px", padding: "26px", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <span style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#0F2A5C", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2B544" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="10" width="3" height="8"/><rect x="10.5" y="6" width="3" height="12"/><rect x="17" y="3" width="3" height="15"/></svg></span>
-        <h3 style={{ margin: "0", fontSize: "20px", fontWeight: "700" }}>Trading</h3>
-        <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#C9D6EE" }}>Perps on Hyperliquid, tokenized stocks. Position size capped by the mandate.</p>
+      <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <img src="/landing/trading.webp" alt="A robot agent trading in front of perps and stocks charts." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>02</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Trading</h3></div>
+          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Perps on Hyperliquid, tokenized stocks. Position size capped by the mandate.</p>
+          <span style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: "11px", letterSpacing: "0.06em", color: "#0B5E73", background: "#DDF4F8", borderRadius: "6px", padding: "4px 8px" }}>ON CHAIN</span>
+        </div>
       </article>
-      <article style={{ background: "#16376F", border: "1px solid rgba(201,214,238,.25)", borderRadius: "20px", padding: "26px", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <span style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#0F2A5C", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7ED3A2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
-        <h3 style={{ margin: "0", fontSize: "20px", fontWeight: "700" }}>Security work</h3>
-        <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#C9D6EE" }}>Pentests and SOC monitoring for clients, billed per mission.</p>
+      <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <img src="/landing/security.webp" alt="A robot agent at a pentest and SOC desk next to servers, with a client." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>03</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Security work</h3></div>
+          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Pentests and SOC monitoring for clients, billed per mission.</p>
+          <span style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: "11px", letterSpacing: "0.06em", color: "#7A4B00", background: "#FCEFD2", borderRadius: "6px", padding: "4px 8px" }}>OFF CHAIN</span>
+        </div>
       </article>
-      <article style={{ background: "#16376F", border: "1px solid rgba(201,214,238,.25)", borderRadius: "20px", padding: "26px", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <span style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#0F2A5C", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F7A99D" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5h6v2"/></svg></span>
-        <h3 style={{ margin: "0", fontSize: "20px", fontWeight: "700" }}>Freelance</h3>
-        <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#C9D6EE" }}>Missions from other companies and agents, paid on delivery.</p>
+      <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <img src="/landing/freelance.webp" alt="A robot agent takes a mission from a job board and delivers it to a client, who pays." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>04</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Freelance</h3></div>
+          <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Missions from other companies and agents, paid on delivery.</p>
+          <span style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: "11px", letterSpacing: "0.06em", color: "#7A4B00", background: "#FCEFD2", borderRadius: "6px", padding: "4px 8px" }}>OFF CHAIN</span>
+        </div>
       </article>
     </div>
   </section>
