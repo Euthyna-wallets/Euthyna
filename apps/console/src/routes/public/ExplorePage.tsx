@@ -107,7 +107,7 @@ export function ExplorePage() {
     <p style={{ margin: "8px 0 32px", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "17px", color: "#C9D6EE" }}>Humans fund it and take the profit. Agents do the earning, spending and investing in between.</p>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "20px" }}>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/raise.webp" alt="Investors buy shares and the money goes into the company." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/raise.webp" alt="Investors and an AI employee build the company together, laying glowing blocks of capital into its walls." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: "1" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>01</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }}></span><h3 style={{ margin: "0", fontSize: "22px", lineHeight: "1.2", color: "#0F2A5C" }}>Raise</h3></div>
           <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#44557A" }}>Humans buy shares. The money funds the company.</p>
@@ -115,7 +115,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/earn.webp" alt="Clients pay the company in crypto on any chain, or into its bank account." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/earn.webp" alt="An AI employee at a toll booth where coins arrive on four conveyor belts, one per chain." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: "1" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>02</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }}></span><h3 style={{ margin: "0", fontSize: "22px", lineHeight: "1.2", color: "#0F2A5C" }}>Earn</h3></div>
           <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#44557A" }}>Clients pay the company on NEAR, EVM, Solana or Bitcoin, or into its bank account.</p>
@@ -123,7 +123,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/spend.webp" alt="An agent pays a stack of invoices for compute and supplies." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/spend.webp" alt="An AI employee pays a vending machine stocked with servers and supplies with a coin." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: "1" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>03</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }}></span><h3 style={{ margin: "0", fontSize: "22px", lineHeight: "1.2", color: "#0F2A5C" }}>Spend</h3></div>
           <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#44557A" }}>Agents pay the company's invoices: compute, data, suppliers.</p>
@@ -131,7 +131,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/grow.webp" alt="Agents trade, run security work for clients and take freelance missions." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/grow.webp" alt="An AI employee waters a small plant whose leaves are coins." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: "1" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>04</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }}></span><h3 style={{ margin: "0", fontSize: "22px", lineHeight: "1.2", color: "#0F2A5C" }}>Grow</h3></div>
           <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#44557A" }}>Agents generate revenue: DeFi, trading, security work, freelance.</p>
@@ -139,7 +139,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/share.webp" alt="Profits flow from the vault to owners holding their votes." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/share.webp" alt="An AI employee serves a tray of coins to the investors seated around the table." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: "1" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>05</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }}></span><h3 style={{ margin: "0", fontSize: "22px", lineHeight: "1.2", color: "#0F2A5C" }}>Share</h3></div>
           <p style={{ margin: "0", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: "1.55", color: "#44557A" }}>Profits go to the owners who voted.</p>
@@ -162,7 +162,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/trading.webp" alt="Robot agents trading at consoles on an orbital ring above Earth, under candlesticks made of light." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/trading.webp" alt="A small robot surfs a rising price chart, holding up a coin." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>02</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Trading</h3></div>
           <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Perps on Hyperliquid, tokenized stocks. Position size capped by the mandate.</p>
@@ -170,7 +170,7 @@ export function ExplorePage() {
         </div>
       </article>
       <article style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <img src="/landing/security.webp" alt="Robot sentinels guarding client companies under shield domes; an intrusion beam is deflected." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
+        <img src="/landing/security.webp" alt="A robot holds an umbrella over a client's office building while red lightning strikes bounce off it." style={{ display: "block", width: "100%", aspectRatio: "13 / 10", objectFit: "cover" }} />
         <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><span style={{ fontSize: "20px", color: "#5A6B8C" }}>03</span><span style={{ width: "1px", height: "36px", background: "#D6DFEE" }} /><h3 style={{ margin: 0, fontSize: "22px", lineHeight: 1.2, color: "#0F2A5C" }}>Security work</h3></div>
           <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "15px", lineHeight: 1.55, color: "#44557A" }}>Pentests and SOC monitoring for clients, billed per mission.</p>
@@ -190,7 +190,7 @@ export function ExplorePage() {
 
   <section id="staff" style={{ maxWidth: "1392px", margin: "0 auto", padding: "56px 24px 24px" }}>
     <div style={{ background: "#FFFFFF", color: "#0F1E3D", borderRadius: "24px", overflow: "hidden", display: "flex", flexWrap: "wrap" }}>
-      <div style={{ flex: "1 1 560px", minWidth: "0", background: "#16376F" }}><img src="/landing/mandate.webp" alt="The security council on a raised desk next to a pause button sends a mandate to four agents; a gauge above each agent shows the budget used this week." style={{ display: "block", width: "100%", height: "auto" }} /></div>
+      <div style={{ flex: "1 1 560px", minWidth: "0", background: "#16376F" }}><img src="/landing/mandate.webp" alt="An AI employee builds inside a glass-walled sandbox next to an hourglass, while a human outside holds the only key." style={{ display: "block", width: "100%", height: "auto" }} /></div>
       <div style={{ flex: "1 1 460px", minWidth: "0", padding: "44px", display: "flex", flexDirection: "column", gap: "18px" }}>
         <span style={{ alignSelf: "flex-start", fontSize: "12px", letterSpacing: "0.08em", color: "#7A4B00", background: "#FCEFD2", borderRadius: "6px", padding: "5px 10px" }}>UNDER HUMAN MANDATE</span><h2 style={{ margin: "0", fontSize: "30px", color: "#0F2A5C" }}>Agents work. Owners set the limits.</h2>
         <p style={{ margin: "0", fontSize: "19px", fontWeight: "600", lineHeight: "1.45" }}>Every agent has a job, a budget and a boss.</p>
