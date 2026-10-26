@@ -23,10 +23,15 @@ export function SecuritySection() {
   return (
     <section id="security" style={{ maxWidth: "1392px", margin: "0 auto", padding: "72px 24px 24px" }}>
       <span style={{ fontFamily: mono, fontSize: "12px", letterSpacing: "0.1em", color: "#F2B544" }}>SECURITY BY DESIGN · OMNIROLES</span>
-      <h2 style={{ margin: "10px 0 0", fontFamily: mono, fontSize: "36px", fontWeight: 700, lineHeight: 1.15, letterSpacing: "-0.02em" }}>Give agents roles, not keys.</h2>
-      <p style={{ margin: "14px 0 32px", fontFamily: sans, fontSize: "18px", lineHeight: 1.6, color: "#C9D6EE", maxWidth: "860px" }}>
-        OmniRoles is role-based access control for AI agents, enforced on chain. The owners decide what each agent may do, on which chain, and how much. A hacked or tricked agent stays inside its role.
-      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "32px", alignItems: "center", margin: "10px 0 32px" }}>
+        <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontFamily: mono, fontSize: "36px", fontWeight: 700, lineHeight: 1.15, letterSpacing: "-0.02em" }}>Give agents roles, not keys.</h2>
+          <p style={{ margin: "14px 0 0", fontFamily: sans, fontSize: "18px", lineHeight: 1.6, color: "#C9D6EE" }}>
+            OmniRoles is role-based access control for AI agents, enforced on chain. The owners decide what each agent may do, on which chain, and how much. A hacked or tricked agent stays inside its role.
+          </p>
+        </div>
+        <img src="/landing/roles.webp" alt="A robot holds up its badge and only one door in a row of locked doors opens for it." style={{ flex: "1 1 420px", minWidth: 0, maxWidth: "640px", width: "100%", height: "auto", borderRadius: "20px", display: "block" }} />
+      </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "stretch" }}>
         <div style={{ flex: "1 1 400px", minWidth: 0, background: "#FFFFFF", color: "#0F1E3D", borderRadius: "20px", padding: "28px", display: "flex", flexDirection: "column", gap: "16px" }}>
