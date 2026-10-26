@@ -4,6 +4,7 @@ import { AgentProvisioningService } from "./agent-provisioning.js";
 import { BaseGasEstimator } from "./base-gas.js";
 import { Guard } from "./guard.js";
 import { createApp } from "./app.js";
+import { PrismaPairingStore } from "./pairings.js";
 import { createAuth } from "./auth.js";
 import { hasFullAccessKey } from "./near-auth.js";
 import { BetterAuthGateway } from "./auth-gateway.js";
@@ -85,6 +86,7 @@ const app = createApp({
   payments,
   consoleOrigin: env.CONSOLE_ORIGIN,
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
+  pairings: new PrismaPairingStore(prisma),
   omniroles,
 });
 

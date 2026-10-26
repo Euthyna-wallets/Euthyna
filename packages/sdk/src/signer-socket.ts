@@ -78,7 +78,7 @@ export class SocketNearSigner implements AgentNearSigner {
   constructor(private readonly socket: SignerSocket, readonly accountId: string) {}
 
   async createKey(): Promise<NearPublicKey> {
-    throw new Error("agent keys are created by the signer: `euthyna-signer add-agent`");
+    throw new Error("agent keys are created by the signer: `euthyna-signer pair` (the console gives the command)");
   }
 
   async getPublicKey(accountId?: string): Promise<NearPublicKey> {

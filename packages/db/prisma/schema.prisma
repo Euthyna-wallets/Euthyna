@@ -101,6 +101,7 @@ model Organization {
   treasuries              Treasury[]
   nearSponsorships        NearWalletSponsorship[]
   agentProvisionings      AgentProvisioning[]
+  agentPairings           AgentPairing[]
 
   @@unique([slug])
   @@map("organization")
@@ -206,6 +207,31 @@ model Agent {
   @@index([organizationId])
   @@index([organizationId, createdByUserId])
   @@map("agent")
+}
+
+/// A one-time code that lets euthyna-signer hire an agent: the console makes it,
+/// the signer redeems it with the agent's public key and receives its API key.
+model AgentPairing {
+  id              String       @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUserId String
+  name            String
+  role            String
+  nearAccountId   String
+  vaultAccountId  String
+  mpcPath         String
+  /// sha256 of the code; the code itself is never stored.
+  codeHash        String       @unique
+  expiresAt       DateTime
+  redeemedAt      DateTime?
+  publicKey       String?
+  hostname        String?
+  agentId         String?
+  createdAt       DateTime     @default(now())
+
+  @@index([organizationId, createdByUserId])
+  @@map("agent_pairing")
 }
 
 model Supplier {
