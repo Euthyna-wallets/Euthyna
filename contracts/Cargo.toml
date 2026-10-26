@@ -6,7 +6,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-rust-version = "1.86"
+rust-version = "1.99.1"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -26,3 +26,4 @@ serial_test = "3.2"
 sha3 = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "sync"] }
+

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use borsh::BorshSerialize;
@@ -37,6 +39,7 @@ pub struct Fixture {
     pub council: Account,
     pub outsider: Account,
     pub vault: Contract,
+    pub mpc: Contract,
     pub guard: SigningKey,
     pub status_guard: SigningKey,
 }
@@ -221,6 +224,7 @@ pub async fn setup() -> Result<Fixture> {
         council,
         outsider,
         vault,
+        mpc,
         guard,
         status_guard,
     })
@@ -315,7 +319,14 @@ pub fn approval(
     expires_at_ns: u64,
     digest_override: Option<[u8; 32]>,
 ) -> Value {
-    approval_signed_by(fixture, &fixture.guard, operation, visa_nonce, expires_at_ns, digest_override)
+    approval_signed_by(
+        fixture,
+        &fixture.guard,
+        operation,
+        visa_nonce,
+        expires_at_ns,
+        digest_override,
+    )
 }
 
 /// A visa signed by any key: the Guard's, or an attacker's.
@@ -436,13 +447,13 @@ pub async fn authorize(
 }
 
 pub async fn get_operation(fixture: &Fixture, operation: &Value) -> Result<Value> {
-    Ok(fixture
+    fixture
         .vault
         .view("get_operation")
         .args_json(json!({"op_id": operation["op_id"]}))
         .await?
         .json::<Option<Value>>()?
-        .context("operation missing")?)
+        .context("operation missing")
 }
 
 pub fn op_id(operation: &Value) -> [u8; 32] {

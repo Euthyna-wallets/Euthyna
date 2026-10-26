@@ -13,15 +13,15 @@ mod vault_common;
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
+use near_workspaces::Account;
 use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::Gas;
-use near_workspaces::Account;
 use serde_json::{Value, json};
 use serial_test::serial;
 use vault_common::{
-    ALLOWANCE_KEY, CHAIN_ID, Fixture, ROLE, TOKEN, apply_rule_change, approval,
-    approval_signed_by, assert_failure_contains, authorize, erc20_transfer, get_operation, prepare,
-    request, setup, status_report, status_report_signed_by,
+    ALLOWANCE_KEY, CHAIN_ID, Fixture, ROLE, TOKEN, apply_rule_change, approval, approval_signed_by,
+    assert_failure_contains, authorize, erc20_transfer, get_operation, prepare, request, setup,
+    status_report, status_report_signed_by,
 };
 
 const ATTACKER: [u8; 20] = [0xba; 20];
@@ -49,7 +49,11 @@ async fn visa_expiry(fixture: &Fixture) -> Result<u64> {
         .saturating_add(30_000_000_000))
 }
 
-async fn try_prepare(fixture: &Fixture, caller: &Account, request: Value) -> Result<ExecutionFinalResult> {
+async fn try_prepare(
+    fixture: &Fixture,
+    caller: &Account,
+    request: Value,
+) -> Result<ExecutionFinalResult> {
     Ok(caller
         .call(fixture.vault.id(), "prepare")
         .args_json(json!({"role": ROLE, "request": request}))
@@ -59,9 +63,20 @@ async fn try_prepare(fixture: &Fixture, caller: &Account, request: Value) -> Res
 }
 
 /// Prepare, Guard visa, MPC signature, then the worker's confirmation.
-async fn pay_and_confirm(fixture: &Fixture, reference: &str, amount: u128, nonce: u64) -> Result<Value> {
+async fn pay_and_confirm(
+    fixture: &Fixture,
+    reference: &str,
+    amount: u128,
+    nonce: u64,
+) -> Result<Value> {
     let operation = prepare(fixture, reference, amount).await?;
-    let visa = approval(fixture, &operation, nonce, visa_expiry(fixture).await?, None);
+    let visa = approval(
+        fixture,
+        &operation,
+        nonce,
+        visa_expiry(fixture).await?,
+        None,
+    );
     authorize(fixture, &operation, visa).await?.into_result()?;
     let signed = get_operation(fixture, &operation).await?;
     fixture
@@ -162,7 +177,11 @@ async fn injected_agent_cannot_send_funds_outside_its_role() -> Result<()> {
         "ERR_MAX_FEE_PER_GAS",
     );
 
-    assert_eq!(wallet_nonce(&fixture).await?, before, "no transaction may have been signed");
+    assert_eq!(
+        wallet_nonce(&fixture).await?,
+        before,
+        "no transaction may have been signed"
+    );
     Ok(())
 }
 
@@ -181,7 +200,8 @@ async fn agent_cannot_skip_forge_or_replay_the_guard() -> Result<()> {
         "ERR_VISA_SIGNATURE",
     );
 
-    let with_status_key = approval_signed_by(&fixture, &fixture.status_guard, &operation, 2, expiry, None);
+    let with_status_key =
+        approval_signed_by(&fixture, &fixture.status_guard, &operation, 2, expiry, None);
     blocked(
         "visa forged with the worker's status key",
         "vault: one key per purpose",
@@ -198,7 +218,9 @@ async fn agent_cannot_skip_forge_or_replay_the_guard() -> Result<()> {
     );
 
     let valid = approval(&fixture, &operation, 4, expiry, None);
-    authorize(&fixture, &operation, valid.clone()).await?.into_result()?;
+    authorize(&fixture, &operation, valid.clone())
+        .await?
+        .into_result()?;
     blocked(
         "same visa sent twice",
         "vault: operation state",
@@ -315,7 +337,11 @@ async fn only_a_dao_vote_changes_rules_or_moves_funds_outside_roles() -> Result<
         "max_fee_per_gas": "20000000000", "max_priority_fee_per_gas": "1000000000"
     }]});
 
-    for (who, account) in [("agent", &fixture.agent), ("council member", &fixture.council), ("outsider", &fixture.outsider)] {
+    for (who, account) in [
+        ("agent", &fixture.agent),
+        ("council member", &fixture.council),
+        ("outsider", &fixture.outsider),
+    ] {
         blocked(
             &format!("{who} raises its own budget"),
             "vault: rules change only by DAO vote",
@@ -398,7 +424,9 @@ async fn kill_switch_and_no_key_on_the_vault() -> Result<()> {
     let fixture = setup().await?;
     // Nobody holds a key of the vault account: not us, not the deployer.
     assert!(fixture.vault.view_access_keys().await?.is_empty());
-    println!("BLOCKED | stolen server or deployer key signs as the vault | vault: account has no access key | 0 keys");
+    println!(
+        "BLOCKED | stolen server or deployer key signs as the vault | vault: account has no access key | 0 keys"
+    );
 
     // One council member pauses; agents stop; only the DAO resumes.
     fixture
@@ -416,7 +444,11 @@ async fn kill_switch_and_no_key_on_the_vault() -> Result<()> {
     blocked(
         "agent unpauses the vault",
         "vault: only the DAO resumes",
-        &fixture.agent.call(fixture.vault.id(), "unpause").transact().await?,
+        &fixture
+            .agent
+            .call(fixture.vault.id(), "unpause")
+            .transact()
+            .await?,
         "ERR_OWNER_ONLY",
     );
 
@@ -430,7 +462,12 @@ async fn kill_switch_and_no_key_on_the_vault() -> Result<()> {
         json!({"RevokeMembership": {"role": ROLE, "member": fixture.agent.id()}}),
     )
     .await?;
-    fixture.owner.call(fixture.vault.id(), "unpause").transact().await?.into_result()?;
+    fixture
+        .owner
+        .call(fixture.vault.id(), "unpause")
+        .transact()
+        .await?
+        .into_result()?;
     blocked(
         "revoked agent keeps paying",
         "vault: role membership",
@@ -450,7 +487,14 @@ fn keccak_hex(data: &[u8]) -> String {
 }
 
 /// initTransfer(address,uint128,uint128,uint128,string,string), ABI-encoded by hand.
-fn init_transfer(token: [u8; 20], amount: u128, fee: u128, native_fee: u128, recipient: &str, message: &str) -> Vec<u8> {
+fn init_transfer(
+    token: [u8; 20],
+    amount: u128,
+    fee: u128,
+    native_fee: u128,
+    recipient: &str,
+    message: &str,
+) -> Vec<u8> {
     let pad = |bytes: &[u8]| {
         let mut out = bytes.to_vec();
         out.resize(bytes.len().div_ceil(32) * 32, 0);
@@ -516,7 +560,14 @@ async fn revenue_role_only_reaches_the_shareholders() -> Result<()> {
         }}}),
         json!({"GrantMembership": {"role": "revenue", "member": fixture.agent.id(), "kind": "Agent", "starts_at_ns": "0", "ends_at_ns": null, "max_uses": null}}),
     ] {
-        apply_rule_change(&fixture.owner, &fixture.outsider, &fixture.worker, &fixture.vault, change).await?;
+        apply_rule_change(
+            &fixture.owner,
+            &fixture.outsider,
+            &fixture.worker,
+            &fixture.vault,
+            change,
+        )
+        .await?;
     }
     let prepare_revenue = |request: Value| {
         fixture
@@ -531,49 +582,104 @@ async fn revenue_role_only_reaches_the_shareholders() -> Result<()> {
     blocked(
         "revenue sent to the attacker's NEAR account",
         "vault: bridge recipient fixed to the shares contract",
-        &prepare_revenue(revenue_request("REV-ATK-1", init_transfer([0; 20], amount, 0, fee, "near:attacker.testnet", ""), amount + fee)).await?,
+        &prepare_revenue(revenue_request(
+            "REV-ATK-1",
+            init_transfer([0; 20], amount, 0, fee, "near:attacker.testnet", ""),
+            amount + fee,
+        ))
+        .await?,
         "parameterNotAllowed",
     );
     blocked(
         "revenue bridged back to an attacker's EVM address",
         "vault: bridge recipient fixed to the shares contract",
-        &prepare_revenue(revenue_request("REV-ATK-2", init_transfer([0; 20], amount, 0, fee, "base:0xbabababababababababababababababababababa", ""), amount + fee)).await?,
+        &prepare_revenue(revenue_request(
+            "REV-ATK-2",
+            init_transfer(
+                [0; 20],
+                amount,
+                0,
+                fee,
+                "base:0xbabababababababababababababababababababa",
+                "",
+            ),
+            amount + fee,
+        ))
+        .await?,
         "parameterNotAllowed",
     );
     blocked(
         "bridge message forwards the ETH elsewhere",
         "vault: bridge message must be empty",
-        &prepare_revenue(revenue_request("REV-ATK-3", init_transfer([0; 20], amount, 0, fee, SHARES, "attacker.testnet"), amount + fee)).await?,
+        &prepare_revenue(revenue_request(
+            "REV-ATK-3",
+            init_transfer([0; 20], amount, 0, fee, SHARES, "attacker.testnet"),
+            amount + fee,
+        ))
+        .await?,
         "parameterNotAllowed",
     );
     blocked(
         "whole value paid as a bridge fee",
         "vault: bridge fee cap",
-        &prepare_revenue(revenue_request("REV-ATK-4", init_transfer([0; 20], 1, 0, 2_000_000_000_000_000, SHARES, ""), 2_000_000_000_000_001)).await?,
+        &prepare_revenue(revenue_request(
+            "REV-ATK-4",
+            init_transfer([0; 20], 1, 0, 2_000_000_000_000_000, SHARES, ""),
+            2_000_000_000_000_001,
+        ))
+        .await?,
         "parameterGreaterThanAllowed",
     );
     blocked(
         "revenue above the budget",
         "vault: ETH budget",
-        &prepare_revenue(revenue_request("REV-ATK-5", init_transfer([0; 20], REVENUE_BUDGET, 0, fee, SHARES, ""), REVENUE_BUDGET + fee)).await?,
+        &prepare_revenue(revenue_request(
+            "REV-ATK-5",
+            init_transfer([0; 20], REVENUE_BUDGET, 0, fee, SHARES, ""),
+            REVENUE_BUDGET + fee,
+        ))
+        .await?,
         "allowanceExceeded",
     );
     blocked(
         "agent declares less ETH than it sends",
         "vault: ETH measured from the value",
         &prepare_revenue({
-            let mut request = revenue_request("REV-ATK-6", init_transfer([0; 20], amount, 0, fee, SHARES, ""), amount + fee);
+            let mut request = revenue_request(
+                "REV-ATK-6",
+                init_transfer([0; 20], amount, 0, fee, SHARES, ""),
+                amount + fee,
+            );
             request["allowance_amount"] = json!("1");
             request
-        }).await?,
+        })
+        .await?,
         "ERR_ALLOWANCE_AMOUNT_MISMATCH",
     );
 
     // The honest call passes and reserves the ETH sent.
-    let operation: Value = prepare_revenue(revenue_request("REV-1", init_transfer([0; 20], amount, 0, fee, SHARES, ""), amount + fee))
-        .await?
-        .into_result()?
-        .json()?;
-    assert_eq!(operation["consumptions"][0]["amount"], (amount + fee).to_string());
+    let operation: Value = prepare_revenue(revenue_request(
+        "REV-1",
+        init_transfer([0; 20], amount, 0, fee, SHARES, ""),
+        amount + fee,
+    ))
+    .await?
+    .into_result()?
+    .json()?;
+    assert_eq!(
+        operation["consumptions"][0]["amount"],
+        (amount + fee).to_string()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn settlement_callback_is_private() -> Result<()> {
+    let f = setup().await?;
+    let result = f.outsider.call(f.vault.id(), "on_settle_verified")
+        .args_json(json!({"op_id": vec![0;32], "tx_hash": vec![0;32], "expected_payload_hash": vec![0;32], "cancellation": false}))
+        .gas(Gas::from_tgas(50)).transact().await?;
+    assert_failure_contains(&result, "Method on_settle_verified is private");
     Ok(())
 }

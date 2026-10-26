@@ -85,6 +85,7 @@ fn run(
         avatar: AVATAR,
         now: NOW,
         allowances: store,
+        address_lists: &(),
     };
     evaluate(conditions, &context)
 }
@@ -672,6 +673,7 @@ fn check(
         avatar: AVATAR,
         now: NOW,
         allowances: &store,
+        address_lists: &(),
     };
     check_call(
         scope,

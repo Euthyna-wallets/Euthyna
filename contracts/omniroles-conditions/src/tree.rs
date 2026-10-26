@@ -230,6 +230,13 @@ fn check_node(nodes: &[Node], index: usize) -> Result<(), IntegrityError> {
             }
             Ok(())
         }
+        Operator::InAddressList => {
+            encoding_in(&[E::Static])?;
+            if !(1..=32).contains(&comp_len) {
+                return Err(IntegrityError::CompValueLength { node: id });
+            }
+            no_children()
+        }
         Operator::EqualToAvatar => {
             encoding_in(&[E::Static])?;
             comp_empty()?;

@@ -14,14 +14,36 @@ fn main() {
     let supplier = [0xa7; 20];
     let key = [0x5a; 32];
     let sheets: Vec<(&str, PresetPermission)> = vec![
-        ("approve", presets::erc20_approve(usdc, &[v3, v2], 10_000_000_000)),
+        (
+            "approve",
+            presets::erc20_approve(usdc, &[v3, v2], 10_000_000_000),
+        ),
         ("approveSingle", presets::erc20_approve(usdc, &[v3], 1)),
         ("transfer", presets::erc20_transfer(usdc, &[supplier], key)),
-        ("transferMany", presets::erc20_transfer(usdc, &[supplier, token_a], key)),
-        ("uniswapV3", presets::uniswap_v3_exact_input_single(v3, usdc, &[token_a, token_b], key)),
-        ("uniswapV3Single", presets::uniswap_v3_exact_input_single(v3, usdc, &[token_a], key)),
-        ("uniswapV2", presets::uniswap_v2_swap_exact_tokens_for_tokens(v2, &[vec![usdc, token_a], vec![usdc, token_b]], key)),
-        ("uniswapV2Single", presets::uniswap_v2_swap_exact_tokens_for_tokens(v2, &[vec![usdc, token_a]], key)),
+        (
+            "transferMany",
+            presets::erc20_transfer(usdc, &[supplier, token_a], key),
+        ),
+        (
+            "uniswapV3",
+            presets::uniswap_v3_exact_input_single(v3, usdc, &[token_a, token_b], key),
+        ),
+        (
+            "uniswapV3Single",
+            presets::uniswap_v3_exact_input_single(v3, usdc, &[token_a], key),
+        ),
+        (
+            "uniswapV2",
+            presets::uniswap_v2_swap_exact_tokens_for_tokens(
+                v2,
+                &[vec![usdc, token_a], vec![usdc, token_b]],
+                key,
+            ),
+        ),
+        (
+            "uniswapV2Single",
+            presets::uniswap_v2_swap_exact_tokens_for_tokens(v2, &[vec![usdc, token_a]], key),
+        ),
     ];
     let json: serde_json::Map<String, serde_json::Value> = sheets
         .into_iter()

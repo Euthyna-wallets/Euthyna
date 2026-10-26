@@ -184,6 +184,11 @@ describe("OmniRoles SDK", () => {
       "prepare",
       "authorize",
       "cancel_nonce",
+      "settle",
+      "settle_cancellation",
+      "release_unconfirmed",
+      "clear_stale_settlement",
+      "execute_queued_operation",
       "cancel_prepared",
       "renounce_role",
     ]);
@@ -238,3 +243,4 @@ describe("revenue sharing by an agent", () => {
     expect(prepared[0]).toMatchObject({ chain_id: 84532, value: "1010", allowance_amount: "1010", reference: "REV-1", calldata: [0xde, 0xb9, 0x15, 0xb8] });
   });
 });
+

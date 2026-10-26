@@ -10,8 +10,8 @@
 use near_sdk::json_types::U64;
 use near_sdk::store::IterableMap;
 use near_sdk::{
-    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseError, env, ext_contract, near,
-    require,
+    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseError, env,
+    ext_contract, near, require,
 };
 
 const VIEW_GAS: Gas = Gas::from_tgas(5);
@@ -70,25 +70,51 @@ pub struct Registry {
 impl Registry {
     #[init]
     pub fn new(factory_id: AccountId) -> Self {
-        Self { factory_id, companies: IterableMap::new(Key::Companies) }
+        Self {
+            factory_id,
+            companies: IterableMap::new(Key::Companies),
+        }
     }
 
     /// Called by the company's DAO. Attach enough NEAR for the storage; the rest is refunded.
     #[payable]
-    pub fn register(&mut self, vault_id: AccountId, shares_id: Option<AccountId>, name: String, description: String) -> Promise {
+    pub fn register(
+        &mut self,
+        vault_id: AccountId,
+        shares_id: Option<AccountId>,
+        name: String,
+        description: String,
+    ) -> Promise {
         let dao_id = env::predecessor_account_id();
         require!(self.is_factory_dao(&dao_id), "ERR_NOT_A_MANDATEOS_DAO");
         let name = name.trim().to_owned();
-        require!(!name.is_empty() && name.chars().count() <= MAX_NAME, "ERR_NAME_LENGTH");
-        require!(description.chars().count() <= MAX_DESCRIPTION, "ERR_DESCRIPTION_LENGTH");
+        require!(
+            !name.is_empty() && name.chars().count() <= MAX_NAME,
+            "ERR_NAME_LENGTH"
+        );
+        require!(
+            description.chars().count() <= MAX_DESCRIPTION,
+            "ERR_DESCRIPTION_LENGTH"
+        );
         let deposit = env::attached_deposit();
-        let company = Company { dao_id, vault_id: vault_id.clone(), shares_id: shares_id.clone(), name, description, registered_at_ns: U64(env::block_timestamp()) };
+        let company = Company {
+            dao_id,
+            vault_id: vault_id.clone(),
+            shares_id: shares_id.clone(),
+            name,
+            description,
+            registered_at_ns: U64(env::block_timestamp()),
+        };
         let callback = ext_self::ext(env::current_account_id())
             .with_static_gas(CALLBACK_GAS)
             .on_checked(company, near_sdk::json_types::U128(deposit.as_yoctonear()));
-        let vault = ext_vault::ext(vault_id).with_static_gas(VIEW_GAS).owner_id();
+        let vault = ext_vault::ext(vault_id)
+            .with_static_gas(VIEW_GAS)
+            .owner_id();
         match shares_id {
-            Some(shares) => vault.and(ext_shares::ext(shares).with_static_gas(VIEW_GAS).info()).then(callback),
+            Some(shares) => vault
+                .and(ext_shares::ext(shares).with_static_gas(VIEW_GAS).info())
+                .then(callback),
             None => vault.then(callback),
         }
     }
@@ -99,7 +125,9 @@ impl Registry {
         let refund_all = |reason: &str| {
             env::log_str(reason);
             if deposit.0 > 0 {
-                Promise::new(payer.clone()).transfer(NearToken::from_yoctonear(deposit.0)).detach();
+                Promise::new(payer.clone())
+                    .transfer(NearToken::from_yoctonear(deposit.0))
+                    .detach();
             }
             false
         };
@@ -118,16 +146,20 @@ impl Registry {
         self.companies.insert(dao_id.clone(), company);
         self.companies.flush();
         let after = env::storage_usage();
-        let cost = env::storage_byte_cost().as_yoctonear() * u128::from(after.saturating_sub(before));
+        let cost =
+            env::storage_byte_cost().as_yoctonear() * u128::from(after.saturating_sub(before));
         if cost > deposit.0 {
             self.companies.remove(&dao_id);
             self.companies.flush();
             return refund_all("ERR_STORAGE_DEPOSIT");
         }
-        let freed = env::storage_byte_cost().as_yoctonear() * u128::from(before.saturating_sub(after));
+        let freed =
+            env::storage_byte_cost().as_yoctonear() * u128::from(before.saturating_sub(after));
         let refund = deposit.0 - cost + freed;
         if refund > 0 {
-            Promise::new(dao_id.clone()).transfer(NearToken::from_yoctonear(refund)).detach();
+            Promise::new(dao_id.clone())
+                .transfer(NearToken::from_yoctonear(refund))
+                .detach();
         }
         env::log_str(&format!("registered {dao_id}"));
         true
@@ -137,11 +169,17 @@ impl Registry {
     pub fn unregister(&mut self) {
         let dao_id = env::predecessor_account_id();
         let before = env::storage_usage();
-        require!(self.companies.remove(&dao_id).is_some(), "ERR_NOT_REGISTERED");
+        require!(
+            self.companies.remove(&dao_id).is_some(),
+            "ERR_NOT_REGISTERED"
+        );
         self.companies.flush();
-        let freed = env::storage_byte_cost().as_yoctonear() * u128::from(before.saturating_sub(env::storage_usage()));
+        let freed = env::storage_byte_cost().as_yoctonear()
+            * u128::from(before.saturating_sub(env::storage_usage()));
         if freed > 0 {
-            Promise::new(dao_id).transfer(NearToken::from_yoctonear(freed)).detach();
+            Promise::new(dao_id)
+                .transfer(NearToken::from_yoctonear(freed))
+                .detach();
         }
     }
 
@@ -171,13 +209,16 @@ impl Registry {
     /// `<name>.<factory>` with a single extra label, as the factory creates them.
     fn is_factory_dao(&self, account: &AccountId) -> bool {
         let suffix = format!(".{}", self.factory_id);
-        account.as_str().strip_suffix(&suffix).is_some_and(|label| !label.is_empty() && !label.contains('.'))
+        account
+            .as_str()
+            .strip_suffix(&suffix)
+            .is_some_and(|label| !label.is_empty() && !label.contains('.'))
     }
 }
 
 fn promise_json<T: serde::de::DeserializeOwned>(index: u64) -> Result<T, PromiseError> {
-    match env::promise_result(index) {
-        near_sdk::PromiseResult::Successful(bytes) => serde_json::from_slice(&bytes).map_err(|_| PromiseError::Failed),
+    match env::promise_result_checked(index, 1_048_576) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| PromiseError::Failed),
         _ => Err(PromiseError::Failed),
     }
 }

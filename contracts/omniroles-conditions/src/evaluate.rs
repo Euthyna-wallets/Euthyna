@@ -19,6 +19,22 @@ impl AllowanceSource for BTreeMap<[u8; 32], Allowance> {
     }
 }
 
+/// Named address lists supplied by the vault. Missing lists fail closed.
+pub trait AddressListSource {
+    fn contains(&self, list: &[u8], address: &[u8; 20]) -> bool;
+}
+impl AddressListSource for () {
+    fn contains(&self, _list: &[u8], _address: &[u8; 20]) -> bool {
+        false
+    }
+}
+impl AddressListSource for BTreeMap<Vec<u8>, Vec<[u8; 20]>> {
+    fn contains(&self, list: &[u8], address: &[u8; 20]) -> bool {
+        self.get(list)
+            .is_some_and(|addresses| addresses.contains(address))
+    }
+}
+
 /// The call being checked.
 pub struct Context<'a> {
     /// Full calldata, selector included.
@@ -30,6 +46,7 @@ pub struct Context<'a> {
     /// Seconds since epoch, for allowance accrual.
     pub now: u64,
     pub allowances: &'a dyn AllowanceSource,
+    pub address_lists: &'a dyn AddressListSource,
 }
 
 /// Validate `conditions`, then evaluate them. On success, returns the
@@ -142,6 +159,20 @@ impl<'t, 'c> Evaluator<'t, 'c> {
                     self.consumptions = snapshot;
                 }
                 Err(Status::NoArrayElementPasses { node: id })
+            }
+            Operator::InAddressList => {
+                let word = abi::word(present(region)?, 0)?;
+                let address: [u8; 20] = word[12..].try_into().expect("20 bytes");
+                if word[..12].iter().all(|byte| *byte == 0)
+                    && self
+                        .context
+                        .address_lists
+                        .contains(&node.comp_value, &address)
+                {
+                    Ok(())
+                } else {
+                    Err(Status::ParameterNotAllowed { node: id })
+                }
             }
             Operator::EqualToAvatar => {
                 let avatar = abi::address_word(&self.context.avatar);

@@ -129,11 +129,11 @@ class FakeStore implements WorkerStore {
 class FakeNear implements WorkerNearGateway {
   timestampNs = 20_000_000_000n;
   submitted: MpcSignature[] = [];
-  reports = 0;
+  settlements = 0;
   cancellations = 0;
   queuedExecutions = 0;
   cancellationFees: Array<{ gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> = [];
-  reportFailsAfterCommit = false;
+  settleFailsAfterCommit = false;
   status: NearTransactionStatus = {};
   walletState: Record<string, unknown> = { address: Array(20).fill(0x11) };
   gasBalanceYocto = "100000000000000000000000";
@@ -168,8 +168,15 @@ class FakeNear implements WorkerNearGateway {
     return Promise.resolve("near-submit-signature");
   }
 
+  settle(_vault: string, _opId: number[], _blockHash: Hex, cancellation = false): Promise<string> {
+    this.settlements += 1;
+    this.operation = { ...this.operation, state: cancellation ? "Cancelled" : "Confirmed" };
+    if (this.settleFailsAfterCommit) return Promise.reject(new Error("connection lost after commit"));
+    return Promise.resolve("near-settle");
+  }
+  releaseUnconfirmed(): Promise<string> { this.operation = { ...this.operation, state: "Unconfirmed" }; return Promise.resolve("near-timeout"); }
   reportStatus(_vault: string, signedReport: unknown): Promise<string> {
-    this.reports += 1;
+    this.settlements += 1;
     const failed =
       signedReport !== null &&
       typeof signedReport === "object" &&
@@ -179,7 +186,7 @@ class FakeNear implements WorkerNearGateway {
       "kind" in signedReport.report &&
       signedReport.report.kind === "Failed";
     this.operation = { ...this.operation, state: failed ? "Failed" : "Confirmed" };
-    if (this.reportFailsAfterCommit) return Promise.reject(new Error("connection lost after commit"));
+    if (this.settleFailsAfterCommit) return Promise.reject(new Error("connection lost after commit"));
     return Promise.resolve("near-report");
   }
 
@@ -219,6 +226,7 @@ class FakeNear implements WorkerNearGateway {
   }
 
   viewFunction<T>(_accountId: string, methodName: string): Promise<T> {
+    if (methodName === "get_settlement_config") return Promise.resolve({ cancel_after_ns: "10000000000", unconfirmed_after_ns: "21600000000000" } as T);
     if (methodName === "is_paused") return Promise.resolve(true as T);
     if (methodName === "get_wallet") return Promise.resolve(this.walletState as T);
     if (methodName === "get_role") {
@@ -249,8 +257,9 @@ class FakeBase implements WorkerBaseGateway {
     return Promise.resolve(this.rawTransactionHash(raw));
   }
 
-  receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null> {
-    return Promise.resolve(this.receipts.get(hash) ?? null);
+  receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash?: Hex } | null> {
+    const receipt = this.receipts.get(hash);
+    return Promise.resolve(receipt ? { ...receipt, blockHash: `0x${"09".repeat(32)}` as Hex } : null);
   }
 
   blockNumber(): Promise<bigint> {
@@ -334,7 +343,7 @@ describe("OperationWorker", () => {
     test.advance(1_000);
     await test.createWorker().tick();
     expect(test.base.broadcasts).toHaveLength(1);
-    expect(test.near.reports).toBe(1);
+    expect(test.near.settlements).toBe(1);
     expect(test.store.operation).toMatchObject({ state: "Confirmed", receiptBlock: 99n });
   });
 
@@ -345,7 +354,7 @@ describe("OperationWorker", () => {
     test.base.receipts.set(originalHash, { status: "success", blockNumber: 99n });
     test.base.head = 102n;
     await test.createWorker().tick();
-    expect(test.near.reports).toBe(0);
+    expect(test.near.settlements).toBe(0);
     expect(test.store.operation).toMatchObject({
       state: "Broadcast",
       txHash: originalHash,
@@ -354,12 +363,12 @@ describe("OperationWorker", () => {
     });
   });
 
-  it("recovers after report_status committed but its RPC response was lost", async () => {
+  it("recovers after settle committed but its RPC response was lost", async () => {
     const test = harness();
     test.store.operation.txHash = originalHash;
     test.store.operation.broadcastAt = new Date(nowStart);
     test.base.receipts.set(originalHash, { status: "success", blockNumber: 99n });
-    test.near.reportFailsAfterCommit = true;
+    test.near.settleFailsAfterCommit = true;
     await test.createWorker().tick();
     expect(test.near.operation.state).toBe("Confirmed");
     expect(test.store.operation.state).not.toBe("Confirmed");
@@ -368,7 +377,7 @@ describe("OperationWorker", () => {
     await test.createWorker().tick();
     expect(test.store.operation.state).toBe("Confirmed");
     expect(test.store.operation.txHash).toBe(originalHash);
-    expect(test.near.reports).toBe(1);
+    expect(test.near.settlements).toBe(1);
   });
 
   it("extracts a published MPC response and calls submit_signature before broadcast", async () => {
@@ -472,15 +481,19 @@ describe("OperationWorker", () => {
     expect(ready.store.operation.nearAuthorizationTxHash).toBe("near-execute-queued");
   });
 
-  it("reports a reverted original and releases its policy reservations", async () => {
+  it("keeps a reverted original reserved until the conservative timeout", async () => {
     const test = harness();
     test.store.operation.txHash = originalHash;
     test.store.operation.broadcastAt = new Date(nowStart);
     test.base.receipts.set(originalHash, { status: "reverted", blockNumber: 42n });
     await test.createWorker().tick();
-    expect(test.store.operation.state).toBe("Failed");
-    expect(test.store.released).toEqual(["Failed"]);
-    expect(test.near.reports).toBe(1);
+    expect(test.near.operation.state).toBe("PossiblySigned");
+    expect(test.store.released).toEqual([]);
+    expect(test.near.settlements).toBe(0);
+    test.near.timestampNs = 22_000_000_000_000n;
+    test.advance(1_000);
+    await test.createWorker().tick();
+    expect(test.near.operation.state).toBe("Unconfirmed");
   });
 
   it("does no work while another process holds the lease", async () => {
@@ -491,3 +504,4 @@ describe("OperationWorker", () => {
   });
 
 });
+

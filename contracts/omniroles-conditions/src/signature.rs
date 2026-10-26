@@ -127,6 +127,7 @@ fn conditions(
         avatar: environment.avatar,
         now: environment.now,
         allowances: environment.allowances,
+        address_lists: environment.address_lists,
     };
     evaluate(conditions, &context)
 }

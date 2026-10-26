@@ -83,6 +83,7 @@ pub enum Operator {
     WithinRatio = 23,
     WithinAllowance = 28,
     CallWithinAllowance = 30,
+    InAddressList = 40,
 }
 
 impl TryFrom<u8> for Operator {
@@ -112,6 +113,7 @@ impl TryFrom<u8> for Operator {
             23 => Self::WithinRatio,
             28 => Self::WithinAllowance,
             30 => Self::CallWithinAllowance,
+            40 => Self::InAddressList,
             other => return Err(format!("unknown operator {other}")),
         })
     }

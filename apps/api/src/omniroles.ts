@@ -1,3 +1,4 @@
+import { hexToBytes } from "viem";
 /**
  * OmniRoles treasury for the console: DAO + keyless vault + company wallet,
  * governance read from chain, agent dry runs and activity.
@@ -847,6 +848,32 @@ export class OmniRolesService {
     return this.proposal(treasury, title, [{ method: "submit_transactions", transactions: drafts }], await this.labels(organizationId));
   }
 
+  async suppliers(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    return { entries: await this.near.viewFunction<Array<{ address: number[]; label: string }>>(treasury.vaultAccountId, "get_address_list", { list: "suppliers" }) };
+  }
+
+  async suppliersProposal(organizationId: string, input: { entries: Array<{ address: string; label: string }>; migrate?: boolean | undefined }) {
+    const treasury = await this.requireTreasury(organizationId);
+    let entries = input.entries;
+    if (input.migrate) {
+      const current = await this.suppliers(organizationId);
+      if (current.entries.length) throw new OmniRolesError(409, "already_migrated", "The on-chain suppliers list is already populated");
+      const wallets = await this.prisma.supplierWallet.findMany({ where: { organizationId, chainId: PROFILE.chainId, active: true, supplier: { active: true } }, include: { supplier: true } });
+      entries = wallets.map((w) => ({ address: w.address, label: w.supplier.name }));
+    }
+    const unique = [...new Map(entries.map((e) => [e.address.toLowerCase(), e])).values()];
+    if (!unique.length || unique.length > 256) throw new OmniRolesError(400, "invalid_list", "Choose 1 to 256 suppliers");
+    const calls = unique.map((e) => {
+      if ([...e.label].length > 64) throw new OmniRolesError(400, "invalid_label", "Supplier labels must contain at most 64 characters");
+      return { method: "queue_rule_change" as const, change: { AddListAddress: { list: "suppliers", address: Array.from(hexToBytes(e.address as Hex)), label: e.label } } };
+    });
+    if (input.migrate) {
+      return this.proposal(treasury, "Move existing suppliers on chain", [{ method: "queue_rule_change", change: { AddListAddresses: { list: "suppliers", entries: calls.map((c) => ({address:c.change.AddListAddress.address,label:c.change.AddListAddress.label})) } } }]);
+    }
+    return this.proposal(treasury, "Add supplier", calls);
+  }
+
   async roleProposal(organizationId: string, draft: RoleDraft) {
     const treasury = await this.requireTreasury(organizationId);
     for (const block of draft.blocks) {
@@ -1643,3 +1670,4 @@ export function explainRefusal(reason: string): string {
   ];
   return byCode.find(([code]) => reason.includes(code))?.[1] ?? reason;
 }
+

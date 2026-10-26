@@ -73,7 +73,7 @@ export interface VaultOperation {
   visa_authorized: boolean;
   cosigned_by: string | null;
   possibly_signed_at_ns: string | null;
-  state: "Prepared" | "Queued" | "PossiblySigned" | "Confirmed" | "Failed" | "Cancelled" | "Vetoed" | "Expired";
+  state: "Prepared" | "Queued" | "PossiblySigned" | "Confirmed" | "Failed" | "Cancelled" | "Vetoed" | "Expired" | "Unconfirmed";
   signature: MpcSignature | null;
   signed_transaction: number[] | null;
   cancellation: CancellationAttempt | null;
@@ -105,4 +105,5 @@ export interface SignedPayload<T> {
   visa?: T;
   signature: string;
 }
+
 

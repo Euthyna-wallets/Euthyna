@@ -77,6 +77,8 @@ export interface WorkerNearGateway {
   executeQueuedOperation(vaultAccountId: string, opId: number[]): Promise<string>;
   transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus>;
   submitSignature(vaultAccountId: string, opId: number[], signature: MpcSignature): Promise<string>;
+  settle?(vaultAccountId: string, opId: number[], blockHash: Hex, cancellation?: boolean): Promise<string>;
+  releaseUnconfirmed?(vaultAccountId: string, opId: number[]): Promise<string>;
   reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string>;
   expireOperation(vaultAccountId: string, opId: number[]): Promise<string>;
   cancelNonce(
@@ -92,7 +94,7 @@ export interface WorkerNearGateway {
 export interface WorkerBaseGateway {
   rawTransactionHash(rawTransaction: number[] | null): Hex;
   broadcastRaw(rawTransaction: number[] | null): Promise<Hex>;
-  receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null>;
+  receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash?: Hex } | null>;
   blockNumber(): Promise<bigint>;
 }
 
@@ -329,6 +331,10 @@ export class OperationWorker {
       });
       return;
     }
+    if (operation.state === "Unconfirmed") {
+      await this.store.update(record, { state: "Unconfirmed", nextAttemptAt: null, lastError: null });
+      return;
+    }
     if (operation.state === "Cancelled") {
       const cancellationTxHash = operation.cancellation?.signed_transaction
         ? this.base.rawTransactionHash(operation.cancellation.signed_transaction)
@@ -493,31 +499,23 @@ export class OperationWorker {
       return;
     }
     if (receipt.status === "reverted") {
-      const signedReport = await this.guard.failureReport(operation, hash, receipt.blockNumber);
-      await this.near.reportStatus(record.vaultAccountId, signedReport);
-      await this.store.update(record, {
-        state: "Reverted",
-        txHash: hash,
-        receiptBlock: receipt.blockNumber,
-        revertedAt: this.now(),
-        lastAttemptAt: this.now(),
-        nextAttemptAt: null,
-        lastError: `Base transaction ${hash} reverted`,
-      });
-      await this.store.releaseReference(record, "Failed");
+      // Reverted transactions are not provable by ForeignTx. Keep the budget spent.
+      const config = await this.near.viewFunction<{ unconfirmed_after_ns: string }>(record.vaultAccountId, "get_settlement_config");
+      const signedAt = BigInt(operation.possibly_signed_at_ns ?? operation.created_at_ns);
+      if (blockTimestampNs >= signedAt + BigInt(config.unconfirmed_after_ns)) {
+        if (!this.near.releaseUnconfirmed) throw new Error("release_unconfirmed gateway unavailable");
+        await this.near.releaseUnconfirmed(record.vaultAccountId, opBytes(record.opId));
+      }
+      await this.schedule(record, "Broadcast");
       return;
     }
-
-    const signedReport = await this.guard.confirmationReport(operation, hash, receipt.blockNumber);
-    await this.near.reportStatus(record.vaultAccountId, signedReport);
+    if (!receipt.blockHash || !this.near.settle) throw new Error("MPC settlement gateway requires a receipt block hash");
+    await this.near.settle(record.vaultAccountId, opBytes(record.opId), receipt.blockHash);
+    const settled = await this.near.getOperation(record.vaultAccountId, opBytes(record.opId));
     await this.store.update(record, {
-      state: "Confirmed",
-      txHash: hash,
-      receiptBlock: receipt.blockNumber,
-      reportNonce: BigInt(signedReport.report?.report_nonce ?? 0),
-      lastAttemptAt: this.now(),
-      nextAttemptAt: null,
-      lastError: null,
+      state: settled.state === "Confirmed" ? "Confirmed" : "Broadcast", txHash: hash,
+      receiptBlock: receipt.blockNumber, lastAttemptAt: this.now(),
+      nextAttemptAt: settled.state === "Confirmed" ? null : new Date(this.now().getTime() + this.config.pollIntervalMs), lastError: null,
     });
   }
 
@@ -591,13 +589,15 @@ export class OperationWorker {
       });
       return;
     }
+    if (!receipt.blockHash || !this.near.settle) throw new Error("MPC settlement gateway requires a receipt block hash");
+    await this.near.settle(record.vaultAccountId, opBytes(record.opId), receipt.blockHash, true);
     await this.store.update(record, {
       state: "CancellationMined",
       cancellationTxHash: hash,
       receiptBlock: receipt.blockNumber,
       lastAttemptAt: this.now(),
       nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs),
-      lastError: "cancellation mined; awaiting DAO confirm_cancellation",
+      lastError: "cancellation mined; awaiting MPC verification",
     });
   }
 
@@ -606,27 +606,15 @@ export class OperationWorker {
     operation: VaultOperation,
     opId: number[],
   ): Promise<void> {
-    const [paused, role] = await Promise.all([
-      this.near.viewFunction<boolean>(record.vaultAccountId, "is_paused"),
-      this.near.viewFunction<{
-        config: {
-          gas_limit: string;
-          max_fee_per_gas: string;
-          max_priority_fee_per_gas: string;
-          max_total_fee: string;
-        };
-      }>(record.vaultAccountId, "get_role", { role: operation.role }),
-    ]);
-    if (!paused) {
-      await this.schedule(
-        record,
-        record.txHash ? "Broadcast" : "PossiblySigned",
-        "stuck transaction requires OmniRoles pause or member-authorized cancellation",
-      );
+    const timing = await this.near.viewFunction<{ cancel_after_ns: string }>(record.vaultAccountId, "get_settlement_config");
+    const now = await this.near.currentBlockTimestampNs();
+    if (operation.cancellation || now < BigInt(operation.possibly_signed_at_ns ?? operation.created_at_ns) + BigInt(timing.cancel_after_ns)) {
+      await this.schedule(record, record.txHash ? "Broadcast" : "PossiblySigned", "waiting for cancellation timeout or existing cancellation proof");
       return;
     }
+    const role = await this.near.viewFunction<{ config: {gas_limit:string;max_fee_per_gas:string;max_priority_fee_per_gas:string;max_total_fee:string} }>(record.vaultAccountId, "get_role", { role: operation.role });
 
-    const previous = operation.cancellation?.transaction ?? operation.transaction;
+    const previous = operation.transaction;
     const maximumFee = BigInt(role.config.max_fee_per_gas);
     const maximumPriority = BigInt(role.config.max_priority_fee_per_gas);
     const gasLimit = 21_000n;
@@ -676,3 +664,4 @@ export class OperationWorker {
     });
   }
 }
+

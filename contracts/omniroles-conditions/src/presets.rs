@@ -244,3 +244,26 @@ pub fn uniswap_v2_swap_exact_tokens_for_tokens(
         conditions,
     }
 }
+
+/// Transfer to a supplier in a governance-managed list, charged to an allowance.
+pub fn erc20_transfer_in_list(token: Address, list: &str, allowance: [u8; 32]) -> PresetPermission {
+    PresetPermission {
+        target: token,
+        selector: ERC20_TRANSFER,
+        conditions: vec![
+            node(0, Encoding::AbiEncoded, Operator::Matches, Vec::new()),
+            node(
+                0,
+                Encoding::Static,
+                Operator::InAddressList,
+                list.as_bytes().to_vec(),
+            ),
+            node(
+                0,
+                Encoding::Static,
+                Operator::WithinAllowance,
+                allowance.to_vec(),
+            ),
+        ],
+    }
+}

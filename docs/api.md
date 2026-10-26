@@ -4,13 +4,27 @@ The API never holds a key that moves company funds. Funds sit at one EVM
 address derived by NEAR MPC from the company's OmniRoles vault (path
 `omniroles/evm`, the same address on every EVM chain). The vault signs only:
 
-- an **agent operation** that fits the agent's role (prepare → Guard visa →
-  authorize → MPC signature), or
+- an **agent operation** that fits the agent's role (prepare → authorize (optional Guard visa) →
+  MPC signature), or
 - a **transaction voted by the DAO** (Sputnik proposal → veto window →
   `start_dao_transaction` → MPC signature).
 
 The API prepares proposals; members sign them with their own NEAR wallet. The
 worker only broadcasts what the vault already signed.
+
+## Direct on-chain agent flow
+
+The MCP server uses NEAR RPC and an EVM RPC directly; no API key or server is required for an unguarded role. Set `EVM_RPC_URL` for a custom endpoint; Base Sepolia defaults to `https://sepolia.base.org`. The signer socket or local NEAR signer still supplies the agent's function-call signatures.
+
+Call `prepare`, then `authorize` with `approval: null`. Read `get_operation` to obtain the exact signed transaction, broadcast it, and resume through the MCP `status` tool. It waits for finalized foreign-chain state before calling `settle`. Queued operations can be resumed after their delay; any configured human co-signature is still required. `cancel` requests the same-nonce self transaction after the on-chain timeout; `status` broadcasts and settles it. After the unconfirmed deadline, `release_unconfirmed` frees the wallet with budget spent.
+
+Vault settlement methods accept `{ op_id: number[32], block_hash: number[32] }`. The untrusted block-hash hint lets the vault calculate the exact MPC V1 expected payload hash; MPC must verify finalized success for that transaction and chain. Failed transactions do not produce refund proofs. `settle_cancellation` uses the stored cancellation transaction. `get_settlement_config` exposes the configured delays. `clear_stale_settlement` can clear a lost verification callback after ten minutes.
+
+`get_address_list({ list: "suppliers" })` returns `{address: number[20], label: string}[]`. Supplier changes use DAO proposals and `queue_rule_change`, not the database approval mechanism. `GET /v1/console/omniroles/suppliers` reads this list; `POST /v1/console/omniroles/proposals/suppliers` accepts `{ entries: [{address: "0x…", label}], migrate?: boolean }` and returns the unsigned DAO proposal. Migration loads active database suppliers and is refused when the on-chain list is already populated. The browser independently checks the proposal before signing.
+
+Role drafts support `guardRequired` (default false) and `suppliersOnly` (default false). The latter compiles payment recipient checks to `InAddressList("suppliers")`; the vault remains the authorization authority when the API is down.
+
+The routes below are optional API conveniences and the legacy Guard-required flow. They are not prerequisites for the direct MCP path. Backend status reports can confirm only; they cannot refund a failed operation. See `Architecture.md` for redeployment and key permissions.
 
 ## Identities
 
@@ -95,8 +109,9 @@ members" in Activity).
 | --- | --- |
 | `mandate` | role, budgets left, accepted recipients, company wallet |
 | `check` | dry run of a transfer (`token`, `recipient`, `amount`) or of any call (`to`, `data`, `value`, `allowanceAmount`) |
-| `pay` | prepare → Guard visa → authorize on NEAR |
-| `share_revenue` | the same for ETH sent to the shareholders (`amountWei`) |
+| `pay` | prepare → authorize without visa → broadcast → MPC settlement |
+| `execute_call` | execute exact calldata allowed by the role, with explicit gas fields |
+| `share_revenue` | optional API builder for an ETH revenue call; use `execute_call` with prebuilt bridge calldata without that API |
 | `status`, `cancel` | operation state; same-nonce cancellation |
 
 With euthyna-signer, the config is one line and holds no secret: the socket is
@@ -283,9 +298,10 @@ The worker leases operations from the database and:
 - recovers the MPC signature from the NEAR transaction if the vault did not
   store it;
 - broadcasts, then waits `WORKER_CONFIRMATIONS` blocks;
-- reports the status to the vault (`report_status`), which releases the
-  wallet.
+- requests MPC settlement with `settle`, or `settle_cancellation` for a finalized cancellation;
+- leaves reverted original budgets spent and uses the conservative unconfirmed timeout.
 
 The API keeps each vault's NEAR storage funded: when it has less than 0.5 NEAR
 free, the API sends it 1 NEAR from the relayer. This NEAR pays for storage
 only; company funds never move.
+

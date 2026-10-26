@@ -1,3 +1,4 @@
+import { hexToBytes, type Hex } from "viem";
 import { keyStores, KeyPair, Near, transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
@@ -255,6 +256,13 @@ export class NearClient {
     });
   }
 
+  async settle(vaultAccountId: string, opId: number[], blockHash: Hex, cancellation = false): Promise<string> {
+    return this.functionCall(vaultAccountId, cancellation ? "settle_cancellation" : "settle", { op_id: opId, block_hash: Array.from(hexToBytes(blockHash)) }, "70000000000000");
+  }
+  async releaseUnconfirmed(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "release_unconfirmed", { op_id: opId }, "30000000000000");
+  }
+
   async reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string> {
     return this.functionCall(
       vaultAccountId,
@@ -359,3 +367,4 @@ export class NearClient {
     return outcome.transaction.hash;
   }
 }
+

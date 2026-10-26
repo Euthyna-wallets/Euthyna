@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 //! Shares of a MandateOS company.
 //!
 //! One contract does four things, so that a share never leaves its ledger:
@@ -257,10 +258,17 @@ impl Shares {
         for (account_id, amount) in allocations {
             require!(amount.0 <= contract.unsold, "ERR_ALLOCATIONS_EXCEED_SUPPLY");
             contract.unsold -= amount.0;
-            let mut holder = contract.holders.get(&account_id).cloned().unwrap_or_else(|| contract.new_holder());
+            let mut holder = contract
+                .holders
+                .get(&account_id)
+                .cloned()
+                .unwrap_or_else(|| contract.new_holder());
             holder.balance += amount.0;
             contract.holders.insert(account_id.clone(), holder);
-            event("ft_mint", format!(r#"{{"owner_id":"{account_id}","amount":"{}"}}"#, amount.0));
+            event(
+                "ft_mint",
+                format!(r#"{{"owner_id":"{account_id}","amount":"{}"}}"#, amount.0),
+            );
         }
         contract
     }
@@ -276,7 +284,10 @@ impl Shares {
         let mut holder = match self.holders.get(&buyer).cloned() {
             Some(holder) => self.settled(holder),
             None => {
-                require!(deposit > REGISTRATION_FEE.as_yoctonear(), "ERR_DEPOSIT_BELOW_REGISTRATION_FEE");
+                require!(
+                    deposit > REGISTRATION_FEE.as_yoctonear(),
+                    "ERR_DEPOSIT_BELOW_REGISTRATION_FEE"
+                );
                 deposit -= REGISTRATION_FEE.as_yoctonear();
                 self.new_holder()
             }
@@ -287,10 +298,17 @@ impl Shares {
         self.unsold -= count;
         holder.balance += count;
         self.holders.insert(buyer.clone(), holder);
-        event("ft_mint", format!(r#"{{"owner_id":"{buyer}","amount":"{count}","memo":"bought"}}"#));
-        Promise::new(self.dao_id.clone()).transfer(NearToken::from_yoctonear(cost)).detach();
+        event(
+            "ft_mint",
+            format!(r#"{{"owner_id":"{buyer}","amount":"{count}","memo":"bought"}}"#),
+        );
+        Promise::new(self.dao_id.clone())
+            .transfer(NearToken::from_yoctonear(cost))
+            .detach();
         if deposit > cost {
-            Promise::new(buyer).transfer(NearToken::from_yoctonear(deposit - cost)).detach();
+            Promise::new(buyer)
+                .transfer(NearToken::from_yoctonear(deposit - cost))
+                .detach();
         }
         U128(count)
     }
@@ -302,7 +320,10 @@ impl Shares {
         require!(amount.0 > 0, "ERR_ZERO_AMOUNT");
         let account_id = env::predecessor_account_id();
         let mut holder = self.holder(&account_id);
-        require!(self.transferable(&holder) >= amount.0, "ERR_NOT_ENOUGH_FREE_SHARES");
+        require!(
+            self.transferable(&holder) >= amount.0,
+            "ERR_NOT_ENOUGH_FREE_SHARES"
+        );
         holder.locked += amount.0;
         let registered_now = !holder.delegation_registered;
         holder.delegation_registered = true;
@@ -399,11 +420,19 @@ impl Shares {
         require!(amount > 0, "ERR_ZERO_AMOUNT");
         self.add_revenue(amount, 0);
         self.near_distributed += amount;
-        env::log_str(&format!("MANDATEOS_REVENUE:near:{amount}:epoch:{}", self.current_epoch()));
+        env::log_str(&format!(
+            "MANDATEOS_REVENUE:near:{amount}:epoch:{}",
+            self.current_epoch()
+        ));
     }
 
     /// Revenue token sent with `ft_transfer_call`, for the voters of the current epoch.
-    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
+    pub fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
         let _ = (sender_id, msg);
         if self.revenue_token.as_ref() != Some(&env::predecessor_account_id()) {
             return PromiseOrValue::Value(amount);
@@ -421,11 +450,18 @@ impl Shares {
         ext_ft::ext(token)
             .with_static_gas(GAS_FT_BALANCE)
             .ft_balance_of(env::current_account_id())
-            .then(ext_self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_token_balance())
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CALLBACK)
+                    .on_token_balance(),
+            )
     }
 
     #[private]
-    pub fn on_token_balance(&mut self, #[callback_result] balance: Result<U128, PromiseError>) -> U128 {
+    pub fn on_token_balance(
+        &mut self,
+        #[callback_result] balance: Result<U128, PromiseError>,
+    ) -> U128 {
         let Ok(balance) = balance else { return U128(0) };
         if self.token_claims_in_flight > 0 {
             return U128(0);
@@ -446,9 +482,19 @@ impl Shares {
         require!(current > 0, "ERR_NO_PAST_EPOCH");
         let epoch = current - 1;
         let mut holder = self.holder(&account_id);
-        require!(holder.previous_epoch == epoch && holder.previous_steady > 0, "ERR_NO_SHARES_LOCKED_LAST_EPOCH");
-        require!(!holder.proofs.iter().any(|proof| proof.epoch == epoch), "ERR_ALREADY_PROVED");
-        holder.proofs.push(Proof { epoch, shares: U128(holder.previous_steady), verified: false });
+        require!(
+            holder.previous_epoch == epoch && holder.previous_steady > 0,
+            "ERR_NO_SHARES_LOCKED_LAST_EPOCH"
+        );
+        require!(
+            !holder.proofs.iter().any(|proof| proof.epoch == epoch),
+            "ERR_ALREADY_PROVED"
+        );
+        holder.proofs.push(Proof {
+            epoch,
+            shares: U128(holder.previous_steady),
+            verified: false,
+        });
         self.holders.insert(account_id.clone(), holder);
         ext_dao_view::ext(self.dao_id.clone())
             .with_static_gas(GAS_DAO_VIEW)
@@ -470,7 +516,10 @@ impl Shares {
     ) -> bool {
         let start = self.genesis_ns + epoch * self.epoch_ns;
         let valid = proposal.ok().is_some_and(|proposal| {
-            let submitted: u64 = proposal["submission_time"].as_str().and_then(|value| value.parse().ok()).unwrap_or(0);
+            let submitted: u64 = proposal["submission_time"]
+                .as_str()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
             proposal["id"].as_u64() == Some(proposal_id)
                 && proposal["votes"].get(account_id.as_str()).is_some()
                 && submitted >= start
@@ -478,8 +527,15 @@ impl Shares {
         });
         // The proof window is epoch N+1: after it, the split of N is final.
         let in_time = self.current_epoch() == epoch + 1;
-        let mut holder = self.holders.get(&account_id).cloned().expect("ERR_NOT_A_HOLDER");
-        let index = holder.proofs.iter().position(|proof| proof.epoch == epoch && !proof.verified);
+        let mut holder = self
+            .holders
+            .get(&account_id)
+            .cloned()
+            .expect("ERR_NOT_A_HOLDER");
+        let index = holder
+            .proofs
+            .iter()
+            .position(|proof| proof.epoch == epoch && !proof.verified);
         let Some(index) = index else { return false };
         if valid && in_time {
             holder.proofs[index].verified = true;
@@ -487,7 +543,9 @@ impl Shares {
             let mut record = self.epochs.get(&epoch).cloned().unwrap_or_default();
             record.voted_shares = U128(record.voted_shares.0 + shares);
             self.epochs.insert(epoch, record);
-            env::log_str(&format!("MANDATEOS_VOTE_PROVED:{account_id}:epoch:{epoch}:proposal:{proposal_id}:shares:{shares}"));
+            env::log_str(&format!(
+                "MANDATEOS_VOTE_PROVED:{account_id}:epoch:{epoch}:proposal:{proposal_id}:shares:{shares}"
+            ));
         } else {
             holder.proofs.remove(index);
         }
@@ -503,7 +561,9 @@ impl Shares {
         let token = std::mem::take(&mut holder.token_owed);
         self.holders.insert(account_id.clone(), holder);
         if near > 0 {
-            Promise::new(account_id.clone()).transfer(NearToken::from_yoctonear(near)).detach();
+            Promise::new(account_id.clone())
+                .transfer(NearToken::from_yoctonear(near))
+                .detach();
         }
         if token > 0 {
             let revenue_token = self.revenue_token.clone().expect("ERR_NO_REVENUE_TOKEN");
@@ -511,7 +571,11 @@ impl Shares {
             ext_ft::ext(revenue_token)
                 .with_attached_deposit(NearToken::from_yoctonear(1))
                 .with_static_gas(GAS_FT_TRANSFER)
-                .ft_transfer(account_id.clone(), U128(token), Some("MandateOS revenue".into()))
+                .ft_transfer(
+                    account_id.clone(),
+                    U128(token),
+                    Some("MandateOS revenue".into()),
+                )
                 .then(
                     ext_self::ext(env::current_account_id())
                         .with_static_gas(GAS_CALLBACK)
@@ -525,7 +589,12 @@ impl Shares {
     /// A failed token payment (the holder is not registered on the token, for
     /// example) stays owed.
     #[private]
-    pub fn on_token_claim(&mut self, account_id: AccountId, amount: U128, #[callback_result] result: Result<(), PromiseError>) -> bool {
+    pub fn on_token_claim(
+        &mut self,
+        account_id: AccountId,
+        amount: U128,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> bool {
         self.token_claims_in_flight = self.token_claims_in_flight.saturating_sub(1);
         if result.is_ok() {
             self.token_accounted = self.token_accounted.saturating_sub(amount.0);
@@ -541,12 +610,18 @@ impl Shares {
 
     #[payable]
     pub fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) {
-        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "ERR_ONE_YOCTO");
+        require!(
+            env::attached_deposit() == NearToken::from_yoctonear(1),
+            "ERR_ONE_YOCTO"
+        );
         let sender_id = env::predecessor_account_id();
         require!(sender_id != receiver_id, "ERR_SELF_TRANSFER");
         require!(amount.0 > 0, "ERR_ZERO_AMOUNT");
         let mut sender = self.holder(&sender_id);
-        require!(self.transferable(&sender) >= amount.0, "ERR_NOT_ENOUGH_FREE_SHARES");
+        require!(
+            self.transferable(&sender) >= amount.0,
+            "ERR_NOT_ENOUGH_FREE_SHARES"
+        );
         let mut receiver = self
             .holders
             .get(&receiver_id)
@@ -557,10 +632,20 @@ impl Shares {
         receiver.balance += amount.0;
         self.holders.insert(sender_id.clone(), sender);
         self.holders.insert(receiver_id.clone(), receiver);
-        let memo = memo.map(|memo| format!(r#","memo":{}"#, near_sdk::serde_json::to_string(&memo).unwrap_or_default())).unwrap_or_default();
+        let memo = memo
+            .map(|memo| {
+                format!(
+                    r#","memo":{}"#,
+                    near_sdk::serde_json::to_string(&memo).unwrap_or_default()
+                )
+            })
+            .unwrap_or_default();
         event(
             "ft_transfer",
-            format!(r#"{{"old_owner_id":"{sender_id}","new_owner_id":"{receiver_id}","amount":"{}"{memo}}}"#, amount.0),
+            format!(
+                r#"{{"old_owner_id":"{sender_id}","new_owner_id":"{receiver_id}","amount":"{}"{memo}}}"#,
+                amount.0
+            ),
         );
     }
 
@@ -569,7 +654,11 @@ impl Shares {
     }
 
     pub fn ft_balance_of(&self, account_id: AccountId) -> U128 {
-        U128(self.holders.get(&account_id).map_or(0, |holder| holder.balance))
+        U128(
+            self.holders
+                .get(&account_id)
+                .map_or(0, |holder| holder.balance),
+        )
     }
 
     pub fn ft_metadata(&self) -> FungibleTokenMetadata {
@@ -586,34 +675,54 @@ impl Shares {
 
     /// Registers an account so it can receive shares. Pays the same fee as a first purchase.
     #[payable]
-    pub fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>) -> StorageBalance {
+    pub fn storage_deposit(
+        &mut self,
+        account_id: Option<AccountId>,
+        registration_only: Option<bool>,
+    ) -> StorageBalance {
         let _ = registration_only;
         let account_id = account_id.unwrap_or_else(env::predecessor_account_id);
         let deposit = env::attached_deposit();
         if self.holders.contains_key(&account_id) {
             if !deposit.is_zero() {
-                Promise::new(env::predecessor_account_id()).transfer(deposit).detach();
+                Promise::new(env::predecessor_account_id())
+                    .transfer(deposit)
+                    .detach();
             }
         } else {
-            require!(deposit >= REGISTRATION_FEE, "ERR_DEPOSIT_BELOW_REGISTRATION_FEE");
+            require!(
+                deposit >= REGISTRATION_FEE,
+                "ERR_DEPOSIT_BELOW_REGISTRATION_FEE"
+            );
             let holder = self.new_holder();
             self.holders.insert(account_id.clone(), holder);
             let refund = deposit.saturating_sub(REGISTRATION_FEE);
             if !refund.is_zero() {
-                Promise::new(env::predecessor_account_id()).transfer(refund).detach();
+                Promise::new(env::predecessor_account_id())
+                    .transfer(refund)
+                    .detach();
             }
         }
-        StorageBalance { total: U128(REGISTRATION_FEE.as_yoctonear()), available: U128(0) }
+        StorageBalance {
+            total: U128(REGISTRATION_FEE.as_yoctonear()),
+            available: U128(0),
+        }
     }
 
     pub fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
         self.holders
             .contains_key(&account_id)
-            .then(|| StorageBalance { total: U128(REGISTRATION_FEE.as_yoctonear()), available: U128(0) })
+            .then(|| StorageBalance {
+                total: U128(REGISTRATION_FEE.as_yoctonear()),
+                available: U128(0),
+            })
     }
 
     pub fn storage_balance_bounds(&self) -> StorageBalanceBounds {
-        StorageBalanceBounds { min: U128(REGISTRATION_FEE.as_yoctonear()), max: Some(U128(REGISTRATION_FEE.as_yoctonear())) }
+        StorageBalanceBounds {
+            min: U128(REGISTRATION_FEE.as_yoctonear()),
+            max: Some(U128(REGISTRATION_FEE.as_yoctonear())),
+        }
     }
 
     // ----- Views -----
@@ -633,9 +742,16 @@ impl Shares {
             epoch_ns: U64(self.epoch_ns),
             current_epoch: self.current_epoch(),
             current_epoch_ends_ns: U64(self.genesis_ns + (self.current_epoch() + 1) * self.epoch_ns),
-            current: self.epochs.get(&self.current_epoch()).cloned().unwrap_or_default(),
+            current: self
+                .epochs
+                .get(&self.current_epoch())
+                .cloned()
+                .unwrap_or_default(),
             last: if self.current_epoch() > 0 {
-                self.epochs.get(&(self.current_epoch() - 1)).cloned().unwrap_or_default()
+                self.epochs
+                    .get(&(self.current_epoch() - 1))
+                    .cloned()
+                    .unwrap_or_default()
             } else {
                 Epoch::default()
             },
@@ -661,7 +777,10 @@ impl Shares {
             provable_last_epoch: U128(
                 if self.current_epoch() > 0
                     && holder.previous_epoch == self.current_epoch() - 1
-                    && !holder.proofs.iter().any(|proof| proof.epoch == holder.previous_epoch)
+                    && !holder
+                        .proofs
+                        .iter()
+                        .any(|proof| proof.epoch == holder.previous_epoch)
                 {
                     holder.previous_steady
                 } else {
@@ -680,13 +799,20 @@ impl Shares {
 
     fn new_holder(&self) -> Holder {
         let epoch = self.current_epoch();
-        Holder { epoch, previous_epoch: epoch.saturating_sub(1), ..Holder::default() }
+        Holder {
+            epoch,
+            previous_epoch: epoch.saturating_sub(1),
+            ..Holder::default()
+        }
     }
 
     fn share_token(&mut self, amount: u128) {
         self.add_revenue(0, amount);
         self.token_distributed += amount;
-        env::log_str(&format!("MANDATEOS_REVENUE:token:{amount}:epoch:{}", self.current_epoch()));
+        env::log_str(&format!(
+            "MANDATEOS_REVENUE:token:{amount}:epoch:{}",
+            self.current_epoch()
+        ));
     }
 
     fn add_revenue(&mut self, near: u128, token: u128) {
@@ -717,7 +843,9 @@ impl Shares {
                 moved.0 += record.near.0;
                 moved.1 += record.token.0;
                 self.epochs.insert(epoch, Epoch::default());
-                env::log_str(&format!("MANDATEOS_REVENUE_MOVED:from:{epoch}:to:{current}"));
+                env::log_str(&format!(
+                    "MANDATEOS_REVENUE_MOVED:from:{epoch}:to:{current}"
+                ));
             }
         }
         self.funded_epochs = keep;
@@ -733,7 +861,11 @@ impl Shares {
     }
 
     fn holder(&self, account_id: &AccountId) -> Holder {
-        let holder = self.holders.get(account_id).cloned().expect("ERR_NOT_A_HOLDER");
+        let holder = self
+            .holders
+            .get(account_id)
+            .cloned()
+            .expect("ERR_NOT_A_HOLDER");
         self.settled(holder)
     }
 
@@ -757,8 +889,10 @@ impl Shares {
             if proof.verified && proof.epoch + 2 <= current {
                 let record = self.epochs.get(&proof.epoch).cloned().unwrap_or_default();
                 if record.voted_shares.0 > 0 {
-                    holder.near_owed += mul_div(record.near.0, proof.shares.0, record.voted_shares.0);
-                    holder.token_owed += mul_div(record.token.0, proof.shares.0, record.voted_shares.0);
+                    holder.near_owed +=
+                        mul_div(record.near.0, proof.shares.0, record.voted_shares.0);
+                    holder.token_owed +=
+                        mul_div(record.token.0, proof.shares.0, record.voted_shares.0);
                 }
             } else if proof.verified || proof.epoch + 1 == current {
                 pending.push(proof);
@@ -775,7 +909,11 @@ impl Shares {
     }
 
     fn transferable(&self, holder: &Holder) -> u128 {
-        let cooling = if env::block_timestamp() >= holder.cooling_until_ns { 0 } else { holder.cooling };
+        let cooling = if env::block_timestamp() >= holder.cooling_until_ns {
+            0
+        } else {
+            holder.cooling
+        };
         holder.balance - holder.locked - cooling
     }
 }

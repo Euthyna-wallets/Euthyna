@@ -95,6 +95,7 @@ pub struct Environment<'a> {
     pub avatar: Address,
     pub now: u64,
     pub allowances: &'a dyn AllowanceSource,
+    pub address_lists: &'a dyn crate::evaluate::AddressListSource,
 }
 
 /// Check a call against a role. On success, returns the allowance
@@ -121,6 +122,7 @@ pub fn check_call(
         avatar: environment.avatar,
         now: environment.now,
         allowances: environment.allowances,
+        address_lists: environment.address_lists,
     };
     evaluate(&conditions, &context)
 }
