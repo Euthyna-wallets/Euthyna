@@ -22,7 +22,7 @@ a role, by vote, and every change waits out a veto window.
 
 ## Product architecture
 
-![Product architecture: investors and founders outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
+![Product architecture: investors and the security council outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
 
 1. **Raise**: founders create the company; investors buy shares and the proceeds go to the treasury.
 2. **Hire**: the owners vote a role for each AI employee. The agent plugs in over MCP.

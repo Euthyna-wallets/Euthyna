@@ -145,7 +145,7 @@ def product():
     text(24, 40, 'MANDATEOS · PRODUCT', 13, GOLD, 'start', 700)
     legend(64, 580)
     node(160, 160, 44, 'investors', 'Investors', 'buy · vote · earn')
-    node(420, 160, 44, 'founders', 'Founders', 'security council')
+    node(420, 160, 44, 'founders', 'Security council', 'vote · veto · pause')
     arrow('M170 262 Q186 330 246 368', color=GOLD)
     arrow('M410 262 Q394 330 334 368')
     chip(150, 318, 'buy shares', GOLD)
