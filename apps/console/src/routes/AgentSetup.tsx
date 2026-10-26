@@ -107,15 +107,16 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
         <div className="stack">
           {account ? (
             <>
-              <p className="small">1. On the machine that runs the agent, create its key in the signer:</p>
-              <pre>{`sudo -u euthyna-signer euthyna-signer add-agent \\\n  --account ${account} \\\n  --vault ${props.vaultAccountId}`}</pre>
+              <p className="small">1. On the machine that runs the agent, create its key in the signer. Leave the terminal open: it asks for the API key after step 3.</p>
+              <pre>{`sudo euthyna-signer add-agent ${account} \\\n  --vault ${props.vaultAccountId} \\\n  --api-url ${API_BASE}`}</pre>
               <label>2. Paste the public key it printed<input className="mono" placeholder="ed25519:…" value={signerKey} onChange={(event) => setSignerKey(event.target.value)} /></label>
               {signerKey && !NEAR_PUBLIC_KEY.test(signerKey.trim()) ? <span className="small warn">Not an ed25519 public key.</span> : null}
             </>
           ) : (
             <div className="row"><button className="secondary" disabled={!name.trim()} onClick={() => void proposeAccount()}>Get the signer command</button></div>
           )}
-          <p className="small muted">Not installed yet? See the euthyna-signer README (one command with sudo, Linux or macOS).</p>
+          <p className="small muted">Not installed yet? Once per machine (Linux or macOS):</p>
+          <pre>curl -fsSL https://raw.githubusercontent.com/joindefi/euthyna-signer/main/install.sh | sudo sh</pre>
         </div>
       ) : (
         <p className="small muted">
@@ -206,7 +207,7 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
 
 /** euthyna-signer holds the key and the API key: the MCP config has no secret. */
 function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
-  const setApi = `sudo -u euthyna-signer euthyna-signer set-api \\\n  --account ${props.agent.nearAccountId} \\\n  --api-url ${API_BASE}`;
+  const setApi = `sudo euthyna-signer set-api ${props.agent.nearAccountId} --api-url ${API_BASE}`;
   const mcp = JSON.stringify({
     mcpServers: {
       euthyna: {
@@ -227,9 +228,8 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
       <span className="eyebrow">{props.agent.name} is hired · API key shown once</span>
       <h3>Plug in your agent</h3>
       <ol className="small">
-        <li>Give the API key to the signer: run this, paste the key below, then Enter and Ctrl-D.</li>
+        <li>Paste this API key in the terminal where <code>add-agent</code> is waiting. Closed it? Run <code>{setApi}</code> instead.</li>
       </ol>
-      <pre>{setApi}</pre>
       <div className="row">
         <code className="mono small" style={{ overflowWrap: "anywhere" }}>{props.agent.apiKey}</code>
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(props.agent.apiKey)}>Copy API key</button>
