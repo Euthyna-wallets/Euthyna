@@ -10,7 +10,12 @@ type Provisioning = {
   attestation: { valid: boolean; expected: { accountId: string; publicKey: string; vaultAccountId: string; methodNames: string[]; allowanceYocto: null } } | null;
 };
 
-export type AgentReady = { name: string; role: string; nearAccountId: string; apiKey: string; keyFile: string };
+export type AgentReady = { name: string; role: string; nearAccountId: string; apiKey: string; keyMode: KeyMode; keyFile: string | null };
+type KeyMode = "signer" | "browser";
+
+const NEAR_PUBLIC_KEY = /^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/;
+/** Where euthyna-signer listens (Linux; on macOS it is /usr/local/var/run/euthyna-signer/signer.sock). */
+const SIGNER_SOCKET = "/run/euthyna-signer/signer.sock";
 
 const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -23,23 +28,44 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
   const [role, setRole] = useState(props.defaultRole ?? "treasury");
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const valid = name.trim().length > 0 && /^[a-z0-9_-]{1,32}$/.test(role);
+  const [keyMode, setKeyMode] = useState<KeyMode>("signer");
+  const [account, setAccount] = useState<string | null>(null);
+  const [signerKey, setSignerKey] = useState("");
+  const valid = name.trim().length > 0 && /^[a-z0-9_-]{1,32}$/.test(role)
+    && (keyMode === "browser" || (account !== null && NEAR_PUBLIC_KEY.test(signerKey.trim())));
+
+  async function proposeAccount() {
+    setError(null);
+    try {
+      const proposed = await api<{ accountId: string }>(`/v1/console/agents/proposed-account?name=${encodeURIComponent(name.trim())}`);
+      setAccount(proposed.accountId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
 
   async function create() {
     setError(null);
     let agentId: string | null = null;
     try {
-      setStep("Generating the agent key in this browser…");
-      const keyPair = KeyPair.fromRandom("ed25519");
-      const publicKey = keyPair.getPublicKey().toString();
+      // With euthyna-signer the key was made by the signer: only its public key reaches this page.
+      const keyPair = keyMode === "browser" ? KeyPair.fromRandom("ed25519") : null;
+      if (keyPair) setStep("Generating the agent key in this browser…");
+      const publicKey = keyPair ? keyPair.getPublicKey().toString() : signerKey.trim();
       setStep("Registering the agent…");
       const created = await api<CreatedAgent>("/v1/console/agents", {
         method: "POST",
-        body: JSON.stringify({ name: name.trim(), role, nearPublicKey: publicKey, vaultAccountId: props.vaultAccountId, mpcPath: `agents/${role}/base` }),
+        body: JSON.stringify({
+          name: name.trim(), role, nearPublicKey: publicKey, vaultAccountId: props.vaultAccountId, mpcPath: `agents/${role}/base`,
+          ...(keyMode === "signer" && account ? { nearAccountId: account } : {}),
+        }),
       });
       agentId = created.agent.id;
-      const keyFile = `${slug(name) || "agent"}-key.json`;
-      download(keyFile, { networkId: "testnet", accountId: created.agent.nearAccountId, publicKey, privateKey: keyPair.toString() });
+      let keyFile: string | null = null;
+      if (keyPair) {
+        keyFile = `${slug(name) || "agent"}-key.json`;
+        download(keyFile, { networkId: "testnet", accountId: created.agent.nearAccountId, publicKey, privateKey: keyPair.toString() });
+      }
       setStep("Creating its NEAR account with a key limited to the vault…");
       const server = await api<Provisioning>(`/v1/console/agents/${created.agent.id}/provision`, { method: "POST" });
       if (!server.attestation) throw new Error("The server did not return the expected access key");
@@ -50,7 +76,7 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
         throw new Error(`The agent key on chain does not match what was expected (${failed}). The agent was not confirmed.`);
       }
       await api(`/v1/console/agents/${created.agent.id}/provision-confirm`, { method: "POST" });
-      props.onReady({ name: created.agent.name, role: created.agent.role, nearAccountId: created.agent.nearAccountId, apiKey: created.apiKey, keyFile });
+      props.onReady({ name: created.agent.name, role: created.agent.role, nearAccountId: created.agent.nearAccountId, apiKey: created.apiKey, keyMode, keyFile });
     } catch (cause) {
       // A half-created agent is revoked so it never shows up as usable.
       if (agentId) await api(`/v1/console/agents/${agentId}/revoke`, { method: "POST", body: "{}" }).catch(() => undefined);
@@ -63,13 +89,40 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
   return (
     <div className="stack">
       <div className="row wrap">
-        <label>Agent name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>Job (role name)<input value={role} onChange={(event) => setRole(event.target.value.toLowerCase())} /></label>
+        <label>Agent name<input value={name} onChange={(event) => { setName(event.target.value); setAccount(null); }} /></label>
+        <label>Role<input value={role} onChange={(event) => setRole(event.target.value.toLowerCase())} /></label>
       </div>
-      <p className="small muted">
-        The private key is generated in this browser and downloaded as a file. MandateOS only receives the public key.
-        The agent's NEAR account can only call the vault: it cannot move NEAR or call another contract.
-      </p>
+      <fieldset className="key-mode">
+        <legend>Where the agent's key lives</legend>
+        <label className="check">
+          <input type="radio" name="key-mode" checked={keyMode === "signer"} onChange={() => setKeyMode("signer")} />
+          <span><strong>euthyna-signer</strong> (recommended): the key stays with a separate system user. The AI can ask it to sign vault requests, never read the key.</span>
+        </label>
+        <label className="check">
+          <input type="radio" name="key-mode" checked={keyMode === "browser"} onChange={() => setKeyMode("browser")} />
+          <span><strong>Key file</strong>: generated in this browser and downloaded. Simpler, but the AI's user can read it.</span>
+        </label>
+      </fieldset>
+      {keyMode === "signer" ? (
+        <div className="stack">
+          {account ? (
+            <>
+              <p className="small">1. On the machine that runs the agent, create its key in the signer:</p>
+              <pre>{`sudo -u euthyna-signer euthyna-signer add-agent \\\n  --account ${account} \\\n  --vault ${props.vaultAccountId}`}</pre>
+              <label>2. Paste the public key it printed<input className="mono" placeholder="ed25519:…" value={signerKey} onChange={(event) => setSignerKey(event.target.value)} /></label>
+              {signerKey && !NEAR_PUBLIC_KEY.test(signerKey.trim()) ? <span className="small warn">Not an ed25519 public key.</span> : null}
+            </>
+          ) : (
+            <div className="row"><button className="secondary" disabled={!name.trim()} onClick={() => void proposeAccount()}>Get the signer command</button></div>
+          )}
+          <p className="small muted">Not installed yet? See the euthyna-signer README (one command with sudo, Linux or macOS).</p>
+        </div>
+      ) : (
+        <p className="small muted">
+          The private key is generated in this browser and downloaded as a file. Euthyna only receives the public key.
+        </p>
+      )}
+      <p className="small muted">The agent's NEAR account can only call the vault: it cannot move NEAR or call another contract.</p>
       {error ? <div className="alert error">{error}</div> : null}
       <div className="row">
         <button className="primary" disabled={!valid || Boolean(step)} onClick={() => void create()}>
@@ -83,6 +136,7 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
 /** Shown once after creation: the API key, as an MCP server for any agent, or as the demo agent's environment. */
 export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
   const [mode, setMode] = useState<"mcp" | "env">("mcp");
+  if (props.agent.keyMode === "signer") return <RunWithSigner {...props} />;
   const mcpEnv: Record<string, string> = {
     MANDATEOS_API_URL: API_BASE,
     MANDATEOS_AGENT_API_KEY: props.agent.apiKey,
@@ -142,6 +196,52 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
       <div className="row">
         <button className="primary" onClick={() => void navigator.clipboard.writeText(mode === "mcp" ? mcp : env)}>Copy</button>
         {props.onDone ? <button className="ghost" onClick={props.onDone}>I saved it</button> : null}
+      </div>
+      <p className="small muted">
+        The agent can do nothing until a role that includes <span className="mono">{props.agent.nearAccountId}</span> is voted and out of its veto window.
+      </p>
+    </section>
+  );
+}
+
+/** euthyna-signer holds the key and the API key: the MCP config has no secret. */
+function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
+  const setApi = `sudo -u euthyna-signer euthyna-signer set-api \\\n  --account ${props.agent.nearAccountId} \\\n  --api-url ${API_BASE}`;
+  const mcp = JSON.stringify({
+    mcpServers: {
+      euthyna: {
+        command: "node",
+        args: ["/path/to/euthyna/packages/mcp/dist/server.js"],
+        env: {
+          EUTHYNA_SIGNER_SOCKET: SIGNER_SOCKET,
+          AGENT_NEAR_ACCOUNT_ID: props.agent.nearAccountId,
+          VAULT_ACCOUNT_ID: props.vaultAccountId,
+          AGENT_ROLE: props.agent.role,
+          NEAR_RPC_URL: "https://rpc.testnet.fastnear.com",
+        },
+      },
+    },
+  }, null, 2);
+  return (
+    <section className="card secret">
+      <span className="eyebrow">{props.agent.name} is hired · API key shown once</span>
+      <h3>Plug in your agent</h3>
+      <ol className="small">
+        <li>Give the API key to the signer: run this, paste the key below, then Enter and Ctrl-D.</li>
+      </ol>
+      <pre>{setApi}</pre>
+      <div className="row">
+        <code className="mono small" style={{ overflowWrap: "anywhere" }}>{props.agent.apiKey}</code>
+        <button className="secondary" onClick={() => void navigator.clipboard.writeText(props.agent.apiKey)}>Copy API key</button>
+      </div>
+      <ol className="small" start={2}>
+        <li>Add this MCP server to Claude, Cursor or Codex. It contains <strong>no secret</strong>: the key and the API key stay with the signer.</li>
+        <li>On macOS the socket is <code>/usr/local/var/run/euthyna-signer/signer.sock</code>.</li>
+      </ol>
+      <pre>{mcp}</pre>
+      <div className="row">
+        <button className="primary" onClick={() => void navigator.clipboard.writeText(mcp)}>Copy MCP config</button>
+        {props.onDone ? <button className="ghost" onClick={props.onDone}>Done</button> : null}
       </div>
       <p className="small muted">
         The agent can do nothing until a role that includes <span className="mono">{props.agent.nearAccountId}</span> is voted and out of its veto window.

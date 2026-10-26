@@ -579,6 +579,20 @@ describe("console isolation and emergency", () => {
     expect(auth.created).toEqual([]);
   });
 
+  it("tells the console which account an agent will get, so its key can be made in euthyna-signer first", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents/proposed-account?name=Research%20agent", {
+      headers: consoleHeaders({ cookie: "session-admin" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accountId: proposedAgentAccountId("Research agent", "mandateos.testnet", "org-1") });
+
+    const invalid = await app.request("/v1/console/agents/proposed-account?name=%20", { headers: consoleHeaders({ cookie: "session-admin" }) });
+    expect(invalid.status).toBe(422);
+    const member = await app.request("/v1/console/agents/proposed-account?name=x1", { headers: consoleHeaders({ cookie: "session-member" }) });
+    expect(member.status).toBe(403);
+  });
+
   it("creates an agent inside the session organization", async () => {
     const { app, auth } = testApp();
     const response = await app.request("/v1/console/agents", {
