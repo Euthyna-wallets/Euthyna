@@ -10,7 +10,7 @@ jobs:
     timeout-minutes: 90
     container:
       image: sourcescan/cargo-near:0.22.0-rust-1.99.1@sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb
-      options: --ulimit nofile=65535:65535
+      options: --user 0 --ulimit nofile=65535:65535
     defaults:
       run:
         shell: bash
