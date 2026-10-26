@@ -37,7 +37,7 @@ export function ActivityPage() {
               {operations.map((item) => (
                 <tr key={item.opId}>
                   <td className="small">{new Date(item.at).toLocaleString()}</td>
-                  <td>{item.actor}{item.role ? <div className="small muted">role "{item.role}"</div> : null}</td>
+                  <td>{item.actor}{item.role ? <div className="small muted">role · {item.role}</div> : null}</td>
                   <td className="small">
                     {item.summary ? <strong>{item.summary}</strong> : <span className="mono">{short(item.opId)}</span>}
                     <div className="muted">{item.chain} · nonce {item.nonce}{item.reference ? ` · ${item.reference}` : ""}</div>

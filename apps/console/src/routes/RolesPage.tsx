@@ -5,7 +5,7 @@ import { getAddress } from "viem";
 import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, nearRecipient, stringHash, validRoleName, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
-import { Card, PageState, Status, short } from "../components/ui.js";
+import { Card, PageState, Status, everyDays, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -115,22 +115,22 @@ function RolesInProgress() {
 
 function RoleCard({ role }: { role: RoleView }) {
   return (
-    <Card title={`Role "${role.name}"`} action={<Status value={role.enabled ? "active" : "disabled"} />}>
+    <Card title={`Role · ${role.name}`} action={<Status value={role.enabled ? "active" : "disabled"} />}>
       <div className="role-grid">
         <div>
           <h3>Budgets</h3>
           {role.budgets.length === 0 ? <p className="muted small">No budget: this role cannot move value.</p> : role.budgets.map((budget) => {
             const available = Number(budget.available ?? 0);
             const max = Number(budget.max ?? 0);
-            const used = max > 0 ? Math.min(100, Math.round(((max - available) / max) * 100)) : 0;
+            const left = max > 0 ? Math.max(0, Math.min(100, Math.round((available / max) * 100))) : 0;
             return (
               <div key={budget.key} className="budget">
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <span>{budget.label}</span>
                   <span className="small">{available.toLocaleString()} / {max.toLocaleString()} {budget.token ?? ""} left</span>
                 </div>
-                <div className="bar"><span style={{ width: `${used}%` }} /></div>
-                <span className="small muted">Refilled every {budget.periodDays ?? "?"} days</span>
+                <div className={`bar${left === 0 ? " empty" : left < 25 ? " low" : ""}`} role="img" aria-label={`${left}% of the budget left`}><span style={{ width: `${left}%` }} /></div>
+                <span className="small muted">{left === 0 ? "Spent for this period. " : ""}Refills {everyDays(budget.periodDays)}</span>
               </div>
             );
           })}

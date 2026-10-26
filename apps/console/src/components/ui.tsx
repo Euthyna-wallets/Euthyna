@@ -33,3 +33,9 @@ export function short(value: string | null | undefined, size = 8): string {
   if (!value) return "—";
   return value.length > size * 2 ? `${value.slice(0, size)}…${value.slice(-6)}` : value;
 }
+
+/** "every day", "every 7 days". */
+export function everyDays(days: number | null | undefined): string {
+  if (!days) return "refill period unknown";
+  return days === 1 ? "every day" : `every ${days} days`;
+}
