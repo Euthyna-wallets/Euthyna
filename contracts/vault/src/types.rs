@@ -17,7 +17,7 @@ pub struct Permission {
     /// `None` allows any function on the target. A selector requires at least
     /// four calldata bytes and an exact match.
     pub selector: Option<[u8; 4]>,
-    /// Zodiac Roles v3 condition tree, flattened (`{parent, paramType,
+    /// OmniRoles condition tree, flattened (`{parent, paramType,
     /// operator, compValue}`), evaluated by `omniroles-conditions` on the exact
     /// calldata and value. Empty means unconditional. Allowances are charged
     /// by `WithinAllowance` / `CallWithinAllowance` nodes, so the amount always

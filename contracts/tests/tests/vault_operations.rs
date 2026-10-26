@@ -74,7 +74,7 @@ async fn derives_one_wallet_per_chain_and_builds_direct_evm_calls() -> Result<()
 
 #[tokio::test]
 #[serial]
-async fn executes_arbitrary_contract_calls_without_safe_or_zodiac() -> Result<()> {
+async fn executes_arbitrary_contract_calls_without_an_evm_module() -> Result<()> {
     let fixture = setup().await?;
     let target = [0x77u8; 20];
     let mut config = role_config();

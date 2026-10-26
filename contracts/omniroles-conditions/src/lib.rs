@@ -5,9 +5,9 @@
 //! call an agent requests against the role the DAO granted it, and only then
 //! asks the MPC network to sign.
 //!
-//! Permissions use the Zodiac Roles v3 condition format (flattened trees of
-//! `{parent, paramType, operator, compValue}`), so they can be authored with the
-//! Roles SDK tooling. Evaluation happens in the vault, not on the target chain.
+//! Permissions are flattened condition trees of
+//! `{parent, paramType, operator, compValue}`. Evaluation happens in the vault,
+//! not on the target chain.
 //!
 //! Supported: `Pass`, `And`, `Or`, `Empty`, `Matches` (tuples, parameter lists,
 //! nested ABI data in `bytes`), `ArraySome`, `ArrayEvery`, `EqualToAvatar`,

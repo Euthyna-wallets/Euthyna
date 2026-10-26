@@ -109,7 +109,7 @@ pnpm attack:all
 | Path | What |
 | --- | --- |
 | `contracts/vault` | the vault: jobs, budgets, veto window, nonces, MPC signing |
-| `contracts/omniroles-conditions` | the rule engine (Zodiac Roles v3 condition trees, reimplemented in Rust) |
+| `contracts/omniroles-conditions` | the rule engine (condition trees on calldata, in Rust) |
 | `contracts/shares` | shares: token, sale, Sputnik votes, revenue by epoch for voters |
 | `contracts/dao-factory` | creates the company DAOs |
 | `contracts/tests` | sandbox tests and the on-chain attack suite |
@@ -125,9 +125,3 @@ pnpm attack:all
 - NEAR MPC and Sputnik DAO are trusted as deployed.
 - A shareholder majority outvotes the others on calls and transfers; the founders' veto on vault changes is the safeguard.
 - Signing in proves a NEAR account, not a distinct human.
-
-## License note
-
-The vault reimplements the Zodiac Roles v3 semantics in Rust and does not copy
-BUSL-licensed Zodiac code. The condition-tree format stays compatible with
-existing authoring tools.
