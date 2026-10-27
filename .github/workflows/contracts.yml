@@ -38,6 +38,9 @@ jobs:
           tar --no-same-owner -xzf /tmp/near-sandbox.tar.gz -C /tmp/mandateos-near-2.14.0
           ulimit -n 65535
           "$NEAR_SANDBOX_BIN_PATH" --version
+      - name: Record checked-in contract hashes
+        run: |
+          sha256sum contracts/res/vault.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/shares.wasm contracts/res/registry.wasm > /tmp/checked-in-contracts.sha256
       - name: Build all contracts with cargo near
         id: build
         working-directory: contracts
@@ -56,7 +59,7 @@ jobs:
             contracts/res/registry.wasm
       - name: Require checked-in WASM to match the build
         run: |
-          git diff --exit-code -- contracts/res/vault.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/shares.wasm contracts/res/registry.wasm
+          sha256sum --check /tmp/checked-in-contracts.sha256
       - name: Format, Clippy and all unit tests
         working-directory: contracts
         run: |
