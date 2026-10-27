@@ -277,12 +277,19 @@ fn lists_go_through_delay_and_veto() {
     assert_eq!(v.get_address_list("suppliers".into()).len(), 2);
 }
 #[test]
-#[should_panic(expected = "ERR_CANCELLATION_ALREADY_REQUESTED")]
-fn cancel_only_once() {
+#[should_panic(expected = "ERR_CANCELLATION_ALREADY_SIGNED")]
+fn signed_cancellation_cannot_be_requested_again() {
     let (mut v, id) = fixture(false, false);
     signed(&mut v, id);
     context("stranger.testnet", 3_600_000_000_003);
     let _ = v.cancel_nonce(id);
+    v.operations
+        .get_mut(&id)
+        .unwrap()
+        .cancellation
+        .as_mut()
+        .unwrap()
+        .signed_transaction = Some(vec![8, 9]);
     let _ = v.cancel_nonce(id);
 }
 #[test]
@@ -526,4 +533,91 @@ fn zero_original_tip_still_produces_a_replaceable_cancellation() {
     cancellation.signed_transaction = Some(vec![8, 9]);
     verify(&mut v, id, true, true);
     assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 100);
+}
+
+#[test]
+fn failed_cancellation_signature_can_retry_the_same_transaction() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    context("stranger.testnet", 3_600_000_000_003);
+    let _ = v.cancel_nonce(id);
+    let attempt = v.operations.get(&id).unwrap().cancellation.clone().unwrap();
+    context("vault.testnet", 3_600_000_000_004);
+    v.on_cancel_signature(id, attempt.tx_digest, Err(PromiseError::Failed));
+    assert!(
+        v.operations
+            .get(&id)
+            .unwrap()
+            .cancellation
+            .as_ref()
+            .unwrap()
+            .signature
+            .is_none()
+    );
+    v.roles.get_mut("payments").unwrap().config.max_fee_per_gas = U128(0);
+    context("stranger.testnet", 3_600_000_000_005);
+    let _ = v.cancel_nonce(id);
+    let retried = v
+        .operations
+        .get(&id)
+        .unwrap()
+        .cancellation
+        .as_ref()
+        .unwrap();
+    assert_eq!(retried.tx_digest, attempt.tx_digest);
+    assert_eq!(
+        near_sdk::serde_json::to_value(&retried.transaction).unwrap(),
+        near_sdk::serde_json::to_value(&attempt.transaction).unwrap()
+    );
+    assert_eq!(retried.request_count, 2);
+    assert_eq!(retried.requested_at_ns, 3_600_000_000_005);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::PossiblySigned
+    );
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().reserved.0, 10);
+}
+
+#[test]
+fn concurrent_cancellation_retries_keep_the_first_signed_transaction() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    for i in 0..3 {
+        context("stranger.testnet", 3_600_000_000_003 + i);
+        let _ = v.cancel_nonce(id);
+    }
+    let digest = v
+        .operations
+        .get(&id)
+        .unwrap()
+        .cancellation
+        .as_ref()
+        .unwrap()
+        .tx_digest;
+    let signature = |scalar: &str| {
+        from_value(json!({"scheme":"Secp256k1","big_r":{"affine_point":format!("02{}", "11".repeat(32))},"s":{"scalar":scalar.repeat(32)},"recovery_id":0})).unwrap()
+    };
+    context("vault.testnet", 3_600_000_000_006);
+    v.on_cancel_signature(id, digest, Ok(signature("22")));
+    let raw = v
+        .operations
+        .get(&id)
+        .unwrap()
+        .cancellation
+        .as_ref()
+        .unwrap()
+        .signed_transaction
+        .clone();
+    assert!(raw.is_some());
+    v.on_cancel_signature(id, digest, Ok(signature("33")));
+    v.on_cancel_signature(id, digest, Err(PromiseError::Failed));
+    let attempt = v
+        .operations
+        .get(&id)
+        .unwrap()
+        .cancellation
+        .as_ref()
+        .unwrap();
+    assert_eq!(attempt.signed_transaction, raw);
+    assert_eq!(attempt.request_count, 3);
 }

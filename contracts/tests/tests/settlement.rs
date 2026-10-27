@@ -176,3 +176,76 @@ async fn zero_tip_input_cannot_poison_cancellation_or_refund() -> Result<()> {
     assert_eq!(allowance["balance"], ALLOWANCE_BALANCE.to_string());
     Ok(())
 }
+
+#[tokio::test]
+#[serial]
+async fn failed_cancellation_signature_can_retry_and_refund() -> Result<()> {
+    let f = setup().await?;
+    apply_rule_change(&f.owner,&f.outsider,&f.worker,&f.vault,json!({"SetSettlementConfig":{"config":{"cancel_after_ns":"1","unconfirmed_after_ns":"3600000000001","foreign_tx_domain_id":3,"mainnet":false}}})).await?;
+    let op = signed_operation(&f, "CANCEL-SIGN-RETRY").await?;
+    f.mpc
+        .call("set_mode")
+        .args_json(json!({"mode":"Fail"}))
+        .transact()
+        .await?
+        .into_result()?;
+    let _ = f
+        .outsider
+        .call(f.vault.id(), "cancel_nonce")
+        .args_json(json!({"op_id":op["op_id"]}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    let failed = get_operation(&f, &op).await?;
+    assert_eq!(failed["state"], "PossiblySigned");
+    assert!(failed["cancellation"]["signed_transaction"].is_null());
+    assert!(failed["cancellation"]["signature"].is_null());
+    assert_eq!(failed["cancellation"]["request_count"], 1);
+    f.mpc
+        .call("set_mode")
+        .args_json(json!({"mode":"Success"}))
+        .transact()
+        .await?
+        .into_result()?;
+    f.outsider
+        .call(f.vault.id(), "cancel_nonce")
+        .args_json(json!({"op_id":op["op_id"]}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    let retried = get_operation(&f, &op).await?;
+    assert_eq!(
+        retried["cancellation"]["transaction"],
+        failed["cancellation"]["transaction"]
+    );
+    assert_eq!(
+        retried["cancellation"]["tx_digest"],
+        failed["cancellation"]["tx_digest"]
+    );
+    assert_eq!(retried["cancellation"]["request_count"], 2);
+    assert!(retried["cancellation"]["signed_transaction"].is_array());
+    let duplicate = f
+        .outsider
+        .call(f.vault.id(), "cancel_nonce")
+        .args_json(json!({"op_id":op["op_id"]}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert_failure_contains(&duplicate, "ERR_CANCELLATION_ALREADY_SIGNED");
+    assert_eq!(
+        get_operation(&f, &op).await?["cancellation"],
+        retried["cancellation"]
+    );
+    prove(&f, &retried, true).await?;
+    assert_eq!(get_operation(&f, &op).await?["state"], "Cancelled");
+    let allowance: Value = f
+        .vault
+        .view("get_allowance")
+        .args_json(json!({"key":ALLOWANCE_KEY}))
+        .await?
+        .json()?;
+    assert_eq!(allowance["reserved"], "0");
+    assert_eq!(allowance["balance"], ALLOWANCE_BALANCE.to_string());
+    Ok(())
+}

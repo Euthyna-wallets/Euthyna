@@ -1000,10 +1000,6 @@ impl Vault {
             "ERR_NOT_POSSIBLY_SIGNED"
         );
         require!(
-            operation.cancellation.is_none(),
-            "ERR_CANCELLATION_ALREADY_REQUESTED"
-        );
-        require!(
             env::block_timestamp()
                 >= operation
                     .possibly_signed_at_ns
@@ -1012,24 +1008,36 @@ impl Vault {
                     .saturating_add(self.settlement_config.cancel_after_ns.0),
             "ERR_CANCEL_TOO_EARLY"
         );
-        let gas_config = self.gas_config(&operation.role);
         let wallet = self
             .wallets
             .get(&operation.request.chain_id)
             .expect("ERR_WALLET_NOT_FOUND");
         let sender = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
-        let (transaction, tx_digest) =
-            evm::build_cancellation_transaction(&gas_config, &operation.transaction, sender);
-        operation.cancellation = Some(types::CancellationAttempt {
-            transaction,
-            tx_digest,
-            signature: None,
-            signed_transaction: None,
-            requested_at_ns: env::block_timestamp(),
-            request_count: 1,
-        });
-        self.operations.insert(op_id, operation.clone());
         let path = wallet.mpc_path.clone();
+        let tx_digest = if let Some(attempt) = operation.cancellation.as_mut() {
+            require!(
+                attempt.signature.is_none() && attempt.signed_transaction.is_none(),
+                "ERR_CANCELLATION_ALREADY_SIGNED"
+            );
+            // Retry the stored transaction even if the role's fee caps have changed.
+            attempt.requested_at_ns = env::block_timestamp();
+            attempt.request_count = attempt.request_count.saturating_add(1);
+            attempt.tx_digest
+        } else {
+            let gas_config = self.gas_config(&operation.role);
+            let (transaction, tx_digest) =
+                evm::build_cancellation_transaction(&gas_config, &operation.transaction, sender);
+            operation.cancellation = Some(types::CancellationAttempt {
+                transaction,
+                tx_digest,
+                signature: None,
+                signed_transaction: None,
+                requested_at_ns: env::block_timestamp(),
+                request_count: 1,
+            });
+            tx_digest
+        };
+        self.operations.insert(op_id, operation.clone());
         ext_mpc::ext(self.mpc_contract_id.clone())
             .with_attached_deposit(MPC_SIGN_DEPOSIT)
             .with_static_gas(MPC_SIGN_GAS)
@@ -1063,7 +1071,7 @@ impl Vault {
         let Some(attempt) = operation.cancellation.as_ref() else {
             return;
         };
-        if attempt.tx_digest != tx_digest {
+        if attempt.tx_digest != tx_digest || attempt.signed_transaction.is_some() {
             return;
         }
         let Ok(response) = result else {
