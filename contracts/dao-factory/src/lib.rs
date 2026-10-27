@@ -11,12 +11,7 @@ const MIN_DAO_BALANCE: NearToken = NearToken::from_millinear(100);
 #[allow(dead_code)]
 #[ext_contract(ext_self)]
 trait ExtSelf {
-    fn on_create(
-        &self,
-        creator: AccountId,
-        amount: U128,
-        dao_id: AccountId,
-    ) -> bool;
+    fn on_create(&self, creator: AccountId, amount: U128, dao_id: AccountId) -> bool;
 }
 
 #[near(contract_state)]
@@ -59,7 +54,12 @@ impl DaoFactory {
             .create_account()
             .transfer(amount)
             .use_global_contract(self.dao_code_hash)
-            .function_call("new".to_owned(), args, NearToken::from_yoctonear(0), DAO_INIT_GAS)
+            .function_call(
+                "new".to_owned(),
+                args,
+                NearToken::from_yoctonear(0),
+                DAO_INIT_GAS,
+            )
             .then(
                 ext_self::ext(env::current_account_id())
                     .with_static_gas(CALLBACK_GAS)
@@ -79,7 +79,9 @@ impl DaoFactory {
             env::log_str(&format!("DAO_CREATED:{dao_id}"));
             true
         } else {
-            Promise::new(creator).transfer(NearToken::from_yoctonear(amount.0)).detach();
+            Promise::new(creator)
+                .transfer(NearToken::from_yoctonear(amount.0))
+                .detach();
             env::log_str(&format!("DAO_CREATE_FAILED:{dao_id}"));
             false
         }
@@ -133,12 +135,22 @@ mod tests {
             .into_iter()
             .find(|receipt| receipt.receiver_id == account("acme.factory-v2.mandateos.testnet"))
             .expect("DAO receipt");
-        assert!(receipt.actions.iter().any(|action| matches!(action, MockAction::CreateAccount { .. })));
+        assert!(
+            receipt
+                .actions
+                .iter()
+                .any(|action| matches!(action, MockAction::CreateAccount { .. }))
+        );
         assert!(receipt.actions.iter().any(|action| matches!(
             action,
             MockAction::Transfer { deposit, .. } if *deposit == NearToken::from_millinear(250)
         )));
-        assert!(receipt.actions.iter().any(|action| matches!(action, MockAction::UseGlobalContract { .. })));
+        assert!(
+            receipt
+                .actions
+                .iter()
+                .any(|action| matches!(action, MockAction::UseGlobalContract { .. }))
+        );
         assert!(receipt.actions.iter().any(|action| matches!(
             action,
             MockAction::FunctionCallWeight { method_name, .. } if method_name == b"new"
@@ -148,7 +160,6 @@ mod tests {
             MockAction::AddKeyWithFullAccess { .. } | MockAction::AddKeyWithFunctionCall { .. }
         )));
     }
-
 
     #[test]
     #[should_panic(expected = "ERR_DAO_BALANCE_TOO_LOW")]

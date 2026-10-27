@@ -91,6 +91,17 @@ function containsPromptInjection(text: string | undefined): boolean {
   ].some((pattern) => pattern.test(normalized));
 }
 
+export function checkInvoice(request: { calldata: number[] }, invoice?: { text?: string | undefined; claimedRecipient?: string | undefined }) {
+  if (containsPromptInjection(invoice?.text)) return { allowed: false, reason: "prompt_injection_detected" };
+  if (invoice?.claimedRecipient) {
+    try {
+      const decoded = decodeFunctionData({ abi: erc20TransferAbi, data: bytesToHex(Uint8Array.from(request.calldata)) });
+      if (String(decoded.args[0]).toLowerCase() !== invoice.claimedRecipient.toLowerCase()) return { allowed: false, reason: "invoice_recipient_mismatch" };
+    } catch { return { allowed: false, reason: "invoice_recipient_mismatch" }; }
+  }
+  return { allowed: true, reason: null };
+}
+
 export class PaymentService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -428,3 +439,4 @@ export class PaymentService {
     });
   }
 }
+

@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   evmAddressBytes,
   MandateAgentClient,
-  type CancellationFees,
+  OnchainAgentClient,
   type PaymentRequest,
 } from "@mandateos/sdk";
 
@@ -13,7 +13,7 @@ const uint = z.string().regex(/^\d+$/);
 const opId = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 
 export class MandateMcpTools {
-  constructor(private readonly client: MandateAgentClient) {}
+  constructor(private readonly client: MandateAgentClient | OnchainAgentClient) {}
 
   pay(input: {
     token: string;
@@ -71,6 +71,10 @@ export class MandateMcpTools {
     });
   }
 
+  call(input: { chainId: number; to: string; data: string; value: string; allowanceAmount: string; reference: string; gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }) {
+    return this.client.call({ chain_id:input.chainId, target:evmAddressBytes(input.to as `0x${string}`), calldata:Array.from(Buffer.from(input.data.slice(2), "hex")), value:input.value, allowance_amount:input.allowanceAmount, reference:input.reference, gas_limit:input.gasLimit, max_fee_per_gas:input.maxFeePerGas, max_priority_fee_per_gas:input.maxPriorityFeePerGas });
+  }
+
   mandate() {
     return this.client.mandate();
   }
@@ -84,8 +88,8 @@ export class MandateMcpTools {
     return this.client.status(input.opId as `0x${string}`);
   }
 
-  cancel(input: { opId: string } & CancellationFees) {
-    return this.client.cancel(input.opId as `0x${string}`, input);
+  cancel(input: { opId: string }) {
+    return this.client.cancel(input.opId as `0x${string}`);
   }
 }
 
@@ -106,15 +110,20 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       "If the task needs something your role does not allow, stop and report the refusal and its reason to whoever gave you the task. Do not ask the members yourself: only a member decides to put a refused operation to a vote.",
     ].join(" "),
   });
+  server.registerTool("execute_call", {
+    title: "Execute a permitted contract call",
+    description: "Execute exact calldata inside your on-chain role, including DeFi calls. The vault enforces target, selector, parameters, budgets and gas caps. No API is required for an unguarded role.",
+    inputSchema: { chainId: z.number().int().positive().default(84532), to: address, data:z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/), value:uint.default("0"), allowanceAmount:uint.default("0"), reference:z.string().min(1), gasLimit:uint, maxFeePerGas:uint, maxPriorityFeePerGas:uint },
+  }, async (input) => result(await tools.call(input)));
   server.registerTool("mandate", {
     title: "Read my mandate",
-    description: "What this agent may do: its role, what each budget has left this period, the recipients the Guard accepts and the company wallet. Read from the vault on NEAR.",
+    description: "What this agent may do: its role, what each budget has left this period, the on-chain supplier list and the company wallet. Read from the vault on NEAR.",
     inputSchema: {},
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async () => result(await tools.mandate()));
   server.registerTool("check", {
     title: "Check before paying",
-    description: "Dry run, nothing reserved: would the vault (on-chain role and budgets) and the Guard (registered suppliers, reused references) allow this? Give token + recipient + amount for a token transfer, or to (+ data, value, allowanceAmount) for any other call. Network fees are not checked.",
+    description: "Dry run, nothing reserved: would the vault (on-chain role, suppliers and budgets) allow this? Give token + recipient + amount for a token transfer, or to (+ data, value, allowanceAmount) for any other call. Network fees are not checked.",
     inputSchema: {
       token: address.optional(),
       recipient: address.optional(),
@@ -161,14 +170,10 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.status(input)));
   server.registerTool("cancel", {
     title: "Cancel a stuck payment nonce",
-    description: "Ask the Vault, as the agent, to sign a higher-fee same-nonce cancellation and register its NEAR hash for the worker.",
-    inputSchema: {
-      opId,
-      gasLimit: uint,
-      maxFeePerGas: uint,
-      maxPriorityFeePerGas: uint,
-    },
+    description: "After the vault timeout, request a same-nonce self transaction. The vault computes replacement fees from the original under role caps; callers choose no fees.",
+    inputSchema: { opId },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async (input) => result(await tools.cancel(input)));
   return server;
 }
+

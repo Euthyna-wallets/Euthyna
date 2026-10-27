@@ -31,25 +31,35 @@ pub(crate) fn build_transaction(
     (transaction, digest)
 }
 
+/// Deterministic replacement fees: double both original fee fields, bounded by policy.
+/// If policy cannot accommodate at least a 12.5% bump of both fields, fail before signing.
 pub(crate) fn build_cancellation_transaction(
     role: &RoleConfig,
-    chain_id: u64,
-    nonce: u64,
+    original: &Eip1559Transaction,
     sender: EvmAddress,
-    original_max_fee_per_gas: u128,
-    gas_limit: U128,
-    max_fee_per_gas: U128,
-    max_priority_fee_per_gas: U128,
 ) -> (Eip1559Transaction, Digest) {
-    require!(gas_limit.0 >= 21_000, "ERR_CANCEL_GAS_TOO_LOW");
-    require!(
-        max_fee_per_gas.0 > original_max_fee_per_gas,
-        "ERR_CANCEL_FEE_NOT_HIGHER"
-    );
+    let gas_limit = U128(21_000);
+    let cap = role
+        .max_fee_per_gas
+        .0
+        .min(role.max_total_fee.0 / gas_limit.0);
+    let bump = |value: u128, limit: u128| {
+        let minimum = value
+            .checked_add(value.div_ceil(8).max(1))
+            .expect("ERR_CANCEL_FEE_OVERFLOW");
+        let chosen = value.saturating_mul(2).max(1).min(limit);
+        require!(chosen >= minimum, "ERR_CANCEL_FEE_CAP");
+        chosen
+    };
+    let max_fee_per_gas = U128(bump(original.max_fee_per_gas.0, cap));
+    let max_priority_fee_per_gas = U128(bump(
+        original.max_priority_fee_per_gas.0,
+        role.max_priority_fee_per_gas.0.min(max_fee_per_gas.0),
+    ));
     validate_gas(role, gas_limit, max_fee_per_gas, max_priority_fee_per_gas);
     let transaction = Eip1559Transaction {
-        chain_id,
-        nonce,
+        chain_id: original.chain_id,
+        nonce: original.nonce,
         to: sender,
         value: U128(0),
         input: Vec::new(),

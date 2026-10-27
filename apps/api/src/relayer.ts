@@ -43,14 +43,18 @@ export class BaseRelayer {
     return localHash;
   }
 
-  async receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null> {
+  async receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash: Hex } | null> {
     try {
       const receipt = await this.client.getTransactionReceipt({ hash });
-      return { status: receipt.status, blockNumber: receipt.blockNumber };
+      return { status: receipt.status, blockNumber: receipt.blockNumber, blockHash: receipt.blockHash };
     } catch (error) {
       if (error instanceof TransactionReceiptNotFoundError) return null;
       throw error;
     }
+  }
+
+  async finalizedBlockNumber(): Promise<bigint> {
+    return (await this.client.getBlock({ blockTag: "finalized" })).number;
   }
 
   async blockNumber(): Promise<bigint> {
@@ -66,8 +70,8 @@ export class BaseRelayer {
     const hash = await this.broadcast(operation);
     const receipt = await this.client.waitForTransactionReceipt({ hash, confirmations: 1 });
     if (receipt.status !== "success") throw new Error(`Base transaction ${hash} reverted`);
-    const signedReport = await this.guard.confirmationReport(operation, hash, receipt.blockNumber);
-    const nearTransactionHash = await this.near.reportStatus(vaultAccountId, signedReport);
+    if (receipt.blockNumber > await this.finalizedBlockNumber()) throw new Error("Transaction is not finalized; resume settlement later");
+    const nearTransactionHash = await this.near.settle(vaultAccountId, operation.op_id, receipt.blockHash);
     return { hash, blockNumber: receipt.blockNumber.toString(), nearTransactionHash };
   }
 }
@@ -80,3 +84,4 @@ export function createBaseRelayer(env: Env, near: NearClient, guard: Guard): Bas
 export function createChainRelayers(env: Env, near: NearClient, guard: Guard): Record<number, BaseRelayer> {
   return { 11155111: new BaseRelayer(env.ETHEREUM_SEPOLIA_RPC_URL, near, guard) };
 }
+

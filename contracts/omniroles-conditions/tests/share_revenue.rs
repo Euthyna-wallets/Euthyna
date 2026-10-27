@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, sol};
 use omniroles_conditions::abi::{address_word, u128_word};
 use omniroles_conditions::*;
@@ -21,7 +21,12 @@ const MAX_FEE: u128 = 1_000_000_000_000_000;
 const BUDGET: u128 = 10_000_000_000_000_000; // 0.01 ETH
 
 fn c(parent: u16, encoding: Encoding, operator: Operator, comp: Vec<u8>) -> ConditionFlat {
-    ConditionFlat { parent, param_type: encoding, operator, comp_value: comp }
+    ConditionFlat {
+        parent,
+        param_type: encoding,
+        operator,
+        comp_value: comp,
+    }
 }
 
 fn keccak(data: &[u8]) -> Vec<u8> {
@@ -44,7 +49,14 @@ fn sheet() -> Vec<ConditionFlat> {
     ]
 }
 
-fn call(token: [u8; 20], amount: u128, fee: u128, native_fee: u128, recipient: &str, message: &str) -> Vec<u8> {
+fn call(
+    token: [u8; 20],
+    amount: u128,
+    fee: u128,
+    native_fee: u128,
+    recipient: &str,
+    message: &str,
+) -> Vec<u8> {
     initTransferCall {
         tokenAddress: Address::from(token),
         amount,
@@ -57,8 +69,27 @@ fn call(token: [u8; 20], amount: u128, fee: u128, native_fee: u128, recipient: &
 }
 
 fn run(calldata: &[u8], value: u128) -> Result<Vec<Consumption>, Status> {
-    let store = BTreeMap::from([(KEY, Allowance { refill: 0, max_refill: BUDGET, period: 86_400, balance: BUDGET, timestamp: NOW - 10 })]);
-    evaluate(&sheet(), &Context { calldata, value, avatar: [0xac; 20], now: NOW, allowances: &store })
+    let store = BTreeMap::from([(
+        KEY,
+        Allowance {
+            refill: 0,
+            max_refill: BUDGET,
+            period: 86_400,
+            balance: BUDGET,
+            timestamp: NOW - 10,
+        },
+    )]);
+    evaluate(
+        &sheet(),
+        &Context {
+            calldata,
+            value,
+            avatar: [0xac; 20],
+            now: NOW,
+            allowances: &store,
+            address_lists: &(),
+        },
+    )
 }
 
 const AMOUNT: u128 = 5_000_000_000_000_000;
@@ -71,7 +102,8 @@ fn the_tree_is_valid() {
 
 #[test]
 fn eth_to_the_shares_contract_passes_and_counts_the_eth_sent() {
-    let consumptions = run(&call([0; 20], AMOUNT, 0, FEE, SHARES, ""), AMOUNT + FEE).expect("allowed");
+    let consumptions =
+        run(&call([0; 20], AMOUNT, 0, FEE, SHARES, ""), AMOUNT + FEE).expect("allowed");
     assert_eq!(consumptions.len(), 1);
     assert_eq!(consumptions[0].consumed, AMOUNT + FEE);
 }
@@ -79,13 +111,76 @@ fn eth_to_the_shares_contract_passes_and_counts_the_eth_sent() {
 #[test]
 fn every_other_destination_or_shape_is_refused() {
     let refused = |calldata: Vec<u8>, value: u128| run(&calldata, value).is_err();
-    assert!(refused(call([0; 20], AMOUNT, 0, FEE, "near:attacker.testnet", ""), AMOUNT + FEE), "other NEAR account");
-    assert!(refused(call([0; 20], AMOUNT, 0, FEE, "base:0xbabababababababababababababababababababa", ""), AMOUNT + FEE), "back to an EVM address");
-    assert!(refused(call([0; 20], AMOUNT, 0, FEE, "near:ACME-AI-SHARES.mandateos.testnet", ""), AMOUNT + FEE), "look-alike");
-    assert!(refused(call([0; 20], AMOUNT, 0, FEE, SHARES, "{\"receiver_id\":\"attacker.testnet\"}"), AMOUNT + FEE), "message");
-    assert!(refused(call([0x05; 20], AMOUNT, 0, FEE, SHARES, ""), 0), "a token instead of ETH");
-    assert!(refused(call([0; 20], AMOUNT, 1, FEE, SHARES, ""), AMOUNT + FEE), "token fee");
-    assert!(refused(call([0; 20], AMOUNT, 0, MAX_FEE + 1, SHARES, ""), AMOUNT + MAX_FEE + 1), "bridge fee above the cap");
-    assert!(refused(call([0; 20], 0, 0, FEE, SHARES, ""), FEE), "zero amount: the whole value would be a fee");
-    assert!(refused(call([0; 20], BUDGET, 0, FEE, SHARES, ""), BUDGET + FEE), "over the budget");
+    assert!(
+        refused(
+            call([0; 20], AMOUNT, 0, FEE, "near:attacker.testnet", ""),
+            AMOUNT + FEE
+        ),
+        "other NEAR account"
+    );
+    assert!(
+        refused(
+            call(
+                [0; 20],
+                AMOUNT,
+                0,
+                FEE,
+                "base:0xbabababababababababababababababababababa",
+                ""
+            ),
+            AMOUNT + FEE
+        ),
+        "back to an EVM address"
+    );
+    assert!(
+        refused(
+            call(
+                [0; 20],
+                AMOUNT,
+                0,
+                FEE,
+                "near:ACME-AI-SHARES.mandateos.testnet",
+                ""
+            ),
+            AMOUNT + FEE
+        ),
+        "look-alike"
+    );
+    assert!(
+        refused(
+            call(
+                [0; 20],
+                AMOUNT,
+                0,
+                FEE,
+                SHARES,
+                "{\"receiver_id\":\"attacker.testnet\"}"
+            ),
+            AMOUNT + FEE
+        ),
+        "message"
+    );
+    assert!(
+        refused(call([0x05; 20], AMOUNT, 0, FEE, SHARES, ""), 0),
+        "a token instead of ETH"
+    );
+    assert!(
+        refused(call([0; 20], AMOUNT, 1, FEE, SHARES, ""), AMOUNT + FEE),
+        "token fee"
+    );
+    assert!(
+        refused(
+            call([0; 20], AMOUNT, 0, MAX_FEE + 1, SHARES, ""),
+            AMOUNT + MAX_FEE + 1
+        ),
+        "bridge fee above the cap"
+    );
+    assert!(
+        refused(call([0; 20], 0, 0, FEE, SHARES, ""), FEE),
+        "zero amount: the whole value would be a fee"
+    );
+    assert!(
+        refused(call([0; 20], BUDGET, 0, FEE, SHARES, ""), BUDGET + FEE),
+        "over the budget"
+    );
 }

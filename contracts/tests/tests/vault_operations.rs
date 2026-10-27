@@ -1,7 +1,5 @@
 mod vault_common;
 
-use std::time::Duration;
-
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use near_workspaces::types::Gas;
@@ -257,8 +255,15 @@ async fn tracks_allowance_reservation_spend_and_refill() -> Result<()> {
     assert_eq!(spent["balance"], "900");
     assert_eq!(spent["reserved"], "0");
 
-    tokio::time::sleep(Duration::from_secs(11)).await;
-    fixture.worker.fast_forward(1).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        spent["timestamp_ns"]
+            .as_str()
+            .expect("allowance timestamp")
+            .parse::<u64>()?
+            + 10_000_000_000,
+    )
+    .await?;
     let refilled: Value = fixture
         .vault
         .view("get_allowance")
@@ -301,7 +306,16 @@ async fn queues_rule_changes_and_vetoes_only_the_selected_entry() -> Result<()> 
         .transact()
         .await?
         .into_result()?;
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_rule_change")
@@ -353,7 +367,14 @@ async fn requires_cosignature_and_delays_high_value_operations_before_mpc() -> R
         .transact()
         .await?;
     assert_failure_contains(&early, "ERR_OPERATION_DELAY");
-    fixture.worker.fast_forward(15).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        operation["execute_after_ns"]
+            .as_str()
+            .expect("operation timestamp")
+            .parse()?,
+    )
+    .await?;
     fixture
         .outsider
         .call(fixture.vault.id(), "execute_queued_operation")
@@ -691,7 +712,7 @@ async fn rejects_modified_replayed_visas_and_invalid_mpc_signatures() -> Result<
 
 #[tokio::test]
 #[serial]
-async fn failed_execution_releases_policy_reservations_but_consumes_wallet_nonce() -> Result<()> {
+async fn trusted_failure_report_cannot_release_reservations() -> Result<()> {
     let fixture = setup().await?;
     let operation = prepare(&fixture, "FAILED-1", 100).await?;
     let approval = approval(&fixture, &operation, 1, visa_expiry(&fixture).await?, None);
@@ -699,20 +720,18 @@ async fn failed_execution_releases_policy_reservations_but_consumes_wallet_nonce
         .await?
         .into_result()?;
     let signed = get_operation(&fixture, &operation).await?;
-    fixture
+    let rejected = fixture
         .outsider
         .call(fixture.vault.id(), "report_status")
         .args_json(status_report(&fixture, &signed, 1, false))
         .gas(Gas::from_tgas(100))
         .transact()
-        .await?
-        .into_result()?;
+        .await?;
+    assert_failure_contains(&rejected, "ERR_FAILURE_REPORT_DISABLED");
     assert_eq!(
         get_operation(&fixture, &operation).await?["state"],
-        "Failed"
+        "PossiblySigned"
     );
-    let next = prepare(&fixture, "FAILED-2", 100).await?;
-    assert_eq!(next["evm_nonce"], 1);
     Ok(())
 }
 
@@ -950,7 +969,9 @@ async fn submit_dao(fixture: &vault_common::Fixture, transactions: Value) -> Res
         .json::<Vec<Value>>()?)
 }
 
-async fn start_dao(fixture: &vault_common::Fixture) -> Result<near_workspaces::result::ExecutionFinalResult> {
+async fn start_dao(
+    fixture: &vault_common::Fixture,
+) -> Result<near_workspaces::result::ExecutionFinalResult> {
     Ok(fixture
         .outsider
         .call(fixture.vault.id(), "start_dao_transaction")
@@ -991,13 +1012,25 @@ async fn dao_transactions_wait_for_the_veto_window_then_run_in_order() -> Result
 
     // Veto window still open.
     assert_failure_contains(&start_dao(&fixture).await?, "ERR_VETO_WINDOW_OPEN");
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
 
     start_dao(&fixture).await?.into_result()?;
     let first = operation_by_id(&fixture, &ids[0]).await?;
     assert_eq!(first["state"], "PossiblySigned");
     assert_eq!(first["evm_nonce"], 0);
-    assert_eq!(first["transaction"]["input"], json!(erc20_transfer(RECIPIENT, 10)));
+    assert_eq!(
+        first["transaction"]["input"],
+        json!(erc20_transfer(RECIPIENT, 10))
+    );
 
     // One transaction at a time per wallet: the second waits for the first.
     assert_failure_contains(&start_dao(&fixture).await?, "ERR_WALLET_QUEUE_BUSY");
@@ -1033,7 +1066,16 @@ async fn council_vetoes_a_dao_transaction_and_agents_keep_working() -> Result<()
         .await?
         .into_result()?;
     assert_eq!(operation_by_id(&fixture, &ids[0]).await?["state"], "Vetoed");
-    fixture.worker.fast_forward(2).await?;
+    tests::wait_until_timestamp(
+        &fixture.worker,
+        fixture
+            .worker
+            .view_block()
+            .await?
+            .timestamp()
+            .saturating_add(2_000_000_000),
+    )
+    .await?;
     assert_failure_contains(&start_dao(&fixture).await?, "ERR_NO_DAO_TRANSACTION");
     // The wallet was never held: an agent can still prepare.
     let operation = prepare(&fixture, "AFTER-VETO", 100).await?;
@@ -1080,8 +1122,18 @@ async fn the_company_wallet_has_the_same_address_on_every_evm_chain() -> Result<
         .transact()
         .await?
         .into_result()?;
-    let base: Value = fixture.vault.view("get_wallet").args_json(json!({"chain_id": CHAIN_ID})).await?.json()?;
-    let sepolia: Value = fixture.vault.view("get_wallet").args_json(json!({"chain_id": 11155111})).await?.json()?;
+    let base: Value = fixture
+        .vault
+        .view("get_wallet")
+        .args_json(json!({"chain_id": CHAIN_ID}))
+        .await?
+        .json()?;
+    let sepolia: Value = fixture
+        .vault
+        .view("get_wallet")
+        .args_json(json!({"chain_id": 11155111}))
+        .await?
+        .json()?;
     assert!(base["address"].is_array());
     assert_eq!(base["address"], sepolia["address"]);
     Ok(())

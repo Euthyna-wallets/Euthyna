@@ -121,11 +121,7 @@ describe("MandateAgentClient", () => {
 
   it("lets the agent call cancel_nonce and registers its NEAR hash", async () => {
     const { client, calls } = fixture();
-    await expect(client.cancel(opId, {
-      gasLimit: "21000",
-      maxFeePerGas: "30000000000",
-      maxPriorityFeePerGas: "2000000000",
-    })).resolves.toMatchObject({ nearTransactionHash: "near-cancel-hash" });
+    await expect(client.cancel(opId)).resolves.toMatchObject({ nearTransactionHash: "near-cancel-hash" });
     expect(calls).toEqual(["cancel_nonce", "record_cancellation:near-cancel-hash"]);
   });
 
@@ -184,6 +180,10 @@ describe("OmniRoles SDK", () => {
       "prepare",
       "authorize",
       "cancel_nonce",
+      "settle",
+      "settle_cancellation",
+      "release_unconfirmed",
+      "execute_queued_operation",
       "cancel_prepared",
       "renounce_role",
     ]);
@@ -238,3 +238,4 @@ describe("revenue sharing by an agent", () => {
     expect(prepared[0]).toMatchObject({ chain_id: 84532, value: "1010", allowance_amount: "1010", reference: "REV-1", calldata: [0xde, 0xb9, 0x15, 0xb8] });
   });
 });
+

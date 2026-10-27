@@ -10,7 +10,7 @@
 //! not on the target chain.
 //!
 //! Supported: `Pass`, `And`, `Or`, `Empty`, `Matches` (tuples, parameter lists,
-//! nested ABI data in `bytes`), `ArraySome`, `ArrayEvery`, `EqualToAvatar`,
+//! nested ABI data in `bytes`), `ArraySome`, `ArrayEvery`, `EqualToAvatar`, `InAddressList`,
 //! `EqualTo`, `GreaterThan`, `LessThan`, signed comparisons, `Bitmask`,
 //! `WithinAllowance` (parameter or native value) and `CallWithinAllowance`.
 //! Other operators are rejected when a tree is validated, never ignored.
@@ -35,7 +35,7 @@ pub mod signature;
 pub mod tree;
 pub mod types;
 
-pub use evaluate::{AllowanceSource, Context, evaluate};
+pub use evaluate::{AddressListSource, AllowanceSource, Context, evaluate};
 pub use permission::{
     Call, Clearance, Environment, FunctionScope, RoleScope, ScopeSource, TargetScope, check_call,
 };

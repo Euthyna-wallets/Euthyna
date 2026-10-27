@@ -79,6 +79,8 @@ pub struct VelocityConfig {
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
 pub struct RoleConfig {
+    #[serde(default)]
+    pub guard_required: bool,
     pub enabled: bool,
     pub permissions: Vec<Permission>,
     pub operation_delay_threshold: Option<U128>,
@@ -218,6 +220,7 @@ pub enum OperationState {
     /// A transaction the DAO voted: waiting for its veto window, then for the
     /// wallet to be free (it has no nonce yet).
     Scheduled,
+    Unconfirmed,
 }
 
 /// One EVM transaction the DAO approved, outside any role (a multisig
@@ -326,6 +329,22 @@ pub enum RuleChange {
     SetVersions {
         policy_version: u64,
         registry_version: u64,
+    },
+    AddListAddress {
+        list: String,
+        address: EvmAddress,
+        label: String,
+    },
+    RemoveListAddress {
+        list: String,
+        address: EvmAddress,
+    },
+    SetSettlementConfig {
+        config: SettlementConfig,
+    },
+    AddListAddresses {
+        list: String,
+        entries: Vec<ListAddress>,
     },
 }
 
@@ -442,4 +461,31 @@ pub struct MpcBigR {
 #[serde(crate = "near_sdk::serde")]
 pub struct MpcScalar {
     pub scalar: String,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct ListAddress {
+    pub address: EvmAddress,
+    pub label: String,
+}
+
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct SettlementConfig {
+    pub cancel_after_ns: U64,
+    pub unconfirmed_after_ns: U64,
+    pub foreign_tx_domain_id: u64,
+    /// Explicit network mapping: false is testnet, true is mainnet.
+    pub mainnet: bool,
+}
+impl Default for SettlementConfig {
+    fn default() -> Self {
+        Self {
+            cancel_after_ns: U64(3_600_000_000_000),
+            unconfirmed_after_ns: U64(21_600_000_000_000),
+            foreign_tx_domain_id: 3,
+            mainnet: false,
+        }
+    }
 }

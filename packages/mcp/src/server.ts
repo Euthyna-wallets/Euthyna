@@ -10,9 +10,11 @@ import { join, relative, resolve } from "node:path";
 import {
   FileAgentKeyStore,
   HttpAgentApi,
-  MandateAgentClient,
-  NearVaultGateway,
   SignerAgentApi,
+
+  OnchainAgentClient,
+  NearVaultGateway,
+
   SignerSocket,
   SocketNearSigner,
 } from "@mandateos/sdk";
@@ -64,7 +66,9 @@ function settings(found: { accountId: string; vaultAccountId?: string | undefine
 const socketPath = env.EUTHYNA_SIGNER_SOCKET
   ?? (env.MANDATEOS_AGENT_API_KEY ? undefined : SIGNER_SOCKETS.find((path) => existsSync(path)));
 
-let client: MandateAgentClient;
+const rpcUrl = process.env.EVM_RPC_URL ?? (env.EVM_CHAIN_ID === 84532 ? "https://sepolia.base.org" : "https://mainnet.base.org");
+const { publicRpc } = await import("@mandateos/sdk");
+let client: OnchainAgentClient;
 if (socketPath) {
   if (env.MANDATEOS_AGENT_API_KEY || env.AGENT_KEY_PATH) {
     console.error("euthyna: euthyna-signer is used; MANDATEOS_AGENT_API_KEY and AGENT_KEY_PATH are ignored. Remove them from this config.");
@@ -89,10 +93,10 @@ if (socketPath) {
     networkId: typeof info.network === "string" ? info.network : undefined,
   });
   const vault = await NearVaultGateway.connect({ ...common, signer: new SocketNearSigner(socket, accountId) });
-  client = new MandateAgentClient(vault, new SignerAgentApi(socket, accountId));
+  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), new SignerAgentApi(socket, accountId));
 } else {
   // Local key mode: weaker, the AI's own user can read the file. Prefer euthyna-signer.
-  if (!env.MANDATEOS_AGENT_API_KEY) throw new Error("install euthyna-signer (recommended) or set MANDATEOS_AGENT_API_KEY");
+
   const common = settings({ accountId: required(env.EUTHYNA_AGENT ?? env.AGENT_NEAR_ACCOUNT_ID, "EUTHYNA_AGENT") });
   const keyPath = resolve(env.AGENT_KEY_PATH ?? defaultAgentKeyPath(common.accountId));
   if (isInside(keyPath, process.cwd()) && !env.EUTHYNA_ALLOW_KEY_IN_PROJECT) {
@@ -101,7 +105,7 @@ if (socketPath) {
   console.error("euthyna: local key mode. The AI's user can read the key file; use euthyna-signer to keep it out of reach.");
   const key = await new FileAgentKeyStore(keyPath).loadOrCreate(common.networkId, common.accountId);
   const vault = await NearVaultGateway.connect({ ...common, privateKey: key.privateKey });
-  client = new MandateAgentClient(vault, new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY));
+  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), env.MANDATEOS_AGENT_API_KEY ? new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY) : undefined);
 }
 function defaultAgentKeyPath(accountId: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
@@ -115,3 +119,4 @@ function isInside(path: string, dir: string): boolean {
 
 const server = createMandateMcpServer(new MandateMcpTools(client));
 await server.connect(new StdioServerTransport());
+

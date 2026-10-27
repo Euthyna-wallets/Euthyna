@@ -1,3 +1,4 @@
+import { hexToBytes, type Hex } from "viem";
 import { keyStores, KeyPair, Near, transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
@@ -255,6 +256,13 @@ export class NearClient {
     });
   }
 
+  async settle(vaultAccountId: string, opId: number[], blockHash: Hex, cancellation = false): Promise<string> {
+    return this.functionCall(vaultAccountId, cancellation ? "settle_cancellation" : "settle", { op_id: opId, block_hash: Array.from(hexToBytes(blockHash)) }, "70000000000000");
+  }
+  async releaseUnconfirmed(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "release_unconfirmed", { op_id: opId }, "30000000000000");
+  }
+
   async reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string> {
     return this.functionCall(
       vaultAccountId,
@@ -303,24 +311,8 @@ export class NearClient {
     }
   }
 
-  async cancelNonce(
-    vaultAccountId: string,
-    opId: number[],
-    gasLimit: string,
-    maxFeePerGas: string,
-    maxPriorityFeePerGas: string,
-  ): Promise<string> {
-    return this.functionCall(
-      vaultAccountId,
-      "cancel_nonce",
-      {
-        op_id: opId,
-        gas_limit: gasLimit,
-        max_fee_per_gas: maxFeePerGas,
-        max_priority_fee_per_gas: maxPriorityFeePerGas,
-      },
-      "120000000000000",
-    );
+  async cancelNonce(vaultAccountId: string, opId: number[]): Promise<string> {
+    return this.functionCall(vaultAccountId, "cancel_nonce", { op_id: opId }, "120000000000000");
   }
 
   /** Function call signed by the relayer (MandateOS pays gas and deposits). */
@@ -359,3 +351,4 @@ export class NearClient {
     return outcome.transaction.hash;
   }
 }
+

@@ -111,6 +111,7 @@ fn check(to: [u8; 20], data: Vec<u8>, balance: u128) -> Result<Vec<Consumption>,
         avatar: WALLET,
         now: NOW,
         allowances: &store,
+        address_lists: &(),
     };
     check_call(
         &swap_role(),
@@ -330,6 +331,7 @@ fn single_value_sheets_use_plain_equality() {
         avatar: WALLET,
         now: NOW,
         allowances: &store,
+        address_lists: &(),
     };
     assert!(evaluate(&path.conditions, &context).is_ok());
     let context = Context {
@@ -338,6 +340,7 @@ fn single_value_sheets_use_plain_equality() {
         avatar: WALLET,
         now: NOW,
         allowances: &store,
+        address_lists: &(),
     };
     assert_eq!(
         evaluate(&path.conditions, &context),

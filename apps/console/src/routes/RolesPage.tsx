@@ -172,6 +172,8 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
   const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares });
   const sharesAccountId = shares.data?.deployed ? shares.data.accountId : null;
   const [name, setName] = useState(initialName);
+  const [guardRequired, setGuardRequired] = useState(false);
+  const [suppliersOnly, setSuppliersOnly] = useState(false);
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
   const [members, setMembers] = useState<string[]>([]);
   const [preselected, setPreselected] = useState(false);
@@ -222,6 +224,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
   };
 
   const draft = (): RoleDraft => ({
+    guardRequired, suppliersOnly,
     name,
     blocks: blocks.map((block): RoleBlock => block.kind === "payments"
       ? { kind: "payments", token: block.token as `0x${string}`, recipients: block.recipients.map((item) => ({ address: item.address as `0x${string}`, label: item.label })), budget: { amount: block.amount, periodDays: block.periodDays } }
@@ -268,14 +271,14 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
 
   const ready = validRoleName(name) && blocks.length > 0 && blocks.every((block) =>
     Number(block.amount) > 0 && (block.kind === "payments"
-      ? block.recipients.length > 0
+      ? suppliersOnly || block.recipients.length > 0
       : block.kind === "share-revenue" || (block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
   // Say what is missing instead of a silently disabled button.
   const missing = !validRoleName(name)
     ? "Give the role a name."
     : blocks.length === 0
       ? "Add what this role allows: + Transfers, + DeFi… or + Share revenue"
-      : blocks.some((block) => block.kind === "payments" && block.recipients.length === 0)
+      : blocks.some((block) => block.kind === "payments" && !suppliersOnly && block.recipients.length === 0)
         ? "Pick at least one recipient for the transfers."
         : blocks.some((block) => block.kind === "swap" && (block.tokensOut.length === 0 || block.protocols.length === 0))
           ? "Pick the tokens it may buy and at least one exchange."
@@ -287,9 +290,11 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     <Card title="New role" action={<button className="ghost" onClick={onClose}>Cancel</button>}>
       {error ? <div className="alert error">{error}</div> : null}
       <div className="stack">
+        <label><input type="checkbox" checked={guardRequired} onChange={(e) => { setGuardRequired(e.target.checked); setPreview(null); }} />Require Guard approval (needs the API)</label>
+        <label><input type="checkbox" checked={suppliersOnly} onChange={(e) => { setSuppliersOnly(e.target.checked); setPreview(null); }} />Recipient must be a supplier</label>
         <label>
           Role name
-          <input placeholder="treasury" value={name} onChange={(event) => { setName(event.target.value.toLowerCase()); setPreview(null); }} />
+            <input placeholder="treasury" value={name} onChange={(event) => { setName(event.target.value.toLowerCase()); setPreview(null); }} />
           {name && !validRoleName(name) ? <span className="small" style={{ color: "#b42318" }}>Lowercase letters, digits and dashes, 2 to 32 characters.</span> : null}
         </label>
 
@@ -538,3 +543,4 @@ function canonical(value: unknown): string {
       ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
       : typeof item === "bigint" ? item.toString() : item);
 }
+

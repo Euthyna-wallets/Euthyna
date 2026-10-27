@@ -349,12 +349,12 @@ pub fn hash_typed_data(data: &TypedData) -> Result<HashedTypedData, String> {
             kind: kind.to_string(),
         })
         .collect();
-    if let Some(declared) = data.types.get("EIP712Domain") {
-        if *declared != domain_type {
-            return Err(invalid(
-                "EIP712Domain type must list the domain fields in canonical order",
-            ));
-        }
+    if let Some(declared) = data.types.get("EIP712Domain")
+        && *declared != domain_type
+    {
+        return Err(invalid(
+            "EIP712Domain type must list the domain fields in canonical order",
+        ));
     }
     let mut types = data.types.clone();
     types.insert("EIP712Domain".to_string(), domain_type);

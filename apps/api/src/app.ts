@@ -1,3 +1,4 @@
+import { checkInvoice } from "./payments.js";
 import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 
@@ -20,11 +21,7 @@ const requestSchema = z.object({
   opId: z.array(z.number().int().min(0).max(255)).length(32),
 });
 
-const cancellationSchema = requestSchema.extend({
-  gasLimit: z.string().regex(/^\d+$/),
-  maxFeePerGas: z.string().regex(/^\d+$/),
-  maxPriorityFeePerGas: z.string().regex(/^\d+$/),
-});
+const cancellationSchema = requestSchema;
 
 const createAgentSchema = z.object({
   name: z.string().min(1).max(80),
@@ -340,9 +337,6 @@ export function createApp({
     const nearTransactionHash = await near.cancelNonce(
       input.vaultAccountId,
       input.opId,
-      input.gasLimit,
-      input.maxFeePerGas,
-      input.maxPriorityFeePerGas,
     );
     await auth.recordAudit({
       organizationId: consoleIdentity.organizationId,
@@ -694,12 +688,14 @@ export function createApp({
     const daoNameSchema = z.object({ daoName: z.string().min(2).max(60) });
     const roleDraftSchema = z.object({
       draft: z.object({
+        guardRequired: z.boolean().optional(),
+        suppliersOnly: z.boolean().optional(),
         name: z.string(),
         blocks: z.array(z.union([
           z.object({
             kind: z.literal("payments"),
             token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-            recipients: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(80) })).min(1).max(20),
+            recipients: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(80) })).max(20),
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
           }),
           z.object({
@@ -767,6 +763,11 @@ export function createApp({
         })).min(1).max(10),
       }));
       return context.json(await omniroles.transactionProposal(orgOf(context), input));
+    });
+    app.get("/v1/console/omniroles/suppliers", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.suppliers(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/suppliers", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ entries: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(64) })).max(256), migrate: z.boolean().optional() }));
+      return context.json(await omniroles.suppliersProposal(orgOf(context), input));
     });
     app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, roleDraftSchema);
@@ -858,8 +859,9 @@ export function createApp({
       context.json(await omniroles.activity(orgOf(context))));
     app.post("/v1/operations/check", requireAgent(auth, agentLimiter), async (context) => {
       const agent = context.get("agent");
-      const input = await parseJson(context, z.object({ request: z.record(z.string(), z.unknown()) }));
+      const input = await parseJson(context, z.object({ request: z.record(z.string(), z.unknown()), advisoryOnly: z.boolean().optional(), invoice: z.object({ text: z.string().max(100000).optional(), claimedRecipient: z.string().optional() }).optional() }));
       const request = input.request;
+      if (input.advisoryOnly) return context.json(checkInvoice({ calldata: Array.isArray(request.calldata) ? request.calldata as number[] : [] }, input.invoice));
       const guardable = typeof request.chain_id === "number" && Array.isArray(request.target) && Array.isArray(request.calldata);
       return context.json(await omniroles.checkOperation(
         agent.organizationId,
@@ -906,3 +908,4 @@ export function createApp({
   });
   return app;
 }
+

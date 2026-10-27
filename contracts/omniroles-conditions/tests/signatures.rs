@@ -283,6 +283,7 @@ fn sign(scope: &RoleScope, data: &TypedData, balance: u128) -> Result<SignatureA
         avatar: AVATAR,
         now: NOW,
         allowances: &allowances,
+        address_lists: &(),
     };
     check_typed_data(scope, data, &environment)
 }
@@ -392,6 +393,7 @@ fn order(message: &str, balance: u128) -> Result<SignatureApproval, Status> {
         avatar: AVATAR,
         now: NOW,
         allowances: &allowances,
+        address_lists: &(),
     };
     check_monerium_order(&monerium_scope(), message, &environment).map(|(_, approval)| approval)
 }
@@ -470,6 +472,7 @@ fn monerium_rejects_malformed_or_stale_orders() {
         avatar: AVATAR,
         now: NOW,
         allowances: &allowances,
+        address_lists: &(),
     };
     let message = format!("Send EUR 1 to {IBAN} at 2027-01-15T08:00:00Z");
     assert_eq!(

@@ -26,6 +26,7 @@ export type Permission = {
 };
 
 export type RoleConfig = {
+  guard_required?: boolean;
   enabled: boolean;
   permissions: Permission[];
   operation_delay_threshold: string | null;
@@ -42,6 +43,10 @@ export type RoleConfig = {
 export type MembershipKind = "Human" | "Agent";
 
 export type RuleChange =
+  | { AddListAddresses: { list: string; entries: Array<{address: number[]; label: string}> } }
+  | { AddListAddress: { list: string; address: number[]; label: string } }
+  | { RemoveListAddress: { list: string; address: number[] } }
+  | { SetSettlementConfig: { config: { cancel_after_ns: string; unconfirmed_after_ns: string; foreign_tx_domain_id: number; mainnet: boolean } } }
   | { SetRole: { role: string; config: RoleConfig } }
   | { RemoveRole: { role: string } }
   | {
@@ -64,7 +69,7 @@ export type RuleChange =
 // Encodings and operators of the OmniRoles condition format.
 export const Encoding = { None: 0, Static: 1, Dynamic: 2, Tuple: 3, Array: 4, AbiEncoded: 5, EtherValue: 6 } as const;
 export const Operator = {
-  Pass: 0, And: 1, Or: 2, Empty: 4, Matches: 5, ArraySome: 6, ArrayEvery: 7,
+  InAddressList: 40, Pass: 0, And: 1, Or: 2, Empty: 4, Matches: 5, ArraySome: 6, ArrayEvery: 7,
   EqualToAvatar: 15, EqualTo: 16, GreaterThan: 17, LessThan: 18,
   SignedIntGreaterThan: 19, SignedIntLessThan: 20, Bitmask: 21,
   WithinAllowance: 28, CallWithinAllowance: 30,
@@ -343,6 +348,8 @@ export type RoleBlock =
 export type RoleMember = { accountId: string; kind: MembershipKind; maxUses?: number | null; endsAt?: Date | null };
 
 export type RoleDraft = {
+  guardRequired?: boolean;
+  suppliersOnly?: boolean;
   name: string;
   blocks: RoleBlock[];
   members: RoleMember[];
@@ -405,7 +412,13 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       },
     });
     if (block.kind === "payments") {
-      permissions.push(toPermission(erc20TransferSheet(token.address, block.recipients.map((item) => item.address), key)));
+      permissions.push(toPermission(draft.suppliersOnly ? {
+        target: token.address, selector: SELECTORS.transfer, conditions: [
+          node(0, Encoding.AbiEncoded, Operator.Matches),
+          node(0, Encoding.Static, Operator.InAddressList, toHex(toBytes("suppliers"))),
+          node(0, Encoding.Static, Operator.WithinAllowance, toHex(Uint8Array.from(key))),
+        ],
+      } : erc20TransferSheet(token.address, block.recipients.map((item) => item.address), key)));
     } else if (block.kind === "share-revenue") {
       if (!profile.omniBridge) throw new Error(`no Omni Bridge known on ${profile.name}`);
       if (!/^[a-z0-9._-]{2,64}$/.test(block.sharesAccountId)) throw new Error("shares account is not a NEAR account id");
@@ -430,6 +443,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       role: draft.name,
       config: {
         enabled: true,
+        guard_required: draft.guardRequired ?? false,
         permissions,
         // Humans set the constraints; operations are allowed or refused by policy alone.
         operation_delay_threshold: null,
@@ -1124,6 +1138,9 @@ export function describePermission(permission: Permission, context: DescribeCont
       case Operator.Matches:
         children(index).forEach(({ position }, fieldIndex) => describeNode(position, nameOf(index, fieldIndex)));
         return;
+      case Operator.InAddressList:
+        rules.push(`${name} must belong to the on-chain address list`);
+        return;
       case Operator.EqualToAvatar:
         rules.push(`${name} must be the company wallet`);
         return;
@@ -1185,6 +1202,10 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
       details: [period_ns > 0 ? `Refilled up to ${amount} ${periodText(period_ns)}.` : "Not refilled."],
     };
   }
+  if ("AddListAddresses" in change) return { title: `Add ${change.AddListAddresses.entries.length} addresses to ${change.AddListAddresses.list}`, details: change.AddListAddresses.entries.map((e) => `${e.label}: ${hexOf(e.address)}`) };
+  if ("AddListAddress" in change) return { title: `Add ${change.AddListAddress.label} to ${change.AddListAddress.list}`, details: [hexOf(change.AddListAddress.address)] };
+  if ("RemoveListAddress" in change) return { title: `Remove an address from ${change.RemoveListAddress.list}`, details: [hexOf(change.RemoveListAddress.address)] };
+  if ("SetSettlementConfig" in change) return { title: "Change settlement timeouts", details: [JSON.stringify(change.SetSettlementConfig.config)] };
   if ("SetRole" in change) {
     const { role, config } = change.SetRole;
     const details = config.permissions.flatMap((permission) => {
@@ -1331,3 +1352,4 @@ export function describeCall(target: Hex, calldata: Hex, value: bigint, context:
   }
   return `call function ${calldata.slice(0, 10)} on ${contract(target)}${value > 0n ? ` with ${formatUnits(value, 18)} ETH` : ""}`;
 }
+

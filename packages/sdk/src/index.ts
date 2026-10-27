@@ -13,6 +13,10 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "prepare",
   "authorize",
   "cancel_nonce",
+  "settle",
+  "settle_cancellation",
+  "release_unconfirmed",
+  "execute_queued_operation",
   "cancel_prepared",
   "renounce_role",
 ] as const;
@@ -88,11 +92,7 @@ export interface GuardApproval {
   signature: string;
 }
 
-export interface CancellationFees {
-  gasLimit: string;
-  maxFeePerGas: string;
-  maxPriorityFeePerGas: string;
-}
+
 
 export interface InvoiceContext {
   text?: string;
@@ -103,13 +103,14 @@ export interface VaultGateway {
   prepare(intent: PaymentIntent): Promise<PreparedOperation>;
   /** Any call the role allows (not only a token transfer). */
   prepareRequest?(request: OmniRolesOperationRequest): Promise<PreparedOperation>;
-  authorize(opId: number[], approval: GuardApproval): Promise<string>;
-  cancelNonce(opId: number[], fees: CancellationFees): Promise<string>;
+  authorize(opId: number[], approval: GuardApproval | null): Promise<string>;
+  cancelNonce(opId: number[]): Promise<string>;
   /** Release a prepared operation the Guard refused, so the wallet is free again. */
   cancelPrepared?(opId: number[]): Promise<string>;
 }
 
 export interface AgentApiGateway {
+  preflightInvoice?(request: OmniRolesOperationRequest, invoice?: InvoiceContext): Promise<void>;
   gasQuote(input: Pick<PaymentIntent, "token" | "recipient" | "amount">): Promise<AgentGasQuote>;
   requestVisa(opId: number[], invoice?: InvoiceContext): Promise<{ status: number; body: Record<string, unknown> }>;
   recordAuthorization(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>>;
@@ -209,6 +210,7 @@ export class MandateAgentClient {
         max_priority_fee_per_gas: quote.gas.maxPriorityFeePerGas,
       };
     }
+    await this.api.preflightInvoice?.(omniRolesPaymentRequest(completeIntent, 84532), invoice);
     return this.submit(await this.vault.prepare(completeIntent), invoice);
   }
 
@@ -300,12 +302,12 @@ export class MandateAgentClient {
   }
 
 
-  async cancel(opId: Hex | number[], fees: CancellationFees): Promise<{
+  async cancel(opId: Hex | number[]): Promise<{
     opId: Hex;
     nearTransactionHash: string;
   }> {
     const bytes = Array.isArray(opId) ? opId : operationIdBytes(opId);
-    const nearTransactionHash = await this.vault.cancelNonce(bytes, fees);
+    const nearTransactionHash = await this.vault.cancelNonce(bytes);
     await this.api.recordCancellation(bytes, nearTransactionHash);
     return { opId: operationIdHex(bytes), nearTransactionHash };
   }
@@ -334,6 +336,13 @@ export class HttpAgentApi implements AgentApiGateway {
     private readonly apiKey: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {}
+
+  async preflightInvoice(request: OmniRolesOperationRequest, invoice?: InvoiceContext): Promise<void> {
+    let response: { status: number; body: Record<string, unknown> };
+    try { response = await this.request("/v1/operations/check", { method: "POST", body: JSON.stringify({ request, invoice, advisoryOnly: true }), signal: AbortSignal.timeout(5_000) }); }
+    catch { return; }
+    if (response.status === 200 && response.body.allowed === false) throw new Error(`Invoice refused: ${String(response.body.reason)}`);
+  }
 
   requestVisa(opId: number[], invoice?: InvoiceContext): Promise<{ status: number; body: Record<string, unknown> }> {
     return this.request("/v1/operations/pay", {
@@ -603,7 +612,7 @@ export class NearVaultGateway implements VaultGateway {
     return { ...operation, op_id: operation.op_id, state: operation.state };
   }
 
-  async authorize(opId: number[], approval: GuardApproval): Promise<string> {
+  async authorize(opId: number[], approval: GuardApproval | null): Promise<string> {
     const outcome = await this.call("authorize", { op_id: opId, approval }, AGENT_GAS.authorize);
     return outcome.transaction_outcome.id;
   }
@@ -613,12 +622,9 @@ export class NearVaultGateway implements VaultGateway {
     return outcome.transaction_outcome.id;
   }
 
-  async cancelNonce(opId: number[], fees: CancellationFees): Promise<string> {
+  async cancelNonce(opId: number[]): Promise<string> {
     const outcome = await this.call("cancel_nonce", {
       op_id: opId,
-      gas_limit: fees.gasLimit,
-      max_fee_per_gas: fees.maxFeePerGas,
-      max_priority_fee_per_gas: fees.maxPriorityFeePerGas,
     }, AGENT_GAS.authorize);
     return outcome.transaction_outcome.id;
   }
@@ -627,6 +633,15 @@ export class NearVaultGateway implements VaultGateway {
     const outcome = await this.call("renounce_role", { role: this.role }, AGENT_GAS.prepare);
     return outcome.transaction_outcome.id;
   }
+
+  async view<T>(methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+    return this.account.viewFunction({ contractId: this.vaultAccountId, methodName, args }) as Promise<T>;
+  }
+  async action(methodName: string, args: Record<string, unknown>): Promise<string> {
+    const result = await this.call(methodName, args, "70000000000000");
+    return result.transaction_outcome.id;
+  }
+  identity() { return { member: this.account.accountId, role: this.role, chain_id: this.chainId }; }
 
   private call(methodName: string, args: Record<string, unknown>, gas: string) {
     return this.account.functionCall({
@@ -638,3 +653,6 @@ export class NearVaultGateway implements VaultGateway {
     });
   }
 }
+
+
+export { OnchainAgentClient, publicRpc } from "./onchain.js";

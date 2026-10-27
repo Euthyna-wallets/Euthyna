@@ -1,5 +1,7 @@
+#![allow(clippy::too_many_arguments)]
 mod conditions;
 mod evm;
+mod foreign;
 mod types;
 
 use borsh::to_vec;
@@ -13,10 +15,11 @@ use near_sdk::{
 use conditions::{EvaluationContext, ReservedAllowances};
 use omniroles_conditions::Consumption;
 pub use types::{
-    Allowance, AllowanceConsumption, ChainWallet, DaoTransaction, Eip1559Transaction, GuardApproval, GuardVisa,
-    Membership, MembershipKind, MpcSignature, Operation, OperationCheck, OperationRequest,
-    OperationState, Permission, QueuedRuleChange, RoleConfig, RoleView, RuleChange,
-    RuleChangeState, SignedStatusReport, StatusKind, StatusReport, VelocityConfig, VelocityState,
+    Allowance, AllowanceConsumption, ChainWallet, DaoTransaction, Eip1559Transaction,
+    GuardApproval, GuardVisa, ListAddress, Membership, MembershipKind, MpcSignature, Operation,
+    OperationCheck, OperationRequest, OperationState, Permission, QueuedRuleChange, RoleConfig,
+    RoleView, RuleChange, RuleChangeState, SettlementConfig, SignedStatusReport, StatusKind,
+    StatusReport, VelocityConfig, VelocityState,
 };
 use types::{
     AllowanceKey, MembershipKey, MpcPayload, MpcSignRequest, MpcSignatureResponse, OperationId,
@@ -38,6 +41,10 @@ const MAX_DAO_TRANSACTIONS_PER_PROPOSAL: usize = 10;
 #[allow(dead_code)]
 #[ext_contract(ext_mpc)]
 trait ExtMpc {
+    fn verify_foreign_transaction(
+        &mut self,
+        request: foreign::VerifyArgs,
+    ) -> foreign::VerifyResponse;
     fn sign(&mut self, request: MpcSignRequest) -> MpcSignatureResponse;
     fn derived_public_key(
         &self,
@@ -53,11 +60,20 @@ trait ExtSelf {
     fn on_mpc_signature(&mut self, op_id: OperationId);
     fn on_cancel_signature(&mut self, op_id: OperationId, tx_digest: [u8; 32]);
     fn on_wallet_public_key(&mut self, chain_id: u64);
+    fn on_settle_verified(
+        &mut self,
+        op_id: OperationId,
+        cancellation: bool,
+        tx_hash: [u8; 32],
+        expected_payload_hash: [u8; 32],
+    );
 }
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Vault {
+    address_lists: std::collections::BTreeMap<String, Vec<ListAddress>>,
+    settlement_config: SettlementConfig,
     client_id: String,
     owner_id: AccountId,
     mpc_contract_id: AccountId,
@@ -108,6 +124,7 @@ impl Vault {
         rule_delay_ns: u64,
         rule_expiration_ns: u64,
         council: Vec<AccountId>,
+        settlement_config: Option<SettlementConfig>,
     ) -> Self {
         require!(!client_id.is_empty(), "ERR_EMPTY_CLIENT_ID");
         require!(operation_ttl_ns > 0, "ERR_ZERO_OPERATION_TTL");
@@ -122,7 +139,11 @@ impl Vault {
             .0
             .try_into()
             .unwrap_or_else(|_| env::panic_str("ERR_STATUS_KEY_LENGTH"));
+        let settlement_config = settlement_config.unwrap_or_default();
+        Self::validate_settlement_config(&settlement_config);
         Self {
+            address_lists: Default::default(),
+            settlement_config,
             client_id,
             owner_id,
             mpc_contract_id,
@@ -675,7 +696,11 @@ impl Vault {
         ));
     }
 
-    pub fn authorize(&mut self, op_id: OperationId, approval: GuardApproval) -> PromiseOrValue<()> {
+    pub fn authorize(
+        &mut self,
+        op_id: OperationId,
+        approval: Option<GuardApproval>,
+    ) -> PromiseOrValue<()> {
         self.assert_not_paused();
         let caller = env::predecessor_account_id();
         let mut operation = self
@@ -698,12 +723,16 @@ impl Vault {
         }) {
             require!(operation.cosigned_by.is_some(), "ERR_COSIGN_REQUIRED");
         }
-        self.verify_visa(&operation, &approval);
-        require!(
-            !self.used_visa_nonces.contains(&approval.visa.visa_nonce),
-            "ERR_VISA_USED"
-        );
-        self.used_visa_nonces.insert(approval.visa.visa_nonce);
+        if let Some(approval) = approval {
+            self.verify_visa(&operation, &approval);
+            require!(
+                !self.used_visa_nonces.contains(&approval.visa.visa_nonce),
+                "ERR_VISA_USED"
+            );
+            self.used_visa_nonces.insert(approval.visa.visa_nonce);
+        } else {
+            require!(!role.config.guard_required, "ERR_VISA_REQUIRED");
+        }
         operation.visa_authorized = true;
         if operation
             .execute_after_ns
@@ -780,7 +809,10 @@ impl Vault {
         let owner = self.owner_id.clone();
         let mut ids = Vec::with_capacity(transactions.len());
         for transaction in transactions {
-            let wallet = self.wallets.get(&transaction.chain_id).expect("ERR_WALLET_NOT_FOUND");
+            let wallet = self
+                .wallets
+                .get(&transaction.chain_id)
+                .expect("ERR_WALLET_NOT_FOUND");
             require!(wallet.address.is_some(), "ERR_WALLET_NOT_DERIVED");
             self.dao_sequence = self.dao_sequence.saturating_add(1);
             let request = OperationRequest {
@@ -825,7 +857,10 @@ impl Vault {
             self.operations.insert(op_id, operation);
             self.dao_queue.push(op_id);
             self.dao_transactions.insert(self.dao_sequence, op_id);
-            env::log_str(&format!("OMNIROLES_DAO_TRANSACTION_SCHEDULED:{}", hex::encode(op_id)));
+            env::log_str(&format!(
+                "OMNIROLES_DAO_TRANSACTION_SCHEDULED:{}",
+                hex::encode(op_id)
+            ));
             ids.push(op_id);
         }
         ids
@@ -838,22 +873,40 @@ impl Vault {
         let position = self
             .dao_queue
             .iter()
-            .position(|op_id| self.operations.get(op_id).is_some_and(|operation| operation.request.chain_id == chain_id))
+            .position(|op_id| {
+                self.operations
+                    .get(op_id)
+                    .is_some_and(|operation| operation.request.chain_id == chain_id)
+            })
             .unwrap_or_else(|| env::panic_str("ERR_NO_DAO_TRANSACTION"));
         let op_id = self.dao_queue[position];
-        let mut operation = self.operations.get(&op_id).cloned().expect("ERR_OPERATION_NOT_FOUND");
-        require!(operation.state == OperationState::Scheduled, "ERR_NOT_SCHEDULED");
+        let mut operation = self
+            .operations
+            .get(&op_id)
+            .cloned()
+            .expect("ERR_OPERATION_NOT_FOUND");
+        require!(
+            operation.state == OperationState::Scheduled,
+            "ERR_NOT_SCHEDULED"
+        );
         let now = env::block_timestamp();
         require!(
-            now >= operation.execute_after_ns.expect("ERR_DELAY_NOT_CONFIGURED").0,
+            now >= operation
+                .execute_after_ns
+                .expect("ERR_DELAY_NOT_CONFIGURED")
+                .0,
             "ERR_VETO_WINDOW_OPEN"
         );
         require!(now <= operation.expires_at_ns.0, "ERR_OPERATION_EXPIRED");
-        let wallet = self.wallets.get_mut(&chain_id).expect("ERR_WALLET_NOT_FOUND");
+        let wallet = self
+            .wallets
+            .get_mut(&chain_id)
+            .expect("ERR_WALLET_NOT_FOUND");
         require!(wallet.active_operation.is_none(), "ERR_WALLET_QUEUE_BUSY");
         let nonce = wallet.next_nonce;
         wallet.active_operation = Some(op_id);
-        let (transaction, tx_digest) = evm::build_transaction(&Self::dao_gas_config(), nonce, &operation.request);
+        let (transaction, tx_digest) =
+            evm::build_transaction(&Self::dao_gas_config(), nonce, &operation.request);
         operation.evm_nonce = nonce;
         operation.transaction = transaction;
         operation.tx_digest = tx_digest;
@@ -861,7 +914,10 @@ impl Vault {
         operation.state = OperationState::Prepared;
         self.operations.insert(op_id, operation);
         self.dao_queue.remove(position);
-        env::log_str(&format!("OMNIROLES_DAO_TRANSACTION_STARTED:{}", hex::encode(op_id)));
+        env::log_str(&format!(
+            "OMNIROLES_DAO_TRANSACTION_STARTED:{}",
+            hex::encode(op_id)
+        ));
         self.request_operation_signature(op_id)
     }
 
@@ -878,7 +934,10 @@ impl Vault {
     }
 
     pub fn dao_queue(&self) -> Vec<Base64VecU8> {
-        self.dao_queue.iter().map(|op_id| Base64VecU8(op_id.to_vec())).collect()
+        self.dao_queue
+            .iter()
+            .map(|op_id| Base64VecU8(op_id.to_vec()))
+            .collect()
     }
 
     pub fn cancel_prepared(&mut self, op_id: OperationId) {
@@ -930,66 +989,55 @@ impl Vault {
         operation.signed_transaction = Some(signed_transaction);
     }
 
-    pub fn cancel_nonce(
-        &mut self,
-        op_id: OperationId,
-        gas_limit: U128,
-        max_fee_per_gas: U128,
-        max_priority_fee_per_gas: U128,
-    ) -> Promise {
-        let caller = env::predecessor_account_id();
+    pub fn cancel_nonce(&mut self, op_id: OperationId) -> Promise {
         let mut operation = self
             .operations
             .get(&op_id)
             .cloned()
             .expect("ERR_OPERATION_NOT_FOUND");
         require!(
-            caller == operation.member
-                || caller == self.owner_id
-                || self.paused
-                || self.council.contains(&caller),
-            "ERR_CANCEL_CALLER"
-        );
-        require!(
             operation.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
-        let gas_config = self.gas_config(&operation.role);
-        let previous_fee = operation
-            .cancellation
-            .as_ref()
-            .map_or(operation.transaction.max_fee_per_gas.0, |attempt| {
-                attempt.transaction.max_fee_per_gas.0
-            });
+        require!(
+            env::block_timestamp()
+                >= operation
+                    .possibly_signed_at_ns
+                    .expect("ERR_NOT_POSSIBLY_SIGNED")
+                    .0
+                    .saturating_add(self.settlement_config.cancel_after_ns.0),
+            "ERR_CANCEL_TOO_EARLY"
+        );
         let wallet = self
             .wallets
             .get(&operation.request.chain_id)
             .expect("ERR_WALLET_NOT_FOUND");
         let sender = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
-        let (transaction, tx_digest) = evm::build_cancellation_transaction(
-            &gas_config,
-            operation.request.chain_id,
-            operation.evm_nonce,
-            sender,
-            previous_fee,
-            gas_limit,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-        );
-        let request_count = operation
-            .cancellation
-            .as_ref()
-            .map_or(1, |attempt| attempt.request_count.saturating_add(1));
-        operation.cancellation = Some(types::CancellationAttempt {
-            transaction,
-            tx_digest,
-            signature: None,
-            signed_transaction: None,
-            requested_at_ns: env::block_timestamp(),
-            request_count,
-        });
-        self.operations.insert(op_id, operation.clone());
         let path = wallet.mpc_path.clone();
+        let tx_digest = if let Some(attempt) = operation.cancellation.as_mut() {
+            require!(
+                attempt.signature.is_none() && attempt.signed_transaction.is_none(),
+                "ERR_CANCELLATION_ALREADY_SIGNED"
+            );
+            // Retry the stored transaction even if the role's fee caps have changed.
+            attempt.requested_at_ns = env::block_timestamp();
+            attempt.request_count = attempt.request_count.saturating_add(1);
+            attempt.tx_digest
+        } else {
+            let gas_config = self.gas_config(&operation.role);
+            let (transaction, tx_digest) =
+                evm::build_cancellation_transaction(&gas_config, &operation.transaction, sender);
+            operation.cancellation = Some(types::CancellationAttempt {
+                transaction,
+                tx_digest,
+                signature: None,
+                signed_transaction: None,
+                requested_at_ns: env::block_timestamp(),
+                request_count: 1,
+            });
+            tx_digest
+        };
+        self.operations.insert(op_id, operation.clone());
         ext_mpc::ext(self.mpc_contract_id.clone())
             .with_attached_deposit(MPC_SIGN_DEPOSIT)
             .with_static_gas(MPC_SIGN_GAS)
@@ -1023,7 +1071,7 @@ impl Vault {
         let Some(attempt) = operation.cancellation.as_ref() else {
             return;
         };
-        if attempt.tx_digest != tx_digest {
+        if attempt.tx_digest != tx_digest || attempt.signed_transaction.is_some() {
             return;
         }
         let Ok(response) = result else {
@@ -1077,18 +1125,18 @@ impl Vault {
             self.operations.insert(op_id, operation);
             return;
         }
-        if let Some(attempt) = operation.cancellation.as_mut() {
-            if signature_matches(attempt.tx_digest, &signature, expected_address) {
-                require!(
-                    attempt.signature.is_none(),
-                    "ERR_SIGNATURE_ALREADY_SUBMITTED"
-                );
-                attempt.signed_transaction =
-                    Some(evm::signed_transaction(&attempt.transaction, &signature));
-                attempt.signature = Some(signature);
-                self.operations.insert(op_id, operation);
-                return;
-            }
+        if let Some(attempt) = operation.cancellation.as_mut()
+            && signature_matches(attempt.tx_digest, &signature, expected_address)
+        {
+            require!(
+                attempt.signature.is_none(),
+                "ERR_SIGNATURE_ALREADY_SUBMITTED"
+            );
+            attempt.signed_transaction =
+                Some(evm::signed_transaction(&attempt.transaction, &signature));
+            attempt.signature = Some(signature);
+            self.operations.insert(op_id, operation);
+            return;
         }
         env::panic_str("ERR_SIGNATURE_MISMATCH");
     }
@@ -1118,6 +1166,10 @@ impl Vault {
         mpc_signature: Option<MpcSignature>,
     ) {
         let report = &signed_report.report;
+        require!(
+            report.kind == StatusKind::Confirmed,
+            "ERR_FAILURE_REPORT_DISABLED"
+        );
         require!(report.client_id == self.client_id, "ERR_REPORT_CLIENT");
         require!(
             !self.used_report_nonces.contains(&report.report_nonce),
@@ -1147,10 +1199,10 @@ impl Vault {
             env::ed25519_verify(&signature, &message, &self.status_public_key),
             "ERR_REPORT_SIGNATURE"
         );
-        if let Some(signature) = mpc_signature {
-            if operation.signed_transaction.is_none() {
-                self.submit_signature(report.op_id, signature);
-            }
+        if let Some(signature) = mpc_signature
+            && operation.signed_transaction.is_none()
+        {
+            self.submit_signature(report.op_id, signature);
         }
         let signed_transaction = self
             .operations
@@ -1166,33 +1218,13 @@ impl Vault {
             StatusKind::Confirmed => {
                 self.release_operation(report.op_id, OperationState::Confirmed, false)
             }
-            StatusKind::Failed => {
-                self.release_operation(report.op_id, OperationState::Failed, true)
-            }
+            StatusKind::Failed => env::panic_str("ERR_FAILURE_REPORT_DISABLED"),
         }
     }
 
     pub fn confirm_cancellation(&mut self, op_id: OperationId, tx_hash: [u8; 32]) {
-        self.assert_owner();
-        let operation = self
-            .operations
-            .get(&op_id)
-            .cloned()
-            .expect("ERR_OPERATION_NOT_FOUND");
-        require!(
-            operation.state == OperationState::PossiblySigned,
-            "ERR_NOT_POSSIBLY_SIGNED"
-        );
-        let signed_transaction = operation
-            .cancellation
-            .as_ref()
-            .and_then(|attempt| attempt.signed_transaction.as_ref())
-            .expect("ERR_CANCELLATION_SIGNATURE_UNAVAILABLE");
-        require!(
-            tx_hash == env::keccak256_array(signed_transaction),
-            "ERR_CANCELLATION_TX_HASH"
-        );
-        self.release_operation(op_id, OperationState::Cancelled, true);
+        let _ = (op_id, tx_hash);
+        env::panic_str("ERR_CANCELLATION_PROOF_REQUIRED");
     }
 
     fn request_operation_signature(&mut self, op_id: OperationId) -> Promise {
@@ -1209,6 +1241,69 @@ impl Vault {
             "ERR_OPERATION_NOT_READY"
         );
         require!(operation.visa_authorized, "ERR_VISA_REQUIRED");
+        if operation.role != DAO_ROLE {
+            let membership = self
+                .memberships
+                .get(&MembershipKey {
+                    role: operation.role.clone(),
+                    member: operation.member.clone(),
+                })
+                .expect("ERR_MEMBERSHIP_NOT_FOUND");
+            require!(membership.active, "ERR_MEMBERSHIP_REVOKED");
+            require!(
+                membership
+                    .ends_at_ns
+                    .is_none_or(|end| env::block_timestamp() <= end.0),
+                "ERR_MEMBERSHIP_EXPIRED"
+            );
+        }
+        if operation.role != DAO_ROLE {
+            let permission = &self
+                .roles
+                .get(&operation.role)
+                .expect("ERR_ROLE_NOT_FOUND")
+                .config
+                .permissions[operation.permission_index as usize];
+            let wallet = self
+                .wallets
+                .get(&operation.request.chain_id)
+                .expect("ERR_WALLET_NOT_FOUND")
+                .address
+                .expect("ERR_WALLET_NOT_DERIVED");
+            let now = env::block_timestamp();
+            let context = EvaluationContext {
+                member: &operation.member,
+                role: &operation.role,
+                chain_id: operation.request.chain_id,
+                wallet,
+                target: operation.request.target,
+                value: operation.request.value.0,
+                block_timestamp_ns: now,
+                address_lists: self,
+            };
+            let allowances = ReservedAllowances {
+                allowances: &self.allowances,
+                now,
+                own: &operation.consumptions,
+            };
+            let checked = conditions::evaluate(
+                &permission.conditions,
+                &operation.request.calldata,
+                &context,
+                &allowances,
+            )
+            .unwrap_or_else(|_| env::panic_str("ERR_CONDITIONS_CHANGED"));
+            require!(
+                checked.len() == operation.consumptions.len()
+                    && checked
+                        .iter()
+                        .zip(&operation.consumptions)
+                        .all(|(a, b)| a.key.as_slice() == b.key
+                            && a.consumed == b.amount.0
+                            && a.calls_only == b.calls_only),
+                "ERR_RESERVATION_CHANGED"
+            );
+        }
         let wallet = self
             .wallets
             .get_mut(&operation.request.chain_id)
@@ -1249,10 +1344,10 @@ impl Vault {
         if permission.chain_id != request.chain_id || permission.target != request.target {
             return Err("TargetNotAllowed".into());
         }
-        if let Some(selector) = permission.selector {
-            if request.calldata.get(..4) != Some(selector.as_slice()) {
-                return Err("FunctionNotAllowed".into());
-            }
+        if let Some(selector) = permission.selector
+            && request.calldata.get(..4) != Some(selector.as_slice())
+        {
+            return Err("FunctionNotAllowed".into());
         }
         if request.value.0 > 0 && !permission.allow_value {
             return Err("SendNotAllowed".into());
@@ -1265,10 +1360,12 @@ impl Vault {
             target: request.target,
             value: request.value.0,
             block_timestamp_ns: now,
+            address_lists: self,
         };
         let allowances = ReservedAllowances {
             allowances: &self.allowances,
             now,
+            own: &[],
         };
         conditions::evaluate(
             &permission.conditions,
@@ -1424,6 +1521,7 @@ impl Vault {
                     | OperationState::Cancelled
                     | OperationState::Vetoed
                     | OperationState::Expired
+                    | OperationState::Unconfirmed
             ),
             "ERR_OPERATION_TERMINAL"
         );
@@ -1524,6 +1622,41 @@ impl Vault {
 
     fn apply_rule_change(&mut self, change: RuleChange, now: u64) {
         match change {
+            RuleChange::AddListAddresses { list, entries } => {
+                for entry in entries {
+                    self.apply_rule_change(
+                        RuleChange::AddListAddress {
+                            list: list.clone(),
+                            address: entry.address,
+                            label: entry.label,
+                        },
+                        now,
+                    );
+                }
+            }
+            RuleChange::AddListAddress {
+                list,
+                address,
+                label,
+            } => {
+                let entries = self.address_lists.entry(list).or_default();
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.address == address) {
+                    entry.label = label;
+                } else {
+                    require!(entries.len() < 256, "ERR_ADDRESS_LIST_FULL");
+                    entries.push(ListAddress { address, label });
+                }
+            }
+            RuleChange::RemoveListAddress { list, address } => {
+                if let Some(entries) = self.address_lists.get_mut(&list) {
+                    entries.retain(|entry| entry.address != address);
+                }
+            }
+            RuleChange::SetSettlementConfig { config } => {
+                Self::validate_settlement_config(&config);
+                self.settlement_config = config;
+            }
+
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
                 require!(
@@ -1560,6 +1693,12 @@ impl Vault {
                     role: role.clone(),
                     member: member.clone(),
                 };
+                require!(
+                    self.memberships
+                        .get(&key)
+                        .is_none_or(|member| member.reserved_uses == 0),
+                    "ERR_MEMBERSHIP_IN_USE"
+                );
                 self.memberships.insert(
                     key,
                     Membership {
@@ -1635,6 +1774,28 @@ impl Vault {
 
     fn validate_rule_change(change: &RuleChange) {
         match change {
+            RuleChange::AddListAddresses { list, entries } => {
+                Self::validate_list_name(list);
+                require!(
+                    !entries.is_empty() && entries.len() <= 256,
+                    "ERR_ADDRESS_LIST_BATCH_SIZE"
+                );
+                let mut unique = std::collections::BTreeSet::new();
+                for entry in entries {
+                    require!(
+                        entry.label.chars().count() <= 64,
+                        "ERR_ADDRESS_LABEL_LENGTH"
+                    );
+                    require!(unique.insert(entry.address), "ERR_DUPLICATE_LIST_ADDRESS");
+                }
+            }
+            RuleChange::AddListAddress { list, label, .. } => {
+                Self::validate_list_name(list);
+                require!(label.chars().count() <= 64, "ERR_ADDRESS_LABEL_LENGTH");
+            }
+            RuleChange::RemoveListAddress { list, .. } => Self::validate_list_name(list),
+            RuleChange::SetSettlementConfig { config } => Self::validate_settlement_config(config),
+
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
                 require!(!role.is_empty(), "ERR_EMPTY_ROLE");
@@ -1660,10 +1821,10 @@ impl Vault {
                 // Condition trees are checked when the rule is queued, so the
                 // DAO votes only on trees the engine can evaluate.
                 for permission in &config.permissions {
-                    if !permission.conditions.is_empty() {
-                        if let Err(error) = omniroles_conditions::validate(&permission.conditions) {
-                            env::panic_str(&format!("ERR_INVALID_CONDITIONS:{error:?}"));
-                        }
+                    if !permission.conditions.is_empty()
+                        && let Err(error) = omniroles_conditions::validate(&permission.conditions)
+                    {
+                        env::panic_str(&format!("ERR_INVALID_CONDITIONS:{error:?}"));
                     }
                 }
             }
@@ -1862,6 +2023,7 @@ impl Vault {
     /// Gas caps of DAO transactions: wide (members vote on the fees), but bounded.
     fn dao_gas_config() -> RoleConfig {
         RoleConfig {
+            guard_required: false,
             enabled: true,
             permissions: Vec::new(),
             operation_delay_threshold: None,
@@ -1880,7 +2042,11 @@ impl Vault {
         if role == DAO_ROLE {
             return Self::dao_gas_config();
         }
-        self.roles.get(role).expect("ERR_ROLE_NOT_FOUND").config.clone()
+        self.roles
+            .get(role)
+            .expect("ERR_ROLE_NOT_FOUND")
+            .config
+            .clone()
     }
 
     /// One key for every EVM chain: the company wallet has the same address
@@ -1946,3 +2112,6 @@ fn signature_matches(
     env::ecrecover(&digest, &compact, signature.recovery_id, true)
         .is_some_and(|public_key| env::keccak256_array(public_key)[12..] == expected_address[..])
 }
+
+#[cfg(test)]
+mod onchain_tests;
