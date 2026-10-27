@@ -135,18 +135,23 @@ def technical():
     chip(cx + 84, 635, 'verified receipt')
     node(cx, 726, 46, 'mpc', 'NEAR MPC', 'signs · verifies receipts')
     arrow(f'M{cx} 828 V884')
-    node(cx, 940, 46, 'wallet', 'Company wallet', 'one address|every EVM chain', ring=GOLD)
-    xs = [190, 290, 390]
+    node(cx, 940, 46, 'wallet', 'Company wallet', 'one MPC key|EVM today · more soon', ring=GOLD)
+    chip(cx, 1096, 'signed tx · relayed as is', GOLD)
+    xs = [70, 158, 246, 334, 422, 510]
     for x in xs:
-        arrow(f'M{cx + (x-cx)*0.2} 1070 Q{x} 1076 {x} 1116', color=GOLD)
-    for x, n in zip(xs, ['base', 'arbitrum', None]):
-        chain_hex(x, 1156, n, None if n else '+')
-    # Anyone broadcasts the signed transaction; MPC reads the finalized receipt.
-    arrow(f'M{cx-54} 182 Q60 182 60 260 V1156 H150', dash='7 6', w=2.2)
-    chip(22, 1000, 'broadcast (anyone)', anchor='start')
-    arrow(f'M430 1156 H540 V726 H{cx+58}', dash='7 6', w=2.2)
+        arrow(f'M{cx + (x-cx)*0.12} 1112 Q{x} 1118 {x} 1158', color=GOLD, dash=None if x < 300 else '5 6')
+    for x, n in zip(xs, ['ethereum', 'base', 'arbitrum', 'solana', 'bitcoin', None]):
+        dim = n in ('solana', 'bitcoin', None)
+        if dim:
+            out.append('<g opacity=".55">')
+        chain_hex(x, 1198, n, None if n else '+')
+        if dim:
+            out.append('</g>')
+    text(422, 1262, 'coming next', 12, MUTED)
+    # MPC reads the finalized receipt on the destination chain.
+    arrow(f'M560 1166 V726 H{cx+58}', dash='7 6', w=2.2)
     chip(580, 1000, 'finalized receipt', anchor='end')
-    return page(600, 1224)
+    return page(600, 1290)
 
 
 def product():
