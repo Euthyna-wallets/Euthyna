@@ -32,7 +32,7 @@ a role, by vote, and every change waits out a veto window.
 
 ## Technical architecture
 
-![Technical architecture: off-chain agent, console, API and worker; NEAR contracts (DAO factory, Sputnik DAO, OmniRoles vault, condition engine, shares, registry, MPC); company wallet and target contracts on Base and Ethereum](./docs/diagrams/technical.png)
+![Technical architecture: the agent calls the OmniRoles vault directly (prepare, authorize); the owners vote rules and suppliers through the Sputnik DAO; NEAR MPC signs for the company wallet, the signed transaction is relayed unchanged to Ethereum, Base, Arbitrum (Solana and Bitcoin next), and NEAR MPC verifies the finalized receipt so the vault settles the budget. The Guard is optional advice.](./docs/diagrams/technical.png)
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
