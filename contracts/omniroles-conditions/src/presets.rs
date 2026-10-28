@@ -32,6 +32,9 @@ pub const UNISWAP_V3_EXACT_INPUT_SINGLE: [u8; 4] = [0x04, 0xe4, 0x5a, 0xaf];
 /// UniswapV2Router02 `swapExactTokensForTokens(uint256,uint256,address[],address,uint256)`
 pub const UNISWAP_V2_SWAP_EXACT_TOKENS_FOR_TOKENS: [u8; 4] = [0x38, 0xed, 0x17, 0x39];
 /// Aave V3 Pool `supply(address,uint256,address,uint16)`
+/// WETH9 `deposit()` and `withdraw(uint256)`.
+pub const WETH_DEPOSIT: [u8; 4] = [0xd0, 0xe3, 0x0d, 0xb0];
+pub const WETH_WITHDRAW: [u8; 4] = [0x2e, 0x1a, 0x7d, 0x4d];
 pub const AAVE_V3_SUPPLY: [u8; 4] = [0x61, 0x7b, 0xa0, 0x37];
 /// Aave V3 Pool `withdraw(address,uint256,address)`
 pub const AAVE_V3_WITHDRAW: [u8; 4] = [0x69, 0x32, 0x8d, 0xec];
@@ -314,5 +317,34 @@ pub fn aave_v3_withdraw(pool: Address, assets: &[Address]) -> PresetPermission {
         target: pool,
         selector: AAVE_V3_WITHDRAW,
         conditions,
+    }
+}
+
+/// `weth.deposit()` with the ETH sent charged to `allowance` (needs Send).
+pub fn weth_wrap(weth: Address, allowance: [u8; 32]) -> PresetPermission {
+    PresetPermission {
+        target: weth,
+        selector: WETH_DEPOSIT,
+        conditions: vec![
+            node(0, Encoding::AbiEncoded, Operator::Matches, Vec::new()),
+            node(
+                0,
+                Encoding::EtherValue,
+                Operator::WithinAllowance,
+                allowance.to_vec(),
+            ),
+        ],
+    }
+}
+
+/// `weth.withdraw(amount)`: WETH9 always pays the caller, so ETH stays in the wallet.
+pub fn weth_unwrap(weth: Address) -> PresetPermission {
+    PresetPermission {
+        target: weth,
+        selector: WETH_WITHDRAW,
+        conditions: vec![
+            node(0, Encoding::AbiEncoded, Operator::Matches, Vec::new()),
+            node(0, Encoding::Static, Operator::Pass, Vec::new()),
+        ],
     }
 }

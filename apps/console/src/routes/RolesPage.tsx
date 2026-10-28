@@ -160,7 +160,8 @@ type BlockDraft =
   | { kind: "payments"; token: string; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number }
   | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string }
   | { kind: "share-revenue"; sharesAccountId: string; amount: string; periodDays: number }
-  | { kind: "lending"; protocol: LendingId; token: string; amount: string; periodDays: number; maxApproval: string };
+  | { kind: "lending"; protocol: LendingId; token: string; amount: string; periodDays: number; maxApproval: string }
+  | { kind: "wrap"; amount: string; periodDays: number };
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
@@ -206,6 +207,11 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     setPreview(null);
     setCatalogOpen(false);
   };
+  const addWrap = () => {
+    setBlocks((current) => [...current, { kind: "wrap", amount: "0.01", periodDays: 1 }]);
+    setPreview(null);
+    setCatalogOpen(false);
+  };
   const addShareRevenue = () => {
     if (!sharesAccountId) return;
     setBlocks((current) => [...current, { kind: "share-revenue", sharesAccountId, amount: "0.01", periodDays: 7 }]);
@@ -238,6 +244,8 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
       ? { kind: "payments", token: block.token as `0x${string}`, recipients: block.recipients.map((item) => ({ address: item.address as `0x${string}`, label: item.label })), budget: { amount: block.amount, periodDays: block.periodDays } }
       : block.kind === "share-revenue"
         ? { kind: "share-revenue", sharesAccountId: block.sharesAccountId, budget: { amount: block.amount, periodDays: block.periodDays } }
+        : block.kind === "wrap"
+          ? { kind: "wrap", budget: { amount: block.amount, periodDays: block.periodDays } }
         : block.kind === "lending"
           ? { kind: "lending", protocol: block.protocol, token: block.token as `0x${string}`, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }
           : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
@@ -282,7 +290,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
   const ready = validRoleName(name) && blocks.length > 0 && blocks.every((block) =>
     Number(block.amount) > 0 && (block.kind === "payments"
       ? suppliersOnly || block.recipients.length > 0
-      : block.kind === "share-revenue" || (block.kind === "lending" ? Number(block.maxApproval) > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
+      : block.kind === "share-revenue" || block.kind === "wrap" || (block.kind === "lending" ? Number(block.maxApproval) > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
   // Say what is missing instead of a silently disabled button.
   const missing = !validRoleName(name)
     ? "Give the role a name."
@@ -311,10 +319,20 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         {blocks.map((block, index) => (
           <div className="block" key={index}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
+              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
               <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
             </div>
-            {block.kind === "lending" ? (
+            {block.kind === "wrap" ? (
+              <>
+                <div className="row wrap">
+                  <label>Budget (ETH)<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
+                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                </div>
+                <span className="small muted">
+                  ETH sent to WETH counts against the budget. Unwrapping is free: WETH always pays back the company wallet.
+                </span>
+              </>
+            ) : block.kind === "lending" ? (
               <>
                 <div className="row wrap">
                   <label>Asset
@@ -452,7 +470,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
           Then: submit to the members' vote → members approve in Decisions → the role applies after the veto window and shows up below.
         </p>
 
-        {catalogOpen ? <DefiCatalog onPick={addSwap} onPickLending={addLending} onClose={() => setCatalogOpen(false)} /> : null}
+        {catalogOpen ? <DefiCatalog onPick={addSwap} onPickLending={addLending} onPickWrap={addWrap} onClose={() => setCatalogOpen(false)} /> : null}
 
         {preview ? (
           <div className="decision">
@@ -485,13 +503,14 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
  * Protocols a role can allow. Each one has a rule template checked by the vault
  * (contracts/omniroles-conditions presets); the others are listed as coming.
  */
-const DEFI_CATALOG: Array<{ id: string; name: string; action: string; protocol?: ProtocolId; lending?: LendingId; note: string }> = [
+const DEFI_CATALOG: Array<{ id: string; name: string; action: string; protocol?: ProtocolId; lending?: LendingId; wrap?: true; note: string }> = [
+  { id: "weth", name: "WETH", action: "Wrap & unwrap", wrap: true, note: "Turn ETH into WETH within a budget, so it can be swapped or deposited; unwrapping returns ETH to the wallet." },
   { id: "uniswap-v3", name: "Uniswap V3", action: "Swap", protocol: "uniswap-v3", note: "Swap within a budget; bought tokens always return to the company wallet." },
   { id: "uniswap-v2", name: "Uniswap V2", action: "Swap", protocol: "uniswap-v2", note: "Same rules, on the V2 router." },
   { id: "aave-v3", name: "Aave V3", action: "Deposit & withdraw", lending: "aave-v3", note: "Deposits within a budget earn yield for the company wallet only; withdrawals return to it." },
 ];
 
-function DefiCatalog({ onPick, onPickLending, onClose }: { onPick: (protocol: ProtocolId) => void; onPickLending: (protocol: LendingId) => void; onClose: () => void }) {
+function DefiCatalog({ onPick, onPickLending, onPickWrap, onClose }: { onPick: (protocol: ProtocolId) => void; onPickLending: (protocol: LendingId) => void; onPickWrap: () => void; onClose: () => void }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -512,12 +531,12 @@ function DefiCatalog({ onPick, onPickLending, onClose }: { onPick: (protocol: Pr
             <button
               key={item.id}
               className="catalog-item"
-              disabled={!item.protocol && !(item.lending && PROFILE.lending?.[item.lending])}
-              onClick={() => (item.protocol ? onPick(item.protocol) : item.lending ? onPickLending(item.lending) : undefined)}
+              disabled={!item.wrap && !item.protocol && !(item.lending && PROFILE.lending?.[item.lending])}
+              onClick={() => (item.wrap ? onPickWrap() : item.protocol ? onPick(item.protocol) : item.lending ? onPickLending(item.lending) : undefined)}
             >
               <span className="catalog-name">{item.name}<span className="catalog-action">{item.action}</span></span>
               <span className="small muted">{item.note}</span>
-              {!item.protocol && !(item.lending && PROFILE.lending?.[item.lending]) ? <span className="catalog-soon">Soon</span> : null}
+              {!item.wrap && !item.protocol && !(item.lending && PROFILE.lending?.[item.lending]) ? <span className="catalog-soon">Soon</span> : null}
             </button>
           ))}
         </div>

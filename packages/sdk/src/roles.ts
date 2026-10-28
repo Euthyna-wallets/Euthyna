@@ -94,6 +94,8 @@ export type ChainProfile = {
   lending?: Partial<Record<LendingId, { name: string; pool: Hex; assets: Hex[] }>>;
   /** NEAR Omni Bridge on this chain: sends ETH to a NEAR account. */
   omniBridge?: Hex;
+  /** Wrapped ETH (WETH9) on this chain. */
+  weth?: Hex;
 };
 
 /** ETH itself, for budgets on the value a call sends. */
@@ -126,6 +128,8 @@ export const BASE_SEPOLIA: ChainProfile = {
   },
   // github.com/Near-One/omni-bridge README, testnet deployment on Base Sepolia.
   omniBridge: "0xa56b860017152cD296ad723E8409Abd6e5D86d4d",
+  // OP Stack predeploy.
+  weth: "0x4200000000000000000000000000000000000006",
 };
 
 export const SELECTORS = {
@@ -137,6 +141,9 @@ export const SELECTORS = {
   aaveSupply: "0x617ba037",
   /** Aave V3 Pool withdraw(address,uint256,address) */
   aaveWithdraw: "0x69328dec",
+  /** WETH9 deposit() (wrap, sends ETH) and withdraw(uint256) (unwrap). */
+  wethDeposit: "0xd0e30db0",
+  wethWithdraw: "0x2e1a7d4d",
   /** initTransfer(address,uint128,uint128,uint128,string,string) on the Omni Bridge. */
   initTransfer: "0xdeb915b8",
 } as const;
@@ -159,6 +166,8 @@ const FUNCTIONS: Record<string, { name: string; params: string[]; tuple?: { inde
   },
   [SELECTORS.aaveSupply]: { name: "deposit (supply)", params: ["asset", "amount", "credited to", "referral code"] },
   [SELECTORS.aaveWithdraw]: { name: "withdraw", params: ["asset", "amount", "recipient"] },
+  [SELECTORS.wethDeposit]: { name: "wrap ETH (deposit)", params: [] },
+  [SELECTORS.wethWithdraw]: { name: "unwrap to ETH (withdraw)", params: ["amount"] },
   [SELECTORS.initTransfer]: {
     name: "bridge to NEAR (initTransfer)",
     params: ["token", "amount", "fee in token", "bridge fee", "NEAR recipient", "message", "ETH sent"],
@@ -280,6 +289,24 @@ export function aaveSupplySheet(pool: Hex, assets: Hex[], key: number[]): Sheet 
 }
 
 /** Withdrawals only return the company's deposit to the company wallet: no budget. */
+/** weth.deposit(): the ETH sent is charged to the budget. */
+export function wethWrapSheet(weth: Hex, key: number[]): Sheet {
+  return {
+    target: weth,
+    selector: SELECTORS.wethDeposit,
+    conditions: [node(0, Encoding.AbiEncoded, Operator.Matches), node(0, Encoding.EtherValue, Operator.WithinAllowance, hexOf(key))],
+  };
+}
+
+/** weth.withdraw(amount): WETH9 pays the caller, so the ETH stays in the wallet. */
+export function wethUnwrapSheet(weth: Hex): Sheet {
+  return {
+    target: weth,
+    selector: SELECTORS.wethWithdraw,
+    conditions: [node(0, Encoding.AbiEncoded, Operator.Matches), node(0, Encoding.Static, Operator.Pass)],
+  };
+}
+
 export function aaveWithdrawSheet(pool: Hex, assets: Hex[]): Sheet {
   requireNonEmpty(assets, "asset");
   const { field, alternatives } = oneOf(0, assets);
@@ -400,7 +427,9 @@ export type RoleBlock =
       maxApproval: string;
     }
   /** Deposit `token` into a lending pool (budget) and withdraw it back to the wallet. */
-  | { kind: "lending"; protocol: LendingId; token: Hex; budget: Budget; maxApproval: string };
+  | { kind: "lending"; protocol: LendingId; token: Hex; budget: Budget; maxApproval: string }
+  /** Wrap ETH into WETH (budget in ETH) and unwrap it back, both in the wallet. */
+  | { kind: "wrap"; budget: Budget };
 
 export type RoleMember = { accountId: string; kind: MembershipKind; maxUses?: number | null; endsAt?: Date | null };
 
@@ -455,7 +484,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
-    const token = block.kind === "share-revenue" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
+    const token = block.kind === "share-revenue" || block.kind === "wrap" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
@@ -485,6 +514,10 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       permissions.push(toPermission(erc20ApproveSheet(token.address, [lending.pool], parseUnits(block.maxApproval, token.decimals))));
       permissions.push(toPermission(aaveSupplySheet(lending.pool, [token.address], key)));
       permissions.push(toPermission(aaveWithdrawSheet(lending.pool, [token.address])));
+    } else if (block.kind === "wrap") {
+      if (!profile.weth) throw new Error(`no WETH known on ${profile.name}`);
+      permissions.push({ ...toPermission(wethWrapSheet(profile.weth, key)), allow_value: true });
+      permissions.push(toPermission(wethUnwrapSheet(profile.weth)));
     } else if (block.kind === "share-revenue") {
       if (!profile.omniBridge) throw new Error(`no Omni Bridge known on ${profile.name}`);
       if (!/^[a-z0-9._-]{2,64}$/.test(block.sharesAccountId)) throw new Error("shares account is not a NEAR account id");
@@ -1157,6 +1190,9 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         } else if (selector === SELECTORS.initTransfer) {
           token = NATIVE_ETH;
           kind = "revenue";
+        } else if (selector === SELECTORS.wethDeposit) {
+          token = NATIVE_ETH;
+          kind = "wraps";
         } else if (selector === SELECTORS.aaveSupply) {
           const asset = permission.conditions[1];
           if (asset?.operator === Operator.EqualTo) token = findToken(wordToAddress(asset.compValue));

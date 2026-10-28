@@ -4,6 +4,8 @@ import { getAddress, toFunctionSelector, type Hex } from "viem";
 import fixture from "./fixtures/presets.json" with { type: "json" };
 import {
   BASE_SEPOLIA,
+  Encoding,
+  Operator,
   budgetsOf,
   compileRole,
   councilPolicy,
@@ -400,5 +402,27 @@ describe("Aave V3 lending role", () => {
       blocks: [{ kind: "lending", protocol: "aave-v3", token: usdc, budget: { amount: "1", periodDays: 30 }, maxApproval: "1" }],
       members: [],
     }, BASE_SEPOLIA)).toThrow(/cannot be deposited on Aave V3/);
+  });
+});
+
+describe("Wrap ETH role", () => {
+  const changes = () => compileRole({ name: "treasury", blocks: [{ kind: "wrap", budget: { amount: "0.001", periodDays: 1 } }], members: [] }, BASE_SEPOLIA);
+
+  it("uses the WETH9 selectors", () => {
+    expect(SELECTORS.wethDeposit).toBe(toFunctionSelector("deposit()"));
+    expect(SELECTORS.wethWithdraw).toBe(toFunctionSelector("withdraw(uint256)"));
+  });
+
+  it("lets only the wrap send ETH, charged to an ETH budget", () => {
+    const role = changes().find((change) => "SetRole" in change) as Extract<RuleChange, { SetRole: unknown }>;
+    const [wrap, unwrap] = role.SetRole.config.permissions;
+    expect(hexOf(wrap!.selector!)).toBe(SELECTORS.wethDeposit);
+    expect(wrap!.allow_value).toBe(true);
+    expect(wrap!.conditions[1]).toMatchObject({ paramType: Encoding.EtherValue, operator: Operator.WithinAllowance });
+    expect(hexOf(unwrap!.selector!)).toBe(SELECTORS.wethWithdraw);
+    expect(unwrap!.allow_value).toBe(false);
+    const budget = changes().find((change) => "SetAllowance" in change) as Extract<RuleChange, { SetAllowance: unknown }>;
+    expect(budget.SetAllowance.balance).toBe((10n ** 15n).toString());
+    expect(Object.values(budgetsOf(changes(), BASE_SEPOLIA))[0]).toMatchObject({ token: { symbol: "ETH" }, label: "treasury wraps" });
   });
 });
