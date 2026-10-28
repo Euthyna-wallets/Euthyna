@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Card } from "../components/ui.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 import { DirectoryCard } from "./DirectoryCard.js";
+import { VersionCard } from "./VersionCard.js";
 
 export function SettingsPage() {
   return (
@@ -23,6 +24,7 @@ export function SettingsPage() {
           <p className="muted">Registry changes use four-eyes approval.</p>
           <Link className="text-action" to="/suppliers">Manage suppliers →</Link>
         </Card>
+        <VersionCard />
         <DirectoryCard />
       </div>
       {demoWalletsEnabled() ? (

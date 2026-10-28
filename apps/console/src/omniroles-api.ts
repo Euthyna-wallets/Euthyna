@@ -198,6 +198,8 @@ export const omni = {
   plan: (daoName: string) => api<OmniPlan>("/v1/console/omniroles/plan", { method: "POST", body: JSON.stringify({ daoName }) }),
   create: (daoName: string) => api<{ daoTransaction: string; vaultTransaction: string }>("/v1/console/omniroles/create", { method: "POST", body: JSON.stringify({ daoName }) }),
   walletProposal: (chainId?: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify(chainId ? { chainId } : {}) }),
+  versions: () => api<VaultVersions>("/v1/console/omniroles/versions"),
+  upgradeProposal: (codeHash: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/upgrade", { method: "POST", body: JSON.stringify({ codeHash }) }),
   solanaWalletProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify({ solana: true }) }),
   transactionProposal: (input: { title?: string; transactions: Array<{ chainId: number; to: string; value?: string; data?: string; gas?: string }> }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/transaction", { method: "POST", body: JSON.stringify(input) }),
@@ -235,3 +237,12 @@ export function approvalsNeeded(threshold: unknown, members: number): number {
   const value = Number(threshold);
   return Number.isFinite(value) && value > 0 ? value : Math.floor(members / 2) + 1;
 }
+
+export type VaultVersions = {
+  vaultAccountId: string;
+  nomosId: string;
+  current: string;
+  latest: string | null;
+  upgradable: boolean;
+  versions: Array<{ index: number; codeHash: string; size: number; notes: string; publishedAt: string; current: boolean }>;
+};

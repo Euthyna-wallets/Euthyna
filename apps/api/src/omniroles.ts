@@ -850,6 +850,62 @@ export class OmniRolesService {
   // Proposals (signed by members in their wallet)
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Vault versions (published on Nomos) and DAO-voted upgrades
+  // -------------------------------------------------------------------------
+
+  /** The vault's code against the versions published on Nomos. */
+  async versions(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    this.forget(treasury.vaultAccountId);
+    const [account, source, published] = await Promise.all([
+      this.near.getAccount(treasury.vaultAccountId),
+      this.near.viewFunction<string>(treasury.vaultAccountId, "code_source").catch(() => null),
+      this.near.viewFunction<Array<{ code_hash: string; size: number; notes: string; published_at_ns: string }>>(this.config.nomosId, "versions"),
+    ]);
+    const current = account.code_hash;
+    const latest = published.at(-1)?.code_hash ?? null;
+    return {
+      vaultAccountId: treasury.vaultAccountId,
+      nomosId: this.config.nomosId,
+      current,
+      latest,
+      // Vaults made before Nomos cannot fetch code: they have no upgrade path.
+      upgradable: source === this.config.nomosId,
+      versions: published.map((version, index) => ({
+        index: index + 1,
+        codeHash: version.code_hash,
+        size: version.size,
+        notes: version.notes,
+        publishedAt: new Date(Number(BigInt(version.published_at_ns) / 1_000_000n)).toISOString(),
+        current: version.code_hash === current,
+      })).reverse(),
+    };
+  }
+
+  /**
+   * A vote to move the vault to a published version. The relayer first tops the
+   * vault up when the new code needs more storage than it holds.
+   */
+  async upgradeProposal(organizationId: string, codeHash: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const info = await this.versions(organizationId);
+    if (!info.upgradable) throw new OmniRolesError(409, "not_upgradable", "this vault was created before Nomos and cannot be upgraded");
+    const target = info.versions.find((version) => version.codeHash === codeHash);
+    if (!target) throw new OmniRolesError(404, "unknown_version", `${codeHash} is not published on ${this.config.nomosId}`);
+    if (target.current) throw new OmniRolesError(409, "already_current", "the vault already runs this version");
+    const account = await this.near.getAccount(treasury.vaultAccountId);
+    const currentSize = info.versions.find((version) => version.current)?.size ?? 0;
+    const grow = BigInt(Math.max(0, target.size - currentSize)) * STORAGE_PRICE_PER_BYTE;
+    const free = BigInt(account.amount) - BigInt(account.storage_usage ?? 0) * STORAGE_PRICE_PER_BYTE;
+    const needed = grow + STORAGE_LOW_YOCTO;
+    if (free < needed) {
+      await this.near.executeActions(treasury.vaultAccountId, [{ type: "Transfer", depositYocto: (needed - free + STORAGE_TOP_UP_YOCTO).toString() }]);
+    }
+    const label = `version ${target.index}${target.notes ? ` (${target.notes})` : ""}`;
+    return this.proposal(treasury, `Upgrade the vault to ${label}`, [{ method: "queue_rule_change", change: { Upgrade: { code_hash: codeHash } } }]);
+  }
+
   async walletProposal(organizationId: string, chainId?: number, solana = false) {
     const treasury = await this.requireTreasury(organizationId);
     if (solana) return this.proposal(treasury, "Create the company wallet on Solana", [{ method: "request_solana_wallet" }]);
@@ -1218,7 +1274,9 @@ export class OmniRolesService {
       .reverse();
     const hashes: string[] = [];
     for (const rule of ready) {
-      hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, "100000000000000", "0"));
+      // An upgrade fetches and deploys ~800 KB of code: give it the full 300 Tgas.
+      const gas = rule.change && typeof rule.change === "object" && "Upgrade" in rule.change ? "300000000000000" : "100000000000000";
+      hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
     }
     hashes.push(...await this.startDaoTransactions(organizationId, treasury));
     if (hashes.length) this.forget(treasury.vaultAccountId);
