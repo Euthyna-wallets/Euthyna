@@ -37,6 +37,9 @@ const MPC_SIGN_DEPOSIT: NearToken = NearToken::from_yoctonear(1);
 /// Role name of the transactions voted by the DAO; no role can be created with it.
 pub const DAO_ROLE: &str = "__dao__";
 const MAX_DAO_TRANSACTIONS_PER_PROPOSAL: usize = 10;
+const CODE_FETCH_GAS: Gas = Gas::from_tgas(30);
+const UPGRADE_CALLBACK_GAS: Gas = Gas::from_tgas(80);
+const MIGRATE_GAS: Gas = Gas::from_tgas(30);
 
 #[allow(dead_code)]
 #[ext_contract(ext_mpc)]
@@ -55,11 +58,18 @@ trait ExtMpc {
 }
 
 #[allow(dead_code)]
+#[ext_contract(ext_code_source)]
+trait ExtCodeSource {
+    fn code_of(&self, code_hash: near_sdk::json_types::Base58CryptoHash);
+}
+
+#[allow(dead_code)]
 #[ext_contract(ext_self)]
 trait ExtSelf {
     fn on_mpc_signature(&mut self, op_id: OperationId);
     fn on_cancel_signature(&mut self, op_id: OperationId, tx_digest: [u8; 32]);
     fn on_wallet_public_key(&mut self, chain_id: u64);
+    fn on_upgrade_code(&mut self, code_hash: near_sdk::json_types::Base58CryptoHash);
     fn on_settle_verified(
         &mut self,
         op_id: OperationId,
@@ -106,6 +116,9 @@ pub struct Vault {
     dao_sequence: u64,
     /// Operation id of every DAO transaction, by sequence number (1-based).
     dao_transactions: LookupMap<u64, OperationId>,
+    /// Account that deployed this vault (the Nomos factory): where published
+    /// versions are fetched from on an upgrade. Untrusted: code is checked by hash.
+    code_source: AccountId,
 }
 
 #[near]
@@ -173,6 +186,7 @@ impl Vault {
             dao_queue: Vec::new(),
             dao_sequence: 0,
             dao_transactions: LookupMap::new(b"d".to_vec()),
+            code_source: env::predecessor_account_id(),
         }
     }
 
@@ -439,7 +453,7 @@ impl Vault {
         entry
     }
 
-    pub fn execute_rule_change(&mut self, queue_id: QueueId) {
+    pub fn execute_rule_change(&mut self, queue_id: QueueId) -> PromiseOrValue<()> {
         let mut entry = self
             .rule_changes
             .get(&queue_id)
@@ -452,6 +466,10 @@ impl Vault {
         let now = env::block_timestamp();
         require!(now >= entry.execute_after_ns.0, "ERR_RULE_DELAY");
         require!(now <= entry.expires_at_ns.0, "ERR_RULE_EXPIRED");
+        let upgrade = match &entry.change {
+            RuleChange::Upgrade { code_hash } => Some(*code_hash),
+            _ => None,
+        };
         self.apply_rule_change(entry.change.clone(), now);
         entry.state = RuleChangeState::Executed;
         self.rule_changes.insert(queue_id, entry);
@@ -459,6 +477,56 @@ impl Vault {
             "OMNIROLES_RULE_EXECUTED:{}",
             hex::encode(queue_id)
         ));
+        match upgrade {
+            Some(code_hash) => PromiseOrValue::Promise(
+                ext_code_source::ext(self.code_source.clone())
+                    .with_static_gas(CODE_FETCH_GAS)
+                    .code_of(code_hash)
+                    .then(
+                        ext_self::ext(env::current_account_id())
+                            .with_static_gas(UPGRADE_CALLBACK_GAS)
+                            .on_upgrade_code(code_hash),
+                    ),
+            ),
+            None => PromiseOrValue::Value(()),
+        }
+    }
+
+    pub fn code_source(&self) -> AccountId {
+        self.code_source.clone()
+    }
+
+    /// Deploys the fetched code only if it has the hash the DAO voted for.
+    #[private]
+    pub fn on_upgrade_code(
+        &mut self,
+        code_hash: near_sdk::json_types::Base58CryptoHash,
+    ) -> Promise {
+        let code = match env::promise_result_checked(0, 4 * 1024 * 1024) {
+            Ok(code) => code,
+            Err(_) => env::panic_str("ERR_UPGRADE_CODE_UNAVAILABLE"),
+        };
+        let expected: [u8; 32] = code_hash.into();
+        require!(
+            env::sha256_array(&code) == expected,
+            "ERR_UPGRADE_CODE_HASH"
+        );
+        env::log_str(&format!("OMNIROLES_UPGRADED:{}", String::from(&code_hash)));
+        Promise::new(env::current_account_id())
+            .deploy_contract(code)
+            .function_call(
+                "migrate".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                MIGRATE_GAS,
+            )
+    }
+
+    /// Runs on the new code right after an upgrade. Same state layout: read as is.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        env::state_read().unwrap_or_else(|| env::panic_str("ERR_NO_STATE"))
     }
 
     pub fn veto_rule_change(&mut self, queue_id: QueueId) {
@@ -1664,6 +1732,8 @@ impl Vault {
                 Self::validate_settlement_config(&config);
                 self.settlement_config = config;
             }
+            // Deployed by `execute_rule_change` once the code is fetched.
+            RuleChange::Upgrade { .. } => {}
 
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
@@ -1803,6 +1873,7 @@ impl Vault {
             }
             RuleChange::RemoveListAddress { list, .. } => Self::validate_list_name(list),
             RuleChange::SetSettlementConfig { config } => Self::validate_settlement_config(config),
+            RuleChange::Upgrade { .. } => {}
 
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");

@@ -64,7 +64,9 @@ export type RuleChange =
   | { SetCouncil: { members: string[] } }
   | { SetVisaPublicKey: { visa_public_key: number[] } }
   | { SetStatusPublicKey: { status_public_key: number[] } }
-  | { SetVersions: { policy_version: number; registry_version: number } };
+  | { SetVersions: { policy_version: number; registry_version: number } }
+  /** Move the vault to a version published on Nomos (base58 sha256 of the WASM). */
+  | { Upgrade: { code_hash: string } };
 
 // Encodings and operators of the OmniRoles condition format.
 export const Encoding = { None: 0, Static: 1, Dynamic: 2, Tuple: 3, Array: 4, AbiEncoded: 5, EtherValue: 6 } as const;
@@ -1304,6 +1306,7 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
   if ("SetCouncil" in change) return { title: "Replace the security council", details: [change.SetCouncil.members.join(", ")] };
   if ("SetVisaPublicKey" in change) return { title: "Rotate the Guard visa key", details: [] };
   if ("SetStatusPublicKey" in change) return { title: "Rotate the Guard status key", details: [] };
+  if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
   return { title: `Set policy version ${change.SetVersions.policy_version}, registry version ${change.SetVersions.registry_version}`, details: [] };
 }
 

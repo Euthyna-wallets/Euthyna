@@ -371,6 +371,11 @@ pub enum RuleChange {
         list: String,
         entries: Vec<ListAddress>,
     },
+    /// Move the vault to another version published by the account that
+    /// created it. The vault checks the code against this hash itself.
+    Upgrade {
+        code_hash: near_sdk::json_types::Base58CryptoHash,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
