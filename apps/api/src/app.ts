@@ -718,6 +718,10 @@ export function createApp({
             maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
           }),
           z.object({
+            kind: z.literal("wrap"),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+          }),
+          z.object({
             kind: z.literal("share-revenue"),
             sharesAccountId: z.string().regex(/^[a-z0-9._-]{2,64}$/),
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
