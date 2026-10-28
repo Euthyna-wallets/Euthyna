@@ -22,8 +22,11 @@ const schema = z.object({
   UAT_DEMO_WALLETS_ENABLED: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   NEAR_AGENT_GAS_RESERVE_YOCTO: z.string().regex(/^\d+$/).default("300000000000000000000000"),
   NEAR_AGENT_GAS_LOW_YOCTO: z.string().regex(/^\d+$/).default("50000000000000000000000"),
-  DAO_FACTORY_ID: z.string().min(1).default("factory-v2.mandateos.testnet"),
-  DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("250000000000000000000000"),
+  /** Sputnik DAO factory (official): sputnikv2.testnet on testnet. */
+  DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
+  /** Nomos factory: creates company vaults from published versions. */
+  NOMOS_ID: z.string().min(1).default("nomos.euthyna.testnet"),
+  DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("6000000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
@@ -40,7 +43,6 @@ const schema = z.object({
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
   ETHEREUM_SEPOLIA_RPC_URL: z.string().url().default("https://ethereum-sepolia-rpc.publicnode.com"),
   OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
-  OMNIROLES_VAULT_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("8000000000000000000000000"),
   OMNIROLES_SHARES_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2900000000000000000000000"),
   /** Revenue epoch of new shares contracts. Default: 1 hour on testnet, 7 days elsewhere. */
   OMNIROLES_SHARES_EPOCH_SECONDS: z.coerce.number().int().positive().optional(),

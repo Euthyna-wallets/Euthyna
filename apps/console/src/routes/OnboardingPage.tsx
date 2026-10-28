@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
@@ -55,6 +55,9 @@ export function OnboardingPage() {
   const [membersConfirmed, setMembersConfirmed] = useState(false);
   const [sharesSkipped, setSharesSkipped] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  // "+ New company" in the sidebar: one user can found several companies, each with its own DAO.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const creating = searchParams.has("new");
 
   useEffect(() => {
     if (!active) return;
@@ -78,7 +81,7 @@ export function OnboardingPage() {
   const treasury = status.data?.treasury ?? null;
   const memberCount = members.data?.members.filter((member) => member.nearAccountId).length ?? 0;
   const activeAgents = (agents.data?.agents ?? []).filter((agent) => agent.active);
-  const stage: Stage = !active
+  const stage: Stage = !active || creating
     ? "company"
     : !treasury
       ? (memberCount < 3 || !membersConfirmed ? "members" : "treasury")
@@ -91,7 +94,7 @@ export function OnboardingPage() {
           : (roles.data?.roles.length ?? 0) === 0
             ? "role"
             : "done";
-  const loading = organizations.isLoading || (Boolean(active) && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
+  const loading = organizations.isLoading || (Boolean(active) && !creating && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
   const firstAgent = activeAgents[0];
   const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
 
@@ -130,6 +133,7 @@ export function OnboardingPage() {
               organizations={organizations.data ?? []}
               onCreated={async (organization) => {
                 setActiveId(organization.id);
+                setSearchParams({});
                 await organizations.refetch();
               }}
               onError={setError}

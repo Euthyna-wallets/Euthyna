@@ -56,11 +56,11 @@ const payments = new PaymentService(prisma, near, guard, registryService, gasEst
 const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   nearNetwork: env.NEAR_NETWORK_ID,
   daoFactoryId: env.DAO_FACTORY_ID,
+  nomosId: env.NOMOS_ID,
   mpcContractId: env.MPC_CONTRACT_ID,
   artifactsDir: env.CONTRACT_ARTIFACTS_DIR,
   accountParent: env.NEAR_ACCOUNT_PARENT,
   daoCreateDepositYocto: env.DAO_CREATE_DEPOSIT_YOCTO,
-  vaultDepositYocto: env.OMNIROLES_VAULT_DEPOSIT_YOCTO,
   sharesDepositYocto: env.OMNIROLES_SHARES_DEPOSIT_YOCTO,
   sharesEpochSeconds: env.OMNIROLES_SHARES_EPOCH_SECONDS ?? (env.NEAR_NETWORK_ID === "testnet" ? 3600 : 7 * 24 * 3600),
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,

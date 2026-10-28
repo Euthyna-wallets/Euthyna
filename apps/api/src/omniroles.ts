@@ -74,11 +74,12 @@ export class OmniRolesError extends Error {
 export interface OmniRolesConfig {
   nearNetwork: string;
   daoFactoryId: string;
+  /** Nomos factory: creates the vault as <slug>.<nomosId> from a published version. */
+  nomosId: string;
   mpcContractId: string;
   artifactsDir: string;
   accountParent: string;
   daoCreateDepositYocto: string;
-  vaultDepositYocto: string;
   /** Funds the shares account: contract storage (~2.2 NEAR) and holder registrations. */
   sharesDepositYocto?: string;
   /** Revenue epoch of new shares contracts, in seconds. */
@@ -316,18 +317,18 @@ export class OmniRolesService {
     }
     const slug = slugify(daoName);
     const daoAccountId = `${slug}.${this.config.daoFactoryId}`;
-    const vaultAccountId = `${slug.slice(0, 20).replace(/-+$/, "")}-vault.${this.config.accountParent}`;
+    const vaultAccountId = `${slug}.${this.config.nomosId}`;
     for (const accountId of [daoAccountId, vaultAccountId]) {
       if (accountId.length > 64) throw new OmniRolesError(400, "account_id_too_long", `${accountId} is longer than 64 characters`);
     }
-    const artifact = await this.artifact();
+    const version = await this.latestVaultVersion();
     return {
       daoAccountId,
       vaultAccountId,
       council,
       threshold: Math.ceil((2 * council.length) / 3),
       ruleDelaySeconds: this.config.ruleDelayNs / 1e9,
-      vaultWasmSha256: artifact.sha256,
+      vaultWasmSha256: version.sha256,
     };
   }
 
@@ -413,7 +414,7 @@ export class OmniRolesService {
       "150000000000000",
       this.config.daoCreateDepositYocto,
     );
-    const artifact = await this.artifact();
+    const version = await this.latestVaultVersion();
     const initArgs = {
       client_id: plan.daoAccountId.split(".")[0],
       owner_id: plan.daoAccountId,
@@ -427,13 +428,23 @@ export class OmniRolesService {
       rule_expiration_ns: this.config.ruleExpirationNs,
       council: plan.council.map((member) => member.nearAccountId),
     };
-    // No AddKey action: the vault account never has an access key.
-    const vaultTransaction = await this.near.executeActions(plan.vaultAccountId, [
-      { type: "CreateAccount" },
-      { type: "Transfer", depositYocto: this.config.vaultDepositYocto },
-      { type: "DeployContract", codeBase64: artifact.base64 },
-      { type: "FunctionCall", methodName: "new", args: initArgs, gasTgas: 100 },
-    ]);
+    // Nomos creates the vault with no access key, owned by the DAO, from the
+    // version pinned here; only the DAO can later move it to another version.
+    const deposit = await this.near.viewFunction<string>(this.config.nomosId, "vault_deposit", { code_hash: version.codeHash });
+    const vaultTransaction = await this.near.callFunction(
+      this.config.nomosId,
+      "create_vault",
+      {
+        name: plan.vaultAccountId.split(".")[0],
+        args: Buffer.from(JSON.stringify({ ...initArgs, settlement_config: null })).toString("base64"),
+        code_hash: version.codeHash,
+      },
+      "300000000000000",
+      deposit,
+    );
+    if (!(await this.accountExists(plan.vaultAccountId))) {
+      throw new OmniRolesError(500, "vault_not_created", `Nomos did not create ${plan.vaultAccountId}`);
+    }
     await this.prisma.treasury.create({
       data: {
         organizationId,
@@ -442,7 +453,7 @@ export class OmniRolesService {
         baseChainId: PROFILE.chainId,
         daoAccountId: plan.daoAccountId,
         vaultAccountId: plan.vaultAccountId,
-        vaultWasmSha256: artifact.sha256,
+        vaultWasmSha256: version.sha256,
         status: "wallet_pending",
       },
     });
@@ -461,8 +472,10 @@ export class OmniRolesService {
   // -------------------------------------------------------------------------
 
   /** One shares contract per company, next to its vault. */
-  private sharesAccountOf(treasury: { vaultAccountId: string }): string {
-    return treasury.vaultAccountId.replace(/-vault\./, "-shares.");
+  private sharesAccountOf(treasury: { vaultAccountId: string; daoAccountId: string }): string {
+    // Vaults made before Nomos were <slug>-vault.<parent>; Nomos vaults are <slug>.<nomos>.
+    if (treasury.vaultAccountId.includes("-vault.")) return treasury.vaultAccountId.replace(/-vault\./, "-shares.");
+    return `${treasury.daoAccountId.split(".")[0]}-shares.${this.config.accountParent}`;
   }
 
   async shares(organizationId: string, viewer: string | null) {
@@ -730,7 +743,8 @@ export class OmniRolesService {
     if (daoMembers.length) await this.syncSeats(organizationId, daoMembers).catch(() => undefined);
     const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const expectedMembers = (plan?.council.map((member) => member.nearAccountId) ?? []).sort();
-    const expectedCodeHash = bs58.encode(Buffer.from(treasury.vaultWasmSha256, "hex"));
+    const published = (await this.vaultVersions().catch(() => [])).map((version) => version.codeHash);
+    const vaultCode = vaultAccount?.code_hash ?? "missing";
     const visaKey = Buffer.from(await this.visaSigner.publicKey()).toString("base64");
     const statusKey = Buffer.from(await this.statusSigner.publicKey()).toString("base64");
     const check = (label: string, expected: unknown, actual: unknown): Check => ({
@@ -742,7 +756,12 @@ export class OmniRolesService {
     const checks: Check[] = [
       check("DAO members are the company members", expectedMembers.join(", "), daoMembers.join(", ")),
       check("DAO has no access key (only votes change it)", 0, daoKeys?.keys.length ?? "unreadable"),
-      check("Vault code is the published MandateOS vault", expectedCodeHash, vaultAccount?.code_hash ?? "missing"),
+      {
+        label: `Vault code is a version published on ${this.config.nomosId}`,
+        expected: published.length ? published.join(" or ") : "a published version",
+        actual: vaultCode,
+        ok: published.includes(vaultCode),
+      },
       check("Vault has no access key (no one can replace its code)", 0, vaultKeys?.keys.length ?? "unreadable"),
       check("Vault is owned by the DAO", treasury.daoAccountId, owner ?? "unreadable"),
       check("Security council is the DAO members", expectedMembers.join(", "), [...(council ?? [])].sort().join(", ")),
@@ -1607,6 +1626,19 @@ export class OmniRolesService {
     } catch {
       return false;
     }
+  }
+
+  /** Versions published on Nomos, oldest first; code hashes are base58 sha256. */
+  private async vaultVersions(): Promise<Array<{ codeHash: string; sha256: string }>> {
+    const versions = await this.memo<Array<{ code_hash: string }>>(`nomos-versions:${this.config.nomosId}`, 60_000, () =>
+      this.near.viewFunction<Array<{ code_hash: string }>>(this.config.nomosId, "versions"));
+    return versions.map((version) => ({ codeHash: version.code_hash, sha256: Buffer.from(bs58.decode(version.code_hash)).toString("hex") }));
+  }
+
+  private async latestVaultVersion(): Promise<{ codeHash: string; sha256: string }> {
+    const latest = (await this.vaultVersions()).at(-1);
+    if (!latest) throw new OmniRolesError(503, "no_vault_version", `no vault version is published on ${this.config.nomosId}`);
+    return latest;
   }
 
   private artifactCache = new Map<string, { base64: string; sha256: string }>();
