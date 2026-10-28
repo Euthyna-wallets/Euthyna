@@ -768,6 +768,12 @@ export function createApp({
       });
       return context.json(result);
     });
+    app.get("/v1/console/omniroles/versions", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.versions(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/upgrade", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ codeHash: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/) }));
+      return context.json(await omniroles.upgradeProposal(orgOf(context), input.codeHash));
+    });
     app.post("/v1/console/omniroles/proposals/wallet", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ chainId: z.number().int().positive().optional(), solana: z.boolean().optional() }));
       return context.json(await omniroles.walletProposal(orgOf(context), input.chainId, input.solana ?? false));

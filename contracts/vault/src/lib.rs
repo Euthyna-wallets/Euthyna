@@ -41,6 +41,7 @@ const MAX_DAO_TRANSACTIONS_PER_PROPOSAL: usize = 10;
 const CODE_FETCH_GAS: Gas = Gas::from_tgas(30);
 const UPGRADE_CALLBACK_GAS: Gas = Gas::from_tgas(80);
 const MIGRATE_GAS: Gas = Gas::from_tgas(30);
+const UPGRADE_MIN_GAS: Gas = Gas::from_tgas(250);
 
 #[allow(dead_code)]
 #[ext_contract(ext_mpc)]
@@ -471,6 +472,14 @@ impl Vault {
             RuleChange::Upgrade { code_hash } => Some(*code_hash),
             _ => None,
         };
+        // Too little gas would mark the upgrade executed and then fail to
+        // deploy: refuse, so nobody can burn a voted upgrade.
+        if upgrade.is_some() {
+            require!(
+                env::prepaid_gas() >= UPGRADE_MIN_GAS,
+                "ERR_UPGRADE_NEEDS_MORE_GAS"
+            );
+        }
         self.apply_rule_change(entry.change.clone(), now);
         entry.state = RuleChangeState::Executed;
         self.rule_changes.insert(queue_id, entry);

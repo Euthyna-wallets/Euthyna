@@ -985,3 +985,22 @@ mod solana_flow {
         drop(v.request_solana_wallet());
     }
 }
+
+#[test]
+#[should_panic(expected = "ERR_UPGRADE_NEEDS_MORE_GAS")]
+fn an_upgrade_cannot_be_burned_with_little_gas() {
+    let (mut v, _) = fixture(false, false);
+    context("owner.testnet", 3);
+    let queued = v.queue_rule_change(RuleChange::Upgrade {
+        code_hash: [1; 32].into(),
+    });
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id("vault.testnet".parse().unwrap())
+            .predecessor_account_id("stranger.testnet".parse().unwrap())
+            .block_timestamp(50)
+            .prepaid_gas(Gas::from_tgas(100))
+            .build()
+    );
+    drop(v.execute_rule_change(queued.queue_id));
+}

@@ -123,3 +123,52 @@ describe("company creation through Sputnik and Nomos", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("vault upgrades", () => {
+  function upgradeSetup(freeYocto: bigint) {
+    const transfers: string[] = [];
+    const treasury = { id: "t1", organizationId: "org-1", daoAccountId: DAO, vaultAccountId: VAULT, baseChainId: 84532, status: "active" };
+    const prisma = { treasury: { findUnique: async () => treasury } } as unknown as PrismaClient;
+    const storage = 700_000;
+    const near = {
+      getAccount: vi.fn(async () => ({ code_hash: OLD_HASH, amount: (BigInt(storage) * 10n ** 19n + freeYocto).toString(), storage_usage: storage })),
+      viewFunction: vi.fn(async (accountId: string, method: string) => {
+        if (accountId === VAULT && method === "code_source") return NOMOS;
+        if (accountId === NOMOS && method === "versions") {
+          return [
+            { code_hash: OLD_HASH, size: 700_000, notes: "", published_at_ns: "1790000000000000000" },
+            { code_hash: CODE_HASH, size: 800_000, notes: "Solana", published_at_ns: "1793000000000000000" },
+          ];
+        }
+        throw new Error(`unexpected view ${accountId}.${method}`);
+      }),
+      executeActions: vi.fn(async (_accountId: string, actions: Array<{ depositYocto: string }>) => {
+        transfers.push(actions[0]!.depositYocto);
+        return "tx";
+      }),
+    } as unknown as NearClient;
+    const config = { nomosId: NOMOS, proposalBondYocto: "100000000000000000000000", proposalPeriodNs: "604800000000000" } as OmniRolesConfig;
+    return { service: new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, config), transfers };
+  }
+
+  it("lists the published versions, newest first, and marks the running one", async () => {
+    const versions = await upgradeSetup(10n ** 24n).service.versions("org-1");
+    expect(versions).toMatchObject({ current: OLD_HASH, latest: CODE_HASH, upgradable: true });
+    expect(versions.versions.map((version) => [version.index, version.current])).toEqual([[2, false], [1, true]]);
+  });
+
+  it("tops the vault up for the bigger code, then drafts the Upgrade vote", async () => {
+    const { service, transfers } = upgradeSetup(10n ** 23n); // 0.1 NEAR free, 1 NEAR more needed
+    const draft = await service.upgradeProposal("org-1", CODE_HASH);
+    expect(transfers).toHaveLength(1);
+    expect(BigInt(transfers[0]!)).toBeGreaterThan(10n ** 24n);
+    expect(draft.title).toBe("Upgrade the vault to version 2 (Solana)");
+    expect(atob(draft.args.proposal.kind.FunctionCall.actions[0]!.args)).toContain(CODE_HASH);
+  });
+
+  it("refuses the running version and unknown hashes", async () => {
+    const { service } = upgradeSetup(10n ** 25n);
+    await expect(service.upgradeProposal("org-1", OLD_HASH)).rejects.toMatchObject({ code: "already_current" });
+    await expect(service.upgradeProposal("org-1", bs58.encode(Buffer.alloc(32, 9)))).rejects.toMatchObject({ code: "unknown_version" });
+  });
+});
