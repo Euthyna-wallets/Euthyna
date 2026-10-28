@@ -2,13 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
-import { Avatar, BudgetGauge, Feed, Icon, Kpi, PanelLink, StateDot, agentState, ago, feedOf, until } from "../components/ops.js";
-import { Card, PageState, Status, short } from "../components/ui.js";
+import { Avatar, Icon, PanelLink, ago, until } from "../components/ops.js";
+import { PageState, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { formatAmount, omni } from "../omniroles-api.js";
-import { TreasuryChecks } from "./TreasurySetup.js";
+import { OUTCOME_LABEL, entriesOf, formatToken, formatUsd, roleName, tokenName } from "../lib/money.js";
+import { omni, type RoleView } from "../omniroles-api.js";
 
-/** The command center: who works, what happened, what waits for the owners. */
+/** Home: how much the company holds, what moved, what waits for you. */
 export function OverviewPage() {
   const wallets = useWallets();
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, refetchInterval: 15_000 });
@@ -17,46 +17,31 @@ export function OverviewPage() {
   const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, enabled: ready, refetchInterval: 15_000 });
   const activity = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, enabled: ready, refetchInterval: 15_000 });
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), enabled: ready, refetchInterval: 15_000 });
+  const holdings = useQuery({ queryKey: ["omni-holdings"], queryFn: omni.holdings, enabled: ready, refetchInterval: 30_000 });
+
   const me = wallets.nearAccountId;
-  const paused = status.data?.paused ?? false;
   const roleList = roles.data?.roles ?? [];
-  const feed = feedOf(activity.data);
+  const staff = (agents.data?.agents ?? []).filter((agent) => agent.active);
+  const nameOf = (actor: string) => staff.find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 14);
+  const entries = entriesOf(activity.data);
   const waiting = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress");
   const myVotes = waiting.filter((proposal) => !(me && me in proposal.votes)).length;
   const pendingRules = (governance.data?.rules ?? []).filter((rule) => rule.state === "Queued");
-  const refused = (activity.data?.requests ?? []).filter((item) => item.kind === "refusal").length;
-  const executed = (activity.data?.operations ?? []).filter((item) => item.evm?.status === "success" || (item.solana && item.vaultState === "Confirmed")).length;
-  const staff = (agents.data?.agents ?? []).filter((agent) => agent.active);
-  const states = staff.map((agent) => agentState(agent, roleList, feed, paused));
-  const working = states.filter((state) => state === "working").length;
-  const nameOf = (actor: string) => staff.find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 14);
-  const holdings = useQuery({ queryKey: ["omni-holdings"], queryFn: omni.holdings, enabled: ready, refetchInterval: 30_000 });
-  const assets = (holdings.data?.chains ?? []).flatMap((chain) => chain.assets);
-  const balance = !status.data?.wallet ? "no wallet"
-    : holdings.isLoading ? "…"
-    : assets.length === 0 ? "empty"
-    : <span className="kpi-list">{assets.slice(0, 3).map((asset) => <span key={`${asset.symbol}-${asset.where}`}>{formatAmount(asset.amount, asset.symbol)}</span>)}{assets.length > 3 ? <span className="small">+{assets.length - 3} more</span> : null}</span>;
-  const chainCount = (holdings.data?.chains ?? []).length;
+  const chains = holdings.data?.chains ?? [];
+  const rows = chains.flatMap((chain) => chain.assets.map((asset) => ({ ...asset, chain: chain.chain })))
+    .sort((a, b) => (b.usd ?? -1) - (a.usd ?? -1));
+  const unpriced = rows.some((row) => row.usd === null);
 
   const loading = ready && (roles.isLoading || governance.isLoading || activity.isLoading);
   const next = loading ? null
-    : !status.data?.treasury ? { title: "Finish the company setup", detail: "Members, treasury and wallet.", action: "Continue setup", to: "/onboarding" }
-    : !status.data.wallet ? { title: "Create the company wallet", detail: "Members vote on the DAO's first decision.", action: "Continue setup", to: "/onboarding" }
-    : roleList.length === 0 ? { title: "Write the first role", detail: "Say what agents may do, with which budget.", action: "New role", to: "/roles?new=1" }
-    : staff.length === 0 ? { title: "Hire the first AI employee", detail: "It gets a NEAR account that can only ask the vault.", action: "Hire an agent", to: "/agents" }
-    : myVotes > 0 ? { title: `${myVotes} decision${myVotes > 1 ? "s" : ""} waiting for your vote`, detail: "Read what changes, then approve or reject.", action: "Open decisions", to: "/governance" }
+    : !status.data?.treasury ? { title: "Finish the company setup", detail: "Members, vault and wallet.", action: "Continue setup", to: "/onboarding" }
+    : !status.data.wallet ? { title: "Create the company wallet", detail: "Members vote on it: it is the company's first decision.", action: "Continue setup", to: "/onboarding" }
+    : roleList.length === 0 ? { title: "Write the first rule", detail: "Say what an agent may do, and with which budget.", action: "New rule", to: "/roles?new=1" }
+    : staff.length === 0 ? { title: "Add your first AI agent", detail: "It can only ask the vault, within its rules.", action: "Add an agent", to: "/agents" }
     : null;
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <span className="eyebrow">Command center</span>
-          <h1>Overview</h1>
-          <p className="muted">Your AI employees, what they did, and what waits for the owners.</p>
-        </div>
-        {ready ? <Link className="button primary" to="/agents">Hire an agent</Link> : null}
-      </header>
+    <div className="page home">
       <PageState loading={status.isLoading} error={status.error}>
         {next ? (
           <div className="next-banner">
@@ -65,91 +50,146 @@ export function OverviewPage() {
             <Link className="button primary" to={next.to}>{next.action}</Link>
           </div>
         ) : null}
+
         {status.data?.treasury ? (
           <>
-            <div className="kpis">
-              <Kpi label="Treasury" value={<Link to="/wallet" className="kpi-link">{balance}</Link>} hint={status.data.wallet ? `${assets.length} asset${assets.length === 1 ? "" : "s"} on ${chainCount} chain${chainCount === 1 ? "" : "s"} · details in Wallet` : "create the wallet"} />
-              <Kpi label="AI employees" value={loading ? "…" : `${working} / ${staff.length}`} hint={paused ? "all paused" : "working in the last 24 h"} tone="cyan" />
-              <Kpi label="Executed on chain" value={loading ? "…" : executed} hint="signed by the vault, mined" />
-              <Kpi label="Refused" value={loading ? "…" : refused} hint="outside a role, or failed checks" tone={refused ? "red" : undefined} />
-              <Kpi label="Waiting for votes" value={loading ? "…" : waiting.length} hint={`${pendingRules.length} rule${pendingRules.length === 1 ? "" : "s"} in veto window`} tone={waiting.length ? "amber" : undefined} />
-            </div>
-
-            <div className="ops-grid">
-              <section className="panel">
-                <header className="panel-head"><h2>AI employees</h2><PanelLink to="/agents">Manage</PanelLink></header>
-                {agents.isLoading ? <div className="state">Loading…</div> : staff.length === 0 ? <div className="state">No AI employee yet.</div> : (
-                  <ul className="roster">
-                    {staff.map((agent, index) => {
-                      const held = roleList.filter((role) => role.members.some((member) => member.member === agent.nearAccountId));
-                      const last = feed.find((item) => item.actor === agent.nearAccountId || item.actor === agent.name);
-                      const budget = held.flatMap((role) => role.budgets.map((item) => ({ role: role.name, item })))[0];
-                      return (
-                        <li key={agent.id}>
-                          <Avatar name={agent.name} seed={agent.nearAccountId} />
-                          <div className="roster-who">
-                            <strong>{agent.name}</strong>
-                            <span className="chips">{held.length ? held.map((role) => <span key={role.name} className="chip-role">{role.name}</span>) : <span className="chip-role none">no role</span>}</span>
-                          </div>
-                          <div className="roster-budget">{budget ? <BudgetGauge role={budget.role} budget={budget.item} /> : <span className="muted small">No budget</span>}</div>
-                          <div className="roster-last">
-                            <StateDot state={states[index]!} />
-                            <span className="small muted">{last ? `${last.ok ? "" : "refused · "}${last.title} · ${ago(last.at)}` : "no activity yet"}</span>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-
-              <section className="panel">
-                <header className="panel-head"><h2>Live activity</h2><PanelLink to="/activity">All</PanelLink></header>
-                {activity.isLoading ? <div className="state">Loading…</div> : <Feed items={feed} limit={7} nameOf={nameOf} />}
-              </section>
-
-              <section className="panel">
-                <header className="panel-head"><h2>Waiting for votes</h2><PanelLink to="/governance">Decisions</PanelLink></header>
-                {waiting.length === 0 && pendingRules.length === 0 ? <div className="state">Nothing to vote on.</div> : (
-                  <ul className="votes-list">
-                    {waiting.map((proposal) => (
-                      <li key={proposal.id}>
-                        <span className="mono small muted">#{proposal.id}</span>
-                        <span className="votes-title">{proposal.title}</span>
-                        {me && me in proposal.votes ? <span className="status status-approved">voted</span> : <span className="status status-pending">your vote</span>}
-                      </li>
-                    ))}
-                    {pendingRules.map((rule) => (
-                      <li key={rule.queueId}>
-                        <span className="mono small muted">veto</span>
-                        <span className="votes-title">{rule.title}</span>
-                        <span className="small muted">applies {until(rule.activatesAt)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              <section className="panel">
-                <header className="panel-head"><h2>Budgets</h2><PanelLink to="/roles">Roles</PanelLink></header>
-                {roles.isLoading ? <div className="state">Loading…</div> : roleList.flatMap((role) => role.budgets).length === 0 ? <div className="state">No budget yet.</div> : (
-                  <div className="gauges">
-                    {roleList.flatMap((role) => role.budgets.map((budget) => <BudgetGauge key={`${role.name}-${budget.key}`} role={role.name} budget={budget} />))}
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <Card title="Company on chain" action={<Status value={status.data.treasury.status === "active" ? "active" : "pending"} />}>
-              <div className="explain">
-                <div><span className="eyebrow">DAO</span><strong className="mono small">{status.data.treasury.daoAccountId}</strong></div>
-                <div><span className="eyebrow">Vault</span><strong className="mono small">{status.data.treasury.vaultAccountId}</strong></div>
+            <section className="balance-hero" aria-label="Total balance">
+              <div className="balance-main">
+                <span className="balance-label">Total balance</span>
+                <strong className="balance-value">{holdings.isLoading ? "…" : !status.data.wallet ? formatUsd(0) : formatUsd(holdings.data?.totalUsd ?? 0)}</strong>
+                <span className="balance-hint">
+                  {chains.length ? `On ${chains.map((chain) => chain.chain).join(" and ")}` : "No wallet yet"} · indicative prices{unpriced ? ", test tokens not counted" : ""}
+                </span>
               </div>
-              <TreasuryChecks status={status.data} />
-            </Card>
+              <div className="balance-actions">
+                <Link className="button primary" to="/wallet">Deposit</Link>
+                <Link className="button secondary" to="/wallet">Treasury details</Link>
+              </div>
+            </section>
+
+            {myVotes > 0 ? (
+              <Link to="/governance" className="vote-callout">
+                <span className="vote-count">{myVotes}</span>
+                <span><strong>{myVotes === 1 ? "A decision is" : `${myVotes} decisions are`} waiting for your vote</strong><span>Nothing changes until members approve.</span></span>
+                <Icon name="arrow" />
+              </Link>
+            ) : null}
+
+            <div className="home-grid">
+              <div className="home-col">
+                <section className="panel">
+                  <header className="panel-head"><h2>Assets</h2><PanelLink to="/wallet">Treasury</PanelLink></header>
+                  {holdings.isLoading ? <div className="state">Loading…</div> : rows.length === 0 ? (
+                    <div className="state">No funds yet. <Link to="/wallet">Deposit</Link> to the company wallet to get started.</div>
+                  ) : (
+                    <table className="assets">
+                      <thead><tr><th>Asset</th><th className="num">Amount</th><th className="num">Value</th></tr></thead>
+                      <tbody>
+                        {rows.map((row) => (
+                          <tr key={`${row.chain}-${row.symbol}-${row.where}`}>
+                            <td>
+                              <span className="asset">
+                                <span className="token-badge" aria-hidden="true">{tokenName(row.symbol).slice(0, 1)}</span>
+                                <span><strong>{tokenName(row.symbol)}</strong><span className="asset-where">{row.chain}{row.where !== "wallet" ? ` · ${row.where}` : ""}</span></span>
+                              </span>
+                            </td>
+                            <td className="num">{formatToken(row.amount)}</td>
+                            <td className="num">{row.usd === null ? <span className="muted">test token</span> : formatUsd(row.usd)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </section>
+
+                <section className="panel">
+                  <header className="panel-head"><h2>Recent activity</h2><PanelLink to="/activity">See all</PanelLink></header>
+                  {activity.isLoading ? <div className="state">Loading…</div> : entries.length === 0 ? (
+                    <div className="state">Nothing yet. Every payment, swap or refusal shows up here.</div>
+                  ) : (
+                    <ul className="tx-list">
+                      {entries.slice(0, 6).map((entry) => (
+                        <li key={entry.id}>
+                          <Link to="/activity" className="tx-row">
+                            <span className={`tx-icon ${entry.outcome}`}><Icon name={entry.outcome === "refused" || entry.outcome === "failed" ? "cross" : entry.outcome === "pending" ? "setup" : "check"} size={15} /></span>
+                            <span className="tx-text">
+                              <strong>{entry.text}</strong>
+                              <span>{nameOf(entry.actor)}{entry.chain ? ` · ${entry.chain}` : ""} · {ago(entry.at)}</span>
+                            </span>
+                            <span className={`outcome outcome-${entry.outcome}`}>{OUTCOME_LABEL[entry.outcome]}</span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+
+              <div className="home-col">
+                <section className="panel">
+                  <header className="panel-head"><h2>Votes</h2><PanelLink to="/governance">Open</PanelLink></header>
+                  {waiting.length === 0 && pendingRules.length === 0 ? <div className="state">Nothing to vote on.</div> : (
+                    <ul className="votes-list">
+                      {waiting.map((proposal) => (
+                        <li key={proposal.id}>
+                          <span className="votes-title">{proposal.title}</span>
+                          {me && me in proposal.votes ? <span className="outcome outcome-done">Voted</span> : <span className="outcome outcome-pending">Your vote</span>}
+                        </li>
+                      ))}
+                      {pendingRules.map((rule) => (
+                        <li key={rule.queueId}>
+                          <span className="votes-title">{rule.title}</span>
+                          <span className="small muted">applies {until(rule.activatesAt)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="panel">
+                  <header className="panel-head"><h2>AI agents</h2><PanelLink to="/agents">Manage</PanelLink></header>
+                  {agents.isLoading ? <div className="state">Loading…</div> : staff.length === 0 ? <div className="state">No agent yet.</div> : (
+                    <ul className="agent-list">
+                      {staff.map((agent) => {
+                        const held = roleList.filter((role) => role.members.some((member) => member.member === agent.nearAccountId));
+                        const last = entries.find((entry) => entry.actor === agent.nearAccountId || entry.actor === agent.name);
+                        return (
+                          <li key={agent.id}>
+                            <Avatar name={agent.name} seed={agent.nearAccountId} size={36} />
+                            <div className="agent-body">
+                              <div className="agent-line">
+                                <strong>{agent.name}</strong>
+                                <span className="muted small">{held.length ? held.map((role) => roleName(role.name)).join(", ") : "No rule yet"}</span>
+                              </div>
+                              {held.flatMap((role) => role.budgets).slice(0, 2).map((budget) => <Allowance key={budget.key} budget={budget} />)}
+                              <span className="small muted">{last ? `Last: ${last.text.charAt(0).toLowerCase()}${last.text.slice(1)} · ${ago(last.at)}` : "No activity yet"}</span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            </div>
           </>
         ) : null}
       </PageState>
+    </div>
+  );
+}
+
+/** "12 USDC left of 50 this week". */
+function Allowance({ budget }: { budget: RoleView["budgets"][number] }) {
+  const available = Number(budget.available ?? 0);
+  const max = Number(budget.max ?? 0);
+  const left = max > 0 ? Math.max(0, Math.min(100, Math.round((available / max) * 100))) : 0;
+  const period = budget.periodDays === 1 ? "today" : budget.periodDays === 7 ? "this week" : budget.periodDays === 30 ? "this month" : `per ${budget.periodDays} days`;
+  const token = budget.token ? tokenName(budget.token) : "";
+  return (
+    <div className="allowance">
+      <div className={`bar${left === 0 ? " empty" : left < 25 ? " low" : ""}`} role="img" aria-label={`${left}% left`}><span style={{ width: `${left}%` }} /></div>
+      <span className="small"><strong>{formatToken(available)} {token}</strong> <span className="muted">left of {formatToken(max)} {period}</span></span>
     </div>
   );
 }

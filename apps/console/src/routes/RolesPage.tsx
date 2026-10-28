@@ -28,7 +28,7 @@ export function RolesPage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Roles</h1>
+          <h1>Rules</h1>
           <p className="muted">
             A role is what an agent may do with company funds: which contracts, which counterparties, which budget.
             Everything else is refused by the vault.
@@ -509,7 +509,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
           <div className="decision">
             <header><div><span className="eyebrow">Members will vote on</span><h3>{preview.title}</h3></div></header>
             <SentenceList items={preview.summary} />
-            <p className="small muted verified">✓ Checked in your browser: the proposal prepared by MandateOS is exactly this role.</p>
+            <p className="small muted verified">✓ Checked in your browser: the proposal prepared by Euthyna is exactly this role.</p>
             <footer className="row wrap">
               <span className="small muted">Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
               <div className="spacer" />

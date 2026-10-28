@@ -56,6 +56,7 @@ import {
 import bs58 from "bs58";
 import { base58Encode, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
 import { vaultLogs } from "./chain-activity.js";
+import { usdPrices, usdValue } from "./prices.js";
 import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
@@ -934,7 +935,13 @@ export class OmniRolesService {
         }
         chains.push({ chain: solana.network, address: solana.address, explorer: `https://explorer.solana.com/address/${solana.address}?cluster=devnet`, assets });
       }
-      return { chains };
+      // Indicative dollar values: testnet assets priced as their mainnet counterparts.
+      const prices = await usdPrices().catch(() => ({} as Record<string, number>));
+      const valued = chains.map((chain) => {
+        const assets = chain.assets.map((asset) => ({ ...asset, usd: usdValue(asset.symbol, asset.amount, prices) }));
+        return { ...chain, assets, usd: assets.reduce((sum, asset) => sum + (asset.usd ?? 0), 0) };
+      });
+      return { chains: valued, totalUsd: valued.reduce((sum, chain) => sum + chain.usd, 0), pricedAt: new Date().toISOString(), indicative: true };
     });
   }
 

@@ -99,7 +99,7 @@ export function GovernancePage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Decisions</h1>
+          <h1>Votes</h1>
           <p className="muted">
             Members vote on every rule. An approved rule waits through a veto window, where any council member can stop it,
             then applies automatically. Agents never change rules.

@@ -251,7 +251,10 @@ export type VaultVersions = {
 };
 
 export type Holdings = {
-  chains: Array<{ chain: string; address: string; explorer: string; assets: Array<{ symbol: string; amount: string; where: string }> }>;
+  chains: Array<{ chain: string; address: string; explorer: string; usd: number; assets: Array<{ symbol: string; amount: string; where: string; usd: number | null }> }>;
+  /** Sum of the assets that have a reference price. */
+  totalUsd: number;
+  indicative: boolean;
 };
 
 /** "0.0006 WETH" with at most 6 significant digits. */
