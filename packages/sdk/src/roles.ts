@@ -81,12 +81,15 @@ export const Operator = {
 
 export type Token = { address: Hex; symbol: string; decimals: number };
 export type ProtocolId = "uniswap-v3" | "uniswap-v2";
+export type LendingId = "aave-v3";
 
 export type ChainProfile = {
   chainId: number;
   name: string;
   tokens: Token[];
   protocols: Record<ProtocolId, { name: string; router: Hex }>;
+  /** Lending pools a role may deposit into; deposits are always credited to the wallet. */
+  lending?: Partial<Record<LendingId, { name: string; pool: Hex; assets: Hex[] }>>;
   /** NEAR Omni Bridge on this chain: sends ETH to a NEAR account. */
   omniBridge?: Hex;
 };
@@ -103,7 +106,17 @@ export const BASE_SEPOLIA: ChainProfile = {
     { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", decimals: 6 },
     { address: "0x418A2b47911dE05e21688F7490195F5324B49474", symbol: "TestUSDC", decimals: 6 },
     { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", decimals: 18 },
+    // Aave's own test USDC on Base Sepolia (not Circle's): the asset its USDC reserve uses.
+    { address: "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f", symbol: "USDC (Aave test)", decimals: 6 },
   ],
+  lending: {
+    // Pool read on chain: getReservesList() lists WETH and the test USDC above, both active.
+    "aave-v3": {
+      name: "Aave V3",
+      pool: "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27",
+      assets: ["0x4200000000000000000000000000000000000006", "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f"],
+    },
+  },
   protocols: {
     // developers.uniswap.org Base deployments (SwapRouter02); V2 router checked on-chain.
     "uniswap-v3": { name: "Uniswap V3", router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" },
@@ -118,6 +131,10 @@ export const SELECTORS = {
   approve: "0x095ea7b3",
   exactInputSingle: "0x04e45aaf",
   swapExactTokensForTokens: "0x38ed1739",
+  /** Aave V3 Pool supply(address,uint256,address,uint16) */
+  aaveSupply: "0x617ba037",
+  /** Aave V3 Pool withdraw(address,uint256,address) */
+  aaveWithdraw: "0x69328dec",
   /** initTransfer(address,uint128,uint128,uint128,string,string) on the Omni Bridge. */
   initTransfer: "0xdeb915b8",
 } as const;
@@ -138,6 +155,8 @@ const FUNCTIONS: Record<string, { name: string; params: string[]; tuple?: { inde
     name: "swap (swapExactTokensForTokens)",
     params: ["amount sold", "minimum received", "route", "recipient", "deadline"],
   },
+  [SELECTORS.aaveSupply]: { name: "deposit (supply)", params: ["asset", "amount", "credited to", "referral code"] },
+  [SELECTORS.aaveWithdraw]: { name: "withdraw", params: ["asset", "amount", "recipient"] },
   [SELECTORS.initTransfer]: {
     name: "bridge to NEAR (initTransfer)",
     params: ["token", "amount", "fee in token", "bridge fee", "NEAR recipient", "message", "ETH sent"],
@@ -237,6 +256,40 @@ export function uniswapV3Sheet(router: Hex, tokenIn: Hex, tokensOut: Hex[], key:
       node(1, Encoding.Static, Operator.GreaterThan, word(0n)),
       node(1, Encoding.Static, Operator.Pass),
       ...withParent(alternatives, 3),
+    ],
+  };
+}
+
+export function aaveSupplySheet(pool: Hex, assets: Hex[], key: number[]): Sheet {
+  requireNonEmpty(assets, "asset");
+  const { field, alternatives } = oneOf(0, assets);
+  return {
+    target: pool,
+    selector: SELECTORS.aaveSupply,
+    conditions: [
+      node(0, Encoding.AbiEncoded, Operator.Matches),
+      field,
+      node(0, Encoding.Static, Operator.WithinAllowance, hexOf(key)),
+      node(0, Encoding.Static, Operator.EqualToAvatar),
+      node(0, Encoding.Static, Operator.Pass),
+      ...withParent(alternatives, 1),
+    ],
+  };
+}
+
+/** Withdrawals only return the company's deposit to the company wallet: no budget. */
+export function aaveWithdrawSheet(pool: Hex, assets: Hex[]): Sheet {
+  requireNonEmpty(assets, "asset");
+  const { field, alternatives } = oneOf(0, assets);
+  return {
+    target: pool,
+    selector: SELECTORS.aaveWithdraw,
+    conditions: [
+      node(0, Encoding.AbiEncoded, Operator.Matches),
+      field,
+      node(0, Encoding.Static, Operator.Pass),
+      node(0, Encoding.Static, Operator.EqualToAvatar),
+      ...withParent(alternatives, 1),
     ],
   };
 }
@@ -343,7 +396,9 @@ export type RoleBlock =
       budget: Budget;
       /** Largest single approval to a router, in tokenIn units. */
       maxApproval: string;
-    };
+    }
+  /** Deposit `token` into a lending pool (budget) and withdraw it back to the wallet. */
+  | { kind: "lending"; protocol: LendingId; token: Hex; budget: Budget; maxApproval: string };
 
 export type RoleMember = { accountId: string; kind: MembershipKind; maxUses?: number | null; endsAt?: Date | null };
 
@@ -398,7 +453,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
-    const token = block.kind === "share-revenue" ? NATIVE_ETH : tokenOf(profile, block.kind === "payments" ? block.token : block.tokenIn);
+    const token = block.kind === "share-revenue" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
@@ -419,6 +474,15 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
           node(0, Encoding.Static, Operator.WithinAllowance, toHex(Uint8Array.from(key))),
         ],
       } : erc20TransferSheet(token.address, block.recipients.map((item) => item.address), key)));
+    } else if (block.kind === "lending") {
+      const lending = profile.lending?.[block.protocol];
+      if (!lending) throw new Error(`no ${block.protocol} pool known on ${profile.name}`);
+      if (!lending.assets.some((asset) => asset.toLowerCase() === token.address.toLowerCase())) {
+        throw new Error(`${token.symbol} cannot be deposited on ${lending.name} on ${profile.name}`);
+      }
+      permissions.push(toPermission(erc20ApproveSheet(token.address, [lending.pool], parseUnits(block.maxApproval, token.decimals))));
+      permissions.push(toPermission(aaveSupplySheet(lending.pool, [token.address], key)));
+      permissions.push(toPermission(aaveWithdrawSheet(lending.pool, [token.address])));
     } else if (block.kind === "share-revenue") {
       if (!profile.omniBridge) throw new Error(`no Omni Bridge known on ${profile.name}`);
       if (!/^[a-z0-9._-]{2,64}$/.test(block.sharesAccountId)) throw new Error("shares account is not a NEAR account id");
@@ -1025,6 +1089,8 @@ export function labelAddress(address: Hex, context: DescribeContext, kind: "reci
   if (token) return token.symbol;
   const protocol = Object.values(context.profile.protocols).find((item) => item.router.toLowerCase() === key);
   if (protocol) return `${protocol.name} router`;
+  const pool = Object.values(context.profile.lending ?? {}).find((item) => item?.pool.toLowerCase() === key);
+  if (pool) return `${pool.name} pool`;
   const known = KNOWN_CONTRACTS[key];
   if (known) return context.fullAddresses ? `${known} (${full})` : known;
   return `${context.fullAddresses ? full : short(full)} (${kind === "contract" ? "unknown contract" : "not a registered supplier"})`;
@@ -1089,6 +1155,10 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         } else if (selector === SELECTORS.initTransfer) {
           token = NATIVE_ETH;
           kind = "revenue";
+        } else if (selector === SELECTORS.aaveSupply) {
+          const asset = permission.conditions[1];
+          if (asset?.operator === Operator.EqualTo) token = findToken(wordToAddress(asset.compValue));
+          kind = "deposits";
         }
         const key = condition.compValue.toLowerCase();
         const existing = result[key];
@@ -1125,7 +1195,11 @@ export function describePermission(permission: Permission, context: DescribeCont
     if (fn?.tuple && parentIndex !== 0) return fn.tuple.fields[fieldIndex] ?? `field ${fieldIndex + 1}`;
     return fn?.params[fieldIndex] ?? `parameter ${fieldIndex + 1}`;
   };
+  const lendingAsset = (selector === SELECTORS.aaveSupply || selector === SELECTORS.aaveWithdraw) && conditions[1]?.operator === Operator.EqualTo
+    ? context.profile.tokens.find((item) => item.address.toLowerCase() === wordToAddress(conditions[1]!.compValue).toLowerCase())
+    : undefined;
   const amountToken = (name: string): Token | undefined => {
+    if (lendingAsset && name === "amount") return lendingAsset;
     if (selector === SELECTORS.initTransfer && (name === "bridge fee" || name === "ETH sent" || name === "amount")) return NATIVE_ETH;
     if (name.includes("amount") || name.includes("minimum")) return tokenIn ?? (selector === SELECTORS.transfer || selector === SELECTORS.approve ? targetToken : undefined);
     return undefined;
