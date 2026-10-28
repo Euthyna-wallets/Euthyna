@@ -32,7 +32,7 @@ export function ActivityPage() {
       <Card title="On-chain operations">
         <PageState loading={query.isLoading} error={query.error} empty={operations.length === 0} emptyContent={<div className="state">No operation signed yet.</div>}>
           <table>
-            <thead><tr><th>When</th><th>By</th><th>What</th><th>Vault (NEAR)</th><th>{"Result (EVM)"}</th></tr></thead>
+            <thead><tr><th>When</th><th>By</th><th>What</th><th>Vault (NEAR)</th><th>{"Result on chain"}</th></tr></thead>
             <tbody>
               {operations.map((item) => (
                 <tr key={item.opId}>
