@@ -58,6 +58,7 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   daoFactoryId: env.DAO_FACTORY_ID,
   nomosId: env.NOMOS_ID,
   solanaRpcUrl: env.SOLANA_RPC_URL,
+  txIndexerUrl: env.NEAR_TX_INDEXER_URL ?? (env.NEAR_NETWORK_ID === "mainnet" ? "https://tx.main.fastnear.com" : "https://tx.test.fastnear.com"),
   mpcContractId: env.MPC_CONTRACT_ID,
   artifactsDir: env.CONTRACT_ARTIFACTS_DIR,
   accountParent: env.NEAR_ACCOUNT_PARENT,

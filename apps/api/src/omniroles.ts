@@ -55,7 +55,8 @@ import {
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
 import { base58Encode, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
-import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseUnits, type Hex, type PublicClient } from "viem";
+import { vaultLogs } from "./chain-activity.js";
+import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
@@ -79,6 +80,8 @@ export interface OmniRolesConfig {
   nomosId: string;
   /** Solana RPC for the company's Solana wallet balance (devnet by default). */
   solanaRpcUrl?: string;
+  /** Public NEAR transaction index (FastNEAR tx API): activity read from the vault's logs. */
+  txIndexerUrl?: string;
   mpcContractId: string;
   artifactsDir: string;
   accountParent: string;
@@ -113,6 +116,8 @@ export interface OmniRolesChain {
   fees(input: { chainId: number; from: Hex; calls: GasCall[] }): Promise<{ gasLimits: bigint[]; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
   /** Transactions the wallet has had mined on a chain (its next nonce). */
   nonce(chainId: number, address: Hex): Promise<number>;
+  /** Supplied balances in lending pools (Aave V3: aTokens), per asset. */
+  lendingPositions?(address: Hex, profile: ChainProfile): Promise<Array<{ protocol: string; symbol: string; amount: string }>>;
   /** The mined result of a transaction, or null while it is not mined. */
   receipt(chainId: number, hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: string } | null>;
 }
@@ -173,6 +178,35 @@ export class RpcOmniRolesChain implements OmniRolesChain {
     return receipt ? { status: receipt.status, blockNumber: receipt.blockNumber.toString() } : null;
   }
 
+  private aTokens = new Map<string, Hex>();
+
+  async lendingPositions(address: Hex, profile: ChainProfile) {
+    const client = this.client(profile.chainId);
+    const abi = parseAbi([
+      "function ADDRESSES_PROVIDER() view returns (address)",
+      "function getPoolDataProvider() view returns (address)",
+      "function getReserveTokensAddresses(address) view returns (address,address,address)",
+    ]);
+    const positions: Array<{ protocol: string; symbol: string; amount: string }> = [];
+    for (const lending of Object.values(profile.lending ?? {})) {
+      if (!lending) continue;
+      for (const asset of lending.assets) {
+        const key = `${profile.chainId}:${asset.toLowerCase()}`;
+        let aToken = this.aTokens.get(key);
+        if (!aToken) {
+          const provider = await client.readContract({ address: lending.pool, abi, functionName: "ADDRESSES_PROVIDER" });
+          const dataProvider = await client.readContract({ address: provider, abi, functionName: "getPoolDataProvider" });
+          [aToken] = await client.readContract({ address: dataProvider, abi, functionName: "getReserveTokensAddresses", args: [asset] });
+          this.aTokens.set(key, aToken);
+        }
+        const amount = await client.readContract({ address: aToken, abi: erc20Abi, functionName: "balanceOf", args: [address] });
+        const token = profile.tokens.find((item) => item.address.toLowerCase() === asset.toLowerCase());
+        if (amount > 0n && token) positions.push({ protocol: lending.name, symbol: token.symbol, amount: formatUnits(amount, token.decimals) });
+      }
+    }
+    return positions;
+  }
+
   async balances(address: Hex, profile: ChainProfile) {
     const client = this.client(84532);
     const eth = await client.getBalance({ address });
@@ -198,6 +232,16 @@ export type OmniRolesPlan = {
   ruleDelaySeconds: number;
   vaultWasmSha256: string;
 };
+
+type SolanaOperationView = {
+  member: string;
+  role: string;
+  state: string;
+  signature: number[] | null;
+  request: { asset: "Sol" | { Spl: { mint: number[] } }; to: number[]; amount: string; reference: string };
+};
+
+const short = (text: string) => `${text.slice(0, 4)}…${text.slice(-4)}`;
 
 type QueuedRule = {
   queue_id: number[];
@@ -849,6 +893,50 @@ export class OmniRolesService {
   // -------------------------------------------------------------------------
   // Proposals (signed by members in their wallet)
   // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Holdings: what the company owns, per chain
+  // -------------------------------------------------------------------------
+
+  async holdings(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    return this.memo(`holdings:${treasury.vaultAccountId}`, 20_000, async () => {
+      const chains: Array<{ chain: string; address: string; explorer: string; assets: Array<{ symbol: string; amount: string; where: string }> }> = [];
+      const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId }).catch(() => null);
+      if (wallet?.address) {
+        const address = getAddress(hexOf(wallet.address));
+        const [balances, positions] = await Promise.all([
+          this.chain.balances(address, PROFILE).catch(() => ({ eth: "0", tokens: [] as Array<{ symbol: string; amount: string }> })),
+          this.chain.lendingPositions?.(address, PROFILE).catch(() => []) ?? Promise.resolve([]),
+        ]);
+        chains.push({
+          chain: PROFILE.name,
+          address,
+          explorer: `https://sepolia.basescan.org/address/${address}`,
+          assets: [
+            ...(Number(balances.eth) > 0 ? [{ symbol: "ETH", amount: balances.eth, where: "wallet" }] : []),
+            ...balances.tokens.filter((token) => Number(token.amount) > 0).map((token) => ({ symbol: token.symbol, amount: token.amount, where: "wallet" })),
+            ...positions.map((position) => ({ symbol: position.symbol, amount: position.amount, where: `deposited on ${position.protocol}` })),
+          ],
+        });
+      }
+      const solana = await this.solanaWallet(treasury.vaultAccountId).catch(() => null);
+      if (solana?.address) {
+        const rpc = solanaRpc(this.config.solanaRpcUrl ?? SOLANA_DEVNET.rpcUrl);
+        const assets: Array<{ symbol: string; amount: string; where: string }> = [];
+        if (solana.sol && Number(solana.sol) > 0) assets.push({ symbol: "SOL", amount: solana.sol, where: "wallet" });
+        for (const token of SOLANA_DEVNET.tokens.filter((item) => item.mint)) {
+          const accounts = await rpc<{ value: Array<{ account: { data: { parsed: { info: { tokenAmount: { uiAmountString: string } } } } } }> }>(
+            "getTokenAccountsByOwner", [solana.address, { mint: token.mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
+          ).catch(() => ({ value: [] }));
+          const amount = accounts.value.reduce((sum, item) => sum + Number(item.account.data.parsed.info.tokenAmount.uiAmountString), 0);
+          if (amount > 0) assets.push({ symbol: token.symbol, amount: String(amount), where: "wallet" });
+        }
+        chains.push({ chain: solana.network, address: solana.address, explorer: `https://explorer.solana.com/address/${solana.address}?cluster=devnet`, assets });
+      }
+      return { chains };
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Vault versions (published on Nomos) and DAO-voted upgrades
@@ -1589,6 +1677,59 @@ export class OmniRolesService {
         vaultAccountId,
       });
     }
+
+    // Agents acting directly on the vault (MCP + signer) never reach our database:
+    // the vault's own logs, read from the chain, are the record.
+    const seen = new Set(operations.map((item) => item.opId.toLowerCase()));
+    const logs = this.config.txIndexerUrl
+      ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId)).catch(() => [])
+      : [];
+    for (const log of logs) {
+      if (seen.has(log.opId)) continue;
+      if (log.kind === "solana") {
+        const op = await this.near.viewFunction<SolanaOperationView | null>(treasury.vaultAccountId, "get_solana_operation", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
+        if (!op) continue;
+        const mint = op.request.asset === "Sol" ? null : base58Encode(op.request.asset.Spl.mint);
+        const token = SOLANA_DEVNET.tokens.find((item) => item.mint === mint) ?? { symbol: mint ? short(mint) : "SOL", decimals: mint ? 0 : 9 };
+        const signature = op.signature ? base58Encode(op.signature) : null;
+        operations.push({
+          opId: log.opId,
+          at: log.at,
+          actor: agentByAccount.get(op.member) ?? op.member,
+          role: op.role,
+          reference: op.request.reference,
+          chainId: 0,
+          chain: SOLANA_DEVNET.name,
+          summary: `Send ${formatUnits(BigInt(op.request.amount), token.decimals)} ${token.symbol} to ${labels[base58Encode(op.request.to)] ?? base58Encode(op.request.to)}`,
+          vaultState: op.state,
+          nonce: null,
+          evm: null,
+          solana: signature ? { signature, explorer: SOLANA_DEVNET.explorer.replace("{tx}", signature) } : null,
+          nearAuthorizationTxHash: log.txHash,
+          vaultAccountId: treasury.vaultAccountId,
+        });
+        continue;
+      }
+      const recorded = await this.ledgerEntry(treasury.vaultAccountId, log.opId).catch(() => null);
+      if (!recorded) continue;
+      const { operation, evmHash, receipt } = recorded;
+      operations.push({
+        opId: log.opId,
+        at: log.at,
+        actor: operation.role === "__dao__" ? "Members (DAO vote)" : agentByAccount.get(operation.member) ?? operation.member,
+        role: operation.role === "__dao__" ? null : operation.role,
+        reference: operation.request.reference,
+        chainId: operation.request.chain_id,
+        chain: chainName(operation.request.chain_id),
+        summary: describeRequest(getAddress(hexOf(operation.request.target)), hexOf(operation.request.calldata), BigInt(operation.request.value)),
+        vaultState: operation.state,
+        nonce: operation.evm_nonce,
+        evm: evmHash ? { hash: evmHash, status: receipt?.status ?? "not mined", blockNumber: receipt?.blockNumber ?? null } : null,
+        nearAuthorizationTxHash: log.txHash,
+        vaultAccountId: treasury.vaultAccountId,
+      });
+    }
+    operations.sort((a, b) => b.at.localeCompare(a.at));
 
     // Every transaction the wallet sends takes the next nonce, and only the vault
     // hands nonces out: the chain's count must equal the vault's.

@@ -9,6 +9,7 @@ import { useWallets } from "../lib/wallet-context.js";
 import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
 import { omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
+import { HoldingsCard } from "./HoldingsCard.js";
 import { SentenceList } from "./GovernancePage.js";
 
 export type Requested = { chainId: number; to: string; value: string; data: string; gas?: string };
@@ -114,6 +115,8 @@ export function WalletPage() {
             </div>
           ) : <div className="state">The wallet is created by the first vote. <Link to="/onboarding">Continue setup</Link></div>}
         </Card>
+
+        {address ? <HoldingsCard /> : null}
 
         {address && status.data?.solana ? (
           <Card title="Solana">

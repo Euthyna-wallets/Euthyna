@@ -28,6 +28,8 @@ const schema = z.object({
   NOMOS_ID: z.string().min(1).default("nomos.euthyna.testnet"),
   /** Solana RPC for the company's Solana wallet (devnet on testnet). */
   SOLANA_RPC_URL: z.string().url().default("https://api.devnet.solana.com"),
+  /** NEAR transaction index used to read the vault's own logs (FastNEAR tx API). Empty disables it. */
+  NEAR_TX_INDEXER_URL: z.string().optional(),
   DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("6000000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),

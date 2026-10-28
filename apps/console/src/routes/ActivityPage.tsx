@@ -15,14 +15,14 @@ export function ActivityPage() {
   const query = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, refetchInterval: 10_000 });
   const operations = query.data?.operations ?? [];
   const requests = query.data?.requests ?? [];
-  const executed = operations.filter((item) => item.evm?.status === "success").length;
+  const executed = operations.filter((item) => item.evm?.status === "success" || (item.solana && item.vaultState === "Confirmed")).length;
   const refused = requests.filter((item) => item.kind === "refusal").length;
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>Activity</h1>
-          <p className="muted">What the chains record: each operation as the vault signed it on NEAR, and its result on the EVM chain.</p>
+          <p className="muted">What the chains record: each operation as the vault signed it on NEAR (read from its own logs), and its result on Base or Solana.</p>
         </div>
         <div className="pill">{executed} executed on-chain · {refused} refused</div>
       </header>
@@ -40,7 +40,7 @@ export function ActivityPage() {
                   <td>{item.actor}{item.role ? <div className="small muted">role · {item.role}</div> : null}</td>
                   <td className="small">
                     {item.summary ? <strong>{item.summary}</strong> : <span className="mono">{short(item.opId)}</span>}
-                    <div className="muted">{item.chain} · nonce {item.nonce}{item.reference ? ` · ${item.reference}` : ""}</div>
+                    <div className="muted">{item.chain}{item.nonce !== null ? ` · nonce ${item.nonce}` : ""}{item.reference ? ` · ${item.reference}` : ""}</div>
                   </td>
                   <td className="small">
                     <Status value={item.vaultState} />
@@ -53,6 +53,11 @@ export function ActivityPage() {
                           {item.evm.status === "success" ? "✓ executed" : item.evm.status === "reverted" ? "✗ reverted" : "not mined yet"}
                         </span>
                         <div><a href={`${EXPLORERS[item.chainId] ?? ""}/tx/${item.evm.hash}`} target="_blank" rel="noreferrer">{item.chain} tx {short(item.evm.hash)}</a></div>
+                      </>
+                    ) : item.solana ? (
+                      <>
+                        <span className={`evm-status ${item.vaultState === "Confirmed" ? "ok" : ""}`}>{item.vaultState === "Confirmed" ? "✓ finalized, attested by MPC" : "signed, waiting for finality"}</span>
+                        <div><a href={item.solana.explorer} target="_blank" rel="noreferrer">{item.chain} tx {short(item.solana.signature)}</a></div>
                       </>
                     ) : <span className="muted">not signed</span>}
                   </td>

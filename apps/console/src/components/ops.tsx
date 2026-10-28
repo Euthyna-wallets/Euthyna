@@ -73,15 +73,19 @@ export type FeedItem = { at: string; ok: boolean; actor: string; title: string; 
 /** Executed operations and refusals, newest first. */
 export function feedOf(activity: Activity | undefined): FeedItem[] {
   if (!activity) return [];
-  const done: FeedItem[] = activity.operations.map((operation) => ({
-    at: operation.at,
-    ok: operation.evm?.status === "success",
-    actor: operation.actor,
-    title: operation.summary ?? `Operation ${operation.opId}`,
-    detail: operation.evm?.status === "success"
-      ? `${operation.chain} · ${operation.role ? `role ${operation.role}` : "voted transaction"}`
-      : `${operation.chain} · ${operation.vaultState}${operation.evm ? ` · ${operation.evm.status}` : ""}`,
-  }));
+  const done: FeedItem[] = activity.operations.map((operation) => {
+    // EVM: mined successfully. Solana: finality attested by MPC (vault state Confirmed).
+    const ok = operation.evm?.status === "success" || (Boolean(operation.solana) && operation.vaultState === "Confirmed");
+    return {
+      at: operation.at,
+      ok,
+      actor: operation.actor,
+      title: operation.summary ?? `Operation ${operation.opId}`,
+      detail: ok
+        ? `${operation.chain} · ${operation.role ? `role ${operation.role}` : "voted transaction"}`
+        : `${operation.chain} · ${operation.vaultState}${operation.evm ? ` · ${operation.evm.status}` : ""}`,
+    };
+  });
   const refused: FeedItem[] = activity.requests.filter((request) => request.kind === "refusal").map((request) => ({
     at: request.at,
     ok: false,

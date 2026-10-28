@@ -5,7 +5,7 @@ import { api, type AgentRow } from "../api.js";
 import { Avatar, BudgetGauge, Feed, Icon, Kpi, PanelLink, StateDot, agentState, ago, feedOf, until } from "../components/ops.js";
 import { Card, PageState, Status, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { omni } from "../omniroles-api.js";
+import { formatAmount, omni } from "../omniroles-api.js";
 import { TreasuryChecks } from "./TreasurySetup.js";
 
 /** The command center: who works, what happened, what waits for the owners. */
@@ -25,14 +25,18 @@ export function OverviewPage() {
   const myVotes = waiting.filter((proposal) => !(me && me in proposal.votes)).length;
   const pendingRules = (governance.data?.rules ?? []).filter((rule) => rule.state === "Queued");
   const refused = (activity.data?.requests ?? []).filter((item) => item.kind === "refusal").length;
-  const executed = (activity.data?.operations ?? []).filter((item) => item.evm?.status === "success").length;
+  const executed = (activity.data?.operations ?? []).filter((item) => item.evm?.status === "success" || (item.solana && item.vaultState === "Confirmed")).length;
   const staff = (agents.data?.agents ?? []).filter((agent) => agent.active);
   const states = staff.map((agent) => agentState(agent, roleList, feed, paused));
   const working = states.filter((state) => state === "working").length;
   const nameOf = (actor: string) => staff.find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 14);
-  const balance = status.data?.wallet
-    ? status.data.wallet.tokens.filter((token) => Number(token.amount) > 0).map((token) => `${Number(token.amount).toLocaleString()} ${token.symbol}`).join(" · ") || "empty"
-    : "no wallet";
+  const holdings = useQuery({ queryKey: ["omni-holdings"], queryFn: omni.holdings, enabled: ready, refetchInterval: 30_000 });
+  const assets = (holdings.data?.chains ?? []).flatMap((chain) => chain.assets);
+  const balance = !status.data?.wallet ? "no wallet"
+    : holdings.isLoading ? "…"
+    : assets.length === 0 ? "empty"
+    : <span className="kpi-list">{assets.slice(0, 3).map((asset) => <span key={`${asset.symbol}-${asset.where}`}>{formatAmount(asset.amount, asset.symbol)}</span>)}{assets.length > 3 ? <span className="small">+{assets.length - 3} more</span> : null}</span>;
+  const chainCount = (holdings.data?.chains ?? []).length;
 
   const loading = ready && (roles.isLoading || governance.isLoading || activity.isLoading);
   const next = loading ? null
@@ -64,7 +68,7 @@ export function OverviewPage() {
         {status.data?.treasury ? (
           <>
             <div className="kpis">
-              <Kpi label="Treasury" value={balance} hint={status.data.wallet ? <span className="mono">{short(status.data.wallet.address, 6)}</span> : "create the wallet"} />
+              <Kpi label="Treasury" value={<Link to="/wallet" className="kpi-link">{balance}</Link>} hint={status.data.wallet ? `${assets.length} asset${assets.length === 1 ? "" : "s"} on ${chainCount} chain${chainCount === 1 ? "" : "s"} · details in Wallet` : "create the wallet"} />
               <Kpi label="AI employees" value={loading ? "…" : `${working} / ${staff.length}`} hint={paused ? "all paused" : "working in the last 24 h"} tone="cyan" />
               <Kpi label="Executed on chain" value={loading ? "…" : executed} hint="signed by the vault, mined" />
               <Kpi label="Refused" value={loading ? "…" : refused} hint="outside a role, or failed checks" tone={refused ? "red" : undefined} />
