@@ -40,6 +40,7 @@ fn fixture(guard_required: bool, unlimited: bool) -> (Vault, OperationId) {
             address: Some([3; 20]),
             next_nonce: 0,
             active_operation: None,
+            in_flight: Vec::new(),
         },
     );
     let conditions = if unlimited {
@@ -93,15 +94,18 @@ fn fixture(guard_required: bool, unlimited: bool) -> (Vault, OperationId) {
         },
         1,
     );
+    context("agent.testnet", 2);
+    let request = payment_request("invoice", unlimited);
+    let op = v.prepare("payments".into(), request);
+    (v, op.op_id)
+}
+fn payment_request(reference: &str, unlimited: bool) -> OperationRequest {
     let mut calldata = vec![0xa9, 5, 0x9c, 0xbb];
     calldata.extend([0; 12]);
     calldata.extend([2; 20]);
     calldata.extend([0; 16]);
     calldata.extend(10u128.to_be_bytes());
-    context("agent.testnet", 2);
-    let request=from_value(json!({"chain_id":84532,"target":vec![1;20],"value":"0","calldata":calldata,"allowance_amount":if unlimited {"0"} else {"10"},"reference":"invoice","gas_limit":"21000","max_fee_per_gas":"2","max_priority_fee_per_gas":"1"})).unwrap();
-    let op = v.prepare("payments".into(), request);
-    (v, op.op_id)
+    from_value(json!({"chain_id":84532,"target":vec![1;20],"value":"0","calldata":calldata,"allowance_amount":if unlimited {"0"} else {"10"},"reference":reference,"gas_limit":"21000","max_fee_per_gas":"2","max_priority_fee_per_gas":"1"})).unwrap()
 }
 fn signed(v: &mut Vault, id: OperationId) {
     let _ = v.authorize(id, None);
@@ -620,4 +624,109 @@ fn concurrent_cancellation_retries_keep_the_first_signed_transaction() {
         .unwrap();
     assert_eq!(attempt.signed_transaction, raw);
     assert_eq!(attempt.request_count, 3);
+}
+
+/// Lets the agent prepare more than one operation.
+fn unlimited_uses(v: &mut Vault) {
+    v.memberships
+        .get_mut(&MembershipKey {
+            role: "payments".into(),
+            member: "agent.testnet".parse().unwrap(),
+        })
+        .unwrap()
+        .max_uses = None;
+}
+fn next_operation(v: &mut Vault, reference: &str) -> OperationId {
+    context("agent.testnet", 2);
+    let id = v
+        .prepare("payments".into(), payment_request(reference, false))
+        .op_id;
+    signed(v, id);
+    id
+}
+fn wallet(v: &Vault) -> &ChainWallet {
+    v.wallets.get(&84532).unwrap()
+}
+
+#[test]
+fn signed_operation_frees_the_next_nonce() {
+    let (mut v, first) = fixture(false, false);
+    unlimited_uses(&mut v);
+    signed(&mut v, first);
+    let second = next_operation(&mut v, "invoice-2");
+    assert_eq!(v.operations.get(&second).unwrap().evm_nonce, 1);
+    assert_eq!(wallet(&v).in_flight, vec![first, second]);
+    assert_eq!(wallet(&v).next_nonce, 2);
+    // Settlement order does not matter.
+    verify(&mut v, second, false, true);
+    verify(&mut v, first, false, true);
+    for id in [first, second] {
+        assert_eq!(
+            v.operations.get(&id).unwrap().state,
+            OperationState::Confirmed
+        );
+    }
+    assert!(wallet(&v).in_flight.is_empty());
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 80);
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().reserved.0, 0);
+}
+#[test]
+#[should_panic(expected = "ERR_WALLET_QUEUE_BUSY")]
+fn unsigned_operation_still_holds_the_nonce() {
+    let (mut v, _first) = fixture(false, false);
+    unlimited_uses(&mut v);
+    context("agent.testnet", 2);
+    v.prepare("payments".into(), payment_request("invoice-2", false));
+}
+#[test]
+fn in_flight_queue_is_capped() {
+    let (mut v, first) = fixture(false, false);
+    unlimited_uses(&mut v);
+    signed(&mut v, first);
+    for n in 1..types::MAX_IN_FLIGHT {
+        next_operation(&mut v, &format!("invoice-{n}"));
+    }
+    assert_eq!(wallet(&v).in_flight.len(), types::MAX_IN_FLIGHT);
+    assert!(!wallet(&v).accepts_operation());
+    context("agent.testnet", 2);
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        v.prepare("payments".into(), payment_request("one-too-many", false))
+    }));
+    assert!(refused.is_err());
+    // Settling any of them makes room again.
+    verify(&mut v, first, false, true);
+    let next = next_operation(&mut v, "after-settle");
+    assert_eq!(
+        v.operations.get(&next).unwrap().evm_nonce,
+        types::MAX_IN_FLIGHT as u64
+    );
+}
+#[test]
+fn cancelled_nonce_does_not_touch_later_operations() {
+    let (mut v, first) = fixture(false, false);
+    unlimited_uses(&mut v);
+    signed(&mut v, first);
+    let second = next_operation(&mut v, "invoice-2");
+    context("stranger.testnet", 3_600_000_000_003);
+    let _ = v.cancel_nonce(first);
+    v.operations
+        .get_mut(&first)
+        .unwrap()
+        .cancellation
+        .as_mut()
+        .unwrap()
+        .signed_transaction = Some(vec![8, 9]);
+    verify(&mut v, first, true, true);
+    assert_eq!(
+        v.operations.get(&first).unwrap().state,
+        OperationState::Cancelled
+    );
+    assert_eq!(
+        v.operations.get(&second).unwrap().state,
+        OperationState::PossiblySigned
+    );
+    assert_eq!(wallet(&v).in_flight, vec![second]);
+    // Only the cancelled operation is refunded.
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 100);
+    assert_eq!(v.allowances.get(&[5; 32]).unwrap().reserved.0, 10);
 }

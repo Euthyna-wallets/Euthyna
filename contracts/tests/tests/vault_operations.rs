@@ -515,7 +515,7 @@ async fn council_veto_releases_one_delayed_operation_and_wallet_queue() -> Resul
 
 #[tokio::test]
 #[serial]
-async fn enforces_velocity_and_one_operation_queue_per_wallet() -> Result<()> {
+async fn enforces_velocity_and_one_unsigned_operation_per_wallet() -> Result<()> {
     let fixture = setup().await?;
     let first = prepare(&fixture, "QUEUE-1", 200).await?;
     let blocked = fixture
@@ -1032,15 +1032,14 @@ async fn dao_transactions_wait_for_the_veto_window_then_run_in_order() -> Result
         json!(erc20_transfer(RECIPIENT, 10))
     );
 
-    // One transaction at a time per wallet: the second waits for the first.
-    assert_failure_contains(&start_dao(&fixture).await?, "ERR_WALLET_QUEUE_BUSY");
-    let confirmed = confirm(&fixture, &first, 900).await?;
-    assert_eq!(confirmed["state"], "Confirmed");
-
+    // Signed transactions do not block the wallet: the second takes the next
+    // nonce right away, before the first is settled.
     start_dao(&fixture).await?.into_result()?;
     let second = operation_by_id(&fixture, &ids[1]).await?;
     assert_eq!(second["state"], "PossiblySigned");
     assert_eq!(second["evm_nonce"], 1);
+    let confirmed = confirm(&fixture, &first, 900).await?;
+    assert_eq!(confirmed["state"], "Confirmed");
 
     let listed: Vec<Value> = fixture
         .vault

@@ -168,6 +168,10 @@ pub struct VelocityState {
     pub reserved: U128,
 }
 
+/// Signed but unsettled operations a wallet may carry. Bounds how many
+/// transactions can wait behind a nonce that never lands.
+pub const MAX_IN_FLIGHT: usize = 8;
+
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
 pub struct ChainWallet {
@@ -176,7 +180,28 @@ pub struct ChainWallet {
     pub derived_public_key: Option<String>,
     pub address: Option<EvmAddress>,
     pub next_nonce: u64,
+    /// The operation holding `next_nonce` before it is signed. One at a time,
+    /// so nonces are handed out in order and an unsigned one is never skipped.
     pub active_operation: Option<OperationId>,
+    /// Signed operations not settled yet, in nonce order. The budget is already
+    /// spent when an operation is prepared, so settlement only finishes the
+    /// accounting and does not block the next operation.
+    pub in_flight: Vec<OperationId>,
+}
+
+impl ChainWallet {
+    /// A new operation may take the next nonce: none is waiting to be signed
+    /// and the in-flight queue has room.
+    pub fn accepts_operation(&self) -> bool {
+        self.active_operation.is_none() && self.in_flight.len() < MAX_IN_FLIGHT
+    }
+
+    pub(crate) fn release(&mut self, op_id: OperationId) {
+        if self.active_operation == Some(op_id) {
+            self.active_operation = None;
+        }
+        self.in_flight.retain(|id| *id != op_id);
+    }
 }
 
 #[derive(Clone, Debug)]
