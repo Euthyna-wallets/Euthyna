@@ -10,8 +10,8 @@ x-app: &app
   environment: &app-environment
     DATABASE_URL: postgresql://mandateos:${POSTGRES_PASSWORD:-mandateos}@postgres:5432/mandateos
     PORT: "3000"
-    BETTER_AUTH_URL: http://localhost:${MANDATEOS_HTTP_PORT:-8088}
-    CONSOLE_ORIGIN: http://localhost:${MANDATEOS_HTTP_PORT:-8088}
+    BETTER_AUTH_URL: ${PUBLIC_URL:-http://localhost:${MANDATEOS_HTTP_PORT:-8088}}
+    CONSOLE_ORIGIN: ${PUBLIC_URL:-http://localhost:${MANDATEOS_HTTP_PORT:-8088}}
     CONTRACT_ARTIFACTS_DIR: /app/contracts/res
 
 services:

@@ -13,6 +13,8 @@ import { disconnectNearWallet } from "../wallets.js";
 
 type Organization = { id: string; name: string };
 
+const NEW_COMPANY = "__new__";
+
 export function Layout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -66,11 +68,16 @@ export function Layout() {
           <div className="small muted">AI company console · testnet</div>
           {active ? (
             <label className="org-select">
-              <span className="small muted">Organization</span>
+              <span className="small muted">Company (DAO)</span>
               <select
                 value={active.id}
                 onChange={(event) => {
+                  if (event.target.value === NEW_COMPANY) {
+                    navigate("/onboarding?new=1");
+                    return;
+                  }
                   void authClient.organization.setActive({ organizationId: event.target.value }).then(async () => {
+                    localStorage.setItem("mandateos.organization", event.target.value);
                     await organizations.refetch();
                     await queryClient.invalidateQueries();
                   });
@@ -79,7 +86,11 @@ export function Layout() {
                 {(organizations.data ?? []).map((organization) => (
                   <option key={organization.id} value={organization.id}>{organization.name}</option>
                 ))}
+                <option value={NEW_COMPANY}>+ New company</option>
               </select>
+              {status.data?.treasury ? (
+                <span className="small muted mono" title="The DAO that owns this company's vault">{status.data.treasury.daoAccountId}</span>
+              ) : null}
             </label>
           ) : null}
           <nav className="app-nav" aria-label="Console">
