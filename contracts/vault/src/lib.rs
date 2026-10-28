@@ -349,7 +349,7 @@ impl Vault {
                         requires_cosign: config
                             .co_sign_threshold
                             .is_some_and(|threshold| threshold_value > threshold.0),
-                        wallet_busy: wallet.active_operation.is_some(),
+                        wallet_busy: !wallet.accepts_operation(),
                     };
                 }
                 Err(reason) => refusal = Self::closer_refusal(refusal, reason),
@@ -374,6 +374,7 @@ impl Vault {
                     address: None,
                     next_nonce: 0,
                     active_operation: None,
+                    in_flight: Vec::new(),
                 },
             );
         }
@@ -536,7 +537,7 @@ impl Vault {
             .cloned()
             .expect("ERR_WALLET_NOT_FOUND");
         let wallet_address = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
-        require!(wallet.active_operation.is_none(), "ERR_WALLET_QUEUE_BUSY");
+        require!(wallet.accepts_operation(), "ERR_WALLET_QUEUE_BUSY");
 
         let membership_key = MembershipKey {
             role: role.clone(),
@@ -902,7 +903,7 @@ impl Vault {
             .wallets
             .get_mut(&chain_id)
             .expect("ERR_WALLET_NOT_FOUND");
-        require!(wallet.active_operation.is_none(), "ERR_WALLET_QUEUE_BUSY");
+        require!(wallet.accepts_operation(), "ERR_WALLET_QUEUE_BUSY");
         let nonce = wallet.next_nonce;
         wallet.active_operation = Some(op_id);
         let (transaction, tx_digest) =
@@ -1313,6 +1314,15 @@ impl Vault {
             "ERR_NONCE_ALREADY_CONSUMED"
         );
         wallet.next_nonce = wallet.next_nonce.saturating_add(1);
+        // Signed: the nonce is used, the next operation may take the following one.
+        require!(
+            wallet.in_flight.len() < types::MAX_IN_FLIGHT,
+            "ERR_WALLET_QUEUE_BUSY"
+        );
+        wallet.in_flight.push(op_id);
+        if wallet.active_operation == Some(op_id) {
+            wallet.active_operation = None;
+        }
         let path = wallet.mpc_path.clone();
         operation.state = OperationState::PossiblySigned;
         operation.possibly_signed_at_ns = Some(U64(env::block_timestamp()));
@@ -1532,9 +1542,7 @@ impl Vault {
                 .wallets
                 .get_mut(&operation.request.chain_id)
                 .expect("ERR_WALLET_NOT_FOUND");
-            if wallet.active_operation == Some(op_id) {
-                wallet.active_operation = None;
-            }
+            wallet.release(op_id);
             operation.state = terminal;
             self.operations.insert(op_id, operation);
             return;
@@ -1615,7 +1623,7 @@ impl Vault {
         self.wallets
             .get_mut(&operation.request.chain_id)
             .expect("ERR_WALLET_NOT_FOUND")
-            .active_operation = None;
+            .release(op_id);
         operation.state = terminal;
         self.operations.insert(op_id, operation);
     }
