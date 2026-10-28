@@ -84,6 +84,16 @@ export class MandateMcpTools {
   }
 
 
+  solanaTransfer(input: { token: string; to: string; amount: string; reference: string }) {
+    if (!(this.client instanceof OnchainAgentClient)) throw new Error("Solana needs the direct on-chain mode (euthyna-signer)");
+    return this.client.solanaTransfer({ token: input.token === "SOL" ? null : input.token, to: input.to, amount: input.amount, reference: input.reference });
+  }
+
+  solanaStatus(input: { reference: string }) {
+    if (!(this.client instanceof OnchainAgentClient)) throw new Error("Solana needs the direct on-chain mode (euthyna-signer)");
+    return this.client.solanaStatus(input.reference);
+  }
+
   status(input: { opId: string }) {
     return this.client.status(input.opId as `0x${string}`);
   }
@@ -106,6 +116,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       "Call `mandate` first to learn what your role allows, your remaining budgets and the recipients you may pay.",
       "Call `check` before `pay`: it answers allowed or refused, and why, without reserving anything.",
       "If your role has a revenue-sharing budget, `share_revenue` sends ETH to the company's shareholders; nothing else can receive it.",
+      "On Solana, `mandate` lists the company's Solana wallet and what your role may send; `solana_transfer` sends SOL or a token to an allowed recipient.",
       "A refusal is final for you: there is no override and no human escalation. Never retry with a different recipient or amount than the task requires.",
       "If the task needs something your role does not allow, stop and report the refusal and its reason to whoever gave you the task. Do not ask the members yourself: only a member decides to put a refused operation to a vote.",
     ].join(" "),
@@ -162,6 +173,23 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async (input) => result(await tools.shareRevenue(input)));
+  server.registerTool("solana_transfer", {
+    title: "Send SOL or a token on Solana",
+    description: "Send from the company's Solana wallet (Solana devnet) to a recipient your role allows, within its budget. token: \"SOL\", \"USDC\" or a mint address. amount in base units (1 SOL = 1000000000 lamports; 1 USDC = 1000000). The vault builds and signs the exact transaction; this broadcasts it, waits for finality and settles it.",
+    inputSchema: {
+      token: z.string().min(3).max(64),
+      to: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/).describe("Recipient wallet (base58). For tokens, its token account is created if needed."),
+      amount: uint,
+      reference: z.string().min(1).max(120),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async (input) => result(await tools.solanaTransfer(input)));
+  server.registerTool("solana_status", {
+    title: "Solana transfer status",
+    description: "Where a Solana transfer stands (by its reference); settles it once finalized.",
+    inputSchema: { reference: z.string().min(1).max(120) },
+    annotations: { idempotentHint: true },
+  }, async (input) => result(await tools.solanaStatus(input)));
   server.registerTool("status", {
     title: "Read MandateOS operation status",
     description: "Read the merged Vault, worker, receipt and visa status.",

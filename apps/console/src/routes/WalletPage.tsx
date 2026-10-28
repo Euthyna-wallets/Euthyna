@@ -115,6 +115,33 @@ export function WalletPage() {
           ) : <div className="state">The wallet is created by the first vote. <Link to="/onboarding">Continue setup</Link></div>}
         </Card>
 
+        {address && status.data?.solana ? (
+          <Card title="Solana">
+            {!status.data.solana.supported ? (
+              <div className="state">This vault predates Solana support: members can vote an upgrade to the latest published version first.</div>
+            ) : status.data.solana.address ? (
+              <div className="stack">
+                <div className="row wrap">
+                  <strong className="mono">{status.data.solana.address}</strong>
+                  <button className="ghost" onClick={() => void navigator.clipboard.writeText(status.data!.solana!.address!)}>Copy</button>
+                </div>
+                <p className="small muted">
+                  {status.data.solana.network} balance: {status.data.solana.sol ?? "?"} SOL. An ed25519 key derived by NEAR MPC: nobody holds it,
+                  agents send only what their role allows.
+                </p>
+              </div>
+            ) : (
+              <div className="row wrap">
+                <span className="small muted">Give the company a Solana wallet, governed by the same members and roles.</span>
+                <button disabled={!me || Boolean(busy)} onClick={() => void run("solana", async () => {
+                  const result = await signDaoProposal(me, await omni.solanaWalletProposal());
+                  return `Proposal #${result.proposalId} submitted: open the wallet on Solana.`;
+                })}>Open the Solana wallet</button>
+              </div>
+            )}
+          </Card>
+        ) : null}
+
         {address ? (
           <Card title="Connect an app">
             {!walletConnect.enabled ? <div className="state">WalletConnect is not configured on this console.</div> : (

@@ -186,6 +186,9 @@ describe("OmniRoles SDK", () => {
       "execute_queued_operation",
       "cancel_prepared",
       "renounce_role",
+      "execute_solana",
+      "settle_solana",
+      "release_solana_unconfirmed",
     ]);
   });
 

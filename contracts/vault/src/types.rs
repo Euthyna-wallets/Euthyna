@@ -376,6 +376,11 @@ pub enum RuleChange {
     Upgrade {
         code_hash: near_sdk::json_types::Base58CryptoHash,
     },
+    /// What the role may send on Solana (replaces the role's Solana list).
+    SetSolanaPermissions {
+        role: String,
+        permissions: Vec<crate::solana::SolanaPermission>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -466,6 +471,7 @@ pub(crate) struct MpcSignRequest {
 #[serde(crate = "near_sdk::serde")]
 pub(crate) enum MpcPayload {
     Ecdsa(String),
+    Eddsa(String),
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -477,7 +483,7 @@ pub enum MpcSignatureResponse {
         recovery_id: u8,
     },
     Ed25519 {
-        signature: String,
+        signature: Vec<u8>,
     },
 }
 

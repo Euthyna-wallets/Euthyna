@@ -718,6 +718,12 @@ export function createApp({
             maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
           }),
           z.object({
+            kind: z.literal("solana-transfer"),
+            token: z.enum(["USDC"]).nullable(),
+            recipients: z.array(z.object({ address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/), label: z.string().max(80) })).min(1).max(32),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+          }),
+          z.object({
             kind: z.literal("wrap"),
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
           }),
@@ -763,8 +769,8 @@ export function createApp({
       return context.json(result);
     });
     app.post("/v1/console/omniroles/proposals/wallet", requireConsole(auth, consoleLimiter), async (context) => {
-      const input = await parseJson(context, z.object({ chainId: z.number().int().positive().optional() }));
-      return context.json(await omniroles.walletProposal(orgOf(context), input.chainId));
+      const input = await parseJson(context, z.object({ chainId: z.number().int().positive().optional(), solana: z.boolean().optional() }));
+      return context.json(await omniroles.walletProposal(orgOf(context), input.chainId, input.solana ?? false));
     });
     app.post("/v1/console/omniroles/proposals/transaction", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({

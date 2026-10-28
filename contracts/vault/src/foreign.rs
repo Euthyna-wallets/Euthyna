@@ -9,6 +9,20 @@ pub(crate) struct VerifyArgs {
     payload_version: u8,
     expected_payload_hash: String,
 }
+impl VerifyArgs {
+    pub(crate) fn new(
+        request: near_sdk::serde_json::Value,
+        domain_id: u64,
+        expected_payload_hash: String,
+    ) -> Self {
+        Self {
+            request,
+            domain_id,
+            payload_version: 1,
+            expected_payload_hash,
+        }
+    }
+}
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VerifyResponse {
