@@ -1,3 +1,4 @@
+import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaRpc, solanaTokenOf, type SolanaProfile } from "./solana.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, hexToBytes, type Hex } from "viem";
 import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
 
@@ -7,7 +8,7 @@ export interface DirectVault {
   authorize: NearVaultGateway["authorize"];
   cancelNonce: NearVaultGateway["cancelNonce"];
   view<T>(method: string, args?: Record<string, unknown>): Promise<T>;
-  action(method: string, args: Record<string, unknown>): Promise<string>;
+  action(method: string, args: Record<string, unknown>, gas?: string): Promise<string>;
 }
 export interface DirectOperation extends Record<string, unknown> {
   state: string; signed_transaction: number[] | null;
@@ -15,6 +16,7 @@ export interface DirectOperation extends Record<string, unknown> {
   possibly_signed_at_ns: string | null;
 }
 export type Rpc = <T>(method: string, params: unknown[]) => Promise<T>;
+type SolanaOperationView = { op_id: number[]; state: string; signature: number[] | null; signed_transaction: number[] | null };
 export function publicRpc(url: string): Rpc {
   return async <T>(method: string, params: unknown[]): Promise<T> => {
     const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(30_000) });
@@ -29,14 +31,27 @@ export class OnchainAgentClient {
   constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
-    const [config, membership, suppliers, wallet] = await Promise.all([
+    const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions] = await Promise.all([
       this.vault.view("get_role", { role }), this.vault.view("get_membership", { role, member }),
       this.vault.view("get_address_list", { list: "suppliers" }), this.vault.view("get_wallet", { chain_id }),
+      // Vaults older than the Solana version do not have these views.
+      this.vault.view<{ address: number[] | null } | null>("get_solana_wallet").catch(() => null),
+      this.vault.view<Array<{ asset: unknown; recipients: number[][]; allowance: number[] }>>("get_solana_permissions", { role }).catch(() => []),
     ]);
     const permissions = (config as { config?: { permissions?: Array<{ conditions: Array<{ operator: number; compValue: Hex }> }> } } | null)?.config?.permissions ?? [];
     const keys = [...new Set(permissions.flatMap((p) => p.conditions.filter((c) => c.operator === 28 || c.operator === 30).map((c) => c.compValue)))];
     const allowances = await Promise.all(keys.map(async (key) => ({ key, allowance: await this.vault.view("get_allowance", { key: Array.from(hexToBytes(key)) }) })));
-    return { config, membership, suppliers, wallet, allowances };
+    const solanaAllowances = await Promise.all(solanaPermissions.map(async (permission) => ({ key: bytesToHex(Uint8Array.from(permission.allowance)), allowance: await this.vault.view("get_allowance", { key: permission.allowance }) })));
+    const solana = solanaWallet?.address ? {
+      wallet: base58Encode(solanaWallet.address),
+      network: SOLANA_DEVNET.name,
+      permissions: solanaPermissions.map((permission) => ({
+        token: permission.asset === "Sol" ? "SOL" : base58Encode((permission.asset as { Spl: { mint: number[] } }).Spl.mint),
+        recipients: permission.recipients.map((recipient) => base58Encode(recipient)),
+        budget: bytesToHex(Uint8Array.from(permission.allowance)),
+      })),
+    } : null;
+    return { config, membership, suppliers, wallet, allowances: [...allowances, ...solanaAllowances], solana };
   }
   async pay(intent: PaymentRequest, _invoice?: InvoiceContext) {
     const { chain_id } = this.vault.identity();
@@ -122,6 +137,54 @@ export class OnchainAgentClient {
     const operation = await this.status(opId);
     return { outcome: "authorized" as const, opId, nearTransactionHash, state: operation.state };
   }
+  /**
+   * Send SOL or an SPL token from the company's Solana wallet. The vault checks
+   * the role, charges the budget and signs; this broadcasts, waits for
+   * finality and asks MPC to attest it (settle_solana). Amount in base units.
+   */
+  async solanaTransfer(input: { token: string | null; to: string; amount: string; reference: string }, profile: SolanaProfile = SOLANA_DEVNET) {
+    const { role } = this.vault.identity();
+    const rpc = solanaRpc(profile.rpcUrl);
+    const token = solanaTokenOf(profile, input.token);
+    const request = { asset: solanaAsset(token), to: solanaAddress(input.to), amount: input.amount, recent_blockhash: await latestBlockhash(rpc), reference: input.reference };
+    const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_solana", { role, member: this.vault.identity().member, request });
+    if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    // Builds the transaction (two PDA derivations for SPL) and asks MPC to sign.
+    const nearTransactionHash = await this.vault.action("execute_solana", { role, request }, "150000000000000");
+    let op: SolanaOperationView | null = null;
+    for (let attempt = 0; attempt < 20 && !op?.signed_transaction; attempt += 1) {
+      op = await this.vault.view<SolanaOperationView | null>("get_solana_operation_by_reference", { role, reference: input.reference });
+      if (!op?.signed_transaction) await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    if (!op?.signed_transaction || !op.signature) throw new Error("the MPC signature did not come back; the budget stays reserved until release_solana_unconfirmed");
+    const signature = base58Encode(op.signature);
+    await broadcast(rpc, op.signed_transaction).catch((error: unknown) => {
+      if (!/already been processed/i.test(String(error))) throw error;
+    });
+    return { outcome: "sent" as const, token: token.symbol, signature, explorer: profile.explorer.replace("{tx}", signature), nearTransactionHash, ...(await this.solanaStatus(input.reference, profile)) };
+  }
+
+  /** Settles a Solana operation once finalized (MPC attestation). Safe to call again. */
+  async solanaStatus(reference: string, profile: SolanaProfile = SOLANA_DEVNET, waitMs = 60_000) {
+    const { role } = this.vault.identity();
+    const rpc = solanaRpc(profile.rpcUrl);
+    const op = await this.vault.view<SolanaOperationView | null>("get_solana_operation_by_reference", { role, reference });
+    if (!op?.signature) return { state: op?.state ?? "unknown" };
+    if (op.state !== "PossiblySigned") return { state: op.state };
+    const signature = base58Encode(op.signature);
+    const deadline = Date.now() + waitMs;
+    let status = await signatureStatus(rpc, signature);
+    while (!status?.finalized && !status?.failed && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      status = await signatureStatus(rpc, signature);
+    }
+    if (status?.failed) return { state: "PossiblySigned", solana: "failed", error: status.err };
+    if (!status?.finalized) return { state: "PossiblySigned", solana: status ? "confirmed, not finalized yet" : "not seen yet" };
+    await this.vault.action("settle_solana", { op_id: op.op_id }, "100000000000000");
+    const settled = await this.vault.view<SolanaOperationView | null>("get_solana_operation_by_reference", { role, reference });
+    return { state: settled?.state ?? "unknown", solana: "finalized" };
+  }
+
   async shareRevenue(amountWei: string, reference: string): Promise<Record<string, unknown>> {
     if (!this.advisory?.shareRevenue) throw new Error("Use execute_call with the bridge calldata when the optional revenue builder API is unavailable");
     const op = await this.advisory.shareRevenue(amountWei);

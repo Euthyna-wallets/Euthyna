@@ -54,6 +54,7 @@ import {
   type VaultCall,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
+import { base58Encode, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
 import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseUnits, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
@@ -76,6 +77,8 @@ export interface OmniRolesConfig {
   daoFactoryId: string;
   /** Nomos factory: creates the vault as <slug>.<nomosId> from a published version. */
   nomosId: string;
+  /** Solana RPC for the company's Solana wallet balance (devnet by default). */
+  solanaRpcUrl?: string;
   mpcContractId: string;
   artifactsDir: string;
   accountParent: string;
@@ -838,6 +841,7 @@ export class OmniRolesService {
       wallet: walletAddress
         ? { address: walletAddress, ...(await this.chain.balances(walletAddress, PROFILE).catch(() => ({ eth: "?", tokens: [] }))) }
         : null,
+      solana: await this.solanaWallet(treasury.vaultAccountId),
       paused: Boolean(paused),
     };
   }
@@ -846,8 +850,9 @@ export class OmniRolesService {
   // Proposals (signed by members in their wallet)
   // -------------------------------------------------------------------------
 
-  async walletProposal(organizationId: string, chainId?: number) {
+  async walletProposal(organizationId: string, chainId?: number, solana = false) {
     const treasury = await this.requireTreasury(organizationId);
+    if (solana) return this.proposal(treasury, "Create the company wallet on Solana", [{ method: "request_solana_wallet" }]);
     const target = chainId ?? treasury.baseChainId;
     const calls: VaultCall[] = [{ method: "request_wallet", chainId: target }];
     return this.proposal(treasury, `Create the company wallet on ${chainName(target)}`, calls);
@@ -1671,6 +1676,25 @@ export class OmniRolesService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The company's Solana wallet: null on vaults older than the Solana version,
+   * { address: null } until the members vote it.
+   */
+  private async solanaWallet(vaultAccountId: string): Promise<{ supported: boolean; address: string | null; sol: string | null; network: string } | null> {
+    const wallet = await this.near.viewFunction<{ address: number[] | null } | null>(vaultAccountId, "get_solana_wallet").then(
+      (value) => ({ value }),
+      () => null,
+    );
+    if (!wallet) return { supported: false, address: null, sol: null, network: SOLANA_DEVNET.name };
+    const address = wallet.value?.address ? base58Encode(wallet.value.address) : null;
+    let sol: string | null = null;
+    if (address) {
+      const lamports = await solanaRpc(this.config.solanaRpcUrl ?? SOLANA_DEVNET.rpcUrl)<{ value: number }>("getBalance", [address, { commitment: "confirmed" }]).catch(() => null);
+      sol = lamports ? (lamports.value / 1e9).toString() : lamports === null ? null : "0";
+    }
+    return { supported: true, address, sol, network: SOLANA_DEVNET.name };
   }
 
   /** Versions published on Nomos, oldest first; code hashes are base58 sha256. */

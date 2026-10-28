@@ -2,6 +2,7 @@
 mod conditions;
 mod evm;
 mod foreign;
+pub mod solana;
 mod types;
 
 use borsh::to_vec;
@@ -1734,6 +1735,10 @@ impl Vault {
             }
             // Deployed by `execute_rule_change` once the code is fetched.
             RuleChange::Upgrade { .. } => {}
+            // Independent of SetRole's order in the same vote; RemoveRole clears it.
+            RuleChange::SetSolanaPermissions { role, permissions } => {
+                solana::set_permissions(&role, permissions);
+            }
 
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
@@ -1749,6 +1754,7 @@ impl Vault {
                     "ERR_ROLE_IN_USE"
                 );
                 self.roles.remove(&role);
+                solana::set_permissions(&role, Vec::new());
             }
             RuleChange::GrantMembership {
                 role,
@@ -1874,6 +1880,10 @@ impl Vault {
             RuleChange::RemoveListAddress { list, .. } => Self::validate_list_name(list),
             RuleChange::SetSettlementConfig { config } => Self::validate_settlement_config(config),
             RuleChange::Upgrade { .. } => {}
+            RuleChange::SetSolanaPermissions { role, permissions } => {
+                require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
+                solana::validate_permissions(permissions);
+            }
 
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");

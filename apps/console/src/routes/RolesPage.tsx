@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
+import { isSolanaAddress, SOLANA_DEVNET } from "@mandateos/sdk/solana";
 import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, nearRecipient, stringHash, validRoleName, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
@@ -161,7 +162,8 @@ type BlockDraft =
   | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string }
   | { kind: "share-revenue"; sharesAccountId: string; amount: string; periodDays: number }
   | { kind: "lending"; protocol: LendingId; token: string; amount: string; periodDays: number; maxApproval: string }
-  | { kind: "wrap"; amount: string; periodDays: number };
+  | { kind: "wrap"; amount: string; periodDays: number }
+  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number };
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
@@ -212,6 +214,10 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     setPreview(null);
     setCatalogOpen(false);
   };
+  const addSolana = () => {
+    setBlocks((current) => [...current, { kind: "solana-transfer", token: null, recipients: [], amount: "0.1", periodDays: 1 }]);
+    setPreview(null);
+  };
   const addShareRevenue = () => {
     if (!sharesAccountId) return;
     setBlocks((current) => [...current, { kind: "share-revenue", sharesAccountId, amount: "0.01", periodDays: 7 }]);
@@ -246,6 +252,8 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         ? { kind: "share-revenue", sharesAccountId: block.sharesAccountId, budget: { amount: block.amount, periodDays: block.periodDays } }
         : block.kind === "wrap"
           ? { kind: "wrap", budget: { amount: block.amount, periodDays: block.periodDays } }
+        : block.kind === "solana-transfer"
+          ? { kind: "solana-transfer", token: block.token, recipients: block.recipients, budget: { amount: block.amount, periodDays: block.periodDays } }
         : block.kind === "lending"
           ? { kind: "lending", protocol: block.protocol, token: block.token as `0x${string}`, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }
           : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
@@ -290,6 +298,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
   const ready = validRoleName(name) && blocks.length > 0 && blocks.every((block) =>
     Number(block.amount) > 0 && (block.kind === "payments"
       ? suppliersOnly || block.recipients.length > 0
+      : block.kind === "solana-transfer" ? block.recipients.length > 0
       : block.kind === "share-revenue" || block.kind === "wrap" || (block.kind === "lending" ? Number(block.maxApproval) > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
   // Say what is missing instead of a silently disabled button.
   const missing = !validRoleName(name)
@@ -298,6 +307,8 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
       ? "Add what this role allows: + Transfers, + DeFi… or + Share revenue"
       : blocks.some((block) => block.kind === "payments" && !suppliersOnly && block.recipients.length === 0)
         ? "Pick at least one recipient for the transfers."
+        : blocks.some((block) => block.kind === "solana-transfer" && block.recipients.length === 0)
+          ? "Add at least one Solana recipient."
         : blocks.some((block) => block.kind === "swap" && (block.tokensOut.length === 0 || block.protocols.length === 0))
           ? "Pick the tokens it may buy and at least one exchange."
           : blocks.some((block) => !(Number(block.amount) > 0))
@@ -319,10 +330,31 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         {blocks.map((block, index) => (
           <div className="block" key={index}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
+              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "solana-transfer" ? "Solana · transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
               <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
             </div>
-            {block.kind === "wrap" ? (
+            {block.kind === "solana-transfer" ? (
+              <>
+                <div className="row wrap">
+                  <label>Token
+                    <select value={block.token ?? "SOL"} onChange={(event) => update(index, { token: event.target.value === "SOL" ? null : event.target.value })}>
+                      {SOLANA_DEVNET.tokens.map((token) => <option key={token.symbol} value={token.mint ? token.symbol : "SOL"}>{token.symbol}</option>)}
+                    </select>
+                  </label>
+                  <label>Budget ({block.token ?? "SOL"})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
+                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                </div>
+                <span className="small muted">Allowed recipients (Solana wallets)</span>
+                {block.recipients.map((recipient) => (
+                  <div key={recipient.address} className="row wrap">
+                    <span className="small">{recipient.label} <span className="mono">{recipient.address}</span></span>
+                    <button className="ghost" onClick={() => update(index, { recipients: block.recipients.filter((item) => item.address !== recipient.address) })}>Remove</button>
+                  </div>
+                ))}
+                <SolanaRecipient onAdd={(recipient) => update(index, { recipients: [...block.recipients.filter((item) => item.address !== recipient.address), recipient] })} />
+                <span className="small muted">From the company's Solana wallet, on {SOLANA_DEVNET.name}. Token accounts of recipients are created when needed.</span>
+              </>
+            ) : block.kind === "wrap" ? (
               <>
                 <div className="row wrap">
                   <label>Budget (ETH)<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
@@ -431,6 +463,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         <div className="row wrap">
           <button onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
           <button onClick={() => setCatalogOpen(true)} title="Pick a protocol from the catalog">+ DeFi…</button>
+          <button onClick={addSolana} title="Send SOL or USDC on Solana to listed wallets, within a budget">+ Solana transfers</button>
           <button
             onClick={addShareRevenue}
             disabled={!sharesAccountId || blocks.some((block) => block.kind === "share-revenue")}
@@ -541,6 +574,20 @@ function DefiCatalog({ onPick, onPickLending, onPickWrap, onClose }: { onPick: (
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SolanaRecipient({ onAdd }: { onAdd: (recipient: { address: string; label: string }) => void }) {
+  const [address, setAddress] = useState("");
+  const [label, setLabel] = useState("");
+  const valid = isSolanaAddress(address) && label.trim().length > 0;
+  return (
+    <div className="row wrap">
+      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
+      <input className="mono" placeholder="Solana address (base58)" value={address} onChange={(event) => setAddress(event.target.value.trim())} />
+      <button disabled={!valid} onClick={() => { onAdd({ address, label: label.trim() }); setAddress(""); setLabel(""); }}>Add</button>
+      {address && !isSolanaAddress(address) ? <span className="small" style={{ color: "#b42318" }}>Not a Solana address.</span> : null}
     </div>
   );
 }

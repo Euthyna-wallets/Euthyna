@@ -26,6 +26,8 @@ const schema = z.object({
   DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
   /** Nomos factory: creates company vaults from published versions. */
   NOMOS_ID: z.string().min(1).default("nomos.euthyna.testnet"),
+  /** Solana RPC for the company's Solana wallet (devnet on testnet). */
+  SOLANA_RPC_URL: z.string().url().default("https://api.devnet.solana.com"),
   DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("6000000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),

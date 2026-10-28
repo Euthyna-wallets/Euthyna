@@ -19,6 +19,9 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "execute_queued_operation",
   "cancel_prepared",
   "renounce_role",
+  "execute_solana",
+  "settle_solana",
+  "release_solana_unconfirmed",
 ] as const;
 
 export const AGENT_GAS = {
@@ -637,8 +640,8 @@ export class NearVaultGateway implements VaultGateway {
   async view<T>(methodName: string, args: Record<string, unknown> = {}): Promise<T> {
     return this.account.viewFunction({ contractId: this.vaultAccountId, methodName, args }) as Promise<T>;
   }
-  async action(methodName: string, args: Record<string, unknown>): Promise<string> {
-    const result = await this.call(methodName, args, "70000000000000");
+  async action(methodName: string, args: Record<string, unknown>, gas = "70000000000000"): Promise<string> {
+    const result = await this.call(methodName, args, gas);
     return result.transaction_outcome.id;
   }
   identity() { return { member: this.account.accountId, role: this.role, chain_id: this.chainId }; }
@@ -656,3 +659,4 @@ export class NearVaultGateway implements VaultGateway {
 
 
 export { OnchainAgentClient, publicRpc } from "./onchain.js";
+export * from "./solana.js";

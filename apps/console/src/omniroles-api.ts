@@ -14,6 +14,8 @@ export type OmniStatus = {
   dao: null | { members: string[]; threshold: unknown };
   wallet: null | { address: string; eth: string; tokens: Array<{ symbol: string; address: string; amount: string }> };
   chains?: Array<{ chainId: number; name: string; enabled: boolean }>;
+  /** null before the treasury; supported=false on vaults older than the Solana version. */
+  solana?: null | { supported: boolean; address: string | null; sol: string | null; network: string };
   paused: boolean;
 };
 
@@ -196,6 +198,7 @@ export const omni = {
   plan: (daoName: string) => api<OmniPlan>("/v1/console/omniroles/plan", { method: "POST", body: JSON.stringify({ daoName }) }),
   create: (daoName: string) => api<{ daoTransaction: string; vaultTransaction: string }>("/v1/console/omniroles/create", { method: "POST", body: JSON.stringify({ daoName }) }),
   walletProposal: (chainId?: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify(chainId ? { chainId } : {}) }),
+  solanaWalletProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify({ solana: true }) }),
   transactionProposal: (input: { title?: string; transactions: Array<{ chainId: number; to: string; value?: string; data?: string; gas?: string }> }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/transaction", { method: "POST", body: JSON.stringify(input) }),
   roleProposal: (draft: unknown) => api<ProposalDraft>("/v1/console/omniroles/proposals/role", { method: "POST", body: JSON.stringify({ draft }) }),

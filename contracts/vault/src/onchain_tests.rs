@@ -772,3 +772,216 @@ fn only_the_dao_queues_an_upgrade() {
         code_hash: [1; 32].into(),
     });
 }
+
+mod solana_flow {
+    use super::*;
+    use crate::solana::*;
+    use ed25519_dalek::{Signer as _, SigningKey};
+
+    const AGENT: &str = "agent.testnet";
+    const OK_TO: [u8; 32] = [9; 32];
+    const BUDGET_KEY: [u8; 32] = [0x50; 32];
+
+    fn result_with(value: Vec<u8>) {
+        testing_env!(
+            VMContextBuilder::new()
+                .current_account_id("vault.testnet".parse().unwrap())
+                .predecessor_account_id("vault.testnet".parse().unwrap())
+                .prepaid_gas(Gas::from_tgas(300))
+                .block_timestamp(3)
+                .build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![near_sdk::PromiseResult::Successful(value)],
+        );
+    }
+
+    /// A vault whose role "payments" may send up to 1 SOL a day to OK_TO.
+    fn setup() -> (Vault, SigningKey) {
+        let (mut v, _) = fixture(false, false);
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let public = key.verifying_key().to_bytes();
+        context("owner.testnet", 3);
+        drop(v.request_solana_wallet());
+        result_with(format!("\"ed25519:{}\"", bs58::encode(public).into_string()).into_bytes());
+        v.on_solana_public_key(Ok(format!(
+            "ed25519:{}",
+            bs58::encode(public).into_string()
+        )));
+        v.memberships
+            .get_mut(&MembershipKey {
+                role: "payments".into(),
+                member: AGENT.parse().unwrap(),
+            })
+            .unwrap()
+            .max_uses = None;
+        v.apply_rule_change(
+            RuleChange::SetAllowance {
+                key: BUDGET_KEY,
+                balance: U128(1_000_000_000),
+                refill: U128(1_000_000_000),
+                max_refill: U128(1_000_000_000),
+                period_ns: 86_400_000_000_000,
+            },
+            3,
+        );
+        v.apply_rule_change(
+            RuleChange::SetSolanaPermissions {
+                role: "payments".into(),
+                permissions: vec![SolanaPermission {
+                    asset: SolanaAsset::Sol,
+                    recipients: vec![OK_TO],
+                    allowance: BUDGET_KEY,
+                }],
+            },
+            3,
+        );
+        (v, key)
+    }
+
+    fn request(to: [u8; 32], lamports: u64, reference: &str) -> SolanaTransferRequest {
+        SolanaTransferRequest {
+            asset: SolanaAsset::Sol,
+            to,
+            amount: U64(lamports),
+            recent_blockhash: [3; 32],
+            reference: reference.into(),
+        }
+    }
+
+    fn last_op(v: &Vault, reference: &str) -> SolanaOperation {
+        let op_id = *v
+            .references
+            .get(&ReferenceKey {
+                role: "payments".into(),
+                reference: reference.into(),
+            })
+            .unwrap();
+        v.get_solana_operation(op_id).unwrap()
+    }
+
+    #[test]
+    fn derives_the_wallet_from_the_mpc_key() {
+        let (v, key) = setup();
+        assert_eq!(
+            v.get_solana_wallet().unwrap().address,
+            Some(key.verifying_key().to_bytes())
+        );
+    }
+
+    #[test]
+    fn signs_settles_and_spends_the_budget() {
+        let (mut v, key) = setup();
+        context(AGENT, 3);
+        drop(v.execute_solana("payments".into(), request(OK_TO, 400_000_000, "pay-1")));
+        let op = last_op(&v, "pay-1");
+        assert_eq!(
+            v.allowances.get(&BUDGET_KEY).unwrap().reserved.0,
+            400_000_000
+        );
+
+        // A signature by any other key, or over another message, is dropped.
+        let wrong = SigningKey::from_bytes(&[1; 32])
+            .sign(&op.message)
+            .to_bytes();
+        result_with(vec![]);
+        v.on_solana_signature(
+            op.op_id,
+            Ok(MpcSignatureResponse::Ed25519 {
+                signature: wrong.to_vec(),
+            }),
+        );
+        assert!(
+            v.get_solana_operation(op.op_id)
+                .unwrap()
+                .signed_transaction
+                .is_none()
+        );
+
+        let good = key.sign(&op.message).to_bytes();
+        v.on_solana_signature(
+            op.op_id,
+            Ok(MpcSignatureResponse::Ed25519 {
+                signature: good.to_vec(),
+            }),
+        );
+        let signed = v.get_solana_operation(op.op_id).unwrap();
+        let wire = signed.signed_transaction.unwrap();
+        assert_eq!(&wire[1..65], &good);
+        assert_eq!(&wire[65..], op.message.as_slice());
+
+        // A wrong attestation does nothing; the right one confirms and spends.
+        let expected = crate::solana::payload_hash(&good);
+        let response = |hash: [u8; 32]| -> foreign::VerifyResponse {
+            from_value(json!({"payload_hash":hex::encode(hash),"signature":{"scheme":"Ed25519","signature":[0]}})).unwrap()
+        };
+        v.on_solana_settled(op.op_id, expected, Ok(response([0; 32])));
+        assert_eq!(
+            v.get_solana_operation(op.op_id).unwrap().state,
+            OperationState::PossiblySigned
+        );
+        v.on_solana_settled(op.op_id, expected, Ok(response(expected)));
+        assert_eq!(
+            v.get_solana_operation(op.op_id).unwrap().state,
+            OperationState::Confirmed
+        );
+        let budget = v.allowances.get(&BUDGET_KEY).unwrap();
+        assert_eq!((budget.balance.0, budget.reserved.0), (600_000_000, 0));
+    }
+
+    #[test]
+    fn refuses_what_the_role_does_not_allow() {
+        let (v, key) = setup();
+        let agent: AccountId = AGENT.parse().unwrap();
+        let check = |request| {
+            v.check_solana("payments".into(), agent.clone(), request)
+                .reason
+        };
+        assert_eq!(check(request(OK_TO, 1, "a")), None);
+        assert_eq!(
+            check(request([8; 32], 1, "a")).as_deref(),
+            Some("FunctionNotAllowed")
+        );
+        assert_eq!(
+            check(request(OK_TO, 1_000_000_001, "a")).as_deref(),
+            Some("allowanceExceeded")
+        );
+        assert_eq!(
+            check(request(key.verifying_key().to_bytes(), 1, "a")).as_deref(),
+            Some("ERR_SELF_TRANSFER")
+        );
+        let spl = SolanaTransferRequest {
+            asset: SolanaAsset::Spl { mint: [5; 32] },
+            ..request(OK_TO, 1, "a")
+        };
+        assert_eq!(check(spl).as_deref(), Some("FunctionNotAllowed"));
+        assert_eq!(
+            v.check_solana(
+                "payments".into(),
+                "stranger.testnet".parse().unwrap(),
+                request(OK_TO, 1, "a")
+            )
+            .reason
+            .as_deref(),
+            Some("ERR_MEMBERSHIP_NOT_FOUND")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_REFERENCE_ALREADY_USED")]
+    fn a_reference_is_used_once() {
+        let (mut v, _) = setup();
+        context(AGENT, 3);
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same")));
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same")));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_OWNER_ONLY")]
+    fn only_the_dao_opens_the_solana_wallet() {
+        let (mut v, _) = fixture(false, false);
+        context(AGENT, 3);
+        drop(v.request_solana_wallet());
+    }
+}

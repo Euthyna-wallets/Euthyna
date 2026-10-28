@@ -9,6 +9,7 @@
  *
  * Browser-safe: depends on viem only.
  */
+import { base58Encode, SOLANA_DEVNET, solanaAddress, solanaAsset, solanaTokenOf } from "./solana.js";
 import { concatHex, decodeFunctionData, encodeAbiParameters, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, sha256, toBytes, toHex, type Hex } from "viem";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,11 @@ export type RuleChange =
   | { SetStatusPublicKey: { status_public_key: number[] } }
   | { SetVersions: { policy_version: number; registry_version: number } }
   /** Move the vault to a version published on Nomos (base58 sha256 of the WASM). */
-  | { Upgrade: { code_hash: string } };
+  | { Upgrade: { code_hash: string } }
+  /** What the role may send on Solana; replaces the role's list. */
+  | { SetSolanaPermissions: { role: string; permissions: SolanaPermission[] } };
+
+export type SolanaPermission = { asset: "Sol" | { Spl: { mint: number[] } }; recipients: number[][]; allowance: number[] };
 
 // Encodings and operators of the OmniRoles condition format.
 export const Encoding = { None: 0, Static: 1, Dynamic: 2, Tuple: 3, Array: 4, AbiEncoded: 5, EtherValue: 6 } as const;
@@ -429,7 +434,9 @@ export type RoleBlock =
   /** Deposit `token` into a lending pool (budget) and withdraw it back to the wallet. */
   | { kind: "lending"; protocol: LendingId; token: Hex; budget: Budget; maxApproval: string }
   /** Wrap ETH into WETH (budget in ETH) and unwrap it back, both in the wallet. */
-  | { kind: "wrap"; budget: Budget };
+  | { kind: "wrap"; budget: Budget }
+  /** Send SOL or an SPL token on Solana to listed wallets (base58), within a budget. */
+  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; budget: Budget };
 
 export type RoleMember = { accountId: string; kind: MembershipKind; maxUses?: number | null; endsAt?: Date | null };
 
@@ -474,6 +481,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   requireNonEmpty(draft.blocks, "block");
   const changes: RuleChange[] = [];
   const permissions: Permission[] = [];
+  const solana: SolanaPermission[] = [];
   const toPermission = (sheet: Sheet): Permission => ({
     chain_id: profile.chainId,
     target: bytes(getAddress(sheet.target)),
@@ -484,7 +492,9 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
-    const token = block.kind === "share-revenue" || block.kind === "wrap" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
+    const token = block.kind === "solana-transfer"
+      ? (() => { const sol = solanaTokenOf(SOLANA_DEVNET, block.token); return { address: NATIVE_ETH.address, symbol: sol.symbol, decimals: sol.decimals }; })()
+      : block.kind === "share-revenue" || block.kind === "wrap" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
@@ -514,6 +524,14 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       permissions.push(toPermission(erc20ApproveSheet(token.address, [lending.pool], parseUnits(block.maxApproval, token.decimals))));
       permissions.push(toPermission(aaveSupplySheet(lending.pool, [token.address], key)));
       permissions.push(toPermission(aaveWithdrawSheet(lending.pool, [token.address])));
+    } else if (block.kind === "solana-transfer") {
+      requireNonEmpty(block.recipients, "Solana recipient");
+      if (block.recipients.length > 32) throw new Error("at most 32 Solana recipients");
+      solana.push({
+        asset: solanaAsset(solanaTokenOf(SOLANA_DEVNET, block.token)),
+        recipients: block.recipients.map((recipient) => solanaAddress(recipient.address)),
+        allowance: key,
+      });
     } else if (block.kind === "wrap") {
       if (!profile.weth) throw new Error(`no WETH known on ${profile.name}`);
       permissions.push({ ...toPermission(wethWrapSheet(profile.weth, key)), allow_value: true });
@@ -569,6 +587,8 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       },
     });
   }
+  // Only roles that use Solana carry it: older vaults do not know this change.
+  if (solana.length > 0) changes.push({ SetSolanaPermissions: { role: draft.name, permissions: solana } });
   return changes;
 }
 
@@ -602,6 +622,7 @@ export type DaoTransactionDraft = {
 export type VaultCall =
   | { method: "queue_rule_change"; change: RuleChange }
   | { method: "request_wallet"; chainId: number }
+  | { method: "request_solana_wallet" }
   | { method: "pause" | "unpause" }
   | { method: "submit_transactions"; transactions: DaoTransactionDraft[] };
 
@@ -634,7 +655,7 @@ export function proposalArgs(vaultAccountId: string, title: string, calls: Vault
       method_name: call.method,
       args: btoa(JSON.stringify(args)),
       deposit: "0",
-      gas: call.method === "request_wallet" ? WALLET_GAS : call.method === "submit_transactions" ? DAO_TRANSACTIONS_GAS : RULE_GAS,
+      gas: call.method === "request_wallet" || call.method === "request_solana_wallet" ? WALLET_GAS : call.method === "submit_transactions" ? DAO_TRANSACTIONS_GAS : RULE_GAS,
     };
   });
   return {
@@ -1056,6 +1077,7 @@ export function decodeVaultCalls(kind: unknown, vaultAccountId: string): VaultCa
     const args = JSON.parse(atob(action.args)) as Record<string, unknown>;
     if (action.method_name === "queue_rule_change") return { method: "queue_rule_change", change: args.change as RuleChange };
     if (action.method_name === "request_wallet") return { method: "request_wallet", chainId: Number(args.chain_id) };
+    if (action.method_name === "request_solana_wallet") return { method: "request_solana_wallet" };
     if (action.method_name === "pause" || action.method_name === "unpause") return { method: action.method_name };
     if (action.method_name === "submit_transactions") {
       const transactions = (args.transactions as Array<Record<string, unknown>>).map((transaction) => ({
@@ -1158,6 +1180,17 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
   const result: Record<string, BudgetInfo> = {};
   const findToken = (address: Hex) => profile.tokens.find((item) => item.address.toLowerCase() === address.toLowerCase());
   for (const change of changes) {
+    if ("SetSolanaPermissions" in change) {
+      for (const permission of change.SetSolanaPermissions.permissions) {
+        const mint = permission.asset === "Sol" ? null : base58Encode(permission.asset.Spl.mint);
+        const sol = SOLANA_DEVNET.tokens.find((item) => item.mint === mint);
+        result[hexOf(permission.allowance).toLowerCase()] = {
+          token: sol ? { address: NATIVE_ETH.address, symbol: sol.symbol, decimals: sol.decimals } : undefined,
+          label: `${change.SetSolanaPermissions.role} Solana transfers`,
+        };
+      }
+      continue;
+    }
     if (!("SetRole" in change)) continue;
     const { role, config } = change.SetRole;
     const approvals = config.permissions.filter((permission) => permission.selector && hexOf(permission.selector) === SELECTORS.approve);
@@ -1342,12 +1375,23 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
   if ("SetCouncil" in change) return { title: "Replace the security council", details: [change.SetCouncil.members.join(", ")] };
   if ("SetVisaPublicKey" in change) return { title: "Rotate the Guard visa key", details: [] };
   if ("SetStatusPublicKey" in change) return { title: "Rotate the Guard status key", details: [] };
+  if ("SetSolanaPermissions" in change) {
+    const { role, permissions } = change.SetSolanaPermissions;
+    const details = permissions.map((permission) => {
+      const mint = permission.asset === "Sol" ? null : base58Encode(permission.asset.Spl.mint);
+      const token = SOLANA_DEVNET.tokens.find((item) => item.mint === mint)?.symbol ?? mint ?? "SOL";
+      const budget = context.budgets?.[hexOf(permission.allowance).toLowerCase()];
+      return `Send ${token} on Solana to ${permission.recipients.map((recipient) => base58Encode(recipient)).join(", ")}${budget ? `, within budget "${budget.label}"` : ""}`;
+    });
+    return { title: permissions.length ? `Let role "${role}" send on Solana` : `Remove Solana transfers from role "${role}"`, details };
+  }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
   return { title: `Set policy version ${change.SetVersions.policy_version}, registry version ${change.SetVersions.registry_version}`, details: [] };
 }
 
 export function describeVaultCall(call: VaultCall, context: DescribeContext): { title: string; details: string[] } {
   if (call.method === "request_wallet") return { title: `Create the company wallet on ${call.chainId === context.profile.chainId ? context.profile.name : `chain ${call.chainId}`}`, details: [] };
+  if (call.method === "request_solana_wallet") return { title: "Create the company wallet on Solana", details: ["Its address is an ed25519 key derived by NEAR MPC; nobody holds it."] };
   if (call.method === "pause") return { title: "Pause all operations", details: [] };
   if (call.method === "unpause") return { title: "Resume operations", details: [] };
   if (call.method === "queue_rule_change") return describeChange(call.change, context);
