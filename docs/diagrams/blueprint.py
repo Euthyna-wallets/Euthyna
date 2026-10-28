@@ -110,33 +110,48 @@ def legend(y, w):
 
 def technical():
     out.clear()
-    cx = 270
+    cx = 290
     text(24, 40, 'MANDATEOS · TECHNICAL', 13, GOLD, 'start', 700)
-    legend(64, 560)
-    node(cx, 150, 46, 'agent', 'AI employee', 'agent over MCP')
-    arrow(f'M{cx-14} 262 V318')
-    arrow(f'M{cx+14} 318 V262')
-    chip(cx - 82, 290, 'visa request')
-    chip(cx + 82, 290, 'signed visa')
-    node(cx, 380, 46, 'guard', 'Guard', 'checks the invoice')
-    out.append(f'<path d="M16 500 H544" stroke="{MUTED}" stroke-width="1.4" stroke-dasharray="2 6"/>')
-    text(530, 492, 'off chain', 12, MUTED, 'end'); text(530, 518, 'on chain', 12, MUTED, 'end')
-    arrow(f'M{cx-54} 150 H96 V610 H{cx-60}')
-    chip(96, 500, 'prepare · authorize')
-    node(cx, 610, 52, 'vault', 'OmniRoles vault', 'roles and budgets|no access key', ring=GOLD)
-    node(460, 610, 40, 'dao', 'Owners', 'Sputnik DAO')
-    arrow(f'M413 610 H{cx+64}')
-    text(370, 598, 'vote roles', 12, CYAN, weight=600)
-    arrow(f'M{cx} 744 V790')
-    node(cx, 846, 46, 'mpc', 'NEAR MPC', 'chain signatures')
-    arrow(f'M{cx} 948 V1004')
-    node(cx, 1060, 46, 'wallet', 'Company wallet', 'one address|every EVM chain', ring=GOLD)
-    xs = [150, 230, 310, 390]
+    legend(64, 600)
+    # Off chain: the agent, and an optional advisory Guard.
+    node(cx, 160, 46, 'agent', 'AI employee', 'agent over MCP|key in euthyna-signer')
+    out.append(f'<g opacity=".75">')
+    node(500, 160, 34, 'guard', 'Guard', 'optional|invoice advice')
+    out.append('</g>')
+    arrow(f'M456 160 H{cx+58}', dash='5 6', w=2)
+    out.append(f'<path d="M16 330 H584" stroke="{MUTED}" stroke-width="1.4" stroke-dasharray="2 6"/>')
+    text(570, 322, 'off chain', 12, MUTED, 'end'); text(570, 348, 'on chain', 12, MUTED, 'end')
+    # Agent acts directly on the vault: no visa, no backend.
+    arrow(f'M{cx-54} 160 H112 V470 H{cx-62}')
+    chip(112, 330, 'prepare · authorize')
+    node(cx, 470, 52, 'vault', 'OmniRoles vault', 'roles · budgets · suppliers|no access key', ring=GOLD)
+    node(500, 470, 40, 'dao', 'Owners', 'Sputnik DAO|vote + veto')
+    arrow(f'M453 470 H{cx+66}')
+    text(398, 458, 'vote rules', 12, CYAN, weight=600)
+    # Vault asks MPC to sign; MPC sends back verified receipts.
+    arrow(f'M{cx-16} 604 V666')
+    arrow(f'M{cx+16} 666 V604')
+    chip(cx - 64, 635, 'sign')
+    chip(cx + 84, 635, 'verified receipt')
+    node(cx, 726, 46, 'mpc', 'NEAR MPC', 'signs · verifies receipts')
+    arrow(f'M{cx} 828 V884')
+    node(cx, 940, 46, 'wallet', 'Company wallet', 'one MPC key|EVM today · more soon', ring=GOLD)
+    chip(cx, 1096, 'signed tx · relayed as is', GOLD)
+    xs = [70, 158, 246, 334, 422, 510]
     for x in xs:
-        arrow(f'M{cx + (x-cx)*0.2} 1190 Q{x} 1196 {x} 1236', color=GOLD)
-    for x, n in zip(xs, ['ethereum', 'base', 'arbitrum', None]):
-        chain_hex(x, 1276, n, None if n else '+')
-    return page(560, 1344)
+        arrow(f'M{cx + (x-cx)*0.12} 1112 Q{x} 1118 {x} 1158', color=GOLD, dash=None if x < 300 else '5 6')
+    for x, n in zip(xs, ['ethereum', 'base', 'arbitrum', 'solana', 'bitcoin', None]):
+        dim = n in ('solana', 'bitcoin', None)
+        if dim:
+            out.append('<g opacity=".55">')
+        chain_hex(x, 1198, n, None if n else '+')
+        if dim:
+            out.append('</g>')
+    text(422, 1262, 'coming next', 12, MUTED)
+    # MPC reads the finalized receipt on the destination chain.
+    arrow(f'M560 1166 V726 H{cx+58}', dash='7 6', w=2.2)
+    chip(580, 1000, 'finalized receipt', anchor='end')
+    return page(600, 1290)
 
 
 def product():
