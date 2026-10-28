@@ -217,6 +217,11 @@ export class NearClient {
     return outcome.transaction_outcome.id;
   }
 
+  /** The account that pays for companies, agents and members. */
+  relayerAccountId(): string {
+    return this.env.NEAR_RELAYER_ACCOUNT_ID;
+  }
+
   async getAccount(accountId: string): Promise<{
     code_hash: string;
     amount: string;

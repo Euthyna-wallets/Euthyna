@@ -280,6 +280,7 @@ const PROFILE = BASE_SEPOLIA;
 /** EVM chains the console offers for DAO transactions. */
 const SUPPORTED_CHAINS = [84532, 11155111];
 const NANOS_PER_MS = 1_000_000n;
+const ONE_NEAR = 1_000_000_000_000_000_000_000_000n;
 
 function slugify(name: string): string {
   return name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "company";
@@ -397,53 +398,73 @@ export class OmniRolesService {
     });
     if (existing) throw new OmniRolesError(409, "treasury_exists", "this company already has a treasury");
     const plan = await this.plan(organizationId, daoName);
-    for (const accountId of [plan.daoAccountId, plan.vaultAccountId]) {
-      if (await this.accountExists(accountId)) {
-        throw new OmniRolesError(409, "account_taken", `${accountId} already exists; choose another company name`);
+    const council = plan.council.map((member) => member.nearAccountId);
+    const version = await this.latestVaultVersion();
+    const deposit = await this.near.viewFunction<string>(this.config.nomosId, "vault_deposit", { code_hash: version.codeHash });
+
+    // Resumable: a DAO or vault left by an earlier attempt for the same council
+    // is reused; one that belongs to someone else means the name is taken.
+    const daoReady = await this.ownDao(plan.daoAccountId, council);
+    const vaultReady = await this.ownVault(plan.vaultAccountId, plan.daoAccountId);
+
+    // Check the relayer can pay for what is left, so a half-made company is rare.
+    const needed = (daoReady ? 0n : BigInt(this.config.daoCreateDepositYocto)) + (vaultReady ? 0n : BigInt(deposit)) + ONE_NEAR;
+    const relayer = this.near.relayerAccountId();
+    const balance = BigInt((await this.near.getAccount(relayer).catch(() => ({ amount: "0" }))).amount);
+    if (balance < needed) {
+      throw new OmniRolesError(503, "relayer_low_funds", `${relayer} needs ${formatNear(needed)} NEAR to create this company and holds ${formatNear(balance)}`);
+    }
+
+    let daoTransaction = "existing";
+    if (!daoReady) {
+      const daoArgs = {
+        config: { name: `${daoName} treasury DAO`, purpose: "Set the rules AI agents follow with company funds", metadata: "" },
+        policy: this.daoPolicy(plan),
+      };
+      daoTransaction = await this.near.callFunction(
+        this.config.daoFactoryId,
+        "create",
+        { name: plan.daoAccountId.split(".")[0], args: Buffer.from(JSON.stringify(daoArgs)).toString("base64") },
+        "150000000000000",
+        this.config.daoCreateDepositYocto,
+      );
+      if (!(await this.ownDao(plan.daoAccountId, council))) {
+        throw new OmniRolesError(500, "dao_not_created", `${this.config.daoFactoryId} did not create ${plan.daoAccountId} (transaction ${daoTransaction})`);
       }
     }
-    const policy = this.daoPolicy(plan);
-    const daoArgs = {
-      config: { name: `${daoName} treasury DAO`, purpose: "Set the rules AI agents follow with company funds", metadata: "" },
-      policy,
-    };
-    const daoTransaction = await this.near.callFunction(
-      this.config.daoFactoryId,
-      "create",
-      { name: plan.daoAccountId.split(".")[0], args: Buffer.from(JSON.stringify(daoArgs)).toString("base64") },
-      "150000000000000",
-      this.config.daoCreateDepositYocto,
-    );
-    const version = await this.latestVaultVersion();
-    const initArgs = {
-      client_id: plan.daoAccountId.split(".")[0],
-      owner_id: plan.daoAccountId,
-      mpc_contract_id: this.config.mpcContractId,
-      visa_public_key: Buffer.from(await this.visaSigner.publicKey()).toString("base64"),
-      status_public_key: Buffer.from(await this.statusSigner.publicKey()).toString("base64"),
-      policy_version: 1,
-      registry_version: 1,
-      operation_ttl_ns: this.config.operationTtlNs,
-      rule_delay_ns: this.config.ruleDelayNs,
-      rule_expiration_ns: this.config.ruleExpirationNs,
-      council: plan.council.map((member) => member.nearAccountId),
-    };
-    // Nomos creates the vault with no access key, owned by the DAO, from the
-    // version pinned here; only the DAO can later move it to another version.
-    const deposit = await this.near.viewFunction<string>(this.config.nomosId, "vault_deposit", { code_hash: version.codeHash });
-    const vaultTransaction = await this.near.callFunction(
-      this.config.nomosId,
-      "create_vault",
-      {
-        name: plan.vaultAccountId.split(".")[0],
-        args: Buffer.from(JSON.stringify({ ...initArgs, settlement_config: null })).toString("base64"),
-        code_hash: version.codeHash,
-      },
-      "300000000000000",
-      deposit,
-    );
-    if (!(await this.accountExists(plan.vaultAccountId))) {
-      throw new OmniRolesError(500, "vault_not_created", `Nomos did not create ${plan.vaultAccountId}`);
+
+    let vaultTransaction = "existing";
+    if (!vaultReady) {
+      const initArgs = {
+        client_id: plan.daoAccountId.split(".")[0],
+        owner_id: plan.daoAccountId,
+        mpc_contract_id: this.config.mpcContractId,
+        visa_public_key: Buffer.from(await this.visaSigner.publicKey()).toString("base64"),
+        status_public_key: Buffer.from(await this.statusSigner.publicKey()).toString("base64"),
+        policy_version: 1,
+        registry_version: 1,
+        operation_ttl_ns: this.config.operationTtlNs,
+        rule_delay_ns: this.config.ruleDelayNs,
+        rule_expiration_ns: this.config.ruleExpirationNs,
+        council,
+        settlement_config: null,
+      };
+      // Nomos creates the vault with no access key, owned by the DAO, from the
+      // version pinned here; only the DAO can later move it to another version.
+      vaultTransaction = await this.near.callFunction(
+        this.config.nomosId,
+        "create_vault",
+        {
+          name: plan.vaultAccountId.split(".")[0],
+          args: Buffer.from(JSON.stringify(initArgs)).toString("base64"),
+          code_hash: version.codeHash,
+        },
+        "300000000000000",
+        deposit,
+      );
+      if (!(await this.ownVault(plan.vaultAccountId, plan.daoAccountId))) {
+        throw new OmniRolesError(500, "vault_not_created", `${this.config.nomosId} did not create ${plan.vaultAccountId} (transaction ${vaultTransaction}); the DAO is kept, try again`);
+      }
     }
     await this.prisma.treasury.create({
       data: {
@@ -458,6 +479,30 @@ export class OmniRolesService {
       },
     });
     return { daoTransaction, vaultTransaction };
+  }
+
+  /** True when `daoAccountId` exists and is governed by exactly this council; throws if it is someone else's. */
+  private async ownDao(daoAccountId: string, council: string[]): Promise<boolean> {
+    if (!(await this.accountExists(daoAccountId))) return false;
+    const policy = await this.near.viewFunction<{ roles: Array<{ kind: unknown }> }>(daoAccountId, "get_policy").catch(() => null);
+    const members = (policy?.roles ?? []).flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? [])).sort();
+    if (members.join(",") !== [...council].sort().join(",")) {
+      throw new OmniRolesError(409, "account_taken", `${daoAccountId} already exists with other members; choose another company name`);
+    }
+    return true;
+  }
+
+  /** True when the vault exists, is owned by this DAO and was made by Nomos; throws if it is someone else's. */
+  private async ownVault(vaultAccountId: string, daoAccountId: string): Promise<boolean> {
+    if (!(await this.accountExists(vaultAccountId))) return false;
+    const [owner, source] = await Promise.all([
+      this.near.viewFunction<string>(vaultAccountId, "owner_id").catch(() => null),
+      this.near.viewFunction<string>(vaultAccountId, "code_source").catch(() => null),
+    ]);
+    if (owner !== daoAccountId || source !== this.config.nomosId) {
+      throw new OmniRolesError(409, "account_taken", `${vaultAccountId} already exists and is not this company's vault; choose another company name`);
+    }
+    return true;
   }
 
   private daoPolicy(plan: { council: Array<{ nearAccountId: string }> }, options: { shareholders?: boolean } = {}) {

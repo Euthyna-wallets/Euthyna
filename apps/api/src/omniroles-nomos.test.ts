@@ -12,8 +12,13 @@ const NOMOS = "nomos.euthyna.testnet";
 const VAULT = `acme.${NOMOS}`;
 const DAO = "acme.sputnikv2.testnet";
 
-function setup() {
+function setup(options: { daoMembers?: string[] | null; relayerYocto?: string } = {}) {
   const created = new Set<string>();
+  let daoMembers = ["a.testnet", "b.testnet", "c.testnet"];
+  if (options.daoMembers) {
+    created.add(DAO);
+    daoMembers = options.daoMembers;
+  }
   const calls: Array<{ contract: string; method: string; args: Record<string, unknown>; deposit: string }> = [];
   const treasuries: unknown[] = [];
   const prisma = {
@@ -33,13 +38,18 @@ function setup() {
     },
   } as unknown as PrismaClient;
   const near = {
+    relayerAccountId: () => "relayer.testnet",
     getAccount: vi.fn(async (accountId: string) => {
+      if (accountId === "relayer.testnet") return { amount: options.relayerYocto ?? "100000000000000000000000000" };
       if (created.has(accountId)) return { code_hash: CODE_HASH };
       throw new Error("does not exist");
     }),
     viewFunction: vi.fn(async (accountId: string, method: string) => {
       if (accountId === NOMOS && method === "versions") return [{ code_hash: OLD_HASH }, { code_hash: CODE_HASH }];
       if (accountId === NOMOS && method === "vault_deposit") return "7750000000000000000000000";
+      if (accountId === DAO && method === "get_policy") return { roles: [{ kind: { Group: daoMembers } }] };
+      if (accountId === VAULT && method === "owner_id") return DAO;
+      if (accountId === VAULT && method === "code_source") return NOMOS;
       throw new Error(`unexpected view ${accountId}.${method}`);
     }),
     callFunction: vi.fn(async (contract: string, method: string, args: Record<string, unknown>, _gas: string, deposit: string) => {
@@ -91,5 +101,25 @@ describe("company creation through Sputnik and Nomos", () => {
     expect(init.council).toEqual(["a.testnet", "b.testnet", "c.testnet"]);
     expect(near.executeActions).not.toHaveBeenCalled();
     expect(treasuries).toEqual([expect.objectContaining({ daoAccountId: DAO, vaultAccountId: VAULT, vaultWasmSha256: "07".repeat(32) })]);
+  });
+
+  it("resumes after a failed vault: reuses the company's own DAO", async () => {
+    const { service, calls, treasuries } = setup({ daoMembers: ["c.testnet", "a.testnet", "b.testnet"] });
+    const result = await service.create("org-1", "Acme");
+    expect(result.daoTransaction).toBe("existing");
+    expect(calls.map((call) => call.method)).toEqual(["create_vault"]);
+    expect(treasuries).toHaveLength(1);
+  });
+
+  it("refuses a DAO name governed by other members", async () => {
+    const { service, calls } = setup({ daoMembers: ["mallory.testnet"] });
+    await expect(service.create("org-1", "Acme")).rejects.toMatchObject({ code: "account_taken" });
+    expect(calls).toEqual([]);
+  });
+
+  it("stops before spending anything when the relayer cannot pay for both", async () => {
+    const { service, calls } = setup({ relayerYocto: "10000000000000000000000000" });
+    await expect(service.create("org-1", "Acme")).rejects.toMatchObject({ code: "relayer_low_funds" });
+    expect(calls).toEqual([]);
   });
 });
