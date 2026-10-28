@@ -32,6 +32,8 @@ import {
   proposalArgs,
   uniswapV2Sheet,
   uniswapV3Sheet,
+  aaveSupplySheet,
+  aaveWithdrawSheet,
   type RuleChange,
   type Sheet,
 } from "./roles.js";
@@ -43,6 +45,7 @@ const B = hex20("bb");
 const V3 = hex20("94");
 const V2 = hex20("16");
 const SUPPLIER = hex20("a7");
+const AAVE = hex20("8b");
 const KEY = Array(32).fill(0x5a);
 
 function normalize(sheet: Sheet) {
@@ -63,6 +66,10 @@ describe("protocol sheets match omniroles-conditions::presets", () => {
     uniswapV3Single: uniswapV3Sheet(V3, USDC, [A], KEY),
     uniswapV2: uniswapV2Sheet(V2, [[USDC, A], [USDC, B]], KEY),
     uniswapV2Single: uniswapV2Sheet(V2, [[USDC, A]], KEY),
+    aaveSupply: aaveSupplySheet(AAVE, [USDC], KEY),
+    aaveSupplyMany: aaveSupplySheet(AAVE, [USDC, A], KEY),
+    aaveWithdraw: aaveWithdrawSheet(AAVE, [USDC]),
+    aaveWithdrawMany: aaveWithdrawSheet(AAVE, [USDC, A]),
   };
   for (const [name, sheet] of Object.entries(cases)) {
     it(name, () => {
@@ -348,5 +355,50 @@ describe("public directory", () => {
     expect(summary.details[0]).toBe("description: Pentest à la demande");
     expect(describeRegistryProposal(kind, "other.testnet")).toBeNull();
     expect(() => registryProposalKind("registry.testnet", { vaultAccountId: "v", sharesAccountId: null, name: " ", description: "" })).toThrow();
+  });
+});
+
+
+describe("Aave V3 lending role", () => {
+  const weth = BASE_SEPOLIA.tokens.find((token) => token.symbol === "WETH")!.address;
+  const pool = BASE_SEPOLIA.lending!["aave-v3"]!.pool;
+  const changes = () => compileRole({
+    name: "treasury",
+    blocks: [{ kind: "lending", protocol: "aave-v3", token: weth, budget: { amount: "2", periodDays: 30 }, maxApproval: "1" }],
+    members: [],
+  }, BASE_SEPOLIA);
+
+  it("uses the real Aave V3 selectors", () => {
+    expect(SELECTORS.aaveSupply).toBe(toFunctionSelector("supply(address,uint256,address,uint16)"));
+    expect(SELECTORS.aaveWithdraw).toBe(toFunctionSelector("withdraw(address,uint256,address)"));
+  });
+
+  it("allows a capped approval to the pool, a budgeted supply and a withdrawal to the wallet only", () => {
+    const role = changes().find((change) => "SetRole" in change) as Extract<RuleChange, { SetRole: unknown }>;
+    const permissions = role.SetRole.config.permissions;
+    expect(permissions.map((permission) => hexOf(permission.selector!))).toEqual([SELECTORS.approve, SELECTORS.aaveSupply, SELECTORS.aaveWithdraw]);
+    expect(getAddress(hexOf(permissions[1]!.target))).toBe(getAddress(pool));
+    const budget = changes().find((change) => "SetAllowance" in change) as Extract<RuleChange, { SetAllowance: unknown }>;
+    expect(budget.SetAllowance.balance).toBe((2n * 10n ** 18n).toString());
+  });
+
+  it("describes the deposit in plain English", () => {
+    const all = changes();
+    const context = { profile: BASE_SEPOLIA, budgets: budgetsOf(all, BASE_SEPOLIA) };
+    const text = all.map((change) => describeChange(change, context)).flatMap((item) => [item.title, ...item.details]).join("\n");
+    expect(text).toContain("deposit (supply) on Aave V3 pool");
+    expect(text).toContain("credited to must be the company wallet");
+    expect(text).toContain("withdraw on Aave V3 pool");
+    expect(text).toContain("recipient must be the company wallet");
+    expect(text).toContain("treasury deposits");
+  });
+
+  it("refuses an asset the pool does not list", () => {
+    const usdc = BASE_SEPOLIA.tokens.find((token) => token.symbol === "USDC")!.address;
+    expect(() => compileRole({
+      name: "treasury",
+      blocks: [{ kind: "lending", protocol: "aave-v3", token: usdc, budget: { amount: "1", periodDays: 30 }, maxApproval: "1" }],
+      members: [],
+    }, BASE_SEPOLIA)).toThrow(/cannot be deposited on Aave V3/);
   });
 });

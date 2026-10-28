@@ -31,6 +31,10 @@ pub const ERC20_TRANSFER: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 pub const UNISWAP_V3_EXACT_INPUT_SINGLE: [u8; 4] = [0x04, 0xe4, 0x5a, 0xaf];
 /// UniswapV2Router02 `swapExactTokensForTokens(uint256,uint256,address[],address,uint256)`
 pub const UNISWAP_V2_SWAP_EXACT_TOKENS_FOR_TOKENS: [u8; 4] = [0x38, 0xed, 0x17, 0x39];
+/// Aave V3 Pool `supply(address,uint256,address,uint16)`
+pub const AAVE_V3_SUPPLY: [u8; 4] = [0x61, 0x7b, 0xa0, 0x37];
+/// Aave V3 Pool `withdraw(address,uint256,address)`
+pub const AAVE_V3_WITHDRAW: [u8; 4] = [0x69, 0x32, 0x8d, 0xec];
 
 fn node(parent: u16, encoding: Encoding, operator: Operator, comp: Vec<u8>) -> ConditionFlat {
     ConditionFlat {
@@ -265,5 +269,50 @@ pub fn erc20_transfer_in_list(token: Address, list: &str, allowance: [u8; 32]) -
                 allowance.to_vec(),
             ),
         ],
+    }
+}
+
+/// Aave V3 Pool `supply`: `asset in assets`, `amount` within allowance,
+/// `onBehalfOf == wallet` (the deposit is credited to the company only).
+pub fn aave_v3_supply(pool: Address, assets: &[Address], allowance: [u8; 32]) -> PresetPermission {
+    assert!(!assets.is_empty(), "at least one asset");
+    let (asset, alternatives) = one_of(0, assets);
+    let mut conditions = vec![
+        node(0, Encoding::AbiEncoded, Operator::Matches, Vec::new()),
+        asset, // 1 asset
+        node(
+            0,
+            Encoding::Static,
+            Operator::WithinAllowance,
+            allowance.to_vec(),
+        ), // 2 amount
+        node(0, Encoding::Static, Operator::EqualToAvatar, Vec::new()), // 3 onBehalfOf
+        node(0, Encoding::Static, Operator::Pass, Vec::new()), // 4 referralCode
+    ];
+    conditions.extend(with_parent(alternatives, 1));
+    PresetPermission {
+        target: pool,
+        selector: AAVE_V3_SUPPLY,
+        conditions,
+    }
+}
+
+/// Aave V3 Pool `withdraw`: `asset in assets`, any amount, `to == wallet`.
+/// Withdrawing only returns the company's own deposit to the company wallet,
+/// so it is not charged to a budget.
+pub fn aave_v3_withdraw(pool: Address, assets: &[Address]) -> PresetPermission {
+    assert!(!assets.is_empty(), "at least one asset");
+    let (asset, alternatives) = one_of(0, assets);
+    let mut conditions = vec![
+        node(0, Encoding::AbiEncoded, Operator::Matches, Vec::new()),
+        asset,                                                          // 1 asset
+        node(0, Encoding::Static, Operator::Pass, Vec::new()),          // 2 amount
+        node(0, Encoding::Static, Operator::EqualToAvatar, Vec::new()), // 3 to
+    ];
+    conditions.extend(with_parent(alternatives, 1));
+    PresetPermission {
+        target: pool,
+        selector: AAVE_V3_WITHDRAW,
+        conditions,
     }
 }

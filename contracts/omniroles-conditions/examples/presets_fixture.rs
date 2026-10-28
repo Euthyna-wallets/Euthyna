@@ -12,6 +12,7 @@ fn main() {
     let v3 = [0x94; 20];
     let v2 = [0x16; 20];
     let supplier = [0xa7; 20];
+    let aave = [0x8b; 20];
     let key = [0x5a; 32];
     let sheets: Vec<(&str, PresetPermission)> = vec![
         (
@@ -43,6 +44,16 @@ fn main() {
         (
             "uniswapV2Single",
             presets::uniswap_v2_swap_exact_tokens_for_tokens(v2, &[vec![usdc, token_a]], key),
+        ),
+        ("aaveSupply", presets::aave_v3_supply(aave, &[usdc], key)),
+        (
+            "aaveSupplyMany",
+            presets::aave_v3_supply(aave, &[usdc, token_a], key),
+        ),
+        ("aaveWithdraw", presets::aave_v3_withdraw(aave, &[usdc])),
+        (
+            "aaveWithdrawMany",
+            presets::aave_v3_withdraw(aave, &[usdc, token_a]),
         ),
     ];
     let json: serde_json::Map<String, serde_json::Value> = sheets
