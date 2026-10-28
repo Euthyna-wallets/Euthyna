@@ -168,7 +168,11 @@ function requireConsoleRequest(consoleOrigin: string) {
       await next();
       return;
     }
-    if (context.req.header("origin") !== consoleOrigin) {
+    // Browsers omit Origin on same-origin GETs (console and API behind one host);
+    // Sec-Fetch-Site is browser-set and cannot be forged by a cross-site page.
+    const origin = context.req.header("origin");
+    const sameOrigin = origin === undefined && context.req.header("sec-fetch-site") === "same-origin";
+    if (origin !== consoleOrigin && !sameOrigin) {
       throw new HTTPException(403, { message: "origin not allowed" });
     }
     if (context.req.method !== "GET" && context.req.method !== "HEAD") {

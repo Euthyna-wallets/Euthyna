@@ -493,6 +493,30 @@ describe("console CSRF protection", () => {
     expect(response.status).toBe(403);
   });
 
+  it("accepts a same-origin console GET, which browsers send without Origin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin", "sec-fetch-site": "same-origin" },
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects a cross-site console request even when Origin is missing", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin", "sec-fetch-site": "cross-site" },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a foreign Origin even when the fetch claims same-origin", async () => {
+    const { app } = testApp();
+    const response = await app.request("/v1/console/agents", {
+      headers: { cookie: "session-admin", origin: "http://evil.test", "sec-fetch-site": "same-origin" },
+    });
+    expect(response.status).toBe(403);
+  });
+
   it("rejects a state-changing console request without JSON", async () => {
     const { app } = testApp();
     const response = await app.request("/v1/emergency/cancel", {
