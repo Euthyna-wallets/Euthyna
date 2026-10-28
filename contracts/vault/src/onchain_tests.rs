@@ -277,7 +277,7 @@ fn lists_go_through_delay_and_veto() {
         label: "New".into(),
     });
     context("stranger.testnet", 32);
-    v.execute_rule_change(entry.queue_id);
+    drop(v.execute_rule_change(entry.queue_id));
     assert_eq!(v.get_address_list("suppliers".into()).len(), 2);
 }
 #[test]
@@ -511,7 +511,7 @@ fn migration_batch_is_one_queued_rule() {
     });
     assert_eq!(v.get_address_list("suppliers".into()).len(), 1);
     context("stranger.testnet", 16);
-    v.execute_rule_change(rule.queue_id);
+    drop(v.execute_rule_change(rule.queue_id));
     assert_eq!(v.get_address_list("suppliers".into()).len(), 3);
 }
 
@@ -729,4 +729,46 @@ fn cancelled_nonce_does_not_touch_later_operations() {
     // Only the cancelled operation is refunded.
     assert_eq!(v.allowances.get(&[5; 32]).unwrap().balance.0, 100);
     assert_eq!(v.allowances.get(&[5; 32]).unwrap().reserved.0, 10);
+}
+
+fn code_result(code: &[u8]) {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id("vault.testnet".parse().unwrap())
+            .predecessor_account_id("vault.testnet".parse().unwrap())
+            .prepaid_gas(Gas::from_tgas(300))
+            .build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![near_sdk::PromiseResult::Successful(code.to_vec())],
+    );
+}
+#[test]
+fn upgrade_deploys_only_the_voted_code() {
+    let (mut v, _) = fixture(false, false);
+    let code = b"\0asm\x01\0\0\0next-vault".to_vec();
+    code_result(&code);
+    drop(v.on_upgrade_code(env::sha256_array(&code).into()));
+    let deployed = near_sdk::test_utils::get_created_receipts()
+        .into_iter()
+        .flat_map(|receipt| receipt.actions)
+        .any(|action| matches!(action, near_sdk::mock::MockAction::DeployContract { code: c, .. } if c == code));
+    assert!(deployed);
+}
+#[test]
+#[should_panic(expected = "ERR_UPGRADE_CODE_HASH")]
+fn upgrade_refuses_code_with_another_hash() {
+    let (mut v, _) = fixture(false, false);
+    code_result(b"\0asm\x01\0\0\0swapped-by-the-factory");
+    drop(v.on_upgrade_code(env::sha256_array(b"\0asm\x01\0\0\0next-vault").into()));
+}
+#[test]
+#[should_panic(expected = "ERR_OWNER_ONLY")]
+fn only_the_dao_queues_an_upgrade() {
+    let (mut v, _) = fixture(false, false);
+    context("factory.testnet", 3);
+    v.queue_rule_change(RuleChange::Upgrade {
+        code_hash: [1; 32].into(),
+    });
 }
