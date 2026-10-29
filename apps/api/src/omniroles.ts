@@ -52,9 +52,10 @@ import {
   type RoleDraft,
   type RuleChange,
   type VaultCall,
+  NEAR_TESTNET_TOKENS,
 } from "@mandateos/sdk/roles";
 import bs58 from "bs58";
-import { base58Encode, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
+import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
 import { vaultLogs } from "./chain-activity.js";
 import { usdPrices, usdValue } from "./prices.js";
 import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
@@ -233,6 +234,32 @@ export type OmniRolesPlan = {
   ruleDelaySeconds: number;
   vaultWasmSha256: string;
 };
+
+type NearOperationView = {
+  op_id: number[];
+  member: string;
+  role: string;
+  state: "Pending" | "Confirmed" | "Failed" | "Unconfirmed";
+  created_at_ns: string;
+  request: { token: string; receiver_id: string; amount: string; memo: string | null; reference: string };
+};
+
+/** "Refilled Larry's card with 5 USDC", or "Sent 5 USDC to bob.testnet". */
+export function nearTransferSummary(request: { amount: string; receiver_id: string }, token: { symbol: string; decimals: number }, receiver: string): string {
+  const amount = `${Number(formatUnits(BigInt(request.amount), token.decimals)).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${token.symbol}`;
+  return receiver.endsWith("'s card") ? `Refilled ${receiver} with ${amount}` : `Sent ${amount} to ${receiver}`;
+}
+
+/** "Larry's card" when the account is an agent's spending card, else the account. */
+export function cardOwner(accountId: string, agents: Array<{ name: string; nearAccountId: string | null }>): string {
+  for (const agent of agents) {
+    if (!agent.nearAccountId) continue;
+    try {
+      if (cardAccountIdOf(agent.nearAccountId) === accountId) return `${agent.name}'s card`;
+    } catch { /* not an Euthyna agent account */ }
+  }
+  return accountId;
+}
 
 type SolanaOperationView = {
   member: string;
@@ -935,6 +962,11 @@ export class OmniRolesService {
         }
         chains.push({ chain: solana.network, address: solana.address, explorer: `https://explorer.solana.com/address/${solana.address}?cluster=devnet`, assets });
       }
+      // NEP-141 tokens held by the vault account itself, and by the agents' spending cards.
+      const nearAssets = await this.nearTokenHoldings(organizationId, treasury.vaultAccountId).catch(() => []);
+      if (nearAssets.length) {
+        chains.push({ chain: "NEAR testnet", address: treasury.vaultAccountId, explorer: `https://testnet.nearblocks.io/address/${treasury.vaultAccountId}`, assets: nearAssets });
+      }
       // Indicative dollar values: testnet assets priced as their mainnet counterparts.
       const prices = await usdPrices().catch(() => ({} as Record<string, number>));
       const valued = chains.map((chain) => {
@@ -943,6 +975,27 @@ export class OmniRolesService {
       });
       return { chains: valued, totalUsd: valued.reduce((sum, chain) => sum + chain.usd, 0), pricedAt: new Date().toISOString(), indicative: true };
     });
+  }
+
+  /** Known NEP-141 balances of the vault account and of each agent's card (non-zero only). */
+  private async nearTokenHoldings(organizationId: string, vaultAccountId: string) {
+    const agents = await this.prisma.agent.findMany({ where: { organizationId, active: true } });
+    const holders: Array<{ accountId: string; where: string }> = [{ accountId: vaultAccountId, where: "vault" }];
+    for (const agent of agents) {
+      if (!agent.nearAccountId) continue;
+      try {
+        holders.push({ accountId: cardAccountIdOf(agent.nearAccountId), where: `${agent.name}'s card` });
+      } catch { /* agent account not made by Euthyna: no card */ }
+    }
+    const assets: Array<{ symbol: string; amount: string; where: string }> = [];
+    for (const holder of holders) {
+      for (const token of NEAR_TESTNET_TOKENS) {
+        // A missing card account or an unregistered holder reads as zero.
+        const raw = await this.near.viewFunction<string>(token.accountId, "ft_balance_of", { account_id: holder.accountId }).catch(() => "0");
+        if (BigInt(raw || "0") > 0n) assets.push({ symbol: token.symbol, amount: formatUnits(BigInt(raw), token.decimals), where: holder.where });
+      }
+    }
+    return assets;
   }
 
   // -------------------------------------------------------------------------
@@ -1101,6 +1154,13 @@ export class OmniRolesService {
         throw new OmniRolesError(400, "invalid_role", `revenue can only go to this company's shares contract, ${this.sharesAccountOf(treasury)}`);
       }
     }
+    // NEAR permissions: only vaults on the NEAR-transfer version know them.
+    const existingNear = await this.view<unknown[]>(treasury.vaultAccountId, "get_near_permissions", { role: draft.name }).catch(() => null);
+    if (draft.blocks.some((block) => block.kind === "near-transfer") && existingNear === null) {
+      throw new OmniRolesError(400, "invalid_role", "this vault cannot send NEAR tokens yet: vote the vault upgrade first");
+    }
+    // A role edited without its NEAR block must lose the NEAR permissions it had.
+    draft = { ...draft, clearNearPermissions: (existingNear?.length ?? 0) > 0 };
     let changes: RuleChange[];
     try {
       changes = compileRole(draft, PROFILE);
@@ -1482,12 +1542,26 @@ export class OmniRolesService {
     const roles = await Promise.all([...roleNames].map(async (name) => {
       const view = await this.view<{ config: { enabled: boolean } } | null>(treasury.vaultAccountId, "get_role", { role: name });
       const setRole = [...executed].reverse().find((change) => "SetRole" in change && change.SetRole.role === name) as Extract<RuleChange, { SetRole: unknown }> | undefined;
-      const description = setRole ? describeVaultCall({ method: "queue_rule_change", change: setRole }, context) : null;
+      const base = setRole ? describeVaultCall({ method: "queue_rule_change", change: setRole }, context) : null;
+      // Solana and NEAR rights live in their own changes; the latest of each applies,
+      // unless the role was deleted after it (RemoveRole clears them on the vault).
+      let removedAt = -1;
+      executed.forEach((change, index) => { if ("RemoveRole" in change && change.RemoveRole.role === name) removedAt = index; });
+      const sinceRemoval = executed.slice(removedAt + 1);
+      const latest = <K extends "SetSolanaPermissions" | "SetNearPermissions">(kind: K) =>
+        [...sinceRemoval].reverse().find((change) => kind in change && (change as Record<K, { role: string }>)[kind].role === name) as Extract<RuleChange, Record<K, unknown>> | undefined;
+      const solanaChange = latest("SetSolanaPermissions");
+      const nearChange = latest("SetNearPermissions");
+      const extra = [solanaChange, nearChange].filter((change): change is NonNullable<typeof change> => Boolean(change));
+      const description = base ? { ...base, details: [...base.details, ...extra.flatMap((change) => describeVaultCall({ method: "queue_rule_change", change }, context).details)] } : null;
       const keys = new Set<string>();
       for (const permission of setRole?.SetRole.config.permissions ?? []) {
         for (const condition of permission.conditions) {
           if (condition.operator === 28 || condition.operator === 30) keys.add(condition.compValue.toLowerCase());
         }
+      }
+      for (const permission of [...(solanaChange?.SetSolanaPermissions.permissions ?? []), ...(nearChange?.SetNearPermissions.permissions ?? [])]) {
+        keys.add(hexOf(permission.allowance).toLowerCase());
       }
       const budgetsView = await Promise.all([...keys].map(async (key) => {
         const allowance = await this.view<{ balance: string; reserved: string; max_refill: string; period_ns: number } | null>(
@@ -1712,6 +1786,28 @@ export class OmniRolesService {
           nonce: null,
           evm: null,
           solana: signature ? { signature, explorer: SOLANA_DEVNET.explorer.replace("{tx}", signature) } : null,
+          nearAuthorizationTxHash: log.txHash,
+          vaultAccountId: treasury.vaultAccountId,
+        });
+        continue;
+      }
+      if (log.kind === "near") {
+        const op = await this.near.viewFunction<NearOperationView | null>(treasury.vaultAccountId, "get_near_operation", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
+        if (!op) continue;
+        const token = NEAR_TESTNET_TOKENS.find((item) => item.accountId === op.request.token) ?? { symbol: short(op.request.token), decimals: 0 };
+        operations.push({
+          opId: log.opId,
+          at: log.at,
+          actor: agentByAccount.get(op.member) ?? op.member,
+          role: op.role,
+          reference: op.request.reference,
+          chainId: 0,
+          chain: "NEAR",
+          summary: nearTransferSummary(op.request, token, labels[op.request.receiver_id] ?? cardOwner(op.request.receiver_id, agents)),
+          vaultState: op.state,
+          nonce: null,
+          evm: null,
+          near: { txHash: log.txHash, explorer: `https://testnet.nearblocks.io/txns/${log.txHash}` },
           nearAuthorizationTxHash: log.txHash,
           vaultAccountId: treasury.vaultAccountId,
         });

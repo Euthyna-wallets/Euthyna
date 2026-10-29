@@ -69,9 +69,48 @@ export type RuleChange =
   /** Move the vault to a version published on Nomos (base58 sha256 of the WASM). */
   | { Upgrade: { code_hash: string } }
   /** What the role may send on Solana; replaces the role's list. */
-  | { SetSolanaPermissions: { role: string; permissions: SolanaPermission[] } };
+  | { SetSolanaPermissions: { role: string; permissions: SolanaPermission[] } }
+  /** NEP-141 tokens the role may send from the vault account; replaces the role's list. */
+  | { SetNearPermissions: { role: string; permissions: NearPermission[] } }
+  /** Register the vault on a NEP-141 token (NEP-145), so it can hold it. */
+  | { NearStorageDeposit: { token: string } };
 
 export type SolanaPermission = { asset: "Sol" | { Spl: { mint: number[] } }; recipients: number[][]; allowance: number[] };
+export type NearPermission = { token: string; receivers: string[]; allowance: number[]; min_per_transfer: string; max_per_transfer: string };
+
+export type NearToken = { accountId: string; symbol: string; decimals: number };
+/** NEP-141 tokens on NEAR testnet a role may send. USDC is Circle's (faucet.circle.com). */
+export const NEAR_TESTNET_TOKENS: NearToken[] = [
+  { accountId: "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af", symbol: "USDC", decimals: 6 },
+  { accountId: "test-ft-v4.mandateos-root-20261021.testnet", symbol: "TestUSDC", decimals: 6 },
+];
+/**
+ * Default floor per transfer, as a share of the budget: each transfer stores a
+ * record the vault pays for, so by default a role makes at most 100 per period.
+ */
+export const NEAR_DEFAULT_TRANSFERS_PER_PERIOD = 100n;
+
+export function nearTokenOf(token: string, tokens: NearToken[] = NEAR_TESTNET_TOKENS): NearToken {
+  const found = tokens.find((item) => item.accountId === token || item.symbol === token);
+  if (!found) throw new Error(`unknown NEAR token ${token}`);
+  return found;
+}
+
+/**
+ * The agent's spending card on NEAR: a plain account next to the agent's,
+ * `<slug>-card.<parent>` for `<slug>-agent.<parent>`. It holds small token
+ * amounts the vault refills by role, so the agent can pay on its own.
+ */
+export function cardAccountIdOf(agentAccountId: string): string {
+  const match = agentAccountId.match(/^(.+)-agent\.(.+)$/);
+  if (!match) throw new Error("not an agent account created by Euthyna");
+  return `${match[1]}-card.${match[2]}`;
+}
+
+/** NEAR account ids: named (`a.b.testnet`) or implicit (64 hex). */
+export function validNearAccountId(id: string): boolean {
+  return id.length >= 2 && id.length <= 64 && /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(id);
+}
 
 // Encodings and operators of the OmniRoles condition format.
 export const Encoding = { None: 0, Static: 1, Dynamic: 2, Tuple: 3, Array: 4, AbiEncoded: 5, EtherValue: 6 } as const;
@@ -436,7 +475,20 @@ export type RoleBlock =
   /** Wrap ETH into WETH (budget in ETH) and unwrap it back, both in the wallet. */
   | { kind: "wrap"; budget: Budget }
   /** Send SOL or an SPL token on Solana to listed wallets (base58), within a budget. */
-  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; budget: Budget };
+  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; budget: Budget }
+  /**
+   * Send a NEP-141 token held by the vault account (NEAR) to listed accounts,
+   * such as agents' spending cards. Amounts in token units ("5" = 5 USDC).
+   */
+  | {
+      kind: "near-transfer";
+      token: string;
+      receivers: Array<{ accountId: string; label: string }>;
+      budget: Budget;
+      maxPerTransfer: string;
+      /** Defaults to budget / NEAR_DEFAULT_TRANSFERS_PER_PERIOD (at least one base unit). */
+      minPerTransfer?: string;
+    };
 
 export type RoleMember = { accountId: string; kind: MembershipKind; maxUses?: number | null; endsAt?: Date | null };
 
@@ -446,6 +498,12 @@ export type RoleDraft = {
   name: string;
   blocks: RoleBlock[];
   members: RoleMember[];
+  /**
+   * Set when the role already has NEAR permissions on the vault and the draft
+   * has none: emits an empty SetNearPermissions so the old ones do not stay.
+   * Only vaults with NEAR transfers know that change.
+   */
+  clearNearPermissions?: boolean;
   gas?: Partial<Pick<RoleConfig, "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas" | "max_total_fee">>;
 };
 
@@ -482,6 +540,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   const changes: RuleChange[] = [];
   const permissions: Permission[] = [];
   const solana: SolanaPermission[] = [];
+  const near: NearPermission[] = [];
   const toPermission = (sheet: Sheet): Permission => ({
     chain_id: profile.chainId,
     target: bytes(getAddress(sheet.target)),
@@ -494,6 +553,8 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
     const key = allowanceKey(draft.name, label);
     const token = block.kind === "solana-transfer"
       ? (() => { const sol = solanaTokenOf(SOLANA_DEVNET, block.token); return { address: NATIVE_ETH.address, symbol: sol.symbol, decimals: sol.decimals }; })()
+      : block.kind === "near-transfer"
+      ? (() => { const ft = nearTokenOf(block.token); return { address: NATIVE_ETH.address, symbol: ft.symbol, decimals: ft.decimals }; })()
       : block.kind === "share-revenue" || block.kind === "wrap" ? NATIVE_ETH : tokenOf(profile, block.kind === "swap" ? block.tokenIn : block.token);
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
@@ -531,6 +592,27 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
         asset: solanaAsset(solanaTokenOf(SOLANA_DEVNET, block.token)),
         recipients: block.recipients.map((recipient) => solanaAddress(recipient.address)),
         allowance: key,
+      });
+    } else if (block.kind === "near-transfer") {
+      requireNonEmpty(block.receivers, "NEAR receiver");
+      if (block.receivers.length > 32) throw new Error("at most 32 NEAR receivers");
+      for (const receiver of block.receivers) {
+        if (!validNearAccountId(receiver.accountId)) throw new Error(`${receiver.accountId} is not a NEAR account id`);
+      }
+      const ft = nearTokenOf(block.token);
+      const max = parseUnits(block.maxPerTransfer, ft.decimals);
+      // Never above the cap: a small cap keeps a floor the agent can still pay.
+      const floor = amount / NEAR_DEFAULT_TRANSFERS_PER_PERIOD;
+      const min = block.minPerTransfer ? parseUnits(block.minPerTransfer, ft.decimals) : floor < 1n ? 1n : floor > max ? max : floor;
+      if (min <= 0n) throw new Error("the smallest transfer must be positive");
+      if (min > max) throw new Error("the smallest transfer is above the largest");
+      if (max > amount) throw new Error("the largest transfer is above the budget");
+      near.push({
+        token: ft.accountId,
+        receivers: [...new Set(block.receivers.map((receiver) => receiver.accountId))],
+        allowance: key,
+        min_per_transfer: min.toString(),
+        max_per_transfer: max.toString(),
       });
     } else if (block.kind === "wrap") {
       if (!profile.weth) throw new Error(`no WETH known on ${profile.name}`);
@@ -589,6 +671,13 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
   }
   // Only roles that use Solana carry it: older vaults do not know this change.
   if (solana.length > 0) changes.push({ SetSolanaPermissions: { role: draft.name, permissions: solana } });
+  // Same for NEAR tokens. The vault registers on each token first, so it can hold it.
+  if (near.length > 0) {
+    for (const token of new Set(near.map((permission) => permission.token))) changes.push({ NearStorageDeposit: { token } });
+    changes.push({ SetNearPermissions: { role: draft.name, permissions: near } });
+  } else if (draft.clearNearPermissions) {
+    changes.push({ SetNearPermissions: { role: draft.name, permissions: [] } });
+  }
   return changes;
 }
 
@@ -1191,6 +1280,16 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
       }
       continue;
     }
+    if ("SetNearPermissions" in change) {
+      for (const permission of change.SetNearPermissions.permissions) {
+        const ft = NEAR_TESTNET_TOKENS.find((item) => item.accountId === permission.token);
+        result[hexOf(permission.allowance).toLowerCase()] = {
+          token: ft ? { address: NATIVE_ETH.address, symbol: ft.symbol, decimals: ft.decimals } : undefined,
+          label: `${change.SetNearPermissions.role} NEAR transfers`,
+        };
+      }
+      continue;
+    }
     if (!("SetRole" in change)) continue;
     const { role, config } = change.SetRole;
     const approvals = config.permissions.filter((permission) => permission.selector && hexOf(permission.selector) === SELECTORS.approve);
@@ -1384,6 +1483,20 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
       return `Send ${token} on Solana to ${permission.recipients.map((recipient) => base58Encode(recipient)).join(", ")}${budget ? `, within budget "${budget.label}"` : ""}`;
     });
     return { title: permissions.length ? `Let role "${role}" send on Solana` : `Remove Solana transfers from role "${role}"`, details };
+  }
+  if ("SetNearPermissions" in change) {
+    const { role, permissions } = change.SetNearPermissions;
+    const details = permissions.map((permission) => {
+      const ft = NEAR_TESTNET_TOKENS.find((item) => item.accountId === permission.token);
+      const units = (value: string) => ft ? `${Number(formatUnits(BigInt(value), ft.decimals)).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${ft.symbol}` : `${value} base units`;
+      const budget = context.budgets?.[hexOf(permission.allowance).toLowerCase()];
+      return `Send ${ft?.symbol ?? permission.token} on NEAR to ${permission.receivers.join(", ")}, from ${units(permission.min_per_transfer)} to ${units(permission.max_per_transfer)} per transfer${budget ? `, within budget "${budget.label}"` : ""}`;
+    });
+    return { title: permissions.length ? `Let role "${role}" send tokens on NEAR` : `Remove NEAR token transfers from role "${role}"`, details };
+  }
+  if ("NearStorageDeposit" in change) {
+    const ft = NEAR_TESTNET_TOKENS.find((item) => item.accountId === change.NearStorageDeposit.token);
+    return { title: `Register the vault on ${ft?.symbol ?? change.NearStorageDeposit.token} (NEAR)`, details: ["Pays the token's storage deposit (about 0.00125 NEAR) from the vault, so it can hold this token."] };
   }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
   return { title: `Set policy version ${change.SetVersions.policy_version}, registry version ${change.SetVersions.registry_version}`, details: [] };

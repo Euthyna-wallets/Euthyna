@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
 import { isSolanaAddress, SOLANA_DEVNET } from "@mandateos/sdk/solana";
-import { BASE_SEPOLIA, budgetsOf, compileRole, decodeVaultCalls, describeVaultCall, nearRecipient, stringHash, validRoleName, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, validNearAccountId, validRoleName, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Card, PageState, Status, everyDays, short } from "../components/ui.js";
@@ -163,7 +163,8 @@ type BlockDraft =
   | { kind: "share-revenue"; sharesAccountId: string; amount: string; periodDays: number }
   | { kind: "lending"; protocol: LendingId; token: string; amount: string; periodDays: number; maxApproval: string }
   | { kind: "wrap"; amount: string; periodDays: number }
-  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number };
+  | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number }
+  | { kind: "near-transfer"; token: string; receivers: Array<{ accountId: string; label: string }>; amount: string; periodDays: number; maxPerTransfer: string; minPerTransfer: string };
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
@@ -218,6 +219,10 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     setBlocks((current) => [...current, { kind: "solana-transfer", token: null, recipients: [], amount: "0.1", periodDays: 1 }]);
     setPreview(null);
   };
+  const addNear = () => {
+    setBlocks((current) => [...current, { kind: "near-transfer", token: NEAR_TESTNET_TOKENS[0]!.symbol, receivers: [], amount: "10", periodDays: 1, maxPerTransfer: "5", minPerTransfer: "" }]);
+    setPreview(null);
+  };
   const addShareRevenue = () => {
     if (!sharesAccountId) return;
     setBlocks((current) => [...current, { kind: "share-revenue", sharesAccountId, amount: "0.01", periodDays: 7 }]);
@@ -254,6 +259,8 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
           ? { kind: "wrap", budget: { amount: block.amount, periodDays: block.periodDays } }
         : block.kind === "solana-transfer"
           ? { kind: "solana-transfer", token: block.token, recipients: block.recipients, budget: { amount: block.amount, periodDays: block.periodDays } }
+        : block.kind === "near-transfer"
+          ? { kind: "near-transfer", token: block.token, receivers: block.receivers, budget: { amount: block.amount, periodDays: block.periodDays }, maxPerTransfer: block.maxPerTransfer, ...(block.minPerTransfer ? { minPerTransfer: block.minPerTransfer } : {}) }
         : block.kind === "lending"
           ? { kind: "lending", protocol: block.protocol, token: block.token as `0x${string}`, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }
           : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
@@ -272,7 +279,12 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     const decoded = decodeVaultCalls(draft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], treasury.vaultAccountId);
     const changes = compileRole(role, PROFILE);
     const expected = changes.map((change) => ({ method: "queue_rule_change" as const, change }));
-    if (!decoded || canonical(decoded) !== canonical(expected)) {
+    // The server may add one change this browser cannot know: clearing the NEAR
+    // permissions the role already has on the vault. It only ever removes rights.
+    const clear: RuleChange = { SetNearPermissions: { role: role.name, permissions: [] } };
+    const cleared = [...expected, { method: "queue_rule_change" as const, change: clear }];
+    const clearAllowed = !role.blocks.some((block) => block.kind === "near-transfer");
+    if (!decoded || (canonical(decoded) !== canonical(expected) && !(clearAllowed && canonical(decoded) === canonical(cleared)))) {
       throw new Error("The proposal prepared by the server does not match the role built here. Nothing was signed.");
     }
     const labels: Record<string, string> = Object.fromEntries(supplierOptions.map((option) => [option.address, option.label]));
@@ -299,6 +311,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     Number(block.amount) > 0 && (block.kind === "payments"
       ? suppliersOnly || block.recipients.length > 0
       : block.kind === "solana-transfer" ? block.recipients.length > 0
+      : block.kind === "near-transfer" ? block.receivers.length > 0 && (block.minPerTransfer === "" || (Number(block.minPerTransfer) > 0 && Number(block.minPerTransfer) <= Number(block.maxPerTransfer))) && Number(block.maxPerTransfer) <= Number(block.amount)
       : block.kind === "share-revenue" || block.kind === "wrap" || (block.kind === "lending" ? Number(block.maxApproval) > 0 : block.tokensOut.length > 0 && block.protocols.length > 0 && Number(block.maxApproval) > 0)));
   // Say what is missing instead of a silently disabled button.
   const missing = !validRoleName(name)
@@ -309,6 +322,10 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         ? "Pick at least one recipient for the transfers."
         : blocks.some((block) => block.kind === "solana-transfer" && block.recipients.length === 0)
           ? "Add at least one Solana recipient."
+        : blocks.some((block) => block.kind === "near-transfer" && block.receivers.length === 0)
+          ? "Add at least one NEAR account to pay."
+        : blocks.some((block) => block.kind === "near-transfer" && !((block.minPerTransfer === "" || (Number(block.minPerTransfer) > 0 && Number(block.minPerTransfer) <= Number(block.maxPerTransfer))) && Number(block.maxPerTransfer) <= Number(block.amount)))
+          ? "NEAR transfers: smallest above zero, up to the largest, and the largest within the budget."
         : blocks.some((block) => block.kind === "swap" && (block.tokensOut.length === 0 || block.protocols.length === 0))
           ? "Pick the tokens it may buy and at least one exchange."
           : blocks.some((block) => !(Number(block.amount) > 0))
@@ -330,10 +347,45 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
         {blocks.map((block, index) => (
           <div className="block" key={index}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "solana-transfer" ? "Solana · transfers" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
+              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "solana-transfer" ? "Solana · transfers" : block.kind === "near-transfer" ? "NEAR · pay in tokens" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
               <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
             </div>
-            {block.kind === "solana-transfer" ? (
+            {block.kind === "near-transfer" ? (
+              <>
+                <div className="row wrap">
+                  <label>Token
+                    <select value={block.token} onChange={(event) => update(index, { token: event.target.value })}>
+                      {NEAR_TESTNET_TOKENS.map((token) => <option key={token.accountId} value={token.symbol}>{token.symbol}</option>)}
+                    </select>
+                  </label>
+                  <label>Budget ({block.token})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
+                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                  <label>Smallest transfer<input inputMode="decimal" placeholder={`${Number(block.amount) / 100 || ""} (budget ÷ 100)`} value={block.minPerTransfer} onChange={(event) => update(index, { minPerTransfer: event.target.value })} /></label>
+                  <label>Largest transfer<input inputMode="decimal" value={block.maxPerTransfer} onChange={(event) => update(index, { maxPerTransfer: event.target.value })} /></label>
+                </div>
+                <span className="small muted">Accounts it may pay (NEAR)</span>
+                {block.receivers.map((receiver) => (
+                  <div key={receiver.accountId} className="row wrap">
+                    <span className="small">{receiver.label} <span className="mono">{receiver.accountId}</span></span>
+                    <button className="ghost" onClick={() => update(index, { receivers: block.receivers.filter((item) => item.accountId !== receiver.accountId) })}>Remove</button>
+                  </div>
+                ))}
+                <div className="row wrap">
+                  {(agents.data?.agents ?? []).filter((agent) => agent.active && cardOf(agent.nearAccountId)).map((agent) => {
+                    const card = cardOf(agent.nearAccountId)!;
+                    const listed = block.receivers.some((item) => item.accountId === card);
+                    return listed ? null : (
+                      <button key={card} className="ghost" onClick={() => update(index, { receivers: [...block.receivers, { accountId: card, label: `${agent.name}'s card` }] })}>+ {agent.name}'s card</button>
+                    );
+                  })}
+                </div>
+                <NearReceiver onAdd={(receiver) => update(index, { receivers: [...block.receivers.filter((item) => item.accountId !== receiver.accountId), receiver] })} />
+                <span className="small muted">
+                  From the tokens the vault holds on NEAR testnet. The vault registers on the token when this role is voted;
+                  each account paid must be registered on the token too, or the transfer fails and the budget comes back.
+                </span>
+              </>
+            ) : block.kind === "solana-transfer" ? (
               <>
                 <div className="row wrap">
                   <label>Token
@@ -464,6 +516,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
           <button onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
           <button onClick={() => setCatalogOpen(true)} title="Pick a protocol from the catalog">+ DeFi…</button>
           <button onClick={addSolana} title="Send SOL or USDC on Solana to listed wallets, within a budget">+ Solana transfers</button>
+          <button onClick={addNear} title="Send USDC held by the vault on NEAR to listed accounts, such as agents' spending cards">+ Pay in NEAR tokens</button>
           <button
             onClick={addShareRevenue}
             disabled={!sharesAccountId || blocks.some((block) => block.kind === "share-revenue")}
@@ -574,6 +627,25 @@ function DefiCatalog({ onPick, onPickLending, onPickWrap, onClose }: { onPick: (
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The agent's spending card account, if it is an Euthyna agent. */
+function cardOf(agentAccountId: string): string | null {
+  try { return cardAccountIdOf(agentAccountId); } catch { return null; }
+}
+
+function NearReceiver({ onAdd }: { onAdd: (receiver: { accountId: string; label: string }) => void }) {
+  const [accountId, setAccountId] = useState("");
+  const [label, setLabel] = useState("");
+  const valid = validNearAccountId(accountId) && label.trim().length > 0;
+  return (
+    <div className="row wrap">
+      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
+      <input className="mono" placeholder="NEAR account (bob.testnet)" value={accountId} onChange={(event) => setAccountId(event.target.value.trim().toLowerCase())} />
+      <button disabled={!valid} onClick={() => { onAdd({ accountId, label: label.trim() }); setAccountId(""); setLabel(""); }}>Add</button>
+      {accountId && !validNearAccountId(accountId) ? <span className="small" style={{ color: "#b42318" }}>Not a NEAR account id.</span> : null}
     </div>
   );
 }

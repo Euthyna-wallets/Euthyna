@@ -189,6 +189,8 @@ describe("OmniRoles SDK", () => {
       "execute_solana",
       "settle_solana",
       "release_solana_unconfirmed",
+      "execute_near",
+      "release_near_unconfirmed",
     ]);
   });
 
