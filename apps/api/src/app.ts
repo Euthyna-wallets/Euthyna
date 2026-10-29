@@ -768,6 +768,8 @@ export function createApp({
       });
       return context.json(result);
     });
+    app.get("/v1/console/omniroles/holdings", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.holdings(orgOf(context))));
     app.get("/v1/console/omniroles/versions", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.versions(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/upgrade", requireConsole(auth, consoleLimiter), async (context) => {

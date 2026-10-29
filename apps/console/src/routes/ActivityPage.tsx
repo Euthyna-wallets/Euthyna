@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
-import { Card, PageState, Status, short } from "../components/ui.js";
+import { api, type AgentRow } from "../api.js";
+import { Icon } from "../components/ops.js";
+import { PageState, Status, short } from "../components/ui.js";
+import { OUTCOME_LABEL, dayLabel, entriesOf, roleName, timeOf, type Entry } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type Sentence, type WalletIntegrity } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -11,107 +14,137 @@ import { verifyTransactions, type Requested } from "./WalletPage.js";
 const EXPLORERS: Record<number, string> = { 84532: "https://sepolia.basescan.org", 11155111: "https://sepolia.etherscan.io", 8453: "https://basescan.org", 1: "https://etherscan.io" };
 const NEAR_EXPLORER = "https://testnet.nearblocks.io";
 
+type Filter = "all" | "done" | "pending" | "refused";
+
+const FILTERS: Array<[Filter, string]> = [["all", "All"], ["done", "Done"], ["pending", "In progress"], ["refused", "Refused"]];
+
 export function ActivityPage() {
   const query = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, refetchInterval: 10_000 });
-  const operations = query.data?.operations ?? [];
-  const requests = query.data?.requests ?? [];
-  const executed = operations.filter((item) => item.evm?.status === "success").length;
-  const refused = requests.filter((item) => item.kind === "refusal").length;
+  const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), staleTime: 30_000 });
+  const [filter, setFilter] = useState<Filter>("all");
+  const [open, setOpen] = useState<string | null>(null);
+  const all = entriesOf(query.data);
+  const count = (value: Filter) => value === "all" ? all.length : all.filter((entry) => matches(entry, value)).length;
+  const shown = all.filter((entry) => matches(entry, filter));
+  const nameOf = (actor: string) => (agents.data?.agents ?? []).find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 18);
+  const groups: Array<[string, Entry[]]> = [];
+  for (const entry of shown) {
+    const label = dayLabel(entry.at);
+    const group = groups.find(([name]) => name === label);
+    if (group) group[1].push(entry);
+    else groups.push([label, [entry]]);
+  }
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>Activity</h1>
-          <p className="muted">What the chains record: each operation as the vault signed it on NEAR, and its result on the EVM chain.</p>
+          <p className="muted">Every payment, swap and deposit made with company money, and every request the rules refused.</p>
         </div>
-        <div className="pill">{executed} executed on-chain · {refused} refused</div>
       </header>
 
-      {(query.data?.integrity ?? []).map((item) => <IntegrityBanner key={item.chainId} item={item} />)}
+      <Trust items={query.data?.integrity ?? []} />
 
-      <Card title="On-chain operations">
-        <PageState loading={query.isLoading} error={query.error} empty={operations.length === 0} emptyContent={<div className="state">No operation signed yet.</div>}>
-          <table>
-            <thead><tr><th>When</th><th>By</th><th>What</th><th>Vault (NEAR)</th><th>{"Result (EVM)"}</th></tr></thead>
-            <tbody>
-              {operations.map((item) => (
-                <tr key={item.opId}>
-                  <td className="small">{new Date(item.at).toLocaleString()}</td>
-                  <td>{item.actor}{item.role ? <div className="small muted">role · {item.role}</div> : null}</td>
-                  <td className="small">
-                    {item.summary ? <strong>{item.summary}</strong> : <span className="mono">{short(item.opId)}</span>}
-                    <div className="muted">{item.chain} · nonce {item.nonce}{item.reference ? ` · ${item.reference}` : ""}</div>
-                  </td>
-                  <td className="small">
-                    <Status value={item.vaultState} />
-                    {item.nearAuthorizationTxHash ? <div><a href={`${NEAR_EXPLORER}/txns/${item.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">NEAR tx {short(item.nearAuthorizationTxHash)}</a></div> : null}
-                  </td>
-                  <td className="small">
-                    {item.evm ? (
-                      <>
-                        <span className={`evm-status ${item.evm.status === "success" ? "ok" : item.evm.status === "reverted" ? "bad" : ""}`}>
-                          {item.evm.status === "success" ? "✓ executed" : item.evm.status === "reverted" ? "✗ reverted" : "not mined yet"}
-                        </span>
-                        <div><a href={`${EXPLORERS[item.chainId] ?? ""}/tx/${item.evm.hash}`} target="_blank" rel="noreferrer">{item.chain} tx {short(item.evm.hash)}</a></div>
-                      </>
-                    ) : <span className="muted">not signed</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </PageState>
-      </Card>
+      <div className="filters" role="tablist" aria-label="Filter activity">
+        {FILTERS.map(([value, label]) => (
+          <button key={value} role="tab" aria-selected={filter === value} className={`filter${filter === value ? " active" : ""}`} onClick={() => setFilter(value)}>
+            {label} <span>{count(value)}</span>
+          </button>
+        ))}
+      </div>
 
-      <Card title="Refusals and dry runs">
-        <p className="small muted">Recorded by MandateOS, not on chain: a refused request never becomes a transaction, and a dry run (check) moves nothing.</p>
-        {requests.length === 0 ? <div className="state">Nothing yet.</div> : (
-          <table>
-            <thead><tr><th>When</th><th>Agent</th><th>What</th><th>Result</th></tr></thead>
-            <tbody>
-              {requests.map((item, index) => (
-                <tr key={`${item.kind}-${item.at}-${index}`} className={item.kind === "refusal" ? "refused" : undefined}>
-                  <td className="small">{new Date(item.at).toLocaleString()}</td>
-                  <td>{item.agent}</td>
-                  <td className="small">{item.summary ? <strong>{item.summary}</strong> : "—"}{item.reference ? <div className="mono muted">{item.reference}</div> : null}</td>
-                  <td className="small">
-                    {item.kind === "refusal" ? (
-                      <span>
-                        <Status value="rejected" /> {item.reason}
-                        {item.request ? <><br /><AskMembers request={item.request} title={`${item.agent}: ${item.summary ?? "refused request"}`} /></> : null}
-                      </span>
-                    ) : <span><Status value="dry run" /> allowed by the role</span>}
-                  </td>
-                </tr>
+      <PageState loading={query.isLoading} error={query.error} empty={shown.length === 0} emptyContent={<div className="state">Nothing here yet.</div>}>
+        {groups.map(([label, entries]) => (
+          <section key={label} className="panel day">
+            <h2 className="day-label">{label}</h2>
+            <ul className="tx-list">
+              {entries.map((entry) => (
+                <li key={entry.id} className={open === entry.id ? "open" : undefined}>
+                  <button className="tx-row" aria-expanded={open === entry.id} onClick={() => setOpen(open === entry.id ? null : entry.id)}>
+                    <span className={`tx-icon ${entry.outcome}`}><Icon name={entry.outcome === "refused" || entry.outcome === "failed" ? "cross" : entry.outcome === "pending" ? "setup" : "check"} size={15} /></span>
+                    <span className="tx-text">
+                      <strong>{entry.text}</strong>
+                      <span>{nameOf(entry.actor)}{entry.role ? ` · ${roleName(entry.role)}` : entry.operation ? " · voted by members" : ""}{entry.chain ? ` · ${entry.chain}` : ""} · {timeOf(entry.at)}</span>
+                      {entry.outcome === "refused" && entry.reason ? <span className="tx-reason">Refused: {humanReason(entry.reason)}</span> : null}
+                    </span>
+                    <span className={`outcome outcome-${entry.outcome}`}>{OUTCOME_LABEL[entry.outcome]}</span>
+                  </button>
+                  {open === entry.id ? <Proof entry={entry} actor={nameOf(entry.actor)} /> : null}
+                </li>
               ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
+            </ul>
+          </section>
+        ))}
+      </PageState>
     </div>
   );
 }
 
-/** Nonce check: the chain cannot count more transactions than the vault signed. */
-function IntegrityBanner({ item }: { item: WalletIntegrity }) {
-  if (item.status === "ok") {
+function matches(entry: Entry, filter: Filter): boolean {
+  if (filter === "all") return true;
+  if (filter === "refused") return entry.outcome === "refused" || entry.outcome === "failed" || entry.outcome === "cancelled";
+  return entry.outcome === filter;
+}
+
+/** Vault error codes, in words. */
+function humanReason(reason: string): string {
+  const known: Record<string, string> = {
+    FunctionNotAllowed: "this action or recipient is not in the agent's rules",
+    allowanceExceeded: "over the agent's budget",
+    ERR_ROLE_NOT_FOUND: "the agent has no rule yet",
+    ERR_PAUSED: "operations are paused",
+  };
+  const code = Object.keys(known).find((key) => reason.includes(key));
+  return code ? known[code]! : reason;
+}
+
+/** The evidence, for whoever wants to check: vault record on NEAR, transaction on the destination chain. */
+function Proof({ entry, actor }: { entry: Entry; actor: string }) {
+  const operation = entry.operation;
+  const rows: Array<[string, ReactNode]> = [["Requested by", <span className="mono">{entry.actor}</span>]];
+  if (!operation) {
+    rows.push(["Recorded by", "Euthyna: a refused request never becomes a transaction"]);
+    if (entry.reason) rows.push(["Vault answer", <span className="mono">{entry.reason}</span>]);
+  } else {
+    rows.push(["Vault status", <Status value={operation.vaultState} />]);
+    if (operation.nearAuthorizationTxHash) rows.push(["Signed on NEAR", <a href={`${NEAR_EXPLORER}/txns/${operation.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">{short(operation.nearAuthorizationTxHash)} ↗</a>]);
+    if (operation.evm) rows.push([`${operation.chain} transaction`, <a href={`${EXPLORERS[operation.chainId] ?? ""}/tx/${operation.evm.hash}`} target="_blank" rel="noreferrer">{short(operation.evm.hash)} ↗</a>]);
+    if (operation.solana) rows.push([`${operation.chain} transaction`, <a href={operation.solana.explorer} target="_blank" rel="noreferrer">{short(operation.solana.signature)} ↗</a>]);
+    if (operation.solana) rows.push(["Finality", operation.vaultState === "Confirmed" ? "Attested by NEAR's MPC network" : "Waiting"]);
+    if (operation.nonce !== null) rows.push(["Wallet nonce", <span className="mono">{operation.nonce}</span>]);
+    if (operation.reference) rows.push(["Reference", <span className="mono">{operation.reference}</span>]);
+    rows.push(["Operation id", <span className="mono">{short(operation.opId, 18)}</span>]);
+  }
+  return (
+    <div className="proof">
+      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      {entry.request ? <AskMembers request={entry.request} title={`${actor}: ${entry.text}`} /> : null}
+    </div>
+  );
+}
+
+/** One line: did anything leave the wallets outside the vault? (nonce on chain = nonce signed by the vault) */
+function Trust({ items }: { items: WalletIntegrity[] }) {
+  if (items.length === 0) return null;
+  const alert = items.find((item) => item.status === "alert");
+  if (alert) {
     return (
-      <div className="alert success small">
-        ✓ {item.chain}: the wallet has sent {item.walletNonce} transaction{item.walletNonce === 1 ? "" : "s"}, exactly the number the vault signed. Nothing left the wallet outside MandateOS.
+      <div className="trust bad">
+        <Icon name="cross" size={16} />
+        <span><strong>Check {alert.chain} now.</strong> The wallet sent {alert.walletNonce} transactions, the vault signed {alert.vaultNonce}. Something left {short(alert.address)} without the vault.</span>
       </div>
     );
   }
-  if (item.status === "pending") {
-    return <div className="alert warning small">{item.chain}: {item.vaultNonce - (item.walletNonce ?? 0)} transaction(s) signed by the vault, not mined yet.</div>;
-  }
-  if (item.status === "alert") {
-    return (
-      <div className="alert error small">
-        {item.chain}: the wallet has sent {item.walletNonce} transactions but the vault signed only {item.vaultNonce}. A transaction left {short(item.address)} outside MandateOS: check the explorer now.
-      </div>
-    );
-  }
-  return <div className="alert small">{item.chain}: could not read the wallet's nonce right now.</div>;
+  const pending = items.filter((item) => item.status === "pending");
+  return (
+    <div className="trust ok">
+      <Icon name="check" size={16} />
+      <span>
+        <strong>Every transaction went through the vault.</strong> The wallets sent exactly what the vault signed.
+        {pending.length ? ` ${pending.map((item) => `${item.vaultNonce - (item.walletNonce ?? 0)} on ${item.chain}`).join(", ")} still being mined.` : ""}
+      </span>
+    </div>
+  );
 }
 
 /** A refused request is not lost: members can vote on exactly that transaction. */

@@ -73,7 +73,7 @@ export function ExplorePage() {
   <header style={{ maxWidth: "1392px", margin: "0 auto", padding: "18px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
     <a href="#top" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none", color: "#F2F6FC" }}>
       <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M4 26V8l11-5 11 5v18" stroke="#4FD1E8" strokeWidth="2.2" strokeLinejoin="round"></path><path d="M10 26v-9l5 4 5-4v9" stroke="#F2B544" strokeWidth="2.2" strokeLinejoin="round"></path></svg>
-      <span style={{ fontWeight: "700", fontSize: "18px" }}>MandateOS</span>
+      <span style={{ fontWeight: "700", fontSize: "18px" }}>Euthyna</span>
     </a>
     <nav aria-label="Main" style={{ display: "flex", flexWrap: "wrap", gap: "32px", fontSize: "14px" }}>
       <a href="#pillars" style={{ color: "#F2F6FC", textDecoration: "none" }}>Economy</a>
@@ -258,7 +258,7 @@ export function ExplorePage() {
   </section>
 
   <footer style={{ maxWidth: "1392px", margin: "0 auto", padding: "64px 24px 48px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "16px", fontSize: "13px", color: "#C9D6EE" }}>
-    <span>MandateOS · NEAR Hackathon 2026 · testnet, unaudited</span>
+    <span>Euthyna · NEAR Hackathon 2026 · testnet, unaudited</span>
     <div style={{ display: "flex", flexWrap: "wrap", gap: "24px" }}><a href="#top">GitHub</a><a href="#top">Docs</a><a href="#top">MCP</a></div>
   </footer>
 </div>

@@ -6,7 +6,7 @@ const CAPABILITIES = [
   { title: "Budgets per role", text: "Each role has allowances that refill every period, counted from the transaction itself, not from what the agent says.", icon: <><path d="M4 19h16" /><path d="M7 16V9M12 16V5M17 16v-4" /></> },
   { title: "Assign, suspend, revoke", text: "Grant a role to one agent or several, suspend it in place, revoke one member. The role outlives the agent.", icon: <><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3.3 2.7-6 6-6" /><path d="M15 14l2 2 4-4" /></> },
   { title: "Changes by vote only", text: "Creating or widening a role is a DAO vote, and the new rule waits out a veto window that any council member can use.", icon: <><path d="M9 11l3 3 8-8" /><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" /></> },
-  { title: "No keys to steal", text: "Company wallets are signed by NEAR MPC, only after the vault approves. The vault itself has no access key, not even for MandateOS.", icon: <><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></> },
+  { title: "No keys to steal", text: "Company wallets are signed by NEAR MPC, only after the vault approves. The vault itself has no access key, not even for Euthyna.", icon: <><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></> },
   { title: "Kill switch", text: "One council member can pause every agent at once. Only a vote resumes them.", icon: <><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></> },
 ];
 

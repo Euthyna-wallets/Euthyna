@@ -56,7 +56,7 @@ export function SignIn() {
   return (
     <div className="auth">
       <aside className="auth-intro">
-        <div className="brand">MandateOS</div>
+        <div className="brand">Euthyna</div>
         <h2>AI agents move company funds. Humans set the limits.</h2>
         <ul>
           <li>Members vote the rules in a NEAR DAO</li>
@@ -67,7 +67,7 @@ export function SignIn() {
       </aside>
       <div className="auth-card">
         <div className="auth-head">
-          <span className="brand">MandateOS</span>
+          <span className="brand">Euthyna</span>
           {demo ? <span className="test-pill" title="UAT demo mode: test-only private keys are stored in this browser.">Test mode</span> : null}
         </div>
         <h1>Sign in</h1>

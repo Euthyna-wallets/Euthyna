@@ -137,7 +137,7 @@ function CreateShares(props: { accountId: string; me: string; busy: string | nul
   return (
     <Card title="Issue shares">
       <p className="muted">
-        Deploys <code>{props.accountId}</code> with no access key: nobody, not even MandateOS, can change it. Then two
+        Deploys <code>{props.accountId}</code> with no access key: nobody, not even Euthyna, can change it. Then two
         proposals: the DAO counts locked shares as votes, and shareholders get a vote on company calls and transfers.
       </p>
       <div className="form-grid">

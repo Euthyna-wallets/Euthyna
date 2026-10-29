@@ -101,8 +101,10 @@ export type OnchainOperation = {
   chain: string;
   summary: string | null;
   vaultState: string;
-  nonce: number;
+  nonce: number | null;
   evm: { hash: string; status: "success" | "reverted" | "not mined"; blockNumber: string | null } | null;
+  /** Solana operations: the transaction signature and its explorer page. */
+  solana?: { signature: string; explorer: string } | null;
   nearAuthorizationTxHash: string | null;
   vaultAccountId: string;
 };
@@ -199,6 +201,7 @@ export const omni = {
   create: (daoName: string) => api<{ daoTransaction: string; vaultTransaction: string }>("/v1/console/omniroles/create", { method: "POST", body: JSON.stringify({ daoName }) }),
   walletProposal: (chainId?: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify(chainId ? { chainId } : {}) }),
   versions: () => api<VaultVersions>("/v1/console/omniroles/versions"),
+  holdings: () => api<Holdings>("/v1/console/omniroles/holdings"),
   upgradeProposal: (codeHash: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/upgrade", { method: "POST", body: JSON.stringify({ codeHash }) }),
   solanaWalletProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify({ solana: true }) }),
   transactionProposal: (input: { title?: string; transactions: Array<{ chainId: number; to: string; value?: string; data?: string; gas?: string }> }) =>
@@ -246,3 +249,16 @@ export type VaultVersions = {
   upgradable: boolean;
   versions: Array<{ index: number; codeHash: string; size: number; notes: string; publishedAt: string; current: boolean }>;
 };
+
+export type Holdings = {
+  chains: Array<{ chain: string; address: string; explorer: string; usd: number; assets: Array<{ symbol: string; amount: string; where: string; usd: number | null }> }>;
+  /** Sum of the assets that have a reference price. */
+  totalUsd: number;
+  indicative: boolean;
+};
+
+/** "0.0006 WETH" with at most 6 significant digits. */
+export function formatAmount(amount: string, symbol: string): string {
+  const value = Number(amount);
+  return `${value >= 1 ? value.toLocaleString(undefined, { maximumFractionDigits: 4 }) : Number(value.toPrecision(4)).toString()} ${symbol}`;
+}

@@ -17,7 +17,7 @@ export function TreasuryCreate(props: { companyName: string; onCreated: () => Pr
     <section className="card">
       <h2>Create the company treasury</h2>
       <p className="muted">
-        MandateOS creates and pays for two contracts on NEAR. Nobody, not even MandateOS, keeps a key to them afterwards.
+        Euthyna creates and pays for two contracts on NEAR. Nobody, not even Euthyna, keeps a key to them afterwards.
       </p>
       {plan.error ? <div className="alert error">{(plan.error as Error).message}</div> : null}
       {plan.data ? (

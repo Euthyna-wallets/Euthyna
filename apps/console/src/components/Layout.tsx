@@ -64,11 +64,11 @@ export function Layout() {
     <WalletProvider>
       <div className="app-shell">
         <aside className="app-sidebar">
-          <div className="brand">MandateOS</div>
-          <div className="small muted">AI company console · testnet</div>
+          <div className="brand">Euthyna</div>
+          <div className="small muted">Treasury for AI agents · testnet</div>
           {active ? (
             <label className="org-select">
-              <span className="small muted">Company (DAO)</span>
+              <span className="small muted">Company</span>
               <select
                 value={active.id}
                 onChange={(event) => {
@@ -94,18 +94,11 @@ export function Layout() {
             </label>
           ) : null}
           <nav className="app-nav" aria-label="Console">
-            <span className="nav-group">Operate</span>
-            <NavLink to="/overview" end><Icon name="overview" />Overview</NavLink>
-            <NavLink to="/agents"><Icon name="agents" />Agents</NavLink>
+            <NavLink to="/overview" end><Icon name="overview" />Home</NavLink>
             <NavLink to="/activity"><Icon name="activity" />Activity</NavLink>
-            <span className="nav-group">Rules</span>
-            <NavLink to="/roles"><Icon name="roles" />Roles</NavLink>
-            <NavLink to="/governance"><Icon name="decisions" />Decisions{toVote ? <span className="nav-badge" title="Waiting for your vote">{toVote}</span> : null}</NavLink>
-            <span className="nav-group">Money</span>
-            <NavLink to="/wallet"><Icon name="wallet" />Wallet</NavLink>
-            <NavLink to="/shares"><Icon name="shares" />Shares</NavLink>
-            <NavLink to="/suppliers"><Icon name="suppliers" />Suppliers</NavLink>
-            <span className="nav-group">Company</span>
+            <NavLink to="/agents"><Icon name="agents" />Agents</NavLink>
+            <NavLink to="/roles"><Icon name="roles" />Rules</NavLink>
+            <NavLink to="/governance"><Icon name="decisions" />Votes{toVote ? <span className="nav-badge" title="Waiting for your vote">{toVote}</span> : null}</NavLink>
             <NavLink to="/settings"><Icon name="settings" />Settings</NavLink>
             {setupRequired ? <NavLink className="setup-link" to="/onboarding"><Icon name="setup" />Finish setup</NavLink> : null}
           </nav>
@@ -116,9 +109,9 @@ export function Layout() {
         <div className="app-frame">
           <header className="app-topbar">
             <div className="topbar-company">
-              <strong>{active?.name ?? "MandateOS"}</strong>
+              <strong>{active?.name ?? "Euthyna"}</strong>
               {status.data?.treasury ? (
-                <span className={`company-state ${paused ? "paused" : "live"}`}>{paused ? "Paused by the security council" : "Agents running"}</span>
+                <span className={`company-state ${paused ? "paused" : "live"}`}>{paused ? "Paused" : "Agents active"}</span>
               ) : status.data ? <span className="company-state setup">Setting up</span> : null}
             </div>
             <div className="spacer" />
@@ -126,7 +119,7 @@ export function Layout() {
             <WalletBar />
           </header>
           <main className="app-main">
-            {paused ? <div className="alert error"><strong>Operations are paused by the security council.</strong> Agents cannot move funds until members vote to resume.</div> : null}
+            {paused ? <div className="alert error"><strong>Agents are paused.</strong> No money can move until members vote to resume.</div> : null}
             <Outlet />
           </main>
         </div>

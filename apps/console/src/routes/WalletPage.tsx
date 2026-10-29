@@ -9,6 +9,7 @@ import { useWallets } from "../lib/wallet-context.js";
 import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
 import { omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
+import { HoldingsCard } from "./HoldingsCard.js";
 import { SentenceList } from "./GovernancePage.js";
 
 export type Requested = { chainId: number; to: string; value: string; data: string; gas?: string };
@@ -84,7 +85,7 @@ export function WalletPage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Company wallet</h1>
+          <h1>Treasury</h1>
           <p className="muted">
             Agents act inside their roles. Anything else, members vote on the exact transaction: it is signed after the vote and the veto window.
           </p>
@@ -114,6 +115,8 @@ export function WalletPage() {
             </div>
           ) : <div className="state">The wallet is created by the first vote. <Link to="/onboarding">Continue setup</Link></div>}
         </Card>
+
+        {address ? <HoldingsCard /> : null}
 
         {address && status.data?.solana ? (
           <Card title="Solana">
@@ -175,7 +178,7 @@ export function WalletPage() {
                     <header><div><span className="eyebrow">{request.app.name} asks</span><h3>{describe(request)} on {chainName(request.chainId)}</h3></div></header>
                     <footer className="row">
                       <div className="spacer" />
-                      <button className="ghost" onClick={() => void run("decline", () => walletConnect.answer(request, "MandateOS: declined by the member."))}>Decline</button>
+                      <button className="ghost" onClick={() => void run("decline", () => walletConnect.answer(request, "Euthyna: declined by the member."))}>Decline</button>
                       <button className="primary" disabled={!me || Boolean(busy)} onClick={() => void run("prepare", () => prepare([request], `${request.app.name}: ${describe(request)}`, request))}>Propose to the members</button>
                     </footer>
                   </div>
@@ -211,7 +214,7 @@ export function WalletPage() {
           <div className="decision">
             <header><div><span className="eyebrow">Members will vote on</span><h3>{preview.draft.title}</h3></div></header>
             <SentenceList items={preview.summary} />
-            <p className="small muted verified">✓ Checked in your browser: the proposal carries exactly these calls; MandateOS only added the network fees.</p>
+            <p className="small muted verified">✓ Checked in your browser: the proposal carries exactly these calls; Euthyna only added the network fees.</p>
             <footer className="row wrap">
               <span className="small muted">Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
               <div className="spacer" />
@@ -219,7 +222,7 @@ export function WalletPage() {
               <button className="primary" disabled={!me || Boolean(busy)} onClick={() => void run("submit", async () => {
                 const result = await signDaoProposal(me, preview.draft);
                 if (preview.request) {
-                  await walletConnect.answer(preview.request, `MandateOS: submitted to the company's vote as proposal #${result.proposalId}. It runs after the vote and the veto window.`);
+                  await walletConnect.answer(preview.request, `Euthyna: submitted to the company's vote as proposal #${result.proposalId}. It runs after the vote and the veto window.`);
                 } else {
                   setBasket([]);
                 }
