@@ -2,6 +2,7 @@
 mod conditions;
 mod evm;
 mod foreign;
+pub mod near_tokens;
 pub mod solana;
 mod types;
 
@@ -472,6 +473,10 @@ impl Vault {
             RuleChange::Upgrade { code_hash } => Some(*code_hash),
             _ => None,
         };
+        let storage_token = match &entry.change {
+            RuleChange::NearStorageDeposit { token } => Some(token.clone()),
+            _ => None,
+        };
         // Too little gas would mark the upgrade executed and then fail to
         // deploy: refuse, so nobody can burn a voted upgrade.
         if upgrade.is_some() {
@@ -487,6 +492,9 @@ impl Vault {
             "OMNIROLES_RULE_EXECUTED:{}",
             hex::encode(queue_id)
         ));
+        if let Some(token) = storage_token {
+            return PromiseOrValue::Promise(near_tokens::storage_deposit(token));
+        }
         match upgrade {
             Some(code_hash) => PromiseOrValue::Promise(
                 ext_code_source::ext(self.code_source.clone())
@@ -1748,6 +1756,11 @@ impl Vault {
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 solana::set_permissions(&role, permissions);
             }
+            RuleChange::SetNearPermissions { role, permissions } => {
+                near_tokens::set_permissions(&role, permissions);
+            }
+            // The registration call is made by `execute_rule_change`.
+            RuleChange::NearStorageDeposit { .. } => {}
 
             RuleChange::SetRole { role, config } => {
                 require!(role != DAO_ROLE, "ERR_RESERVED_ROLE");
@@ -1764,6 +1777,7 @@ impl Vault {
                 );
                 self.roles.remove(&role);
                 solana::set_permissions(&role, Vec::new());
+                near_tokens::set_permissions(&role, Vec::new());
             }
             RuleChange::GrantMembership {
                 role,
@@ -1892,6 +1906,13 @@ impl Vault {
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
                 solana::validate_permissions(permissions);
+            }
+            RuleChange::SetNearPermissions { role, permissions } => {
+                require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
+                near_tokens::validate_permissions(permissions);
+            }
+            RuleChange::NearStorageDeposit { token } => {
+                require!(token != &env::current_account_id(), "ERR_NEAR_SELF");
             }
 
             RuleChange::SetRole { role, config } => {

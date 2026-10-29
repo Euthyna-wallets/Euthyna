@@ -30,6 +30,167 @@ pub const OPERATION_TTL_NS: u64 = 120_000_000_000;
 const VAULT_WASM: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/vault.wasm"));
 const MOCK_MPC_WASM: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/mock_mpc.wasm"));
+pub const TEST_FT_WASM: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../res/test_ft.wasm"));
+
+/// NEAR token budget: 5 test USDC (6 decimals), at most 6 per transfer.
+pub const NEAR_ALLOWANCE_KEY: [u8; 32] = [0x4e; 32];
+pub const NEAR_BUDGET: u128 = 5_000_000;
+pub const NEAR_MIN_PER_TRANSFER: u128 = 100_000;
+pub const NEAR_MAX_PER_TRANSFER: u128 = 6_000_000;
+pub const NEAR_VAULT_FUNDS: u128 = 100_000_000;
+
+/// A test USDC the vault holds, a registered card account the role may pay,
+/// a listed receiver that never registered, and a token the role may not send.
+pub struct NearFixture {
+    pub token: Contract,
+    pub other_token: Contract,
+    pub card: Account,
+    pub unregistered: Account,
+}
+
+pub async fn deploy_test_ft(worker: &Worker<Sandbox>) -> Result<Contract> {
+    let token = worker.dev_deploy(TEST_FT_WASM).await?;
+    token.call("new").transact().await?.into_result()?;
+    Ok(token)
+}
+
+/// Registers the vault on the token by DAO vote, funds it, and lets the
+/// researcher role pay the card (and the unregistered receiver) within budget.
+pub async fn near_setup(fixture: &Fixture) -> Result<NearFixture> {
+    let token = deploy_test_ft(&fixture.worker).await?;
+    let other_token = deploy_test_ft(&fixture.worker).await?;
+    let card = fixture.worker.dev_create_account().await?;
+    let unregistered = fixture.worker.dev_create_account().await?;
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({"NearStorageDeposit": {"token": token.id()}}),
+    )
+    .await?;
+    let registered: Option<Value> = token
+        .view("storage_balance_of")
+        .args_json(json!({"account_id": fixture.vault.id()}))
+        .await?
+        .json()?;
+    if registered.is_none() {
+        bail!("the vote did not register the vault on the token");
+    }
+    card.call(token.id(), "storage_deposit")
+        .args_json(json!({"account_id": null, "registration_only": true}))
+        .deposit(near_workspaces::types::NearToken::from_millinear(10))
+        .transact()
+        .await?
+        .into_result()?;
+    for (contract, holder) in [
+        (&token, fixture.vault.id()),
+        (&other_token, fixture.vault.id()),
+    ] {
+        contract
+            .call("mint")
+            .args_json(json!({"account_id": holder, "amount": NEAR_VAULT_FUNDS.to_string()}))
+            .transact()
+            .await?
+            .into_result()?;
+    }
+
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({
+            "SetAllowance": {
+                "key": NEAR_ALLOWANCE_KEY,
+                "balance": NEAR_BUDGET.to_string(),
+                "refill": "1",
+                "max_refill": NEAR_BUDGET.to_string(),
+                "period_ns": 86_400_000_000_000u64
+            }
+        }),
+    )
+    .await?;
+    apply_rule_change(
+        &fixture.owner,
+        &fixture.outsider,
+        &fixture.worker,
+        &fixture.vault,
+        json!({
+            "SetNearPermissions": {
+                "role": ROLE,
+                "permissions": [{
+                    "token": token.id(),
+                    "receivers": [card.id(), unregistered.id()],
+                    "allowance": NEAR_ALLOWANCE_KEY,
+                    "min_per_transfer": NEAR_MIN_PER_TRANSFER.to_string(),
+                    "max_per_transfer": NEAR_MAX_PER_TRANSFER.to_string()
+                }]
+            }
+        }),
+    )
+    .await?;
+    Ok(NearFixture {
+        token,
+        other_token,
+        card,
+        unregistered,
+    })
+}
+
+pub fn near_request(token: &Contract, receiver: &Account, amount: u128, reference: &str) -> Value {
+    json!({
+        "token": token.id(),
+        "receiver_id": receiver.id(),
+        "amount": amount.to_string(),
+        "memo": "card refill",
+        "reference": reference
+    })
+}
+
+pub async fn execute_near(
+    fixture: &Fixture,
+    caller: &Account,
+    request: Value,
+) -> Result<ExecutionFinalResult> {
+    Ok(caller
+        .call(fixture.vault.id(), "execute_near")
+        .args_json(json!({"role": ROLE, "request": request}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?)
+}
+
+pub async fn ft_balance(token: &Contract, account: &near_workspaces::AccountId) -> Result<u128> {
+    let balance: String = token
+        .view("ft_balance_of")
+        .args_json(json!({"account_id": account}))
+        .await?
+        .json()?;
+    Ok(balance.parse()?)
+}
+
+pub async fn near_operation_by_reference(fixture: &Fixture, reference: &str) -> Result<Value> {
+    fixture
+        .vault
+        .view("get_near_operation_by_reference")
+        .args_json(json!({"role": ROLE, "reference": reference}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("NEAR operation missing")
+}
+
+pub async fn allowance(fixture: &Fixture, key: [u8; 32]) -> Result<Value> {
+    fixture
+        .vault
+        .view("get_allowance")
+        .args_json(json!({"key": key}))
+        .await?
+        .json::<Option<Value>>()?
+        .context("allowance missing")
+}
 
 pub struct Fixture {
     pub worker: Worker<Sandbox>,

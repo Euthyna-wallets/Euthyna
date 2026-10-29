@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 use serial_test::serial;
 use vault_common::{
     ALLOWANCE_KEY, CHAIN_ID, Fixture, ROLE, TOKEN, apply_rule_change, approval, approval_signed_by,
-    assert_failure_contains, authorize, erc20_transfer, get_operation, prepare, request, setup,
-    status_report, status_report_signed_by,
+    assert_failure_contains, authorize, erc20_transfer, execute_near, get_operation, near_request,
+    near_setup, prepare, request, setup, status_report, status_report_signed_by,
 };
 
 const ATTACKER: [u8; 20] = [0xba; 20];
@@ -699,5 +699,173 @@ async fn settlement_callback_is_private() -> Result<()> {
         .args_json(json!({"op_id": vec![0;32], "tx_hash": vec![0;32], "expected_payload_hash": vec![0;32], "cancellation": false}))
         .gas(Gas::from_tgas(50)).transact().await?;
     assert_failure_contains(&result, "Method on_settle_verified is private");
+    Ok(())
+}
+
+/// The agent's key can only move NEAR tokens the DAO listed, to receivers it
+/// listed, within the voted budget; nothing else the vault holds.
+#[tokio::test]
+#[serial]
+async fn injected_agent_cannot_move_near_tokens_outside_its_role() -> Result<()> {
+    let f = setup().await?;
+    let near = near_setup(&f).await?;
+    const USDC: u128 = 1_000_000;
+
+    blocked(
+        "agent sends test USDC to an unlisted NEAR account",
+        "vault: NEAR permissions (receiver)",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &f.outsider, USDC, "NEAR-RECEIVER"),
+        )
+        .await?,
+        "FunctionNotAllowed",
+    );
+    blocked(
+        "agent sends a token the role does not list",
+        "vault: NEAR permissions (token)",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.other_token, &near.card, USDC, "NEAR-TOKEN"),
+        )
+        .await?,
+        "TokenNotAllowed",
+    );
+    blocked(
+        "agent sends more than the per-transfer cap",
+        "vault: NEAR permissions (max per transfer)",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, 7 * USDC, "NEAR-CAP"),
+        )
+        .await?,
+        "ERR_MAX_PER_TRANSFER",
+    );
+    blocked(
+        "agent spams dust transfers to grow the vault's storage",
+        "vault: NEAR permissions (min per transfer)",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, 1, "NEAR-DUST"),
+        )
+        .await?,
+        "ERR_MIN_PER_TRANSFER",
+    );
+    blocked(
+        "an account outside the role calls execute_near",
+        "vault: membership",
+        &execute_near(
+            &f,
+            &f.outsider,
+            near_request(&near.token, &near.card, USDC, "NEAR-OUTSIDER"),
+        )
+        .await?,
+        "ERR_MEMBERSHIP_NOT_FOUND",
+    );
+
+    // A membership that ended: the vote set an end date, now passed.
+    let late = f.worker.dev_create_account().await?;
+    let ends_at = f.worker.view_block().await?.timestamp() + 3_000_000_000;
+    apply_rule_change(
+        &f.owner,
+        &f.outsider,
+        &f.worker,
+        &f.vault,
+        json!({"GrantMembership": {
+            "role": ROLE, "member": late.id(), "kind": "Agent",
+            "starts_at_ns": "0", "ends_at_ns": ends_at.to_string(), "max_uses": null
+        }}),
+    )
+    .await?;
+    tests::wait_until_timestamp(&f.worker, ends_at + 1).await?;
+    blocked(
+        "an agent whose membership expired",
+        "vault: membership (end date)",
+        &execute_near(
+            &f,
+            &late,
+            near_request(&near.token, &near.card, USDC, "NEAR-EXPIRED"),
+        )
+        .await?,
+        "ERR_MEMBERSHIP_UNAVAILABLE",
+    );
+
+    // One honest refill, then the same reference again.
+    execute_near(
+        &f,
+        &f.agent,
+        near_request(&near.token, &near.card, USDC, "NEAR-REF"),
+    )
+    .await?
+    .into_result()?;
+    blocked(
+        "agent replays a reference to pay twice",
+        "vault: unique reference",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, USDC, "NEAR-REF"),
+        )
+        .await?,
+        "ERR_REFERENCE_ALREADY_USED",
+    );
+    // 4 USDC left of 5: 4.5 is under the cap but over the budget.
+    blocked(
+        "agent spends past the voted NEAR budget",
+        "vault: allowance",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, 4_500_000, "NEAR-BUDGET"),
+        )
+        .await?,
+        "ERR_ALLOWANCE_EXCEEDED",
+    );
+
+    // Enough gas for ft_transfer but not for the callback that settles the budget.
+    let starved = f.agent.call(f.vault.id(), "execute_near")
+        .args_json(json!({"role": ROLE, "request": near_request(&near.token, &near.card, USDC, "NEAR-GAS")}))
+        .gas(Gas::from_tgas(40)).transact().await?;
+    blocked(
+        "agent attaches too little gas for the settlement callback",
+        "vault: callback gas",
+        &starved,
+        "ERR_NEAR_CALLBACK_GAS",
+    );
+
+    f.council
+        .call(f.vault.id(), "pause")
+        .transact()
+        .await?
+        .into_result()?;
+    blocked(
+        "agent pays while the council paused the vault",
+        "vault: pause",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, USDC, "NEAR-PAUSED"),
+        )
+        .await?,
+        "ERR_PAUSED",
+    );
+
+    let callback = f
+        .outsider
+        .call(f.vault.id(), "on_near_transfer")
+        .args_json(json!({"op_id": vec![0; 32]}))
+        .gas(Gas::from_tgas(30))
+        .transact()
+        .await?;
+    blocked(
+        "anyone calls the transfer callback to fake a result",
+        "vault: private callback",
+        &callback,
+        "Method on_near_transfer is private",
+    );
     Ok(())
 }
