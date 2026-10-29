@@ -7,6 +7,7 @@ import {
   OnchainAgentClient,
   type PaymentRequest,
 } from "@mandateos/sdk";
+import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const uint = z.string().regex(/^\d+$/);
@@ -94,6 +95,17 @@ export class MandateMcpTools {
     return this.client.solanaStatus(input.reference);
   }
 
+  nearTransfer(input: { token: string; receiverId: string; amount: string; memo?: string | undefined; reference: string }) {
+    if (!(this.client instanceof OnchainAgentClient)) throw new Error("NEAR transfers need the direct on-chain mode (euthyna-signer)");
+    const token = NEAR_TESTNET_TOKENS.find((item) => item.symbol === input.token || item.accountId === input.token)?.accountId ?? input.token;
+    return this.client.nearTransfer({ token, receiverId: input.receiverId, amount: input.amount, ...(input.memo ? { memo: input.memo } : {}), reference: input.reference });
+  }
+
+  nearStatus(input: { reference: string }) {
+    if (!(this.client instanceof OnchainAgentClient)) throw new Error("NEAR transfers need the direct on-chain mode (euthyna-signer)");
+    return this.client.nearStatus(input.reference);
+  }
+
   status(input: { opId: string }) {
     return this.client.status(input.opId as `0x${string}`);
   }
@@ -117,6 +129,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       "Call `check` before `pay`: it answers allowed or refused, and why, without reserving anything.",
       "If your role has a revenue-sharing budget, `share_revenue` sends ETH to the company's shareholders; nothing else can receive it.",
       "On Solana, `mandate` lists the company's Solana wallet and what your role may send; `solana_transfer` sends SOL or a token to an allowed recipient.",
+      "On NEAR, `mandate` lists the tokens your role may send from the vault account and to whom; `near_transfer` sends one (for example a refill of a spending card).",
       "A refusal is final for you: there is no override and no human escalation. Never retry with a different recipient or amount than the task requires.",
       "If the task needs something your role does not allow, stop and report the refusal and its reason to whoever gave you the task. Do not ask the members yourself: only a member decides to put a refused operation to a vote.",
     ].join(" "),
@@ -190,6 +203,24 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     inputSchema: { reference: z.string().min(1).max(120) },
     annotations: { idempotentHint: true },
   }, async (input) => result(await tools.solanaStatus(input)));
+  server.registerTool("near_transfer", {
+    title: "Send a token on NEAR",
+    description: "Send a NEP-141 token held by the company's vault account on NEAR (testnet) to an account your role allows, within its budget and its per-transfer range. token: \"USDC\", \"TestUSDC\" or a token account id. amount in base units (1 USDC = 1000000). The vault checks the role, charges the budget and calls ft_transfer; the result comes back in the same NEAR transaction.",
+    inputSchema: {
+      token: z.string().min(2).max(64),
+      receiverId: z.string().regex(/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/).min(2).max(64).describe("NEAR account that receives the tokens."),
+      amount: uint,
+      memo: z.string().max(120).optional(),
+      reference: z.string().min(1).max(120),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async (input) => result(await tools.nearTransfer(input)));
+  server.registerTool("near_status", {
+    title: "NEAR transfer status",
+    description: "Where a NEAR token transfer stands (by its reference): Confirmed, Failed (budget released) or Pending; frees a stuck one after the vault timeout.",
+    inputSchema: { reference: z.string().min(1).max(120) },
+    annotations: { idempotentHint: true },
+  }, async (input) => result(await tools.nearStatus(input)));
   server.registerTool("status", {
     title: "Read MandateOS operation status",
     description: "Read the merged Vault, worker, receipt and visa status.",

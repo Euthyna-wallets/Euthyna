@@ -724,6 +724,14 @@ export function createApp({
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
           }),
           z.object({
+            kind: z.literal("near-transfer"),
+            token: z.enum(["USDC", "TestUSDC"]),
+            receivers: z.array(z.object({ accountId: z.string().regex(/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/).min(2).max(64), label: z.string().max(80) })).min(1).max(32),
+            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+            maxPerTransfer: z.string().regex(/^\d+(\.\d+)?$/),
+            minPerTransfer: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+          }),
+          z.object({
             kind: z.literal("wrap"),
             budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
           }),

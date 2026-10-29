@@ -1,5 +1,6 @@
 import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaRpc, solanaTokenOf, type SolanaProfile } from "./solana.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, hexToBytes, type Hex } from "viem";
+import { NEAR_TESTNET_TOKENS } from "./roles.js";
 import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
 
 export interface DirectVault {
@@ -16,6 +17,10 @@ export interface DirectOperation extends Record<string, unknown> {
   possibly_signed_at_ns: string | null;
 }
 export type Rpc = <T>(method: string, params: unknown[]) => Promise<T>;
+type NearPermissionView = { token: string; receivers: string[]; allowance: number[]; min_per_transfer: string; max_per_transfer: string };
+type NearOperationView = { op_id: number[]; state: string; created_at_ns: string; request: { token: string; receiver_id: string; amount: string; memo: string | null; reference: string } };
+/** execute_near: 30 Tgas for ft_transfer, 10 for the callback, 10 for itself, plus margin. */
+const NEAR_TRANSFER_GAS = "100000000000000";
 type SolanaOperationView = { op_id: number[]; state: string; signature: number[] | null; signed_transaction: number[] | null };
 export function publicRpc(url: string): Rpc {
   return async <T>(method: string, params: unknown[]): Promise<T> => {
@@ -31,12 +36,14 @@ export class OnchainAgentClient {
   constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
-    const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions] = await Promise.all([
+    const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions, nearPermissions] = await Promise.all([
       this.vault.view("get_role", { role }), this.vault.view("get_membership", { role, member }),
       this.vault.view("get_address_list", { list: "suppliers" }), this.vault.view("get_wallet", { chain_id }),
       // Vaults older than the Solana version do not have these views.
       this.vault.view<{ address: number[] | null } | null>("get_solana_wallet").catch(() => null),
       this.vault.view<Array<{ asset: unknown; recipients: number[][]; allowance: number[] }>>("get_solana_permissions", { role }).catch(() => []),
+      // Vaults older than the NEAR-transfer version do not have this view.
+      this.vault.view<NearPermissionView[]>("get_near_permissions", { role }).catch(() => []),
     ]);
     const permissions = (config as { config?: { permissions?: Array<{ conditions: Array<{ operator: number; compValue: Hex }> }> } } | null)?.config?.permissions ?? [];
     const keys = [...new Set(permissions.flatMap((p) => p.conditions.filter((c) => c.operator === 28 || c.operator === 30).map((c) => c.compValue)))];
@@ -51,7 +58,18 @@ export class OnchainAgentClient {
         budget: bytesToHex(Uint8Array.from(permission.allowance)),
       })),
     } : null;
-    return { config, membership, suppliers, wallet, allowances: [...allowances, ...solanaAllowances], solana };
+    const nearAllowances = await Promise.all(nearPermissions.map(async (permission) => ({ key: bytesToHex(Uint8Array.from(permission.allowance)), allowance: await this.vault.view("get_allowance", { key: permission.allowance }) })));
+    const near = nearPermissions.length ? {
+      permissions: nearPermissions.map((permission) => ({
+        token: permission.token,
+        symbol: NEAR_TESTNET_TOKENS.find((item) => item.accountId === permission.token)?.symbol ?? null,
+        receivers: permission.receivers,
+        minPerTransfer: permission.min_per_transfer,
+        maxPerTransfer: permission.max_per_transfer,
+        budget: bytesToHex(Uint8Array.from(permission.allowance)),
+      })),
+    } : null;
+    return { config, membership, suppliers, wallet, allowances: [...allowances, ...solanaAllowances, ...nearAllowances], solana, near };
   }
   async pay(intent: PaymentRequest, _invoice?: InvoiceContext) {
     const { chain_id } = this.vault.identity();
@@ -183,6 +201,57 @@ export class OnchainAgentClient {
     await this.vault.action("settle_solana", { op_id: op.op_id }, "100000000000000");
     const settled = await this.vault.view<SolanaOperationView | null>("get_solana_operation_by_reference", { role, reference });
     return { state: settled?.state ?? "unknown", solana: "finalized" };
+  }
+
+  /**
+   * Send a NEP-141 token held by the vault account to a listed NEAR account
+   * (a spending card, a supplier). The vault checks the role, charges the
+   * budget and calls `ft_transfer`; its callback confirms or releases the
+   * budget in the same NEAR transaction. Amount in base units.
+   */
+  async nearTransfer(input: { token: string; receiverId: string; amount: string; memo?: string; reference: string }) {
+    const { role, member } = this.vault.identity();
+    const request = { token: input.token, receiver_id: input.receiverId, amount: input.amount, memo: input.memo ?? null, reference: input.reference };
+    // Older vaults do not have NEAR transfers; any other error is not a refusal.
+    const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_near", { role, member, request }).catch((error: unknown) => {
+      if (/MethodNotFound|MethodResolveError/.test(String(error))) return { allowed: false, reason: "the vault does not support NEAR transfers yet (upgrade by vote)" };
+      throw error;
+    });
+    if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    // check_near does not look at references: a reused one would panic in execute_near.
+    if (await this.vault.view("get_near_operation_by_reference", { role, reference: input.reference })) {
+      return { outcome: "refused" as const, reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" as const };
+    }
+    let nearTransactionHash: string;
+    try {
+      nearTransactionHash = await this.vault.action("execute_near", { role, request }, NEAR_TRANSFER_GAS);
+    } catch (error) {
+      // Agent keys made before NEAR transfers cannot call execute_near.
+      if (/MethodNameMismatch|method_name/i.test(String(error))) {
+        return { outcome: "refused" as const, reason: "this agent's NEAR key predates NEAR transfers: pair the agent again", refusedBy: "key" as const };
+      }
+      throw error;
+    }
+    return { outcome: "sent" as const, nearTransactionHash, ...(await this.nearStatus(input.reference)) };
+  }
+
+  /** State of a NEAR token transfer; frees a stuck one after the unconfirmed timeout. */
+  async nearStatus(reference: string): Promise<{ state: string; opId?: Hex; receiverId?: string; amount?: string }> {
+    const { role } = this.vault.identity();
+    const read = () => this.vault.view<NearOperationView | null>("get_near_operation_by_reference", { role, reference });
+    let op = await read();
+    if (!op) return { state: "unknown" };
+    if (op.state === "Pending") {
+      const config = await this.vault.view<{ unconfirmed_after_ns: string }>("get_settlement_config");
+      if (BigInt(Date.now()) * 1_000_000n - BigInt(op.created_at_ns) >= BigInt(config.unconfirmed_after_ns)) {
+        // Our clock may run ahead of the chain's: too early is not an error, just not yet.
+        await this.vault.action("release_near_unconfirmed", { op_id: op.op_id }).catch((error: unknown) => {
+          if (!/ERR_UNCONFIRMED_TOO_EARLY|ERR_NOT_PENDING/.test(String(error))) throw error;
+        });
+        op = (await read()) ?? op;
+      }
+    }
+    return { state: op.state, opId: bytesToHex(Uint8Array.from(op.op_id)), receiverId: op.request.receiver_id, amount: op.request.amount };
   }
 
   async shareRevenue(amountWei: string, reference: string): Promise<Record<string, unknown>> {

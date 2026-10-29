@@ -57,7 +57,7 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
 export function outcomeOf(operation: OnchainOperation): Outcome {
   if (operation.evm?.status === "success") return "done";
   if (operation.evm?.status === "reverted") return "failed";
-  if (operation.solana && operation.vaultState === "Confirmed") return "done";
+  if ((operation.solana || operation.near) && operation.vaultState === "Confirmed") return "done";
   if (["Cancelled", "Vetoed", "Expired"].includes(operation.vaultState)) return "cancelled";
   if (operation.vaultState === "Failed") return "failed";
   return "pending";

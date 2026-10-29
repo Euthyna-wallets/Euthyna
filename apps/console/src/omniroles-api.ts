@@ -105,6 +105,8 @@ export type OnchainOperation = {
   evm: { hash: string; status: "success" | "reverted" | "not mined"; blockNumber: string | null } | null;
   /** Solana operations: the transaction signature and its explorer page. */
   solana?: { signature: string; explorer: string } | null;
+  /** NEP-141 transfer from the vault account: ft_transfer and its result in one NEAR transaction. */
+  near?: { txHash: string; explorer: string } | null;
   nearAuthorizationTxHash: string | null;
   vaultAccountId: string;
 };

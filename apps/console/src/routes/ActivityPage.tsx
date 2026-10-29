@@ -110,6 +110,7 @@ function Proof({ entry, actor }: { entry: Entry; actor: string }) {
     if (operation.nearAuthorizationTxHash) rows.push(["Signed on NEAR", <a href={`${NEAR_EXPLORER}/txns/${operation.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">{short(operation.nearAuthorizationTxHash)} ↗</a>]);
     if (operation.evm) rows.push([`${operation.chain} transaction`, <a href={`${EXPLORERS[operation.chainId] ?? ""}/tx/${operation.evm.hash}`} target="_blank" rel="noreferrer">{short(operation.evm.hash)} ↗</a>]);
     if (operation.solana) rows.push([`${operation.chain} transaction`, <a href={operation.solana.explorer} target="_blank" rel="noreferrer">{short(operation.solana.signature)} ↗</a>]);
+    if (operation.near) rows.push(["Token transfer", operation.vaultState === "Confirmed" ? "ft_transfer succeeded, budget spent" : operation.vaultState === "Failed" ? "ft_transfer failed, budget released" : operation.vaultState === "Unconfirmed" ? "No result came back: budget kept spent, check the transaction" : "Waiting for the token's answer"]);
     if (operation.solana) rows.push(["Finality", operation.vaultState === "Confirmed" ? "Attested by NEAR's MPC network" : "Waiting"]);
     if (operation.nonce !== null) rows.push(["Wallet nonce", <span className="mono">{operation.nonce}</span>]);
     if (operation.reference) rows.push(["Reference", <span className="mono">{operation.reference}</span>]);

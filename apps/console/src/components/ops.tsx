@@ -75,7 +75,8 @@ export function feedOf(activity: Activity | undefined): FeedItem[] {
   if (!activity) return [];
   const done: FeedItem[] = activity.operations.map((operation) => {
     // EVM: mined successfully. Solana: finality attested by MPC (vault state Confirmed).
-    const ok = operation.evm?.status === "success" || (Boolean(operation.solana) && operation.vaultState === "Confirmed");
+    // NEAR tokens: ft_transfer succeeded (vault state Confirmed, set by its callback).
+    const ok = operation.evm?.status === "success" || ((Boolean(operation.solana) || Boolean(operation.near)) && operation.vaultState === "Confirmed");
     return {
       at: operation.at,
       ok,

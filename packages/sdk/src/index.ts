@@ -22,7 +22,17 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "execute_solana",
   "settle_solana",
   "release_solana_unconfirmed",
+  "execute_near",
+  "release_near_unconfirmed",
 ] as const;
+
+/** Methods NEAR-transfer agents add; keys made before them still work for everything else. */
+export const NEAR_AGENT_METHODS = ["execute_near", "release_near_unconfirmed"] as const;
+/** Agent key method lists accepted on chain, newest first. */
+export const AGENT_METHOD_GENERATIONS: ReadonlyArray<readonly string[]> = [
+  AGENT_FUNCTION_CALL_METHODS,
+  AGENT_FUNCTION_CALL_METHODS.filter((method) => !(NEAR_AGENT_METHODS as readonly string[]).includes(method)),
+];
 
 export const AGENT_GAS = {
   prepare: "30000000000000",
@@ -47,6 +57,8 @@ export function proposedAgentAccountId(name: string, parent: string, organizatio
   if (accountId.length > 64) throw new Error("proposed agent account exceeds NEAR's 64-character limit");
   return accountId;
 }
+
+export { cardAccountIdOf } from "./roles.js";
 
 export interface PaymentIntent {
   token: number[];
