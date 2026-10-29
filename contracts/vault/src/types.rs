@@ -381,6 +381,15 @@ pub enum RuleChange {
         role: String,
         permissions: Vec<crate::solana::SolanaPermission>,
     },
+    /// What the role may send in NEAR tokens (replaces the role's NEAR list).
+    SetNearPermissions {
+        role: String,
+        permissions: Vec<crate::near_tokens::NearPermission>,
+    },
+    /// Register the vault on a NEP-141 token so it can receive it.
+    NearStorageDeposit {
+        token: AccountId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
