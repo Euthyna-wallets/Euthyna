@@ -745,6 +745,17 @@ async fn injected_agent_cannot_move_near_tokens_outside_its_role() -> Result<()>
         "ERR_MAX_PER_TRANSFER",
     );
     blocked(
+        "agent spams dust transfers to grow the vault's storage",
+        "vault: NEAR permissions (min per transfer)",
+        &execute_near(
+            &f,
+            &f.agent,
+            near_request(&near.token, &near.card, 1, "NEAR-DUST"),
+        )
+        .await?,
+        "ERR_MIN_PER_TRANSFER",
+    );
+    blocked(
         "an account outside the role calls execute_near",
         "vault: membership",
         &execute_near(

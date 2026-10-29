@@ -30,6 +30,9 @@ pub struct NearPermission {
     pub receivers: Vec<AccountId>,
     /// Budget charged with the amount, in the token's base units.
     pub allowance: AllowanceKey,
+    /// Smallest transfer accepted. Each transfer stores a record paid by the
+    /// vault's NEAR balance: a floor bounds how many records a budget can buy.
+    pub min_per_transfer: U128,
     pub max_per_transfer: U128,
 }
 
@@ -49,6 +52,10 @@ pub enum NearOperationState {
     Pending,
     Confirmed,
     Failed,
+    /// The callback never ran (e.g. out of gas): released by anyone after the
+    /// unconfirmed timeout, with the budget kept spent, since the transfer may
+    /// have happened.
+    Unconfirmed,
 }
 
 #[derive(Clone, Debug)]
@@ -102,8 +109,9 @@ pub(crate) fn validate_permissions(permissions: &[NearPermission]) {
             "ERR_NEAR_RECEIVERS"
         );
         require!(
-            permission.max_per_transfer.0 > 0,
-            "ERR_NEAR_MAX_PER_TRANSFER"
+            permission.min_per_transfer.0 > 0
+                && permission.min_per_transfer.0 <= permission.max_per_transfer.0,
+            "ERR_NEAR_MIN_PER_TRANSFER"
         );
         require!(
             permission.token != vault && !permission.receivers.contains(&vault),
@@ -263,6 +271,22 @@ impl Vault {
         self.release_near(op, state.clone());
         state
     }
+
+    /// Anyone, after the unconfirmed timeout, for an operation whose callback
+    /// never ran: frees the role and the membership, keeps the budget spent.
+    pub fn release_near_unconfirmed(&mut self, op_id: OperationId) {
+        let op = operation(&op_id);
+        require!(op.state == NearOperationState::Pending, "ERR_NOT_PENDING");
+        require!(
+            env::block_timestamp()
+                >= op
+                    .created_at_ns
+                    .0
+                    .saturating_add(self.settlement_config.unconfirmed_after_ns.0),
+            "ERR_UNCONFIRMED_TOO_EARLY"
+        );
+        self.release_near(op, NearOperationState::Unconfirmed);
+    }
 }
 
 impl Vault {
@@ -326,6 +350,9 @@ impl Vault {
             .into_iter()
             .find(|p| p.token == request.token && p.receivers.contains(&request.receiver_id))
             .ok_or("FunctionNotAllowed")?;
+        if request.amount.0 < permission.min_per_transfer.0 {
+            return Err("ERR_MIN_PER_TRANSFER");
+        }
         if request.amount.0 > permission.max_per_transfer.0 {
             return Err("ERR_MAX_PER_TRANSFER");
         }
@@ -342,7 +369,10 @@ impl Vault {
     }
 
     fn release_near(&mut self, mut op: NearOperation, terminal: NearOperationState) {
-        let confirmed = terminal == NearOperationState::Confirmed;
+        let failed = terminal == NearOperationState::Failed;
+        // Confirmed, or unknown (Unconfirmed): the tokens may have left, so the
+        // budget and the membership use stay spent.
+        let confirmed = !failed;
         let reservations = self
             .role_reservations
             .get_mut(&op.role)
@@ -367,12 +397,208 @@ impl Vault {
         if confirmed {
             budget.balance = U128(budget.balance.0.saturating_sub(op.consumption.amount.0));
         }
+        let label = match terminal {
+            NearOperationState::Confirmed => "CONFIRMED",
+            NearOperationState::Unconfirmed => "UNCONFIRMED",
+            _ => "FAILED",
+        };
         op.state = terminal;
         store(&op);
-        env::log_str(&format!(
-            "OMNIROLES_NEAR_{}:{}",
-            if confirmed { "CONFIRMED" } else { "FAILED" },
-            hex::encode(op.op_id)
-        ));
+        env::log_str(&format!("OMNIROLES_NEAR_{label}:{}", hex::encode(op.op_id)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use near_sdk::{test_utils::VMContextBuilder, testing_env};
+
+    const TOKEN: &str = "usdc.testnet";
+    const CARD: &str = "card.testnet";
+    const AGENT: &str = "agent.testnet";
+    const BUDGET: AllowanceKey = [9; 32];
+    const SIX_HOURS: u64 = 21_600_000_000_000;
+
+    fn context(caller: &str, now: u64) {
+        testing_env!(
+            VMContextBuilder::new()
+                .current_account_id("vault.testnet".parse().unwrap())
+                .predecessor_account_id(caller.parse().unwrap())
+                .signer_account_id(caller.parse().unwrap())
+                .block_timestamp(now)
+                .prepaid_gas(Gas::from_tgas(300))
+                .build()
+        );
+    }
+
+    fn permission(min: u128, max: u128) -> NearPermission {
+        NearPermission {
+            token: TOKEN.parse().unwrap(),
+            receivers: vec![CARD.parse().unwrap()],
+            allowance: BUDGET,
+            min_per_transfer: U128(min),
+            max_per_transfer: U128(max),
+        }
+    }
+
+    fn vault() -> Vault {
+        near_sdk::mock::with_mocked_blockchain(|b| {
+            b.take_storage();
+        });
+        context("owner.testnet", 1);
+        let mut v = Vault::new(
+            "acme".into(),
+            "owner.testnet".parse().unwrap(),
+            "mpc.testnet".parse().unwrap(),
+            Base64VecU8(vec![7; 32]),
+            Base64VecU8(vec![8; 32]),
+            1,
+            1,
+            1_000_000_000,
+            10,
+            100,
+            vec!["council.testnet".parse().unwrap()],
+            None,
+        );
+        v.apply_rule_change(
+            RuleChange::SetRole {
+                role: "cards".into(),
+                config: Vault::dao_gas_config(),
+            },
+            1,
+        );
+        v.apply_rule_change(
+            RuleChange::GrantMembership {
+                role: "cards".into(),
+                member: AGENT.parse().unwrap(),
+                kind: MembershipKind::Agent,
+                starts_at_ns: U64(0),
+                ends_at_ns: None,
+                max_uses: None,
+            },
+            1,
+        );
+        v.apply_rule_change(
+            RuleChange::SetAllowance {
+                key: BUDGET,
+                balance: U128(10_000_000),
+                refill: U128(0),
+                max_refill: U128(10_000_000),
+                period_ns: 0,
+            },
+            1,
+        );
+        let permissions = vec![permission(1_000_000, 5_000_000)];
+        validate_permissions(&permissions);
+        v.apply_rule_change(
+            RuleChange::SetNearPermissions {
+                role: "cards".into(),
+                permissions,
+            },
+            1,
+        );
+        v
+    }
+
+    fn request(amount: u128, reference: &str) -> NearTransferRequest {
+        NearTransferRequest {
+            token: TOKEN.parse().unwrap(),
+            receiver_id: CARD.parse().unwrap(),
+            amount: U128(amount),
+            memo: None,
+            reference: reference.into(),
+        }
+    }
+
+    #[test]
+    fn transfers_below_the_floor_are_refused() {
+        let v = vault();
+        context(AGENT, 2);
+        let check = v.check_near(
+            "cards".into(),
+            AGENT.parse().unwrap(),
+            request(999_999, "tiny"),
+        );
+        assert!(!check.allowed);
+        assert_eq!(check.reason.as_deref(), Some("ERR_MIN_PER_TRANSFER"));
+        let check = v.check_near(
+            "cards".into(),
+            AGENT.parse().unwrap(),
+            request(1_000_000, "floor"),
+        );
+        assert!(check.allowed);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PERMISSION_DENIED:ERR_MIN_PER_TRANSFER")]
+    fn execute_refuses_below_the_floor() {
+        let mut v = vault();
+        context(AGENT, 2);
+        let _ = v.execute_near("cards".into(), request(1, "dust"));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_NEAR_MIN_PER_TRANSFER")]
+    fn floor_must_be_positive() {
+        validate_permissions(&[permission(0, 5_000_000)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_NEAR_MIN_PER_TRANSFER")]
+    fn floor_cannot_exceed_the_cap() {
+        validate_permissions(&[permission(6_000_000, 5_000_000)]);
+    }
+
+    fn pending_operation(v: &mut Vault) -> OperationId {
+        context(AGENT, 2);
+        let _ = v.execute_near("cards".into(), request(2_000_000, "card-refill"));
+        let op = v
+            .get_near_operation_by_reference("cards".into(), "card-refill".into())
+            .expect("operation stored");
+        assert_eq!(op.state, NearOperationState::Pending);
+        assert_eq!(v.allowances.get(&BUDGET).unwrap().reserved.0, 2_000_000);
+        op.op_id
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_UNCONFIRMED_TOO_EARLY")]
+    fn stuck_operation_cannot_be_released_early() {
+        let mut v = vault();
+        let id = pending_operation(&mut v);
+        context("stranger.testnet", 3);
+        v.release_near_unconfirmed(id);
+    }
+
+    #[test]
+    fn stuck_operation_is_released_with_the_budget_kept_spent() {
+        let mut v = vault();
+        let id = pending_operation(&mut v);
+        context("stranger.testnet", 2 + SIX_HOURS + 1);
+        v.release_near_unconfirmed(id);
+        let op = v.get_near_operation(id).unwrap();
+        assert_eq!(op.state, NearOperationState::Unconfirmed);
+        let budget = v.allowances.get(&BUDGET).unwrap();
+        assert_eq!(budget.reserved.0, 0);
+        assert_eq!(budget.balance.0, 8_000_000);
+        assert_eq!(*v.role_reservations.get("cards").unwrap(), 0);
+        let membership = v
+            .memberships
+            .get(&MembershipKey {
+                role: "cards".into(),
+                member: AGENT.parse().unwrap(),
+            })
+            .unwrap();
+        assert_eq!(membership.reserved_uses, 0);
+        assert_eq!(membership.used_uses, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_NOT_PENDING")]
+    fn released_operation_cannot_be_released_twice() {
+        let mut v = vault();
+        let id = pending_operation(&mut v);
+        context("stranger.testnet", 2 + SIX_HOURS + 1);
+        v.release_near_unconfirmed(id);
+        v.release_near_unconfirmed(id);
     }
 }

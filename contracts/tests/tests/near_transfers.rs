@@ -239,7 +239,7 @@ async fn published_vault_upgrades_by_vote_then_transfers_near_tokens() -> Result
         "role": ROLE,
         "permissions": [{
             "token": token.id(), "receivers": [card.id()],
-            "allowance": budget_key, "max_per_transfer": FIVE_USDC.to_string()
+            "allowance": budget_key, "min_per_transfer": "100000", "max_per_transfer": FIVE_USDC.to_string()
         }]
     }});
     let refused = dao

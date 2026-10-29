@@ -36,6 +36,7 @@ pub const TEST_FT_WASM: &[u8] =
 /// NEAR token budget: 5 test USDC (6 decimals), at most 6 per transfer.
 pub const NEAR_ALLOWANCE_KEY: [u8; 32] = [0x4e; 32];
 pub const NEAR_BUDGET: u128 = 5_000_000;
+pub const NEAR_MIN_PER_TRANSFER: u128 = 100_000;
 pub const NEAR_MAX_PER_TRANSFER: u128 = 6_000_000;
 pub const NEAR_VAULT_FUNDS: u128 = 100_000_000;
 
@@ -124,6 +125,7 @@ pub async fn near_setup(fixture: &Fixture) -> Result<NearFixture> {
                     "token": token.id(),
                     "receivers": [card.id(), unregistered.id()],
                     "allowance": NEAR_ALLOWANCE_KEY,
+                    "min_per_transfer": NEAR_MIN_PER_TRANSFER.to_string(),
                     "max_per_transfer": NEAR_MAX_PER_TRANSFER.to_string()
                 }]
             }

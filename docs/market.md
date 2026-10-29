@@ -18,9 +18,11 @@ council like every other rule.
 | `NearStorageDeposit { token }` | The vault calls `storage_deposit` on `token` for itself (0.00125 NEAR, excess refunded), so it can receive that token, e.g. sales. |
 | `SetNearPermissions { role, permissions }` | Replaces what `role` may send in NEAR tokens. `RemoveRole` clears it. |
 
-A permission is `{ token, receivers, allowance, max_per_transfer }`: one NEP-141 contract, up to 32
-receivers, the budget (an existing `SetAllowance` key, in the token's base units) and a cap per
-transfer. At most 16 permissions per role.
+A permission is `{ token, receivers, allowance, min_per_transfer, max_per_transfer }`: one NEP-141 contract, up to 32
+receivers, the budget (an existing `SetAllowance` key, in the token's base units), a floor and a
+cap per transfer (`0 < min ≤ max`). The floor matters: every transfer stores a record paid by the
+vault's NEAR balance, so it bounds how many records a compromised agent can make the vault pay for
+(at most budget ÷ floor per period). At most 16 permissions per role.
 
 ### What the agent calls
 
@@ -36,6 +38,7 @@ The vault refuses unless all of these hold:
 | caller is a member, started, not ended, uses left | `ERR_MEMBERSHIP_NOT_FOUND`, `ERR_MEMBERSHIP_UNAVAILABLE` |
 | token listed for the role | `TokenNotAllowed` |
 | receiver listed for that token | `FunctionNotAllowed` |
+| `amount ≥ min_per_transfer` | `ERR_MIN_PER_TRANSFER` |
 | `amount ≤ max_per_transfer` | `ERR_MAX_PER_TRANSFER` |
 | `amount ≤ budget left` (after refill) | `ERR_ALLOWANCE_EXCEEDED` |
 | reference never used by this role | `ERR_REFERENCE_ALREADY_USED` |
@@ -51,6 +54,13 @@ token with 1 yoctoNEAR and 30 Tgas. The private callback `on_near_transfer` then
 - on failure (for example the receiver never registered on the token): releases the reservation,
   sets `Failed`, logs `OMNIROLES_NEAR_FAILED`. The reference stays used.
 
+If the callback never runs (for example it ran out of gas), the operation would stay `Pending`
+and hold its reservation. After the vault's unconfirmed timeout (`settlement_config.unconfirmed_after_ns`,
+6 hours by default), anyone can call `release_near_unconfirmed(op_id)`: the operation becomes
+`Unconfirmed`, the role and membership reservations are freed, and the budget and membership use
+**stay spent**, because the tokens may have left. Same rule as `release_unconfirmed` on EVM and
+`release_solana_unconfirmed` on Solana. Logs `OMNIROLES_NEAR_UNCONFIRMED`.
+
 The vault never calls anything other than `ft_transfer` on a listed token, and `storage_deposit`
 on a token the DAO voted.
 
@@ -65,11 +75,15 @@ unchanged and a vault on the published version moves to this one by a DAO `Upgra
 ([`contracts/tests/tests/near_transfers.rs`](../contracts/tests/tests/near_transfers.rs)).
 
 The new code is about 60 KB larger, which is about 0.6 NEAR more locked for storage. Nomos funds
-new vaults tightly, so top the vault up (a plain NEAR transfer, anyone can send it) before the
-upgrade vote, or the deploy fails for lack of storage balance.
+new vaults tightly, so the vault needs a top-up before the upgrade vote, or the deploy fails for lack
+of storage balance. The console's upgrade flow does it: `upgradeProposal()` in the API tops the vault
+up from the relayer before drafting the vote. By hand, a plain NEAR transfer to the vault works too.
 
 ### Tests
 
+- `contracts/vault/src/near_tokens.rs` unit tests: floor refused (check and execute), floor validation
+  (`0 < min ≤ max`), a stuck `Pending` operation released only after the timeout, with the budget kept
+  spent and reservations freed, and never twice.
 - [`near_transfers.rs`](../contracts/tests/tests/near_transfers.rs): refill within budget; failed
   `ft_transfer` releases the budget; published vault upgraded by vote, state kept, then transfers.
 - [`attacks.rs`](../contracts/tests/tests/attacks.rs) `injected_agent_cannot_move_near_tokens_outside_its_role`:
