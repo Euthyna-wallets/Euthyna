@@ -1155,12 +1155,17 @@ export class OmniRolesService {
       }
     }
     // NEAR permissions: only vaults on the NEAR-transfer version know them.
-    const existingNear = await this.view<unknown[]>(treasury.vaultAccountId, "get_near_permissions", { role: draft.name }).catch(() => null);
-    if (draft.blocks.some((block) => block.kind === "near-transfer") && existingNear === null) {
+    // Only "method not found" means an older vault; any other error stops here.
+    const nearSupported = await this.view<unknown[]>(treasury.vaultAccountId, "get_near_permissions", { role: draft.name }).then(() => true, (error: unknown) => {
+      if (/MethodNotFound|MethodResolveError/.test(String(error))) return false;
+      throw error;
+    });
+    if (draft.blocks.some((block) => block.kind === "near-transfer") && !nearSupported) {
       throw new OmniRolesError(400, "invalid_role", "this vault cannot send NEAR tokens yet: vote the vault upgrade first");
     }
-    // A role edited without its NEAR block must lose the NEAR permissions it had.
-    draft = { ...draft, clearNearPermissions: (existingNear?.length ?? 0) > 0 };
+    // A role saved without a NEAR block always clears NEAR rights on vaults that have them:
+    // an earlier vote still in the veto queue may add some after this one is drafted.
+    draft = { ...draft, clearNearPermissions: nearSupported };
     let changes: RuleChange[];
     try {
       changes = compileRole(draft, PROFILE);

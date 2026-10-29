@@ -600,6 +600,10 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
         if (!validNearAccountId(receiver.accountId)) throw new Error(`${receiver.accountId} is not a NEAR account id`);
       }
       const ft = nearTokenOf(block.token);
+      // parseUnits rounds beyond the token's decimals: refuse instead.
+      for (const value of [block.budget.amount, block.maxPerTransfer, block.minPerTransfer ?? ""]) {
+        if ((value.split(".")[1]?.length ?? 0) > ft.decimals) throw new Error(`${ft.symbol} has ${ft.decimals} decimals: ${value} is too precise`);
+      }
       const max = parseUnits(block.maxPerTransfer, ft.decimals);
       // Never above the cap: a small cap keeps a floor the agent can still pay.
       const floor = amount / NEAR_DEFAULT_TRANSFERS_PER_PERIOD;

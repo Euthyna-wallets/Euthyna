@@ -54,16 +54,23 @@ describe("NEAR transfer roles", () => {
     await expect(service({ legacy: true }).roleProposal("org-1", refill)).rejects.toMatchObject({ code: "invalid_role", message: expect.stringMatching(/upgrade/) });
   });
 
-  it("clears NEAR permissions the role had when the edit drops them, and only then", async () => {
+  it("clears NEAR permissions whenever a role is saved without them, on vaults that have NEAR", async () => {
     expect(kinds(await service({ existing: [{ token: USDC.accountId }] }).roleProposal("org-1", evmOnly))).toContain("SetNearPermissions");
-    expect(kinds(await service().roleProposal("org-1", evmOnly))).not.toContain("SetNearPermissions");
+    // Even with none executed yet: an earlier vote may still be in the veto queue.
+    expect(kinds(await service().roleProposal("org-1", evmOnly))).toContain("SetNearPermissions");
     // Older vaults never get the change they do not know.
     expect(kinds(await service({ legacy: true }).roleProposal("org-1", evmOnly))).not.toContain("SetNearPermissions");
   });
 
   it("ignores a clear flag sent by the client", async () => {
-    const draft = await service().roleProposal("org-1", { ...evmOnly, clearNearPermissions: true });
+    const draft = await service({ legacy: true }).roleProposal("org-1", { ...evmOnly, clearNearPermissions: true });
     expect(kinds(draft)).not.toContain("SetNearPermissions");
+  });
+
+  it("stops on an RPC error instead of guessing the vault's version", async () => {
+    const failing = service();
+    (failing as unknown as { near: { viewFunction: (account: string, method: string) => Promise<unknown> } }).near.viewFunction = async () => { throw new Error("fetch failed"); };
+    await expect(failing.roleProposal("org-1", evmOnly)).rejects.toThrow(/fetch failed/);
   });
 });
 

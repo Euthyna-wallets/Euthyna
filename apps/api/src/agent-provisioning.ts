@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@mandateos/db";
-import { AGENT_FUNCTION_CALL_METHODS, proposedAgentAccountId } from "@mandateos/sdk";
+import { AGENT_FUNCTION_CALL_METHODS, AGENT_METHOD_GENERATIONS, proposedAgentAccountId } from "@mandateos/sdk";
 
 import type { NearClient } from "./near.js";
 
@@ -19,6 +19,8 @@ export interface AgentAccessKeyAttestation {
   receiverId: string | null;
   methodNames: string[];
   allowanceYocto: string | null;
+  /** Valid key from before NEAR transfers: works, but cannot call execute_near (pair again). */
+  outdated: boolean;
   expected: AgentAccessKeyExpectation;
 }
 
@@ -47,6 +49,11 @@ export function attestAgentAccessKeys(
     ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
     : [];
   const expectedMethods = [...expected.methodNames].sort();
+  // Keys from an earlier generation of the method list stay valid: they only have fewer rights.
+  const sameAsCurrent = JSON.stringify(methodNames) === JSON.stringify(expectedMethods);
+  const earlier = !sameAsCurrent
+    && JSON.stringify(expectedMethods) === JSON.stringify([...AGENT_METHOD_GENERATIONS[0]!].sort())
+    && AGENT_METHOD_GENERATIONS.slice(1).some((generation) => JSON.stringify([...generation].sort()) === JSON.stringify(methodNames));
   const publicKey = typeof entry?.public_key === "string" ? entry.public_key : null;
   const receiverId = typeof functionCall?.receiver_id === "string" ? functionCall.receiver_id : null;
   const allowanceYocto = typeof functionCall?.allowance === "string" ? functionCall.allowance : null;
@@ -56,13 +63,14 @@ export function attestAgentAccessKeys(
       publicKey === expected.publicKey &&
       receiverId === expected.vaultAccountId &&
       allowanceYocto === expected.allowanceYocto &&
-      JSON.stringify(methodNames) === JSON.stringify(expectedMethods),
+      (sameAsCurrent || earlier),
     keyCount: keys.length,
     publicKey,
     permission: permission === "FullAccess" ? "FullAccess" : functionCall ? "FunctionCall" : "unknown",
     receiverId,
     methodNames,
     allowanceYocto,
+    outdated: earlier,
     expected,
   };
 }

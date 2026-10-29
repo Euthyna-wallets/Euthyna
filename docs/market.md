@@ -101,14 +101,17 @@ up from the relayer before drafting the vote. By hand, a plain NEAR transfer to 
 - **Tokens** (NEAR testnet): Circle's USDC `3e2210e1…b8af` (faucet.circle.com) and the test token
   `test-ft-v4.mandateos-root-20261021.testnet`, both 6 decimals.
 - **Editing a role.** `SetRole` does not touch NEAR permissions. When a role that has NEAR permissions on the
-  vault is edited without its NEAR block, the API adds `SetNearPermissions` with an empty list, so the old
-  rights do not survive the edit. The console accepts the proposal only if it matches the role it compiled
+  vault is saved without a NEAR block, the API adds `SetNearPermissions` with an empty list on every vault that
+  has NEAR transfers (even if none are executed yet: an earlier vote may still be in the veto queue), so old
+  rights never survive the edit. Only « method not found » counts as an older vault; any other RPC error stops
+  the draft. The console accepts the proposal only if it matches the role it compiled
   itself, or that plus this one clearing change (it only removes rights). A NEAR block on a vault older than
   this version is refused with « vote the vault upgrade first ».
 - **Agent** (`OnchainAgentClient.nearTransfer`, MCP `near_transfer` and `near_status`): dry run with
   `check_near`, then `execute_near` with 100 Tgas; the result is read back by reference. `near_status` calls
   `release_near_unconfirmed` once the timeout has passed. `execute_near` and `release_near_unconfirmed` are in
-  `AGENT_FUNCTION_CALL_METHODS`: **agents paired before this version need a new key** (pair again) to call them.
+  `AGENT_FUNCTION_CALL_METHODS`. **Agents paired before this version** keep a valid key (attested as `outdated`);
+  `near_transfer` answers « this agent's NEAR key predates NEAR transfers: pair the agent again ».
 - **API**: Holdings show the vault's and the cards' token balances (stablecoin = $1). Activity reads
   `OMNIROLES_NEAR_OPERATION` logs from the vault and shows « Refilled Larry's card with 5 USDC » or
   « Sent 5 USDC to bob.testnet ». The roles view lists the NEAR (and Solana) rights and their budgets.

@@ -68,4 +68,12 @@ describe("near_transfer", () => {
     expect(calls.find((call) => call.method === "release_near_unconfirmed")?.args).toMatchObject({ op_id: id });
     await expect(tools.nearStatus({ reference: "stuck" })).resolves.toMatchObject({ state: "Unconfirmed" });
   });
+
+  it("refuses a reused reference before sending", async () => {
+    const { tools, calls } = fixture();
+    await tools.nearTransfer({ token: "USDC", receiverId: "bob.testnet", amount: "5000000", reference: "same" });
+    await expect(tools.nearTransfer({ token: "USDC", receiverId: "bob.testnet", amount: "5000000", reference: "same" }))
+      .resolves.toEqual({ outcome: "refused", reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" });
+    expect(calls.filter((call) => call.method === "execute_near")).toHaveLength(1);
+  });
 });

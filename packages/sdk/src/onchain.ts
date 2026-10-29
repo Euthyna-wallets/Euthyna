@@ -212,10 +212,26 @@ export class OnchainAgentClient {
   async nearTransfer(input: { token: string; receiverId: string; amount: string; memo?: string; reference: string }) {
     const { role, member } = this.vault.identity();
     const request = { token: input.token, receiver_id: input.receiverId, amount: input.amount, memo: input.memo ?? null, reference: input.reference };
-    // Older vaults do not have NEAR transfers.
-    const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_near", { role, member, request }).catch(() => ({ allowed: false, reason: "the vault does not support NEAR transfers yet (upgrade by vote)" }));
+    // Older vaults do not have NEAR transfers; any other error is not a refusal.
+    const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_near", { role, member, request }).catch((error: unknown) => {
+      if (/MethodNotFound|MethodResolveError/.test(String(error))) return { allowed: false, reason: "the vault does not support NEAR transfers yet (upgrade by vote)" };
+      throw error;
+    });
     if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
-    const nearTransactionHash = await this.vault.action("execute_near", { role, request }, NEAR_TRANSFER_GAS);
+    // check_near does not look at references: a reused one would panic in execute_near.
+    if (await this.vault.view("get_near_operation_by_reference", { role, reference: input.reference })) {
+      return { outcome: "refused" as const, reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" as const };
+    }
+    let nearTransactionHash: string;
+    try {
+      nearTransactionHash = await this.vault.action("execute_near", { role, request }, NEAR_TRANSFER_GAS);
+    } catch (error) {
+      // Agent keys made before NEAR transfers cannot call execute_near.
+      if (/MethodNameMismatch|method_name/i.test(String(error))) {
+        return { outcome: "refused" as const, reason: "this agent's NEAR key predates NEAR transfers: pair the agent again", refusedBy: "key" as const };
+      }
+      throw error;
+    }
     return { outcome: "sent" as const, nearTransactionHash, ...(await this.nearStatus(input.reference)) };
   }
 
@@ -228,7 +244,10 @@ export class OnchainAgentClient {
     if (op.state === "Pending") {
       const config = await this.vault.view<{ unconfirmed_after_ns: string }>("get_settlement_config");
       if (BigInt(Date.now()) * 1_000_000n - BigInt(op.created_at_ns) >= BigInt(config.unconfirmed_after_ns)) {
-        await this.vault.action("release_near_unconfirmed", { op_id: op.op_id });
+        // Our clock may run ahead of the chain's: too early is not an error, just not yet.
+        await this.vault.action("release_near_unconfirmed", { op_id: op.op_id }).catch((error: unknown) => {
+          if (!/ERR_UNCONFIRMED_TOO_EARLY|ERR_NOT_PENDING/.test(String(error))) throw error;
+        });
         op = (await read()) ?? op;
       }
     }

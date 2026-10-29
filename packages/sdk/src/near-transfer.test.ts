@@ -61,6 +61,7 @@ describe("NEAR transfer role", () => {
     expect(() => compile([block({ minPerTransfer: "6" })])).toThrow(/above the largest/);
     expect(() => compile([block({ maxPerTransfer: "11" })])).toThrow(/above the budget/);
     expect(() => compile([block({ token: "DOGE" })])).toThrow(/unknown NEAR token/);
+    expect(() => compile([block({ maxPerTransfer: "5.0000009" })])).toThrow(/too precise/);
     expect(() => compile([block({ receivers: Array.from({ length: 33 }, (_, i) => ({ accountId: `r${i}.testnet`, label: "r" })) })])).toThrow(/at most 32/);
   });
 
