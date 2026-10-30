@@ -75,6 +75,18 @@ export class OmniRolesError extends Error {
   }
 }
 
+/**
+ * Reads are at finality "final", a few blocks behind the transaction that was
+ * just sent: a fresh account can look missing for a couple of seconds.
+ */
+export async function untilFinal(check: () => Promise<boolean>, attempts = 10, delayMs = 1_500): Promise<boolean> {
+  for (let attempt = 1; ; attempt += 1) {
+    if (await check()) return true;
+    if (attempt >= attempts) return false;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 export interface OmniRolesConfig {
   nearNetwork: string;
   daoFactoryId: string;
@@ -503,7 +515,7 @@ export class OmniRolesService {
         "150000000000000",
         this.config.daoCreateDepositYocto,
       );
-      if (!(await this.ownDao(plan.daoAccountId, council))) {
+      if (!(await untilFinal(() => this.ownDao(plan.daoAccountId, council)))) {
         throw new OmniRolesError(500, "dao_not_created", `${this.config.daoFactoryId} did not create ${plan.daoAccountId} (transaction ${daoTransaction})`);
       }
     }
@@ -537,7 +549,7 @@ export class OmniRolesService {
         "300000000000000",
         deposit,
       );
-      if (!(await this.ownVault(plan.vaultAccountId, plan.daoAccountId))) {
+      if (!(await untilFinal(() => this.ownVault(plan.vaultAccountId, plan.daoAccountId)))) {
         throw new OmniRolesError(500, "vault_not_created", `${this.config.nomosId} did not create ${plan.vaultAccountId} (transaction ${vaultTransaction}); the DAO is kept, try again`);
       }
     }

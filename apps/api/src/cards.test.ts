@@ -10,7 +10,9 @@ const KEY = "ed25519:8tQ4vRBkq7WbXqT9hQh5n3tQyM2m4oZpWQ2bVQyT9Zx1";
 function near(existing: string[] | null = null) {
   const calls: string[] = [];
   const fake: CardNear = {
-    getAccessKeys: async () => { if (!existing) throw new Error("account does not exist"); return { keys: existing.map((public_key) => ({ public_key })) }; },
+    getAccount: async () => { if (!existing) throw new Error("account does not exist"); return {}; },
+    // Like NEAR RPC: a missing account has an empty key list, not an error.
+    getAccessKeys: async () => ({ keys: (existing ?? []).map((public_key) => ({ public_key })) }),
     createSubaccount: async (id, key, amount) => { calls.push(`create ${id} ${key} ${amount}`); return id; },
     callFunction: async (contract, method, args) => { calls.push(`${contract}.${method} ${JSON.stringify(args)}`); return "tx"; },
   };
@@ -26,6 +28,9 @@ describe("spending cards", () => {
   it("is idempotent for the same key, and never adds a second one", async () => {
     await expect(createCard(near([KEY]).fake, AGENT, { publicKey: KEY, token: USDC })).resolves.toMatchObject({ created: false });
     await expect(createCard(near(["ed25519:other"]).fake, AGENT, { publicKey: KEY, token: USDC })).rejects.toMatchObject({ code: "card_exists" });
+  });
+  it("never adds a key to an existing card that has none", async () => {
+    await expect(createCard(near([]).fake, AGENT, { publicKey: KEY, token: USDC })).rejects.toMatchObject({ code: "card_exists" });
   });
   it("refuses unknown tokens, bad keys and accounts Euthyna did not make", async () => {
     await expect(createCard(near().fake, AGENT, { publicKey: KEY, token: "usdc.fakes.testnet" })).rejects.toMatchObject({ code: "invalid_token" });

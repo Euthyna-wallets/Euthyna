@@ -18,6 +18,8 @@ export class CardError extends Error {
 }
 
 export interface CardNear {
+  /** Throws "does not exist" / UNKNOWN_ACCOUNT for a missing account. */
+  getAccount(accountId: string): Promise<unknown>;
   getAccessKeys(accountId: string): Promise<{ keys: unknown[] }>;
   createSubaccount(accountId: string, publicKey: string, amountYocto: string): Promise<string>;
   callFunction(contractId: string, methodName: string, args: Record<string, unknown>, gas: string, depositYocto: string): Promise<string>;
@@ -34,10 +36,12 @@ export async function createCard(near: CardNear, agentAccountId: string, input: 
   } catch {
     throw new CardError(400, "not_an_euthyna_agent", "only agents created by Euthyna get a card");
   }
-  const existing = await near.getAccessKeys(cardAccountId).catch((error: unknown) => {
-    if (/does not exist|UNKNOWN_ACCOUNT/i.test(String(error))) return null;
+  // view_access_key_list answers an empty list for a missing account: ask view_account whether it exists.
+  const exists = await near.getAccount(cardAccountId).then(() => true, (error: unknown) => {
+    if (/does not exist|UNKNOWN_ACCOUNT/i.test(String(error))) return false;
     throw error;
   });
+  const existing = exists ? await near.getAccessKeys(cardAccountId) : null;
   if (existing) {
     // Idempotent for the same key (a retried `euthyna-signer card`); never a second key.
     const keys = existing.keys.map((key) => (key as { public_key?: string }).public_key);
