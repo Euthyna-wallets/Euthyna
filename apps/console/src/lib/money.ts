@@ -1,4 +1,7 @@
+import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+
 import type { Activity, ActivityItem, OnchainOperation } from "../omniroles-api.js";
+import { tokenAmount, type Sale } from "./market.js";
 
 /** $1,234.56; under a cent shows "< $0.01". */
 export function formatUsd(value: number | null | undefined): string {
@@ -75,7 +78,38 @@ export type Entry = {
   operation: OnchainOperation | null;
   /** A refused request, as the agent asked it: members can still vote on it. */
   request: ActivityItem["request"] | null;
+  /** A sale by one of the company's listings, or a purchase by one of its agents. */
+  market?: { kind: "sale" | "purchase"; sale: Sale };
 };
+
+/** Where the money of a market task is: paid, on its way, or never coming. */
+function marketOutcome(sale: Sale): Outcome {
+  if (sale.holdState === "settled" || sale.holdState === "prepaid") return "done";
+  if (sale.state === "expired" || sale.holdState === "expired") return "cancelled";
+  if (sale.state === "failed" || sale.state === "completed_unpaid" || sale.holdState === "failed") return "failed";
+  return "pending";
+}
+
+/** Market sales and purchases as Activity entries. Orders still waiting for a payment moved no money: left out. */
+export function marketEntriesOf(sales: Sale[] = [], purchases: Sale[] = []): Entry[] {
+  const symbol = (asset: string) => NEAR_TESTNET_TOKENS.find((token) => token.accountId === asset)?.symbol ?? "tokens";
+  const price = (sale: Sale) => (sale.amount ? ` for ${tokenAmount(sale.amount)} ${symbol(sale.asset)}` : "");
+  const entry = (kind: "sale" | "purchase", sale: Sale): Entry => ({
+    id: `market-${kind}-${sale.taskId}`,
+    at: sale.completedAt ?? sale.createdAt,
+    actor: kind === "sale" ? sale.handle : sale.buyer,
+    role: null,
+    text: kind === "sale" ? `Sold "${sale.title}"${price(sale)} to ${sale.buyer}` : `Bought "${sale.title}"${price(sale)} from @${sale.handle}`,
+    outcome: marketOutcome(sale),
+    chain: "NEAR",
+    reason: null,
+    operation: null,
+    request: null,
+    market: { kind, sale },
+  });
+  const paid = (sale: Sale) => sale.state !== "awaiting_payment";
+  return [...sales.filter(paid).map((sale) => entry("sale", sale)), ...purchases.filter(paid).map((sale) => entry("purchase", sale))];
+}
 
 /** Operations and refusals as one list of plain sentences, newest first. */
 export function entriesOf(activity: Activity | undefined): Entry[] {
