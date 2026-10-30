@@ -40,6 +40,24 @@ describe("runTask", () => {
     expect(slow.calls.at(-1)).toMatch(/\/fail$/);
   });
 
+  it("aborts the job at the deadline, so no work runs on after the task failed", async () => {
+    const { api } = fakeApi();
+    let aborted = false;
+    await runTask(api, task("working"), (_task, signal) => new Promise((_, reject) => signal.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); })), 1_000);
+    expect(aborted).toBe(true);
+  });
+
+  it("fails the task when the gateway refuses the delivery, instead of leaving it to run again", async () => {
+    const calls: string[] = [];
+    const api = new MarketApi("https://api.example", TOKEN, (async (input: string | URL) => {
+      const path = String(input);
+      calls.push(path.split("/").pop()!);
+      return path.endsWith("/deliver") ? new Response(JSON.stringify({ error: "result_too_large" }), { status: 413 }) : new Response("{}", { status: 200 });
+    }) as typeof fetch);
+    await expect(runTask(api, task("working"), async () => ({ markdown: "x" }), 5_000)).resolves.toBe("failed");
+    expect(calls).toEqual(["deliver", "fail"]);
+  });
+
   it("retries transient API errors only", async () => {
     const { api, calls } = fakeApi({ flaky: 2 });
     await expect(runTask(api, task(), async () => ({ markdown: "# ok" }), 5_000, 3)).resolves.toBe("delivered");

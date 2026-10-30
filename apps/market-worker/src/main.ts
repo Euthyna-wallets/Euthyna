@@ -20,6 +20,8 @@ export const configSchema = z.object({
   WEBHOOK_SECRET: z.string().min(32).optional(),
   WEBHOOK_PORT: z.coerce.number().int().positive().default(8787),
   POLL_SECONDS: z.coerce.number().int().min(2).default(10),
+  /** Jobs at once; more tasks wait for the next poll. */
+  MAX_CONCURRENT: z.coerce.number().int().min(1).max(16).default(2),
   /** Per-task time limit; keep it under the listing's SLA. */
   TASK_TIMEOUT_SECONDS: z.coerce.number().int().min(5).default(1500),
   WORK_DIR: z.string().default("/work"),
@@ -28,22 +30,27 @@ export const configSchema = z.object({
 });
 export type WorkerConfig = z.infer<typeof configSchema>;
 
-type Job = (task: AssignedTask) => Promise<Delivery>;
+type Job = (task: AssignedTask, signal: AbortSignal) => Promise<Delivery>;
 
 export function jobFor(config: WorkerConfig): Job {
   if (config.MARKET_JOB === "tx-check") return async (task) => txCheckJob(task.input);
   if (!config.ANTHROPIC_API_KEY) throw new Error("defi-due-diligence needs ANTHROPIC_API_KEY");
-  return (task) => defiDueDiligenceJob(task.input, { taskId: task.id, skillDir: config.SKILL_DIR, workRoot: config.WORK_DIR, timeoutMs: config.TASK_TIMEOUT_SECONDS * 1000 });
+  return (task, signal) => defiDueDiligenceJob(task.input, { taskId: task.id, skillDir: config.SKILL_DIR, workRoot: config.WORK_DIR, timeoutMs: config.TASK_TIMEOUT_SECONDS * 1000, signal });
 }
 
 const log = (event: string, fields: Record<string, unknown> = {}) =>
   // Structured, and never the token, the input or the result.
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/** Runs the job with a deadline; at the deadline the job's signal aborts it, so no work runs on. */
+function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out after ${Math.round(ms / 1000)} s`)), ms);
-    promise.then((value) => { clearTimeout(timer); resolve(value); }, (error: unknown) => { clearTimeout(timer); reject(error); });
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`timed out after ${Math.round(ms / 1000)} s`));
+    }, ms);
+    run(controller.signal).then((value) => { clearTimeout(timer); resolve(value); }, (error: unknown) => { clearTimeout(timer); reject(error); });
   });
 }
 
@@ -68,18 +75,25 @@ export async function runTask(api: MarketApi, task: AssignedTask, job: Job, time
     }
   }
   const remaining = Date.parse(task.expiresAt) - Date.now() - 15_000;
+  const failTask = async (reason: string) => {
+    log("task.failed", { task: task.id, reason: reason.slice(0, 200) });
+    await retry(() => api.fail(task.id, reason)).catch((error: unknown) => log("task.fail_error", { task: task.id, reason: error instanceof Error ? error.message : String(error) }));
+    return "failed" as const;
+  };
   let delivery: Delivery;
   try {
-    delivery = await withTimeout(job(task), Math.max(1_000, Math.min(timeoutMs, remaining)));
+    delivery = await withDeadline((signal) => job(task, signal), Math.max(1_000, Math.min(timeoutMs, remaining)));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    log("task.failed", { task: task.id, reason: reason.slice(0, 200) });
-    await retry(() => api.fail(task.id, reason)).catch(() => undefined);
-    return "failed";
+    return failTask(error instanceof Error ? error.message : String(error));
   }
-  const result = await retry(() => api.deliver(task.id, delivery));
-  log("task.delivered", { task: task.id, state: result.state });
-  return "delivered";
+  try {
+    const result = await retry(() => api.deliver(task.id, delivery));
+    log("task.delivered", { task: task.id, state: result.state });
+    return "delivered";
+  } catch (error) {
+    // Refused (too large, expired...): the task fails rather than stay open and run again.
+    return failTask(`delivery refused: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function main(env: NodeJS.ProcessEnv = process.env) {
@@ -87,13 +101,24 @@ export async function main(env: NodeJS.ProcessEnv = process.env) {
   const api = new MarketApi(config.EUTHYNA_API_URL, config.MARKET_DELIVERY_TOKEN);
   const job = jobFor(config);
   const running = new Set<string>();
+  // A task runs once per worker life: never again after a failure, a refusal or a crash mid-way.
+  const attempted = new Set<string>();
   let wake: (() => void) | null = null;
   if (config.WEBHOOK_SECRET) {
     const secret = config.WEBHOOK_SECRET;
     createServer((request, response) => {
       const chunks: Buffer[] = [];
       let size = 0;
-      request.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= 65_536) chunks.push(chunk); });
+      request.setTimeout(5_000, () => request.destroy());
+      request.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 65_536) {
+          response.writeHead(413).end();
+          request.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
       request.on("end", () => {
         const body = Buffer.concat(chunks).toString("utf8");
         const ok = request.method === "POST" && size <= 65_536 && verifyWebhook(secret, body, request.headers["x-euthyna-signature"] as string | undefined, request.headers["x-euthyna-timestamp"] as string | undefined);
@@ -107,8 +132,10 @@ export async function main(env: NodeJS.ProcessEnv = process.env) {
   for (;;) {
     try {
       const { tasks } = await api.assigned();
-      for (const task of tasks.filter((item) => !running.has(item.id))) {
+      for (const task of tasks.filter((item) => !running.has(item.id) && !attempted.has(item.id))) {
+        if (running.size >= config.MAX_CONCURRENT) break;
         running.add(task.id);
+        attempted.add(task.id);
         void runTask(api, task, job, config.TASK_TIMEOUT_SECONDS * 1000)
           .catch((error: unknown) => log("task.error", { task: task.id, reason: error instanceof Error ? error.message : String(error) }))
           .finally(() => running.delete(task.id));

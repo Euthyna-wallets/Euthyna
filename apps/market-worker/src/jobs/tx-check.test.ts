@@ -27,6 +27,8 @@ describe("tx-check", () => {
   it("flags unlimited approvals, approvals for all, ownership and upgrades", () => {
     const unlimited = checkTransaction(call(USDC, encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [SPENDER, maxUint256] })));
     expect(unlimited.risks).toContainEqual(expect.objectContaining({ severity: "high", title: "Unlimited approval" }));
+    const uint160 = checkTransaction(call(USDC, encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [SPENDER, 2n ** 160n - 1n] })));
+    expect(uint160.risks[0]).toMatchObject({ severity: "high", title: "Unlimited approval" });
     const all = checkTransaction(call(SPENDER, encodeFunctionData({ abi: parseAbi(["function setApprovalForAll(address,bool)"]), args: [WALLET, true] })));
     expect(all.risks[0]).toMatchObject({ severity: "critical" });
     const owner = checkTransaction(call(SPENDER, encodeFunctionData({ abi: parseAbi(["function transferOwnership(address)"]), args: [WALLET] })));

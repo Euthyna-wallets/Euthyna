@@ -10,7 +10,8 @@ import type { Delivery } from "../api.js";
 
 const PROFILES: Record<number, ChainProfile> = { [BASE_SEPOLIA.chainId]: BASE_SEPOLIA };
 const CHAINS: Record<number, string> = { 1: "Ethereum", 8453: "Base", 84532: "Base Sepolia", 11155111: "Ethereum Sepolia", 42161: "Arbitrum One", 10: "OP Mainnet", 56: "BNB Smart Chain", 137: "Polygon" };
-const UNLIMITED = 2n ** 255n;
+/** Any allowance this large is, in practice, unlimited (uint256.max, uint160.max, 2^200...). */
+const UNLIMITED = 2n ** 128n;
 
 const RISKY = parseAbi([
   "function approve(address spender, uint256 amount)",
@@ -54,7 +55,8 @@ export function checkTransaction(input: TxInput): { description: string; functio
   const to = getAddress(input.to);
   const data = input.data as Hex;
   const value = BigInt(input.value);
-  const profile = PROFILES[input.chainId] ?? { ...BASE_SEPOLIA, chainId: input.chainId, name: CHAINS[input.chainId] ?? `chain ${input.chainId}`, tokens: [], protocols: {} as ChainProfile["protocols"], lending: {} };
+  // Other chains: no known tokens or contracts, so nothing is named after Base Sepolia's.
+  const profile: ChainProfile = PROFILES[input.chainId] ?? { chainId: input.chainId, name: CHAINS[input.chainId] ?? `chain ${input.chainId}`, tokens: [], protocols: {} as ChainProfile["protocols"], lending: {} };
   const description = describeCall(to, data, value, { profile, fullAddresses: true });
   const risks: TxRisk[] = [];
   let functionName: string | null = data === "0x" ? null : "unknown";

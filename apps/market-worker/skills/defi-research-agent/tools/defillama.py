@@ -36,6 +36,25 @@ class ApiError(Exception):
     pass
 
 
+def shown(url: str) -> str:
+    """The URL as it may be printed: never with the Pro API key in it."""
+    key = os.environ.get("DEFILLAMA_API_KEY")
+    return url.replace(key, "<DEFILLAMA_API_KEY>") if key else url
+
+
+class _LlamaOnly(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only within DeFiLlama."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        host = urllib.parse.urlparse(newurl).hostname or ""
+        if host != "llama.fi" and not host.endswith(".llama.fi"):
+            raise ApiError(f"{shown(req.full_url)}: redirect outside DeFiLlama refused")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_LlamaOnly)
+
+
 def fetch(url: str, *, cache: bool = False, retries: int = 3) -> object:
     """GET a JSON URL with retries, an optional disk cache, and clear errors."""
     path = os.path.join(CACHE_DIR, urllib.parse.quote(url, safe="") + ".json")
@@ -46,23 +65,26 @@ def fetch(url: str, *, cache: bool = False, retries: int = 3) -> object:
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with _OPENER.open(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if cache:
-                os.makedirs(CACHE_DIR, exist_ok=True)
-                with open(path, "w", encoding="utf-8") as fh:
-                    json.dump(data, fh)
+                try:
+                    os.makedirs(CACHE_DIR, exist_ok=True)
+                    with open(path, "w", encoding="utf-8") as fh:
+                        json.dump(data, fh)
+                except OSError:
+                    pass  # read-only home: run without the cache
             return data
         except urllib.error.HTTPError as err:
             if err.code == 402:
-                raise ApiError(f"{url}: paid endpoint (HTTP 402). Set DEFILLAMA_API_KEY to use DeFiLlama Pro.") from err
+                raise ApiError(f"{shown(url)}: paid endpoint (HTTP 402). Set DEFILLAMA_API_KEY to use DeFiLlama Pro.") from err
             if err.code in (400, 404):
-                raise ApiError(f"{url}: not found (HTTP {err.code}). Check the slug with the `search` command.") from err
+                raise ApiError(f"{shown(url)}: not found (HTTP {err.code}). Check the slug with the `search` command.") from err
             last = err
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as err:
             last = err
         time.sleep(1.5 * (attempt + 1))
-    raise ApiError(f"{url}: {last}")
+    raise ApiError(f"{shown(url)}: {shown(str(last))}")
 
 
 def pro_or_free(path: str, free_base: str) -> str:
