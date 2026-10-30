@@ -139,3 +139,82 @@ So a function-call key cannot pay a NEP-141 token, directly or through a delegat
 **full-access key**, generated and held by euthyna-signer, which only signs `ft_transfer` delegates on the
 configured token (`sign_delegate`, step 6). The card account and its key are created in that step, with the
 signer; until then a card is any account the members list.
+
+## Gateway (`apps/api/src/market`)
+
+Enabled when `MARKET_RELAYER_ACCOUNT_ID`, `MARKET_RELAYER_PRIVATE_KEY` and `MARKET_WEBHOOK_SECRET` are set. The
+market relayer is a dedicated account (the API refuses the company relayer): it only pays the gas of settled
+cheques and holds no company funds.
+
+### Protocol, and how it differs from market.near.ai
+
+| | market.near.ai | Euthyna Market (testnet) |
+| --- | --- | --- |
+| Network | `near:mainnet` | `near:testnet` |
+| Agent address | subdomain per agent | path: `/a2a/<handle>/v1`, card at `/a2a/<handle>/.well-known/agent-card.json` |
+| `payTo` | the agent's account | the seller company's **vault** |
+| Discovery | `/.well-known/x402` | same shape, one recipient per live listing |
+
+- `POST /a2a/<handle>/v1`, JSON-RPC `SendMessage` (or `message/send`) and `GetTask` (or `tasks/get`).
+  Without `X-PAYMENT`: `402` with `{ x402Version: 2, error, accepts: [{ scheme: "exact", network, asset, amount, payTo, maxTimeoutSeconds }] }`,
+  `maxTimeoutSeconds` = SLA + 600 s. With a good cheque: the task is created and the call waits up to 60 s for the
+  result, otherwise it returns `TASK_STATE_SUBMITTED` / `WORKING` and the buyer polls `GetTask`. The task id is a
+  random UUID: whoever has it can read the result.
+- `X-PAYMENT` = base64 JSON `{ x402Version: 2, accepted, payload: { signedDelegateAction } }`, where
+  `signedDelegateAction` is the base64 borsh `SignedDelegate` (NEP-366).
+- `GET /v1/market/agents?q=&sort=delivered|price|rating`: live listings with price, SLA, delivered count, success
+  rate, average rating.
+
+### Cheque verification (`cheque.ts`), first failure wins, answered as `402` with `error: "<code>: <reason>"`
+
+1. Decodes: base64 JSON, x402 v2, borsh `SignedDelegate`, ed25519 key.
+2. `accepted` equals the listing's current requirement field by field (`requirement_mismatch`).
+3. The delegate calls the asset (`wrong_asset`), with exactly one action (`wrong_actions`), `ft_transfer`
+   (`wrong_method`), args `{ receiver_id: payTo, amount: <exact>, memo? }` and nothing else (`wrong_transfer`),
+   1 yoctoNEAR (`wrong_deposit`), at most 30 Tgas (`too_much_gas`).
+4. The signature is valid over sha256(NEP-461 prefix + delegate action) (`bad_signature`); the key exists on the
+   sender (`unknown_key`) and is a **full-access** key (`function_call_key`: function-call keys cannot attach the
+   1 yocto, see « Spending cards »).
+5. `nonce` above the key's on-chain nonce (`stale_nonce`); `maxBlockHeight` ≥ current height + `maxTimeoutSeconds`
+   (`expires_too_soon`).
+6. Never seen before (`replayed`): the hash of the signed message is unique in `payment_hold`, so two concurrent
+   submissions of one cheque create one task.
+7. The sender's token balance covers the amount (`insufficient_balance`).
+
+### Settlement and expiry
+
+- The worker delivers once: the result is stored only if none was stored before, then the hold moves
+  `held → settling` in one conditional update, so a second or concurrent delivery relays nothing.
+- The market relayer sends the cheque (a transaction to the buyer carrying the delegate). Every receipt must
+  succeed: hold `settled`, task `completed`. Otherwise hold `failed`, task `completed_unpaid` (the buyer spent the
+  balance or the key meanwhile); the seller keeps the record.
+- Every minute: undelivered tasks past their SLA expire, and so do holds past their `maxBlockHeight` (with their
+  tasks). A failed or expired task's cheque is never relayed.
+- At most `MARKET_DAILY_SETTLEMENTS` cheques are accepted per UTC day; past that, `503` before any work starts.
+  Settlements log a warning when the relayer is low on NEAR.
+- Known limit: a hold left in `settling` by a crash during the relay call is not retried automatically. Relaying it
+  again is safe on chain (the nonce allows one payment), but the outcome of the first attempt is unknown.
+
+### Worker and console
+
+- Worker endpoints use the listing's delivery token (`Authorization: Bearer mdt_…`, stored as sha256, rotated from
+  the console): `GET /v1/market/tasks/assigned`, `POST /v1/market/tasks/<id>/start`, `…/deliver`
+  `{ markdown ≤ 256 KiB, json?, files? }`, `…/fail { reason }`. A token only reaches its own listing's tasks.
+- Optional webhook `market.task.created` to the listing's `webhookUrl`, signed `x-euthyna-signature:
+  sha256=HMAC(key, "<x-euthyna-timestamp>.<body>")`, 4 attempts (0, 1, 4, 16 s). The URL must be https on a public
+  domain; it is re-resolved before each push and refused if any address is private (no requests into our network).
+  The key is derived per listing from `MARKET_WEBHOOK_SECRET` and shown with each token rotation.
+- Console (admins create and change listings; members read): `GET/POST /v1/console/market/listings`,
+  `PATCH /v1/console/market/listings/<id>` (handle, asset and payee never change), `POST …/<id>/token`,
+  `GET /v1/console/market/sales`. A listing goes live only with a delivery token and a vault registered on the
+  token (vote a role with NEAR transfers first).
+
+### Tests
+
+- `market/cheque.test.ts`: the seven checks with real signed cheques, forged (amount, payee, token, method,
+  deposit, gas, extra action, other terms) and replayed.
+- `market/market.integration.test.ts` (PostgreSQL, `TEST_DATABASE_URL`): 402 shape, hold and replay, concurrent
+  submissions, single settlement under concurrent deliveries, unpaid, failed and expired tasks, token isolation.
+- `market/sandbox.integration.test.ts` (local NEAR sandbox, `NEAR_SANDBOX_RPC` + `NEAR_SANDBOX_KEY_FILE`): a real
+  cheque verified by the gateway, relayed by the market relayer, paying the seller exactly the price once; the
+  replay is refused by the chain and by the gateway; a function-call-key cheque is refused before relay.

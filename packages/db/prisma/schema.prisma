@@ -102,6 +102,7 @@ model Organization {
   nearSponsorships        NearWalletSponsorship[]
   agentProvisionings      AgentProvisioning[]
   agentPairings           AgentPairing[]
+  marketListings          MarketListing[]
 
   @@unique([slug])
   @@map("organization")
@@ -435,4 +436,103 @@ model AuditLog {
   @@index([organizationId, createdAt])
   @@index([actorType, actorId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// Euthyna Market: listings, tasks, held payments (x402 v2 + NEP-366 cheques)
+// ---------------------------------------------------------------------------
+
+/// A service an AI company sells. Paid to its vault; the handle never changes.
+model MarketListing {
+  id                String         @id @default(uuid())
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentId           String?
+  handle            String         @unique
+  title             String
+  description       String
+  category          String         @default("research")
+  /// Price in the asset's base units (1 USDC = 1000000).
+  priceAtomic       String
+  /// NEP-141 token account.
+  asset             String
+  /// The seller's vault account: the cheque pays it directly.
+  payTo             String
+  slaSeconds        Int            @default(1800)
+  inputHint         String         @default("")
+  outputHint        String         @default("")
+  status            String         @default("draft") // draft | live | paused
+  /// sha256 of the worker's delivery token (mdt_...), never the token itself.
+  deliveryTokenHash String?        @unique
+  /// Optional push to the worker (https only, public hosts only).
+  webhookUrl        String?
+  tasks             MarketTask[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("market_listing")
+}
+
+model MarketTask {
+  id             String         @id @default(uuid())
+  listingId      String
+  listing        MarketListing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyerAccountId String
+  input          String
+  /// submitted | working | completed | completed_unpaid | failed | expired
+  state          String         @default("submitted")
+  resultMarkdown String?
+  resultJson     Json?
+  files          Json?
+  failureReason  String?
+  hold           PaymentHold?
+  rating         MarketRating?
+  createdAt      DateTime       @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  /// Past this, an undelivered task expires and its cheque is never relayed.
+  expiresAt      DateTime
+
+  @@index([listingId, state])
+  @@index([state, expiresAt])
+  @@map("market_task")
+}
+
+/// The buyer's signed cheque, held until delivery, then relayed once.
+model PaymentHold {
+  id                String     @id @default(uuid())
+  taskId            String     @unique
+  task              MarketTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  signedDelegateB64 String
+  /// sha256 of the signed message: a cheque is accepted once, ever.
+  delegateHash      String     @unique
+  sender            String
+  publicKey         String
+  nonce             String
+  maxBlockHeight    String
+  amount            String
+  asset             String
+  payTo             String
+  /// held | settling | settled | failed | expired
+  state             String     @default("held")
+  settleTxHash      String?
+  settleError       String?
+  createdAt         DateTime   @default(now())
+  settledAt         DateTime?
+
+  @@index([state])
+  @@index([sender])
+  @@map("payment_hold")
+}
+
+model MarketRating {
+  taskId    String     @id
+  task      MarketTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  stars     Int
+  comment   String     @default("")
+  createdAt DateTime   @default(now())
+
+  @@map("market_rating")
 }

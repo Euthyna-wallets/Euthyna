@@ -1,6 +1,8 @@
 import { checkInvoice } from "./payments.js";
 import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
+import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
+import { MarketError, type MarketService } from "./market/service.js";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
 import { Hono, type Context, type Next } from "hono";
@@ -108,6 +110,10 @@ export interface AppDependencies {
   nearParentAccount: string;
   pairings: PairingStore;
   omniroles?: OmniRolesService;
+  /** Euthyna Market gateway; absent when not configured. */
+  market?: MarketService | undefined;
+  /** Public base URL of this API, used in A2A agent cards. */
+  publicBaseUrl?: string;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -210,6 +216,8 @@ export function createApp({
   nearParentAccount,
   pairings,
   omniroles,
+  market,
+  publicBaseUrl,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -272,15 +280,16 @@ export function createApp({
       hostname: pairing.hostname,
     };
   }
-  app.use(
-    "*",
-    cors({
-      origin: consoleOrigin,
-      credentials: true,
-      allowHeaders: ["content-type", "x-api-key"],
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    }),
-  );
+  // The market is public: any origin, no cookies. Everything else: the console only.
+  const publicCors = cors({ origin: "*", allowHeaders: ["content-type", "x-payment", "authorization"], allowMethods: ["GET", "POST", "OPTIONS"], exposeHeaders: ["x-payment-response"] });
+  const consoleCors = cors({
+    origin: consoleOrigin,
+    credentials: true,
+    allowHeaders: ["content-type", "x-api-key"],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  });
+  const isPublicMarket = (path: string) => path.startsWith("/a2a/") || path.startsWith("/v1/market/") || path === "/.well-known/x402";
+  app.use("*", (context, next) => (isPublicMarket(context.req.path) ? publicCors(context, next) : consoleCors(context, next)));
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
@@ -926,8 +935,36 @@ export function createApp({
     });
   }
 
+  if (market) {
+    const marketLimiter = new MemoryRateLimiter(120, 60_000);
+    registerMarketPublicRoutes(app, market, { baseUrl: publicBaseUrl ?? "http://localhost:3000", limiter: marketLimiter });
+    registerMarketWorkerRoutes(app, market, new MemoryRateLimiter(600, 60_000));
+    const vaultOf = async (organizationId: string) => {
+      const treasury = await treasuries.activeTreasury(organizationId);
+      if (!treasury || treasury.status !== "active") throw new MarketError(409, "treasury_not_active", "the company vault is not active yet");
+      return treasury.vaultAccountId;
+    };
+    const orgId = (context: { get: (key: "console") => ConsoleIdentity }) => context.get("console").organizationId;
+    app.get("/v1/console/market/listings", requireConsole(auth, consoleLimiter), async (context) => context.json({ listings: await market.listings(orgId(context)) }));
+    app.post("/v1/console/market/listings", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, listingCreateSchema);
+      const listing = await market.createListing(orgId(context), await vaultOf(orgId(context)), input);
+      return context.json({ listing }, 201);
+    });
+    app.patch("/v1/console/market/listings/:id", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, listingUpdateSchema);
+      return context.json({ listing: await market.updateListing(orgId(context), context.req.param("id") ?? "", input) });
+    });
+    app.post("/v1/console/market/listings/:id/token", requireConsoleAdmin(auth, consoleLimiter), async (context) =>
+      context.json(await market.rotateDeliveryToken(orgId(context), context.req.param("id") ?? "")));
+    app.get("/v1/console/market/sales", requireConsole(auth, consoleLimiter), async (context) => context.json(await market.sales(orgId(context))));
+  }
+
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof MarketError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
     if (error instanceof OmniRolesError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
