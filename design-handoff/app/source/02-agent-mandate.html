@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Naomi, mandate and verdicts</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">II</b>Agents</a>
+      <a href="#"><b>III</b>Rules</a>
+      <a href="#"><b>IV</b>Activity</a>
+      <a href="#"><b>V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#"><b>VIII</b>Market</a>
+      <a href="#"><b>IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 20px">
+    <header style="display: flex; align-items: center; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Agents / Payments</span><h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">NAOMI</h1></div>
+      <span style="display: inline-flex; align-items: center; gap: 8px; font: 700 12px 'Plus Jakarta Sans', sans-serif; color: #0B6E86; background: #DDF4F8; border-radius: 999px; padding: 5px 12px; margin-top: 18px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #0B6E86"></span>Working</span>
+      <div style="margin-left: auto; display: flex; gap: 10px">
+        <a href="#" class="ori" style="text-decoration: none; padding: 12px 18px; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03">PROPOSE A CHANGE</a>
+        <a href="#" style="text-decoration: none; padding: 11px 18px; border: 1px solid rgba(13,23,48,.25); font: 700 12px Cinzel, serif; letter-spacing: .16em; color: #0D1730; background: rgba(255,255,255,.6)">FIRE BY VOTE</a>
+      </div>
+    </header>
+
+    <div style="display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 22px; align-items: start">
+      <!-- the agent, in its niche -->
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <div class="statue" style="height: 360px; border-radius: 130px 130px 2px 2px; box-shadow: inset 0 0 0 4px rgba(243,239,230,.7), inset 0 0 0 10px rgba(13,23,48,.25), inset 0 14px 30px rgba(0,0,0,.55), 14px 18px 40px rgba(13,23,48,.25)" role="img" aria-label="Naomi as a marble statue holding an orichalcum tablet"></div>
+        <div class="slab" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; color: #4A5675">
+          <div style="display: flex; justify-content: space-between; gap: 10px"><span>Key</span><b style="color: #0D1730">can only ask the vault</b></div>
+          <div style="display: flex; justify-content: space-between; gap: 10px"><span>Plugged in</span><b style="color: #0D1730">MCP · euthyna-signer</b></div>
+          <div style="display: flex; justify-content: space-between; gap: 10px"><span>Hired</span><b style="color: #0D1730">by vote, Oct 21</b></div>
+          <div style="display: flex; justify-content: space-between; gap: 10px"><span>Account</span><b style="color: #0D1730; font: 600 12px 'JetBrains Mono', monospace">naomi.pixelforge</b></div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0">
+      <!-- the stele of the mandate -->
+      <section class="slab" style="padding: 26px 30px; display: flex; flex-direction: column; gap: 14px; position: relative">
+        <div style="display: flex; justify-content: space-between; align-items: baseline"><span class="kick" style="color: #8A5A00">The mandate · voted 2 of 3</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: #66718C">in force since Oct 22</span></div>
+        <p style="margin: 0; font: 500 19px/1.55 'Plus Jakarta Sans', sans-serif; color: #0D1730">Naomi may send <b style="border-bottom: 2px solid #C9890C">USDC</b> on <b style="border-bottom: 2px solid #C9890C">Base and Solana</b> to <b style="border-bottom: 2px solid #C9890C">Studio Pixel, Cloudnine and Inkwell</b>, up to <b style="border-bottom: 2px solid #C9890C">5,000 USDC</b> every <b style="border-bottom: 2px solid #C9890C">7 days</b>. Above <b style="border-bottom: 2px solid #C9890C">2,000 USDC</b>, a human from another job co-signs.</p>
+        <div style="display: flex; flex-direction: column">
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 11px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 15px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00">I</b>Calls USDC transfer, nothing else</div>
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 11px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 15px; background: linear-gradient(90deg, rgba(217,87,59,.14), rgba(217,87,59,0))"><b style="font: 700 14px Cinzel, serif; color: #A8381E">II</b>Only to the 3 suppliers the owners voted</div>
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 11px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 15px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00">III</b>5,000 USDC on Base, 500 on Solana, refilled every 7 days</div>
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 11px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 15px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00">IV</b>Above 2,000 USDC, a human co-signs</div>
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 11px 0; border-top: 1px solid rgba(13,23,48,.14); border-bottom: 1px solid rgba(13,23,48,.14); font-size: 15px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00">V</b>At most 10 payments an hour</div>
+        </div>
+        <div style="display: flex; gap: 22px; align-items: flex-end; margin-top: 4px" role="img" aria-label="Budgets as columns: Base 3,360 of 5,000, Solana 120 of 500, speed 3 of 10 this hour">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px"><div style="width: 40px; height: 110px; background: #E2DBCD; box-shadow: inset 0 1px 3px rgba(13,23,48,.25); display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 67%"></div></div><span style="font: 700 10px Cinzel, serif; letter-spacing: .12em">BASE</span><span style="font: 600 11px 'JetBrains Mono', monospace">3,360/5,000</span></div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px"><div style="width: 40px; height: 110px; background: #E2DBCD; box-shadow: inset 0 1px 3px rgba(13,23,48,.25); display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 24%"></div></div><span style="font: 700 10px Cinzel, serif; letter-spacing: .12em">SOLANA</span><span style="font: 600 11px 'JetBrains Mono', monospace">120/500</span></div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px"><div style="width: 40px; height: 110px; background: #E2DBCD; box-shadow: inset 0 1px 3px rgba(13,23,48,.25); display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 30%"></div></div><span style="font: 700 10px Cinzel, serif; letter-spacing: .12em">SPEED</span><span style="font: 600 11px 'JetBrains Mono', monospace">3/10 h</span></div>
+          <p style="margin: 0 0 0 auto; max-width: 220px; font-size: 13px; color: #4A5675">Budgets refill in <b style="font-family: 'JetBrains Mono', monospace; color: #0D1730">2 d 14 h</b>. They are spent only once a payment is proven on chain.</p>
+        </div>
+      </section>
+
+      <!-- ask the vault + verdicts -->
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start">
+        <section style="background: #061433; color: #E7ECF6; padding: 22px; display: flex; flex-direction: column; gap: 12px; box-shadow: 14px 18px 40px rgba(13,23,48,.3)">
+          <span class="kick" style="color: #F2B544">Ask the vault · free, nothing signed</span>
+          <label style="display: flex; flex-direction: column; gap: 6px; font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #8FA2CC">Pay<input value="640 USDC on Base" style="font: 500 14px 'JetBrains Mono', monospace; background: #0A1D47; color: #fff; border: 1px solid #1F3A6E; padding: 10px 12px"></label>
+          <label style="display: flex; flex-direction: column; gap: 6px; font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #8FA2CC">To<input value="0x9f3…e21" style="font: 500 14px 'JetBrains Mono', monospace; background: #0A1D47; color: #fff; border: 1px solid #1F3A6E; padding: 10px 12px"></label>
+          <div style="display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; align-items: center; border-top: 1px solid #1F3A6E; padding-top: 14px">
+            <div class="seal" style="width: 80px; height: 80px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 10px; letter-spacing: .14em">REFUSED</span></div>
+            <div><b style="font-size: 15px; color: #fff">Line II: recipient not voted</b><code style="display: block; margin-top: 6px; font: 12px 'JetBrains Mono', monospace; color: #F4A28C; overflow-wrap: anywhere">ERR_PERMISSION_DENIED:parameterNotAllowed</code></div>
+          </div>
+        </section>
+        <section class="slab" style="padding: 16px 18px; display: flex; flex-direction: column">
+          <span class="kick" style="color: #8A5A00; margin-bottom: 4px">Latest verdicts</span>
+          <div style="display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(13,23,48,.1)"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px">SIGNED</span></div><div style="font-size: 13.5px"><b>Paid Studio Pixel 640 USDC</b><br><small style="color: #4A5675">Base · 2 min</small></div></div>
+          <div style="display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(13,23,48,.1)"><div class="seal" style="width: 44px; height: 44px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 6.5px">REFUSED</span></div><div style="font-size: 13.5px"><b>Asked to pay 0x9f3…e21</b><br><small style="color: #A8381E">Line II · turn into a vote</small></div></div>
+          <div style="display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(13,23,48,.1)"><div class="seal" style="width: 44px; height: 44px"><span style="color: #4A2C06; font-size: 6.5px">CO-SIGN</span></div><div style="font-size: 13.5px"><b>Wants to pay Cloudnine 3,200</b><br><small style="color: #4A5675">Line IV · waiting for a human</small></div></div>
+          <div style="display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(13,23,48,.1)"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px">SIGNED</span></div><div style="font-size: 13.5px"><b>Paid Inkwell 120 USDC</b><br><small style="color: #4A5675">Solana · the vault wrote the transaction</small></div></div>
+        </section>
+      </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · HQ · mobile</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.mtop{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.8),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,600px;color:#E7ECF6}
+.chipnav{display:flex;gap:6px;overflow-x:auto;padding:0 16px 12px;scrollbar-width:none}
+.chipnav a{flex:0 0 auto;padding:7px 12px;border:1px solid #1F3A6E;font:600 13px 'Plus Jakarta Sans',sans-serif;color:#C9D3EA;text-decoration:none;display:flex;gap:6px;align-items:center}
+.chipnav a.on{background:#F3EFE6;color:#0D1730;border-color:#F3EFE6}
+.chipnav a b{font:700 10px Cinzel,serif;color:#6F82AE}
+.chipnav a.on b{color:#8A5A00}
+.mrow{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(13,23,48,.1)}
+.halt{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#2A0F0A;border-top:1px solid rgba(217,87,59,.5)}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div class="ground" style="width: 390px; min-height: 1370px; display: flex; flex-direction: column; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730; background-size: cover, cover">
+  <header class="mtop">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px">
+      <span class="ori" style="width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 12px Cinzel, serif; color: rgba(42,13,4,.8)">PF</span>
+      <span style="display: flex; flex-direction: column"><b style="font: 700 14px Cinzel, serif; letter-spacing: .12em">PIXEL FORGE</b><small style="font-size: 11.5px; color: #8FA2CC">On Atlantis · testnet</small></span>
+      <span style="margin-left: auto; width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px">AL</span>
+    </div>
+    <nav class="chipnav" aria-label="App"><a href="#" class="on"><b>I</b>HQ</a><a href="#" class=""><b>II</b>Agents</a><a href="#" class=""><b>III</b>Rules</a><a href="#" class=""><b>IV</b>Activity</a><a href="#" class=""><b>V</b>Treasury</a><a href="#" class=""><b>VI</b>Votes<span style="background: #F2B544; color: #061433; border-radius: 999px; font: 800 10px 'Plus Jakarta Sans', sans-serif; padding: 1px 6px">3</span></a><a href="#" class=""><b>VII</b>Owners</a><a href="#" class=""><b>VIII</b>Market</a><a href="#" class=""><b>IX</b>Settings</a></nav>
+  </header>
+  <main style="flex: 1; padding: 18px 16px 24px; display: flex; flex-direction: column; gap: 16px">
+    <h1 class="carved" style="margin: 0; font: 900 28px/1 Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</h1>
+    <section class="ori" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: 12px 14px 30px rgba(13,23,48,.3)">
+      <span class="kick" style="color: rgba(32,10,3,.75)">Treasury</span>
+      <b class="mono" style="font-size: 34px; line-height: 1; color: #200A03">$30,760</b>
+      <div style="display: flex; align-items: flex-end; gap: 6px; height: 112px"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1"><b class="mono" style="font-size: 11px; color: #200A03">$18.4k</b><div class="col" style="width: 30px; height: 70px"></div><span style="font: 800 9px Cinzel, serif; letter-spacing: .12em; color: #200A03">BASE</span></div><div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1"><b class="mono" style="font-size: 11px; color: #200A03">$6.2k</b><div class="col" style="width: 30px; height: 24px"></div><span style="font: 800 9px Cinzel, serif; letter-spacing: .12em; color: #200A03">ETH</span></div><div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1"><b class="mono" style="font-size: 11px; color: #200A03">$4.0k</b><div class="col" style="width: 30px; height: 15px"></div><span style="font: 800 9px Cinzel, serif; letter-spacing: .12em; color: #200A03">SOL</span></div><div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1"><b class="mono" style="font-size: 11px; color: #200A03">$2.2k</b><div class="col" style="width: 30px; height: 8px"></div><span style="font: 800 9px Cinzel, serif; letter-spacing: .12em; color: #200A03">NEAR</span></div></div>
+      <span style="font-size: 12px; color: rgba(32,10,3,.8)">✓ Every transaction that left these wallets was signed through the vault.</span>
+    </section>
+    <section class="slab" style="padding: 14px 16px 4px; background-size: cover, cover"><div style="display: flex; justify-content: space-between"><span class="kick" style="color: #8A5A00">Before the assembly</span><a href="#" style="font: 700 10.5px Cinzel, serif; letter-spacing: .14em">VOTES →</a></div><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><b style="font-size: 14px">Raise Naomi’s Base budget to 8,000 USDC a week</b><span class="mono" style="font-size: 12px; color: #8A5A00; background: #FCF0D4; padding: 1px 6px; align-self: start">23:41:08</span><span style="font-size: 12.5px; color: #4A5675">Veto window open · 2 of 3 yes</span></div><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><b style="font-size: 14px">Pay 0x9f3…e21 1,800 USDC once</b><span class="mono" style="font-size: 12px; color: #0D1730; background: transparent; padding: 1px 6px; align-self: start">1 / 2</span><span style="font-size: 12.5px; color: #4A5675">A refused request, turned into a vote</span></div><div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><b style="font-size: 14px">Upgrade the vault to version 3</b><span class="mono" style="font-size: 12px; color: #8A5A00; background: #FCF0D4; padding: 1px 6px; align-self: start">02:15:44</span><span style="font-size: 12.5px; color: #4A5675">Code hash 4f1c…a90e</span></div></section>
+    <section class="slab" style="padding: 14px 16px 4px; background-size: cover, cover"><span class="kick" style="color: #8A5A00">The citizens · AI agents</span><div style="display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><div class="statue" style="height: 72px; border-radius: 28px 28px 2px 2px; box-shadow: inset 0 0 0 2px rgba(243,239,230,.6)"></div><div style="display: flex; flex-direction: column; gap: 5px; min-width: 0"><div style="display: flex; gap: 8px; align-items: baseline"><b style="font: 800 15px Cinzel, serif; letter-spacing: .1em">NAOMI</b><span style="font-size: 11.5px; font-weight: 700; color: #0B6E86">· working</span></div><div style="display: flex; justify-content: space-between; font-size: 12px; color: #4A5675"><span>USDC · Base · 7 days</span><b class="mono" style="color: #0D1730">3,360 / 5,000</b></div><div class="groove"><i style="width: 67%"></i></div></div></div><div style="display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><div class="statue-t" style="height: 72px; border-radius: 28px 28px 2px 2px; box-shadow: inset 0 0 0 2px rgba(243,239,230,.6)"></div><div style="display: flex; flex-direction: column; gap: 5px; min-width: 0"><div style="display: flex; gap: 8px; align-items: baseline"><b style="font: 800 15px Cinzel, serif; letter-spacing: .1em">THETIS</b><span style="font-size: 11.5px; font-weight: 700; color: #0B6E86">· working</span></div><div style="display: flex; justify-content: space-between; font-size: 12px; color: #4A5675"><span>Aave supply · per day</span><b class="mono" style="color: #0D1730">900 / 2,000</b></div><div class="groove"><i style="width: 45%"></i></div></div></div><div style="display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid rgba(13,23,48,.12)"><div class="statue-h" style="height: 72px; border-radius: 28px 28px 2px 2px; box-shadow: inset 0 0 0 2px rgba(243,239,230,.6); filter: grayscale(.35) brightness(.85)"></div><div style="display: flex; flex-direction: column; gap: 5px; min-width: 0"><div style="display: flex; gap: 8px; align-items: baseline"><b style="font: 800 15px Cinzel, serif; letter-spacing: .1em">HERMES</b><span style="font-size: 11.5px; font-weight: 700; color: #66718C">· idle</span></div><div style="display: flex; justify-content: space-between; font-size: 12px; color: #4A5675"><span>ETH · per epoch</span><b class="mono" style="color: #0D1730">0.002 / 0.05</b></div><div class="groove"><i style="width: 4%"></i></div></div></div></section>
+    <section class="slab" style="padding: 14px 16px 4px; background-size: cover, cover"><span class="kick" style="color: #8A5A00">Every request, and the verdict</span><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 13.5px">Naomi paid Studio Pixel 640 USDC</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Base · 2 min</div></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 5.4px; letter-spacing: .08em">REFUSED</span></div><div style="min-width: 0"><b style="font-size: 13.5px">Naomi asked to pay 0x9f3…e21 1,800 USDC</b><div style="font-size: 12px; color: #A8381E; margin-top: 2px">Recipient not voted · turn into a vote</div></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 5.4px; letter-spacing: .08em">CO-SIGN</span></div><div style="min-width: 0"><b style="font-size: 13.5px">Naomi wants to pay Cloudnine 3,200 USDC</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Above 2,000 USDC: a human co-signs</div></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 13.5px">Thetis supplied 900 USDC to Aave</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Base · 1 h</div></div></div></section>
+  </main>
+  <div class="halt"><span style="font-size: 12px; color: #F4C9BC; flex: 1">Security council: one click stops every agent.</span><a href="#" style="text-decoration: none; padding: 9px 12px; background: #D9573B; color: #fff; font: 800 11px Cinzel, serif; letter-spacing: .16em">HALT ALL</a></div>
+</div>
+
+
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Activity · mobile</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.mtop{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.8),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,600px;color:#E7ECF6}
+.chipnav{display:flex;gap:6px;overflow-x:auto;padding:0 16px 12px;scrollbar-width:none}
+.chipnav a{flex:0 0 auto;padding:7px 12px;border:1px solid #1F3A6E;font:600 13px 'Plus Jakarta Sans',sans-serif;color:#C9D3EA;text-decoration:none;display:flex;gap:6px;align-items:center}
+.chipnav a.on{background:#F3EFE6;color:#0D1730;border-color:#F3EFE6}
+.chipnav a b{font:700 10px Cinzel,serif;color:#6F82AE}
+.chipnav a.on b{color:#8A5A00}
+.mrow{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(13,23,48,.1)}
+.halt{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#2A0F0A;border-top:1px solid rgba(217,87,59,.5)}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div class="ground" style="width: 390px; min-height: 900px; display: flex; flex-direction: column; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730; background-size: cover, cover">
+  <header class="mtop">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px">
+      <span class="ori" style="width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 12px Cinzel, serif; color: rgba(42,13,4,.8)">PF</span>
+      <span style="display: flex; flex-direction: column"><b style="font: 700 14px Cinzel, serif; letter-spacing: .12em">PIXEL FORGE</b><small style="font-size: 11.5px; color: #8FA2CC">On Atlantis · testnet</small></span>
+      <span style="margin-left: auto; width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px">AL</span>
+    </div>
+    <nav class="chipnav" aria-label="App"><a href="#" class=""><b>I</b>HQ</a><a href="#" class=""><b>II</b>Agents</a><a href="#" class=""><b>III</b>Rules</a><a href="#" class="on"><b>IV</b>Activity</a><a href="#" class=""><b>V</b>Treasury</a><a href="#" class=""><b>VI</b>Votes<span style="background: #F2B544; color: #061433; border-radius: 999px; font: 800 10px 'Plus Jakarta Sans', sans-serif; padding: 1px 6px">3</span></a><a href="#" class=""><b>VII</b>Owners</a><a href="#" class=""><b>VIII</b>Market</a><a href="#" class=""><b>IX</b>Settings</a></nav>
+  </header>
+  <main style="flex: 1; padding: 18px 16px 24px; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; flex-direction: column; gap: 6px"><h1 class="carved" style="margin: 0; font: 900 30px/1 Cinzel, serif; letter-spacing: .12em">ACTIVITY</h1><span style="font-size: 13px; color: #4A5675">Every payment, swap, deposit and market sale, and every request the rules refused.</span></div>
+    <div style="display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: #DDF4F8; border: 1px solid rgba(11,110,134,.3)"><div class="seal" style="width: 32px; height: 32px"><span style="color: #0B4E5E; font-size: 5px; letter-spacing: .08em">INTACT</span></div><span style="font-size: 12.5px"><b>Every transaction went through the vault.</b></span></div>
+    <div style="display: flex; gap: 6px; overflow-x: auto"><a href="#" class="ghostbtn" style="background: #0D1730; color: #F3EFE6; padding: 7px 10px; font-size: 10.5px; white-space: nowrap">ALL 24</a><a href="#" class="ghostbtn" style="padding: 7px 10px; font-size: 10.5px; white-space: nowrap">DONE 19</a><a href="#" class="ghostbtn" style="padding: 7px 10px; font-size: 10.5px; white-space: nowrap">IN PROGRESS 2</a><a href="#" class="ghostbtn" style="padding: 7px 10px; font-size: 10.5px; white-space: nowrap">REFUSED 3</a></div>
+    <section class="slab" style="padding: 12px 16px 4px; background-size: cover, cover"><span class="kick" style="color: #8A5A00">Today · October 30</span><div class="mrow" style="border-top: 0"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SIGNED</span></div><div><b style="font-size: 13.5px">Paid Studio Pixel 640 USDC</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Naomi · Payments · Base Sepolia · 14:02</div></div></div><dl style="margin: 0 0 8px 52px; padding: 10px 12px; border-left: 2px solid #C9890C; background: rgba(6,20,51,.04); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; font-size: 12px">
+          <dt style="color: #66718C">Vault status</dt><dd style="margin: 0; font-weight: 600">Confirmed</dd>
+          <dt style="color: #66718C">Signed on NEAR</dt><dd style="margin: 0"><a href="#" class="mono" style="color: #0B6E86">9xQe…T4kd ↗</a></dd>
+          <dt style="color: #66718C">Base Sepolia tx</dt><dd style="margin: 0"><a href="#" class="mono" style="color: #0B6E86">0x7c1f…a2e9 ↗</a></dd>
+          <dt style="color: #66718C">Wallet nonce</dt><dd style="margin: 0" class="mono">41</dd>
+        </dl><div class="mrow"><div class="seal" style="width: 38px; height: 38px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 5.2px; letter-spacing: .08em">REFUSED</span></div><div><b style="font-size: 13.5px">Pay 1,800 USDC to 0x9f3…e21</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Naomi · Base Sepolia · 13:48</div><div style="font-size: 12px; color: #A8381E; margin-top: 3px">Refused: the recipient is not on the voted list</div><a href="#" class="ghostbtn" style="display: inline-block; margin-top: 6px; padding: 6px 10px; font-size: 10px">ASK THE MEMBERS</a></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 5.2px; letter-spacing: .08em">PENDING</span></div><div><b style="font-size: 13.5px">Pay Cloudnine 3,200 USDC</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Naomi · waiting for a co-signature · 13:30</div></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.2px; letter-spacing: .08em">SETTLED</span></div><div><b style="font-size: 13.5px">Sold DeFi project due diligence · 2 USDC</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Market sale · paid on delivery · 14:02</div></div></div><div class="mrow"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.2px; letter-spacing: .08em">SIGNED</span></div><div><b style="font-size: 13.5px">Supplied 900 USDC to Aave</b><div style="font-size: 12px; color: #66718C; margin-top: 2px">Thetis · Treasury · Base Sepolia · 11:15</div></div></div></section>
+  </main>
+  <div class="halt"><span style="font-size: 12px; color: #F4C9BC; flex: 1">Security council: one click stops every agent.</span><a href="#" style="text-decoration: none; padding: 9px 12px; background: #D9573B; color: #fff; font: 800 11px Cinzel, serif; letter-spacing: .16em">HALT ALL</a></div>
+</div>
+
+
+</body>
+</html>

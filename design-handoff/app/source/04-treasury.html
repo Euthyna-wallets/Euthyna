@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Treasury</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.addr{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(13,23,48,.12);font-size:13px}
+.addr b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#4A5675}
+.copy{font:600 12px 'Plus Jakarta Sans',sans-serif;color:#4A5675}
+.sent{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid rgba(13,23,48,.1);font-size:13px}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#"><b>II</b>Agents</a>
+      <a href="#"><b>III</b>Rules</a>
+      <a href="#"><b>IV</b>Activity</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#"><b>VIII</b>Market</a>
+      <a href="#"><b>IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; align-items: flex-end; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Pixel Forge · the treasury</span><h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">TREASURY</h1><span style="font-size: 14px; color: #4A5675; max-width: 720px">Agents act inside their roles. Anything else, members vote on the exact transaction: it is signed after the vote and the veto window.</span></div>
+      <a href="#" class="ori oribtn" style="margin-left: auto">NEW TRANSACTION</a>
+    </header>
+
+    <div style="display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 20px; align-items: stretch">
+      <section class="ori" style="padding: 20px 26px; display: flex; flex-direction: column; gap: 14px; box-shadow: 18px 22px 40px rgba(13,23,48,.3), inset 0 1px 0 rgba(255,230,190,.5)">
+        <div style="display: flex; justify-content: space-between; align-items: baseline"><span class="kick" style="color: rgba(32,10,3,.75)">Held by the company</span><span style="font-size: 12px; color: rgba(32,10,3,.75)">testnet values</span></div>
+        <b class="mono" style="font-size: 44px; line-height: 1; color: #200A03">$30,760</b>
+        <div style="display: flex; gap: 10px; align-items: flex-end; padding-top: 6px"><div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; height: 250px">
+              <b class="mono" style="font-size: 15px; color: #200A03">$18.4k</b>
+              <div style="width: 54px; height: 150px; display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 100%; box-shadow: 8px 8px 16px rgba(40,10,0,.35)"></div></div>
+              <div style="width: 70px; height: 8px; background: rgba(255,240,215,.55); box-shadow: 0 2px 4px rgba(40,10,0,.3)"></div>
+              <span style="font: 800 11px Cinzel, serif; letter-spacing: .14em; color: #200A03">BASE</span><span style="font-size: 11px; color: rgba(32,10,3,.75); margin-top: -6px">Sepolia</span>
+            </div><div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; height: 250px">
+              <b class="mono" style="font-size: 15px; color: #200A03">$6.2k</b>
+              <div style="width: 54px; height: 51px; display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 100%; box-shadow: 8px 8px 16px rgba(40,10,0,.35)"></div></div>
+              <div style="width: 70px; height: 8px; background: rgba(255,240,215,.55); box-shadow: 0 2px 4px rgba(40,10,0,.3)"></div>
+              <span style="font: 800 11px Cinzel, serif; letter-spacing: .14em; color: #200A03">ETHEREUM</span><span style="font-size: 11px; color: rgba(32,10,3,.75); margin-top: -6px">Sepolia</span>
+            </div><div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; height: 250px">
+              <b class="mono" style="font-size: 15px; color: #200A03">$4.0k</b>
+              <div style="width: 54px; height: 33px; display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 100%; box-shadow: 8px 8px 16px rgba(40,10,0,.35)"></div></div>
+              <div style="width: 70px; height: 8px; background: rgba(255,240,215,.55); box-shadow: 0 2px 4px rgba(40,10,0,.3)"></div>
+              <span style="font: 800 11px Cinzel, serif; letter-spacing: .14em; color: #200A03">SOLANA</span><span style="font-size: 11px; color: rgba(32,10,3,.75); margin-top: -6px">devnet</span>
+            </div><div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; height: 250px">
+              <b class="mono" style="font-size: 15px; color: #200A03">$2.2k</b>
+              <div style="width: 54px; height: 18px; display: flex; align-items: flex-end"><div class="col" style="width: 100%; height: 100%; box-shadow: 8px 8px 16px rgba(40,10,0,.35)"></div></div>
+              <div style="width: 70px; height: 8px; background: rgba(255,240,215,.55); box-shadow: 0 2px 4px rgba(40,10,0,.3)"></div>
+              <span style="font: 800 11px Cinzel, serif; letter-spacing: .14em; color: #200A03">NEAR</span><span style="font-size: 11px; color: rgba(32,10,3,.75); margin-top: -6px">testnet</span>
+            </div></div>
+      </section>
+      <section class="slab" style="padding: 18px 22px 10px; display: flex; flex-direction: column">
+        <span class="kick" style="color: #8A5A00">Four wallets, no private key</span>
+        <span style="font-size: 13px; color: #4A5675; margin: 6px 0 8px">Each address is derived from the vault. It signs only what a role allows or what the members voted.</span>
+        <div class="addr"><b>BASE · ETHEREUM</b><span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">0x5Ae3c9…7d91F0</span><a href="#" class="copy">Copy</a></div>
+        <div class="addr"><b>SOLANA</b><span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">7Gk2Wq…Nf4pQ9</span><a href="#" class="copy">Copy</a></div>
+        <div class="addr"><b>NEAR</b><span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">vault.pixelforge.testnet</span><a href="#" class="copy">Copy</a></div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 0 6px; border-top: 1px solid rgba(13,23,48,.12)"><div class="seal" style="width: 36px; height: 36px"><span style="color: #0B4E5E; font-size: 5.6px; letter-spacing: .08em">INTACT</span></div><span style="font-size: 12.5px; color: #0B6E86">Every transaction that left these wallets was signed through the vault.</span></div>
+      </section>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 20px; align-items: start">
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0">
+        <section class="slab" style="padding: 18px 22px; display: flex; flex-direction: column; gap: 12px">
+          <span class="kick" style="color: #8A5A00">Connect an app</span>
+          <span style="font-size: 13px; color: #4A5675">In the app (Aave, Uniswap, a bridge…), choose WalletConnect, copy the connection link and paste it here.</span>
+          <div style="display: flex; gap: 8px"><span class="mono" style="flex: 1; padding: 10px 12px; border: 1px solid rgba(13,23,48,.2); background: rgba(255,255,255,.7); font-size: 12.5px; color: #66718C">wc:…</span><a href="#" class="ghostbtn" style="padding: 9px 14px">CONNECT</a></div>
+          <div style="border: 1px solid rgba(13,23,48,.14); background: rgba(255,255,255,.6); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+            <span class="kick" style="color: #0B6E86">Aave asks</span>
+            <b style="font-size: 15px">Supply 2,000 USDC on Base Sepolia</b>
+            <div style="display: flex; gap: 8px; justify-content: flex-end"><a href="#" class="ghostbtn" style="padding: 8px 12px; font-size: 11px">DECLINE</a><a href="#" class="ori oribtn" style="padding: 9px 12px; font-size: 11px">PROPOSE TO THE MEMBERS</a></div>
+          </div>
+        </section>
+        <section class="slab" style="padding: 16px 22px 8px; display: flex; flex-direction: column">
+          <span class="kick" style="color: #8A5A00; margin-bottom: 6px">Voted transactions</span>
+          <div class="sent"><div class="seal" style="width: 32px; height: 32px"><span style="color: #0B4E5E; font-size: 4.8px; letter-spacing: .08em">SIGNED</span></div><div><b>Swapped 500 USDC for ETH on Uniswap</b><br><small style="color: #66718C">Proposal #10 · Base Sepolia · Oct 29</small></div><a href="#" class="mono" style="font-size: 12px; color: #0B6E86">0x3be0…19 ↗</a></div>
+          <div class="sent"><div class="seal" style="width: 32px; height: 32px"><span style="color: #0B4E5E; font-size: 4.8px; letter-spacing: .08em">SIGNED</span></div><div><b>Sent 2,200 USDC to the agents’ cards</b><br><small style="color: #66718C">Proposal #9 · NEAR · Oct 27</small></div><a href="#" class="mono" style="font-size: 12px; color: #0B6E86">F2kq…w8 ↗</a></div>
+        </section>
+      </div>
+
+      <section style="background: #061433; color: #E7ECF6; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 14px 18px 40px rgba(13,23,48,.3)">
+        <span class="kick" style="color: #F2B544">Members will vote on</span>
+        <h3 style="margin: 0; font: 800 22px/1.25 Cinzel, serif; letter-spacing: .04em; color: #fff">Aave: supply 2,000 USDC</h3>
+        <div style="display: flex; flex-direction: column; border-top: 1px solid #1F3A6E">
+          <div style="display: grid; grid-template-columns: 34px minmax(0, 1fr); padding: 10px 0; border-bottom: 1px solid #1F3A6E; font-size: 14px"><b style="font: 700 13px Cinzel, serif; color: #F2B544">I</b>Approve 2,000 USDC to the Aave pool, on Base Sepolia</div>
+          <div style="display: grid; grid-template-columns: 34px minmax(0, 1fr); padding: 10px 0; border-bottom: 1px solid #1F3A6E; font-size: 14px"><b style="font: 700 13px Cinzel, serif; color: #F2B544">II</b>Supply 2,000 USDC; the aUSDC go to the company wallet</div>
+        </div>
+        <span style="font-size: 12.5px; color: #8FE3F1">✓ Checked in your browser: the proposal carries exactly these calls; Euthyna only added the network fees.</span>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid #1F3A6E">
+          <div style="padding: 12px 14px; border-right: 1px solid #1F3A6E"><span class="kick" style="color: #8FA2CC; font-size: 10px">Votes</span><b style="display: block; margin-top: 4px; font-size: 13px">2 of 3 members</b></div>
+          <div style="padding: 12px 14px; border-right: 1px solid #1F3A6E"><span class="kick" style="color: #8FA2CC; font-size: 10px">Then</span><b style="display: block; margin-top: 4px; font-size: 13px">a veto window</b></div>
+          <div style="padding: 12px 14px"><span class="kick" style="color: #8FA2CC; font-size: 10px">Then</span><b style="display: block; margin-top: 4px; font-size: 13px">the vault signs</b></div>
+        </div>
+        <span style="font-size: 12.5px; color: #A9B6D6">Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
+        <div style="display: flex; gap: 10px; justify-content: flex-end"><a href="#" style="text-decoration: none; padding: 10px 16px; border: 1px solid #36507F; font: 700 12px Cinzel, serif; letter-spacing: .16em; color: #C9D3EA">CANCEL</a><a href="#" class="ori oribtn">SUBMIT THE PROPOSAL</a></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>

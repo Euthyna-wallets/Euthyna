@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EUTHYNA · Plug in your agent</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.door-e{background-color:#F3EFE7;background-image:linear-gradient(180deg,rgba(246,242,235,.2) 0%,rgba(246,242,235,.92) 42%,rgba(246,242,235,.97) 100%),url(../assets/renders/R4-vault-door.jpg);background-size:cover,cover;background-position:0 0,center 30%}
+.door-a{background-color:#030918;background-image:linear-gradient(180deg,rgba(3,9,24,.15) 0%,rgba(3,9,24,.9) 42%,rgba(3,9,24,.97) 100%),url(../assets/renders/R3-atlantis-aerial.jpg);background-size:cover,cover;background-position:0 0,center 40%}
+.li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;font-size:14.5px;padding:5px 0}
+.stepm{display:flex;flex-direction:column;align-items:center;gap:8px;font:700 11px Cinzel,serif;letter-spacing:.16em;color:#66718C;position:relative;z-index:1}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div class="ground" style="width: 1440px; height: 1040px; box-sizing: border-box; padding: 30px 64px; display: flex; flex-direction: column; gap: 26px; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730; background-size: cover, cover">
+  <header style="display: flex; align-items: center; gap: 14px">
+    <span style="display: flex; align-items: center; gap: 12px; font: 700 17px Cinzel, serif; letter-spacing: .24em; color: #0D1730"><svg width="28" height="28" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#0D1730" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</span>
+    <span style="font: 700 12px Cinzel, serif; letter-spacing: .26em; color: #8A5A00; margin-left: 10px">· CREATE YOUR VAULT</span>
+    <span class="mono" style="margin-left: auto; font-size: 11px; letter-spacing: .08em; color: #66718C">TESTNET · NOT AUDITED</span>
+  </header>
+
+  <div style="position: relative; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); max-width: 900px">
+    <div style="position: absolute; left: 7%; right: 7%; top: 20px; height: 2px; background: #C9890C"></div>
+    <div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">Team</span></div><div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">Members</span></div><div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">Incorporate</span></div><div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">Wallet</span></div><div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">First hire</span></div><div class="stepm"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 14px; letter-spacing: .08em">✓</span></div><span style="color: #4A5675">Role</span></div><div class="stepm"><div style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #C9890C, 0 0 22px rgba(201,137,12,.35); background: #FBF9F4; font: 800 13px Cinzel, serif; color: #8A5A00">VII</div><span style="color: #8A5A00">Plug in</span></div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr); gap: 28px; align-items: start">
+    <div style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 8px"><span class="kick" style="color: #8A5A00">Naomi is hired · paired with alex-macbook</span><h1 class="carved" style="margin: 0; font: 900 42px/1.05 Cinzel, serif; letter-spacing: .06em">PLUG IT INTO YOUR AI</h1>
+        <span style="font-size: 15.5px; color: #4A5675; max-width: 640px">Its key and API key stay with euthyna-signer on that machine. This config holds <b style="color: #0D1730">no secret</b>: the vault, role and network are read from the signer.</span></div>
+      <section style="background: #061433; color: #E7ECF6; box-shadow: 18px 22px 44px rgba(13,23,48,.3)">
+        <div style="display: flex; gap: 0; border-bottom: 1px solid #1F3A6E"><span style="padding: 12px 18px; font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #061433; background: #F2B544">CLAUDE CODE</span><span style="padding: 12px 18px; font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #8FA2CC">CLAUDE DESKTOP, CURSOR, CODEX</span></div>
+        <pre style="margin: 0; padding: 22px 24px; font: 13.5px/1.7 'JetBrains Mono', monospace; color: #D5DDF0; white-space: pre-wrap; word-break: break-all">claude mcp add euthyna --env EUTHYNA_AGENT=naomi.pixelforge.testnet -- npx -y @euthyna/mcp</pre>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid #1F3A6E"><span class="mono" style="font-size: 11.5px; color: #F2B544">@euthyna/mcp on npm · NEXT</span><span style="font-size: 12px; color: #A9B6D6">until it is published, build the MCP server from the repository</span><span class="ori oribtn" style="margin-left: auto; padding: 9px 16px; font-size: 11px">COPY</span></div>
+      </section>
+      <span style="font-size: 13.5px; color: #4A5675">The agent can do nothing until a role that includes <span class="mono" style="color: #0D1730">naomi.pixelforge.testnet</span> is voted and out of its veto window. Then it has the tools to check, pay and read its status, and nothing else.</span>
+      <div style="display: flex; gap: 14px; align-items: center"><span class="ori oribtn" style="padding: 14px 22px; font-size: 13px">DONE · GO TO YOUR HQ</span></div>
+      <section style="margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; background: #061433; color: #C9D3EA; box-shadow: 14px 18px 40px rgba(13,23,48,.25)">
+        <div style="padding: 18px 20px; border-right: 1px solid #1F3A6E; display: flex; flex-direction: column; gap: 6px"><span class="kick" style="color: #F2B544">Next · I</span><span style="font-size: 13.5px">Your members vote Naomi’s role in <b style="color: #fff">Votes</b>.</span></div>
+        <div style="padding: 18px 20px; border-right: 1px solid #1F3A6E; display: flex; flex-direction: column; gap: 6px"><span class="kick" style="color: #F2B544">Next · II</span><span style="font-size: 13.5px">The veto window runs; any council member can still stop it.</span></div>
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 6px"><span class="kick" style="color: #F2B544">Next · III</span><span style="font-size: 13.5px">Naomi asks the vault; every verdict appears in <b style="color: #fff">Activity</b>.</span></div>
+      </section>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <section class="slab" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; background-size: cover, cover">
+        <span class="kick" style="color: #8A5A00; margin-bottom: 6px">What you now have</span>
+        <div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13.5px"><div class="seal" style="width: 26px; height: 26px"><span style="color: #0B4E5E; font-size: 9px; letter-spacing: .08em">✓</span></div><span>A DAO with 3 members, 2 of 3 to approve</span></div><div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13.5px"><div class="seal" style="width: 26px; height: 26px"><span style="color: #0B4E5E; font-size: 9px; letter-spacing: .08em">✓</span></div><span>A vault with no key, owned by the DAO</span></div><div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13.5px"><div class="seal" style="width: 26px; height: 26px"><span style="color: #0B4E5E; font-size: 9px; letter-spacing: .08em">✓</span></div><span>Company wallets on Base, Ethereum and Solana</span></div><div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13.5px"><div class="seal" style="width: 26px; height: 26px"><span style="color: #4A2C06; font-size: 9px; letter-spacing: .08em">…</span></div><span>Naomi’s role: 1 of 2 votes, then the veto window</span></div>
+      </section>
+      <section style="padding: 16px 18px; border: 1px dashed rgba(201,137,12,.55); display: flex; flex-direction: column; gap: 8px">
+        <span class="kick" style="color: #8A5A00">Private by default</span>
+        <span style="font-size: 13px; color: #4A5675">Your vault is not listed in Atlantis and has no shares. Both can come later, each by a members’ vote.</span>
+        <a href="#" style="font: 700 11px Cinzel, serif; letter-spacing: .16em; color: #0D1730">JOIN ATLANTIS LATER →</a>
+      </section>
+      <div class="statue" style="height: 380px; border-radius: 160px 160px 2px 2px; box-shadow: inset 0 0 0 4px rgba(243,239,230,.7), inset 0 14px 30px rgba(0,0,0,.45), 18px 22px 44px rgba(13,23,48,.25)" role="img" aria-label="Naomi, a marble statue holding an orichalcum tablet"></div>
+    </div>
+  </div>
+</div>
+
+
+</body>
+</html>

@@ -1,0 +1,35 @@
+/* EUTHYNA design tokens · direction « Marbre et orichalque » (30 October 2026).
+   Same values in the site, the app, Atlantis and Rob the Agent. */
+:root{
+  /* Night: sidebar, dark sections, panels that judge (verdicts, veto, purchases) */
+  --night:#061433; --night-2:#0A1D47; --night-3:#142E63; --night-deep:#030918;
+  --night-line:#1F3A6E; --night-mute:#8FA2CC; --night-soft:#C9D3EA; --night-text:#A9B6D6;
+  /* Marble: page grounds, slabs (cards) */
+  --marble:#F3EFE7; --marble-slab:#FBF9F4; --vein:#E5DFD2; --groove:#E2DBCD; --white:#FFFFFF;
+  /* Ink */
+  --ink:#0D1730; --ink-2:#4A5675; --ink-3:#66718C;
+  /* Carved: titles engraved in marble (use with --carved-shadow) */
+  --carved:#8E8473; --carved-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45);
+  /* Orichalcum: the city, primary buttons, totals, the agent's spending card */
+  --orichalcum:#B4532E; --orichalcum-ink:#200A03; --orichalcum-light:#FFE2A8;
+  /* Gold: kickers, roman numerals, law lines */
+  --gold:#F2B544; --gold-deep:#C9890C; --gold-ink:#8A5A00; --gold-bg:#FCF0D4;
+  /* Aegean: signed, live, verified, Atlantis */
+  --aegean:#4FD1E8; --aegean-ink:#0B6E86; --aegean-bg:#DDF4F8; --aegean-link:#8FE3F1;
+  /* Terracotta: refused, veto, pause, danger */
+  --terra:#D9573B; --terra-btn:#B8442B; --terra-ink:#A8381E; --terra-soft:#F4A28C;
+  /* Seal (bronze verdict stamp): radial gradient, see .seal in the sources */
+  --seal:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);
+  /* Type */
+  --font-brand:"Cinzel","Times New Roman",serif;                  /* titles in capitals, kickers, numerals, seals */
+  --font-ui:"Plus Jakarta Sans","Segoe UI",system-ui,sans-serif;  /* everything else */
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;            /* amounts, hashes, accounts, code */
+  --kicker:700 11px/1 var(--font-brand); --kicker-tracking:.26em;
+  /* Shape: carved stone, almost square */
+  --radius:2px; --radius-arch:999px 999px 2px 2px; --radius-card-wallet:10px;
+  --shadow-slab:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08);
+  --shadow-night:14px 18px 40px rgba(13,23,48,.30);
+  --shadow-plate:24px 30px 70px rgba(0,0,0,.55);
+  /* Motion */
+  --t-engrave:400ms; --t-strike:220ms; --t-open:600ms; --t-pulse:1200ms;
+}

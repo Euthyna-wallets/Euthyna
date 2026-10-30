@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief des rendus GUS</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.bg{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.6),rgba(6,20,51,.94)),url(../assets/textures/marble-night.jpg);background-size:cover,900px}
+.night{background-color:#0A1D47;background-image:linear-gradient(180deg,rgba(6,20,51,.2),rgba(6,20,51,.7)),url(../assets/textures/marble-night.jpg);background-size:cover,600px}
+.marble{background-color:#E9E4DA;background-image:linear-gradient(180deg,rgba(6,20,51,0),rgba(6,20,51,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,700px}
+.ori{background-color:#B4532E;background-image:linear-gradient(180deg,rgba(6,20,51,0),rgba(6,20,51,.5)),url(../assets/textures/orichalcum.jpg);background-size:cover}
+.bronze{background-color:#78502A;background-image:linear-gradient(180deg,rgba(6,20,51,0),rgba(6,20,51,.5)),url(../assets/textures/bronze.jpg);background-size:cover,500px}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 260%;background-position:0 30%;-webkit-background-clip:text;background-clip:text;color:transparent}
+</style>
+
+<div class="bg" style="width: 1600px; min-height: 1980px; box-sizing: border-box; padding: 72px 80px; display: flex; flex-direction: column; gap: 32px; font-family: 'Plus Jakarta Sans', sans-serif; color: #E7ECF6">
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 40px">
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <span style="font: 700 13px Cinzel, serif; letter-spacing: .32em; color: #F2B544">À GÉNÉRER AVEC GUS · FAL.AI</span>
+    <h1 class="leaf" style="margin: 0; font: 800 84px/0.98 Cinzel, serif; letter-spacing: .04em">BRIEF DES RENDUS</h1>
+  </div>
+  <p style="margin: 0; max-width: 560px; font-size: 16px; line-height: 1.6; color: #C9D3EA">Huit images et une vidéo. Lancement depuis C:\GUS\gus-studio : python rendus.py (prompts dans rendus/euthyna.yaml). Chaque prompt se termine par le bloc de style commun ; même lumière, même matière, même nuit partout, pour que toutes les images semblent venir du même lieu. Générer 4 variantes par emplacement, garder la plus sculpturale.</p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px">
+  <div style="border: 1px solid rgba(242,181,68,.4); border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: rgba(6,20,51,.6)">
+    <b style="font: 700 13px Cinzel, serif; letter-spacing: .2em; color: #F2B544">BLOC DE STYLE · À AJOUTER À CHAQUE PROMPT</b>
+    <p style="margin: 0; font: 13px/1.65 'JetBrains Mono', monospace; color: #fff">cinematic architectural photography, ultra-detailed carved Pentelic marble with thin gold kintsugi veins, orichalcum (reddish-gold brushed metal), raking warm key light from upper left, cool aegean-cyan rim light from behind, deep midnight-navy atmosphere (#061433), light volumetric haze, 35mm lens, f/2.8, high dynamic range, monumental, timeless, no text, no letters, no logos</p>
+  </div>
+  <div style="border: 1px solid rgba(217,87,59,.5); border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: rgba(6,20,51,.6)">
+    <b style="font: 700 13px Cinzel, serif; letter-spacing: .2em; color: #F4A28C">PROMPT NÉGATIF</b>
+    <p style="margin: 0; font: 13px/1.65 'JetBrains Mono', monospace; color: #fff">text, letters, watermark, logo, robot, cyborg, neon sci-fi city, cartoon, plastic, CGI look, low detail, crowd, modern buildings, heavy lens flare</p>
+    <p style="margin: 6px 0 0; font-size: 13px; color: #A9B6D6">Livrer en JPG ou PNG à la taille indiquée, sans texte ajouté. Les titres et le logo sont posés par le design.</p>
+  </div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="night" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R1</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">16:9 · 2560×1440</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">HERO DU SITE</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">A monumental orichalcum stele standing alone at the center of a night-time marble agora, its face engraved with five short lines of law glowing faintly gold, on a three-step marble base; a ring of fluted Doric columns fading into haze behind it; concentric circular grooves carved in the dark marble floor catch a thin cyan light</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="marble" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R2</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">4:5 · 1600×2000</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">UN AGENT (CARTES, APP, RÉSEAUX)</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">A serene marble statue of an androgynous young figure in Greek classical style (kouros), eyes closed, contrapposto, holding a small orichalcum tablet against its chest; fine gold kintsugi veins run across the marble like circuitry; plain dark navy background, museum sculpture photography</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="night" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R3</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">1:1 · 2048×2048</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">ATLANTIS VUE DU CIEL</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">Aerial night view of a circular city of concentric rings of white marble and dark water, Plato's Atlantis, a pillar of orichalcum light at the very center, bridges crossing the canals, tiny warm lights in temples on each ring, a calm deep-navy sea all around</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="bronze" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R4</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">16:9 · 2560×1440</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">LE COFFRE SANS CLÉ</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">A massive bronze temple door with no keyhole and no handle, sealed by a single carved circular emblem, set in a white marble wall, lit by one raking warm light, fine dust in the air</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="night" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R5</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">16:9 · 2560×1440</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">LE PROBLÈME : UNE CLÉ = UNE PANNE</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">A bronze key snapped in two lying on a black marble floor, a little gold dust scattered around the break, dramatic low raking light, shallow depth of field</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="ori" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R6</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">4:5 · 1600×2000</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">PLUTUS, ROB THE AGENT</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">A marble statue of Plutus, the blind child god of wealth, eyes covered by a carved blindfold, holding an overflowing cornucopia of gold coins, standing behind a row of vertical engraved orichalcum bars, theatrical top spotlight</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="marble" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R7</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">1:1 · 2048×2048</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">RÉCUPÉRATION</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">Two halves of a broken marble seal rejoined by gold kintsugi, floating slightly apart above a dark polished marble surface, soft warm light, minimal composition</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="marble" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">R8</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">4:5 · 1600×2000</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">FOND DE CONNEXION DE L'APP</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">Close-up of a fluted white marble column in raking light, half in deep shadow, ultra-detailed stone texture, minimal composition, dark navy background</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(6,20,51,.72); border: 1px solid #1F3A6E; border-radius: 4px; padding: 18px">
+    <div class="night" style="height: 150px; border-radius: 2px; display: flex; align-items: flex-end; justify-content: space-between; padding: 12px 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12)"><span style="font: 800 30px Cinzel, serif; letter-spacing: .1em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.5)">V1</span><span style="font: 600 12px 'JetBrains Mono', monospace; color: rgba(255,255,255,.85); background: rgba(6,20,51,.55); padding: 3px 8px; border-radius: 2px">16:9 · 6 s en boucle</span></div>
+    <b style="font: 700 14px Cinzel, serif; letter-spacing: .16em; color: #F2B544">VIDÉO D'ARRIÈRE-PLAN DU HÉROS (KLING)</b>
+    <p style="margin: 0; font: 13px/1.6 'JetBrains Mono', monospace; color: #DCE4F4">Very slow camera dolly around the orichalcum stele from R1, gold dust drifting in the haze, the cyan rings in the floor pulse once, seamless loop, no camera shake</p>
+  </div>
+</div>
+</div>
+
+
+</body>
+</html>

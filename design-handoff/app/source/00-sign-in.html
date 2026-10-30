@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Sign in</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.r8{background-color:#061433;background-image:linear-gradient(90deg,rgba(3,9,24,.15) 0%,rgba(3,9,24,0) 40%,rgba(3,9,24,.55) 100%),linear-gradient(180deg,rgba(3,9,24,.4) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,.15) 40%,rgba(3,9,24,.82) 58%,rgba(3,9,24,.97) 74%),url(../assets/renders/R8-column.jpg);background-size:cover,cover,cover;background-position:0 0,0 0,center 30%}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="r8" style="position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 40px 56px 56px; box-sizing: border-box; color: #E7ECF6" role="img" aria-label="A fluted white marble column in raking light">
+    <div style="display: flex; align-items: center; gap: 12px; font: 700 18px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6">
+      <svg width="30" height="30" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <div style="display: flex; flex-direction: column; gap: 22px; max-width: 560px">
+      <h2 style="margin: 0; font: 900 52px/1.02 Cinzel, serif; letter-spacing: .02em"><span class="leaf">AI AGENTS MOVE COMPANY FUNDS.</span><br><span style="color: #F3EFE6">HUMANS SET THE LIMITS.</span></h2>
+      <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; font-size: 16px; color: #C9D3EA">
+        <li style="display: flex; gap: 16px"><b style="font: 700 14px Cinzel, serif; color: #F2B544; width: 26px">I</b>Members vote the rules in a NEAR DAO</li>
+        <li style="display: flex; gap: 16px"><b style="font: 700 14px Cinzel, serif; color: #F2B544; width: 26px">II</b>A vault checks every agent request against them</li>
+        <li style="display: flex; gap: 16px"><b style="font: 700 14px Cinzel, serif; color: #F2B544; width: 26px">III</b>No key on our servers can move company funds</li>
+      </ol>
+      <a href="#" style="font: 700 13px Cinzel, serif; letter-spacing: .2em; color: #8FE3F1; text-decoration: none">EXPLORE THE AI COMPANIES →</a>
+    </div>
+  </aside>
+
+  <main class="ground" style="display: flex; align-items: center; justify-content: center; padding: 40px; box-sizing: border-box; position: relative">
+    <span style="position: absolute; top: 34px; right: 40px; font: 600 11px 'JetBrains Mono', monospace; letter-spacing: .08em; color: #66718C">TESTNET · NOT AUDITED</span>
+    <section class="slab" style="width: 440px; padding: 44px 44px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; box-shadow: 26px 30px 60px rgba(13,23,48,.22), inset 0 0 0 1px rgba(13,23,48,.08)">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span class="kick" style="color: #8A5A00">Enter the assembly</span>
+        <h1 class="carved" style="margin: 0; font: 900 46px/1 Cinzel, serif; letter-spacing: .1em">SIGN IN</h1>
+        <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #4A5675">With the NEAR account you vote with. You sign a message: it is free and sends no transaction.</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: rgba(255,255,255,.7); border: 1px solid rgba(13,23,48,.14)">
+        <span style="width: 38px; height: 38px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800">A</span>
+        <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><small style="font-size: 12px; color: #66718C">Connected wallet</small><b style="font: 600 14px 'JetBrains Mono', monospace">alex.testnet</b></span>
+        <a href="#" style="margin-left: auto; font-size: 13px; font-weight: 600; color: #4A5675">Change</a>
+      </div>
+      <a href="#" class="ori" style="text-align: center; text-decoration: none; padding: 17px; font: 800 14px Cinzel, serif; letter-spacing: .22em; color: #200A03; box-shadow: 0 10px 26px rgba(180,83,46,.3), inset 0 1px 0 rgba(255,230,190,.5)">SIGN IN</a>
+      <p style="margin: 0; padding-top: 18px; border-top: 1px solid rgba(13,23,48,.12); font-size: 13.5px; line-height: 1.6; color: #4A5675">New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account.</p>
+    </section>
+  </main>
+</div>
+
+
+</body>
+</html>
