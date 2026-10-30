@@ -18,6 +18,16 @@
     reverse_proxy api:3000
   }
 
+  # Euthyna Market: the x402 discovery document and the A2A agent endpoints are
+  # served by the API, never by the console's single page app.
+  handle /.well-known/* {
+    reverse_proxy api:3000
+  }
+
+  handle /a2a/* {
+    reverse_proxy api:3000
+  }
+
   handle {
     root * /srv
     try_files {path} /index.html
