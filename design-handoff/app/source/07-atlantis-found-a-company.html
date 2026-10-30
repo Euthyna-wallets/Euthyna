@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlantis · Found a company</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.atl{background-color:#030918;background-image:radial-gradient(60% 70% at 78% 40%,rgba(3,9,24,0) 0%,rgba(3,9,24,.6) 60%,rgba(3,9,24,.96) 100%),linear-gradient(90deg,rgba(3,9,24,.96) 0%,rgba(3,9,24,.75) 45%,rgba(3,9,24,.35) 100%),url(../assets/renders/R3-atlantis-aerial.jpg);background-size:cover,cover,1100px auto;background-position:0 0,0 0,right -180px center;background-repeat:no-repeat}
+.step{display:flex;flex-direction:column;align-items:center;gap:8px;font:700 11px Cinzel,serif;letter-spacing:.16em;color:#8FA2CC;position:relative;z-index:1}
+.job{display:flex;flex-direction:column;background-size:cover,cover;box-shadow:24px 30px 60px rgba(0,0,0,.45),inset 0 0 0 1px rgba(13,23,48,.08);color:#0D1730;text-decoration:none}
+.jobniche{height:300px;border-radius:150px 150px 2px 2px;margin:18px 18px 0;box-shadow:inset 0 0 0 4px rgba(243,239,230,.7),inset 0 14px 30px rgba(0,0,0,.45)}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div class="atl" style="width: 1440px; height: 1040px; box-sizing: border-box; padding: 34px 64px; display: flex; flex-direction: column; gap: 30px; font-family: 'Plus Jakarta Sans', sans-serif; color: #E7ECF6" role="img" aria-label="Founding a company on Atlantis: the city of rings at night, behind the setup steps">
+  <header style="display: flex; align-items: center; gap: 16px">
+    <div style="display: flex; align-items: center; gap: 12px; font: 700 17px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6">
+      <svg width="28" height="28" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <span style="font: 700 12px Cinzel, serif; letter-spacing: .26em; color: #4FD1E8; margin-left: 10px">· LAUNCH ON ATLANTIS</span>
+    <span class="mono" style="margin-left: auto; font-size: 11px; letter-spacing: .08em; color: #6F82AE">TESTNET · NOT AUDITED</span>
+  </header>
+
+  <div style="position: relative; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); max-width: 1000px">
+    <div style="position: absolute; left: 6%; right: 6%; top: 21px; height: 2px; background: linear-gradient(90deg, #C9890C 0%, #C9890C 66%, #36507F 74%)"></div>
+    <div class="step" style="min-width: 0"><div class="seal" style="width: 40px; height: 40px"><span style="color: #4A2C06; font-size: 15px; letter-spacing: .08em">✓</span></div><span style="color: #C9D3EA">Company</span></div><div class="step" style="min-width: 0"><div class="seal" style="width: 40px; height: 40px"><span style="color: #4A2C06; font-size: 15px; letter-spacing: .08em">✓</span></div><span style="color: #C9D3EA">Founders</span></div><div class="step" style="min-width: 0"><div class="seal" style="width: 40px; height: 40px"><span style="color: #4A2C06; font-size: 15px; letter-spacing: .08em">✓</span></div><span style="color: #C9D3EA">Incorporate</span></div><div class="step" style="min-width: 0"><div class="seal" style="width: 40px; height: 40px"><span style="color: #4A2C06; font-size: 15px; letter-spacing: .08em">✓</span></div><span style="color: #C9D3EA">Wallet</span></div><div class="step" style="min-width: 0"><div class="seal" style="width: 40px; height: 40px"><span style="color: #4A2C06; font-size: 15px; letter-spacing: .08em">✓</span></div><span style="color: #C9D3EA">Shares</span></div><div class="step" style="min-width: 0"><div style="width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #F2B544, 0 0 26px rgba(242,181,68,.55); background: #061433; font: 800 14px Cinzel, serif; color: #F2B544">VI</div><span style="color: #F2B544">First hire</span></div><div class="step" style="min-width: 0"><div style="width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1.5px #36507F; background: #061433; font: 700 13px Cinzel, serif; color: #6F82AE">VII</div><span>Role</span></div><div class="step" style="min-width: 0"><div style="width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1.5px #36507F; background: #061433; font: 700 13px Cinzel, serif; color: #6F82AE">VIII</div><span>City</span></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 10px; max-width: 720px">
+    <span class="kick" style="color: #F2B544">Pixel Forge · first hire</span>
+    <h1 style="margin: 0; font: 900 48px/1.02 Cinzel, serif; letter-spacing: .02em"><span class="leaf">WHAT SHOULD YOUR</span><br><span style="color: #F3EFE6">FIRST AGENT DO?</span></h1>
+    <p style="margin: 0; font-size: 16.5px; color: #C9D3EA">Pick a role. You set its budget next, and the founders vote on it. The agent gets its own NEAR account and can only ask the vault for what its role allows.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, 300px) minmax(0, 1fr); gap: 26px; align-items: start">
+        <a href="#" class="slab job" style="position: relative; box-shadow: 0 0 0 3px #F2B544, 0 0 40px rgba(242,181,68,.35), 24px 30px 60px rgba(0,0,0,.45);">
+          <div class="statue jobniche"></div><span style="position: absolute; top: 30px; left: 50%; transform: translateX(-50%); padding: 5px 12px; background: #F2B544; color: #061433; font: 800 10px Cinzel, serif; letter-spacing: .18em; white-space: nowrap">SELECTED</span>
+          <div style="padding: 18px 22px 22px; display: flex; flex-direction: column; gap: 8px">
+            <span class="kick" style="color: #8A5A00">Payments agent</span>
+            <b style="font: 800 22px Cinzel, serif; letter-spacing: .06em">Pay suppliers</b>
+            <span style="font-size: 14px; color: #4A5675; line-height: 1.5">Pays registered suppliers in USDC, invoice by invoice.</span>
+            <span style="font-size: 12.5px; color: #66718C; border-top: 1px solid rgba(13,23,48,.12); padding-top: 8px"><b style="color: #0D1730">Allows:</b> USDC transfers to registered suppliers, within a budget. Everything else is refused.</span>
+            
+          </div>
+        </a>
+        <a href="#" class="slab job" style="position: relative; ">
+          <div class="statue-t jobniche"></div>
+          <div style="padding: 18px 22px 22px; display: flex; flex-direction: column; gap: 8px">
+            <span class="kick" style="color: #8A5A00">Treasury agent</span>
+            <b style="font: 800 22px Cinzel, serif; letter-spacing: .06em">Manage the treasury</b>
+            <span style="font-size: 14px; color: #4A5675; line-height: 1.5">Swaps company tokens on Uniswap; what it buys always returns to the company wallet.</span>
+            <span style="font-size: 12.5px; color: #66718C; border-top: 1px solid rgba(13,23,48,.12); padding-top: 8px"><b style="color: #0D1730">Allows:</b> Uniswap V3 swaps of USDC, within a budget. Everything else is refused.</span>
+            
+          </div>
+        </a>
+        <a href="#" class="slab job" style="position: relative; ">
+          <div class="statue-h jobniche"></div>
+          <div style="padding: 18px 22px 22px; display: flex; flex-direction: column; gap: 8px">
+            <span class="kick" style="color: #8A5A00">Revenue agent</span>
+            <b style="font: 800 22px Cinzel, serif; letter-spacing: .06em">Share revenue</b>
+            <span style="font-size: 14px; color: #4A5675; line-height: 1.5">Sends the ETH the company earns to the shareholders who vote.</span>
+            <span style="font-size: 12.5px; color: #66718C; border-top: 1px solid rgba(13,23,48,.12); padding-top: 8px"><b style="color: #0D1730">Allows:</b> ETH to the company’s shares contract only, through the Omni Bridge, within a budget. Everything else is refused.</span>
+            <span style="font-size: 12px; color: #0B6E86; font-weight: 700">Shares are open: available</span>
+          </div>
+        </a>
+    <div style="align-self: end; display: flex; flex-direction: column; gap: 14px; padding: 22px; background: rgba(3,9,24,.82); border: 1px solid rgba(242,181,68,.35)">
+      <span class="kick" style="color: #F2B544">Next · VII · Role</span>
+      <span style="font-size: 14px; color: #C9D3EA">Name the agent and set its budget. The founders vote on it before it can ask the vault for anything.</span>
+      <a href="#" class="ori oribtn" style="text-align: center">HIRE THE PAYMENTS AGENT</a>
+      <a href="#" style="font-size: 13px; color: #8FA2CC; text-align: center">Skip for now</a>
+    </div>
+  </div>
+</div>
+
+
+</body>
+</html>

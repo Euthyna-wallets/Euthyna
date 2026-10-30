@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EUTHYNA · Home</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#061433}
+a{color:inherit}a:hover{color:#F2B544}
+.nightm{background-color:#061433;background-image:radial-gradient(120% 90% at 70% 10%,rgba(28,58,120,.55),rgba(6,20,51,0) 60%),linear-gradient(180deg,rgba(6,20,51,.55),rgba(3,9,24,.96)),url(../assets/textures/marble-night.jpg);background-size:cover,cover,900px}
+.nightflat{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.86),rgba(4,12,30,.96)),url(../assets/textures/marble-night.jpg);background-size:cover,1100px}
+.marble{background-color:#F3EFE7;background-image:linear-gradient(rgba(245,241,233,.72),rgba(245,241,233,.72)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.marblelit{background-color:#F3EFE7;background-image:linear-gradient(115deg,rgba(255,255,255,.62),rgba(255,255,255,.25) 40%,rgba(13,23,48,.10)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.18),rgba(0,0,0,0) 35%,rgba(40,10,0,.35)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.bronze{background-color:#78502A;background-image:radial-gradient(circle at 35% 30%,rgba(255,226,180,.35),rgba(0,0,0,0) 55%),url(../assets/textures/bronze.jpg);background-size:cover,400px}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 5px rgba(255,236,196,.28),inset 0 0 0 7px rgba(60,32,8,.35),inset 0 -6px 12px rgba(40,18,0,.45),0 12px 26px rgba(0,0,0,.5)}
+.seal span{font:800 13px Cinzel,serif;letter-spacing:.2em;text-shadow:0 1px 0 rgba(255,236,196,.45)}
+.flutes{background-image:linear-gradient(90deg,rgba(13,23,48,.38),rgba(13,23,48,0) 18%,rgba(255,255,255,0) 60%,rgba(13,23,48,.28)),repeating-linear-gradient(90deg,rgba(255,255,255,.0) 0 11px,rgba(13,23,48,.16) 11px 12px,rgba(255,255,255,.65) 12px 13px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,700px}
+.fluteline{background-image:repeating-linear-gradient(90deg,rgba(242,181,68,0) 0 13px,rgba(242,181,68,.55) 13px 14px)}
+.hero-r1{background-color:#030918;background-image:linear-gradient(90deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.86) 30%,rgba(3,9,24,.35) 52%,rgba(3,9,24,0) 66%),linear-gradient(180deg,rgba(3,9,24,.7) 0%,rgba(3,9,24,0) 18%,rgba(3,9,24,0) 72%,rgba(6,20,51,1) 100%),url(../assets/renders/R1-hero-stele.jpg);background-size:cover,cover,1640px auto;background-position:0 0,0 0,left 210px top 38%;background-repeat:no-repeat}
+.r3{background:#030918 url(../assets/renders/R3-atlantis-aerial.jpg) center/cover no-repeat}
+.r4{background:#061433 url(../assets/renders/R4-vault-door.jpg) center 40%/cover no-repeat}
+.r5{background:#061433 url(../assets/renders/R5-broken-key.jpg) 30% center/cover no-repeat}
+.r7{background:#061433 url(../assets/renders/R7-recovery-seal.jpg) center/cover no-repeat}
+.plate{box-shadow:0 0 0 1px rgba(242,181,68,.35),0 0 0 8px rgba(3,9,24,.0),24px 30px 70px rgba(0,0,0,.55)}
+.wrap{max-width:1280px;margin:0 auto;padding:0 48px;box-sizing:border-box}
+.kick{font:700 12px Cinzel,serif;letter-spacing:.32em;text-transform:uppercase}
+.h2{margin:0;font:800 clamp(34px,3.9vw,56px)/1.04 Cinzel,serif;letter-spacing:.04em;text-transform:uppercase}
+@media (max-width:900px){
+  .wrap{padding:0 20px}
+  .g2,.g3,.g4,.hero-grid,.atl-grid,.court{grid-template-columns:minmax(0,1fr) !important}
+  .navlinks{display:none !important}
+  .stele-stage{height:420px !important}
+  .frieze{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .hero-r1{background-image:linear-gradient(180deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.92) 52%,rgba(3,9,24,.25) 68%,rgba(3,9,24,0) 80%,rgba(6,20,51,.9) 100%),url(../assets/renders/R1-hero-stele.jpg) !important;background-size:cover,auto 600px !important;background-position:0 0,left -340px bottom 10px !important}
+  .stele-stage{height:400px !important}
+  .slabtitle{font-size:42px !important}
+  .vault-banner{aspect-ratio:4/3 !important}
+  .vault-text{left:18px !important;right:18px;bottom:18px !important}
+  .vault-text b{font-size:16px !important}
+  .g4>div{padding:22px 0 !important}
+}
+</style>
+
+<div style="font-family: 'Plus Jakarta Sans', sans-serif; color: #E7ECF6; background: #061433; overflow-x: hidden">
+
+<!-- HERO -->
+<section class="hero-r1" style="position: relative; overflow: hidden" role="img" aria-label="An orichalcum stele engraved with the law, on marble steps, in a ring of columns at night">
+  <div class="wrap" style="display: flex; align-items: center; gap: 28px; padding-top: 26px; padding-bottom: 26px">
+    <a href="#" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: #F3EFE6; font: 700 18px Cinzel, serif; letter-spacing: .22em">
+      <svg width="30" height="30" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</a>
+    <nav class="navlinks" style="display: flex; gap: 30px; margin-left: auto; font-size: 14px; font-weight: 600; color: #C9D3EA">
+      <a href="#how" style="text-decoration: none">How it works</a><a href="#uses" style="text-decoration: none">Use cases</a><a href="#security" style="text-decoration: none">Security</a><a href="#atlantis" style="text-decoration: none">Atlantis</a><a href="#dev" style="text-decoration: none">Developers</a><a href="#" style="text-decoration: none">Whitepaper</a>
+    </nav>
+    <a href="#" style="margin-left: 18px; text-decoration: none; padding: 11px 20px; border: 1px solid rgba(242,181,68,.6); color: #F2B544; font: 700 13px Cinzel, serif; letter-spacing: .18em; border-radius: 2px">OPEN APP</a>
+  </div>
+
+  <div class="wrap hero-grid" style="display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 40px; padding-bottom: 0">
+    <div style="display: flex; flex-direction: column; gap: 26px; padding-bottom: 96px">
+      <span class="kick" style="color: #F2B544">Wallet infrastructure for AI agents</span>
+      <h1 style="margin: 0; font: 900 clamp(44px,5.4vw,80px)/0.98 Cinzel, serif; letter-spacing: .02em">
+        <span class="leaf">GIVE AI AGENTS MONEY.</span><br><span style="color: #F3EFE6">KEEP THE LAW.</span>
+      </h1>
+      <p style="margin: 0; max-width: 560px; font-size: 19px; line-height: 1.6; color: #C9D3EA">EUTHYNA gives your AI agents wallets on Base, Ethereum and Solana, with a budget and rules instead of a private key. Owners vote the rules. A vault with no key checks every transaction before anything is signed.</p>
+      <div style="display: flex; gap: 14px; flex-wrap: wrap">
+        <a href="#dev" class="ori" style="text-decoration: none; padding: 17px 28px; color: #2A0D04; font: 800 14px Cinzel, serif; letter-spacing: .18em; border-radius: 2px; box-shadow: 0 10px 30px rgba(180,83,46,.35), inset 0 1px 0 rgba(255,230,190,.5)">PLUG IN YOUR AGENT</a>
+        <a href="#atlantis" style="text-decoration: none; padding: 16px 26px; border: 1px solid rgba(243,239,230,.45); color: #F3EFE6; font: 700 14px Cinzel, serif; letter-spacing: .18em; border-radius: 2px">START A COMPANY ON ATLANTIS</a>
+      </div>
+      <div style="display: flex; gap: 22px; flex-wrap: wrap; font: 600 12px 'JetBrains Mono', monospace; color: #8FA2CC; letter-spacing: .06em">
+        <span>BASE</span><span>ETHEREUM</span><span>SOLANA</span><span style="opacity: .55">BITCOIN · PLANNED</span><span style="opacity: .55">TESTNET · NOT AUDITED</span>
+      </div>
+    </div>
+
+    <div class="stele-stage" style="height: 680px" aria-hidden="true"></div>
+  </div>
+  <div class="fluteline" style="height: 10px; opacity: .6"></div>
+</section>
+
+<!-- PROBLEM -->
+<section class="nightflat" style="padding: 120px 0">
+  <div class="wrap g2" style="display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 64px; align-items: center">
+    <div class="r5 plate" style="aspect-ratio: 16/11; border-radius: 2px" role="img" aria-label="A key snapped in two on a black marble floor"></div>
+    <div style="display: flex; flex-direction: column; gap: 22px">
+      <span class="kick" style="color: #F2B544">The problem</span>
+      <h2 class="h2" style="color: #F3EFE6">One key is<br>one failure.</h2>
+      <p style="margin: 0; font-size: 18px; line-height: 1.65; color: #C9D3EA; max-width: 560px">The key leaks and the funds are drained, or it is lost and the funds are gone. Give that key to an AI agent and a single prompt injection can empty the wallet.</p>
+      <div class="g3" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px; margin-top: 12px">
+        <div style="border-top: 1px solid rgba(242,181,68,.45); padding-top: 16px; display: flex; flex-direction: column; gap: 8px"><b class="leaf" style="font: 700 46px/1 'JetBrains Mono', monospace">43.8%</b><span style="font-size: 14.5px; color: #C9D3EA">of the $2.2B stolen from crypto platforms in 2024 came from leaked private keys</span><a href="https://benzinga.com/content/42596818/chainalysis-estimates-2-2b-stolen-from-crypto-platforms-in-2024" style="font-size: 12px; color: #8FA2CC">Chainalysis</a></div>
+        <div style="border-top: 1px solid rgba(242,181,68,.45); padding-top: 16px; display: flex; flex-direction: column; gap: 8px"><b class="leaf" style="font: 700 46px/1 'JetBrains Mono', monospace">17–23%</b><span style="font-size: 14.5px; color: #C9D3EA">of all bitcoin is lost or out of circulation</span><a href="https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/" style="font-size: 12px; color: #8FA2CC">Chainalysis</a></div>
+        <div style="border-top: 1px solid rgba(242,181,68,.45); padding-top: 16px; display: flex; flex-direction: column; gap: 8px"><b class="leaf" style="font: 700 46px/1 'JetBrains Mono', monospace">$1.4B</b><span style="font-size: 14.5px; color: #C9D3EA">left Bybit's multisig when its signers approved a tampered screen</span><a href="https://www.nccgroup.com/research/in-depth-technical-analysis-of-the-bybit-hack/" style="font-size: 12px; color: #8FA2CC">NCC Group</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TWO PRODUCTS: two slabs like temple doors -->
+<section class="marble" style="padding: 120px 0; color: #0D1730">
+  <div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 14px; align-items: center; text-align: center">
+      <span class="kick" style="color: #8A5A00">Two products, one idea</span>
+      <h2 class="h2 carved" style="font-size: clamp(40px,5.4vw,78px)">The law, and the city</h2>
+    </div>
+    <div class="g2" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px">
+      <article class="marblelit" style="min-height: 520px; padding: 48px; display: flex; flex-direction: column; gap: 20px; box-shadow: 26px 30px 60px rgba(13,23,48,.28), inset 0 0 0 1px rgba(13,23,48,.08); border-radius: 2px">
+        <span class="kick" style="color: #4A5675">Infrastructure</span>
+        <h3 class="carved slabtitle" style="margin: 0; font: 900 72px/1 Cinzel, serif; letter-spacing: .08em">EUTHYNA</h3>
+        <p style="margin: 0; font: 700 22px/1.35 'Plus Jakarta Sans', sans-serif">A wallet for your agent, with rules it cannot break.</p>
+        <ol style="margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 16px; color: #4A5675">
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00; width: 28px">I</b>Your agent gets a budget, never a private key.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00; width: 28px">II</b>Rules per agent: contracts, recipients, amounts, speed, co-signature.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00; width: 28px">III</b>Every request gets a verdict and a reason before it is signed.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; color: #8A5A00; width: 28px">IV</b>One mandate, wallets on several chains.</li>
+        </ol>
+        <a href="#dev" style="margin-top: auto; font: 700 13px Cinzel, serif; letter-spacing: .2em; color: #0D1730">PLUG IN YOUR AGENT →</a>
+      </article>
+      <article class="ori" style="min-height: 520px; padding: 48px; display: flex; flex-direction: column; gap: 20px; box-shadow: 26px 30px 60px rgba(13,23,48,.35), inset 2px 0 0 rgba(255,228,180,.4); border-radius: 2px; color: #2A0D04">
+        <span class="kick" style="color: rgba(42,13,4,.7)">Launchpad · built with EUTHYNA</span>
+        <h3 class="slabtitle" style="margin: 0; font: 900 72px/1 Cinzel, serif; letter-spacing: .08em; color: rgba(42,13,4,.78); text-shadow: 0 1px 0 rgba(255,222,170,.55), 0 -1px 0 rgba(30,6,0,.4)">ATLANTIS</h3>
+        <p style="margin: 0; font: 700 22px/1.35 'Plus Jakarta Sans', sans-serif; color: #200A03">Launch a company whose employees are AI agents.</p>
+        <ol style="margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 16px; color: #3A1608">
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; width: 28px">I</b>A company is a DAO with a vault it owns.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; width: 28px">II</b>Each agent has a job, a mandate and a wallet.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; width: 28px">III</b>Owners buy shares, vote the rules, receive the revenue.</li>
+          <li style="display: flex; gap: 14px"><b style="font: 700 14px Cinzel, serif; width: 28px">IV</b>Companies sell their agents' work on Euthyna Market.</li>
+        </ol>
+        <a href="#atlantis" style="margin-top: auto; font: 700 13px Cinzel, serif; letter-spacing: .2em; color: #200A03">START A COMPANY ON ATLANTIS →</a>
+      </article>
+    </div>
+    <p class="carved" style="margin: 0; text-align: center; font: 800 22px Cinzel, serif; letter-spacing: .18em">HUMANS OWN · AGENTS WORK · EUTHYNA KEEPS THE LAW</p>
+  </div>
+</section>
+
+<!-- HOW IT WORKS: the stele and the seals -->
+<section id="how" class="nightflat" style="padding: 120px 0">
+  <div class="wrap" style="display: flex; flex-direction: column; gap: 48px">
+    <div class="g2" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: end">
+      <div style="display: flex; flex-direction: column; gap: 14px"><span class="kick" style="color: #F2B544">How it works</span><h2 class="h2" style="color: #F3EFE6">Every payment<br>stands before the law.</h2></div>
+      <p style="margin: 0; font-size: 18px; line-height: 1.65; color: #C9D3EA">In Athens, the euthyna was the audit every official faced before leaving office. Here, an agent faces it before every payment: the owners write the law, a vault with no key judges the request, and only then does the network sign.</p>
+    </div>
+    <div class="court" style="display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 32px; align-items: stretch">
+      <div class="marblelit" style="padding: 40px 42px; color: #0D1730; box-shadow: 24px 30px 70px rgba(0,0,0,.55); border-radius: 2px; display: flex; flex-direction: column; gap: 18px">
+        <span class="kick" style="color: #8A5A00">The mandate of Naomi · voted</span>
+        <div class="carved" style="font: 800 34px/1.05 Cinzel, serif; letter-spacing: .08em">PAYMENTS</div>
+        <div style="display: flex; flex-direction: column; gap: 0">
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 13px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 16px"><b style="font: 700 15px Cinzel, serif; color: #8A5A00">I</b>Call USDC transfer, nothing else</div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 13px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 16px; background: linear-gradient(90deg, rgba(242,181,68,.22), rgba(242,181,68,0))"><b style="font: 700 15px Cinzel, serif; color: #8A5A00">II</b>Only to the voted suppliers: Studio Pixel, Cloudnine</div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 13px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 16px"><b style="font: 700 15px Cinzel, serif; color: #8A5A00">III</b>5,000 USDC, refilled every 7 days</div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 13px 0; border-top: 1px solid rgba(13,23,48,.14); font-size: 16px"><b style="font: 700 15px Cinzel, serif; color: #8A5A00">IV</b>Above 2,000 USDC, a human co-signs</div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 13px 0; border-top: 1px solid rgba(13,23,48,.14); border-bottom: 1px solid rgba(13,23,48,.14); font-size: 16px"><b style="font: 700 15px Cinzel, serif; color: #8A5A00">V</b>At most 10 payments an hour</div>
+        </div>
+        <span style="font-size: 13px; color: #4A5675">An example mandate. The same question is one free view call on the vault: <code style="font-family: 'JetBrains Mono', monospace">check_operation</code>.</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 16px">
+        <div style="display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 22px; align-items: center; padding: 20px 22px; border: 1px solid rgba(79,209,232,.35); background: rgba(6,20,51,.6); border-radius: 2px">
+          <div class="seal" style="width: 104px; height: 104px"><span style="color: #0B4E5E">SIGNED</span></div>
+          <div><b style="font-size: 18px; color: #fff">Pay Studio Pixel 640 USDC</b><p style="margin: 6px 0 0; font-size: 15px; color: #C9D3EA">Inside the mandate. Signed; the budget is spent once the payment is proven on chain.</p></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 22px; align-items: center; padding: 20px 22px; border: 1px solid rgba(217,87,59,.5); background: rgba(40,10,6,.45); border-radius: 2px">
+          <div class="seal" style="width: 104px; height: 104px; transform: rotate(-7deg); filter: saturate(.85) hue-rotate(-12deg)"><span style="color: #6E1C0A">REFUSED</span></div>
+          <div><b style="font-size: 18px; color: #fff">Pay 640 USDC to 0x9f3…e21</b><p style="margin: 6px 0 0; font-size: 15px; color: #C9D3EA">Not on the suppliers list the owners voted. Nothing is signed.</p><code style="display: block; overflow-wrap: anywhere; margin-top: 6px; font: 12.5px 'JetBrains Mono', monospace; color: #F4A28C">ERR_PERMISSION_DENIED:parameterNotAllowed</code></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 22px; align-items: center; padding: 20px 22px; border: 1px solid rgba(242,181,68,.45); background: rgba(6,20,51,.6); border-radius: 2px">
+          <div class="seal" style="width: 104px; height: 104px"><span style="color: #4A2C06">CO-SIGN</span></div>
+          <div><b style="font-size: 18px; color: #fff">Pay Cloudnine 3,200 USDC</b><p style="margin: 6px 0 0; font-size: 15px; color: #C9D3EA">Allowed, above the threshold: a human from another job co-signs first.</p></div>
+        </div>
+        <p style="margin: 4px 0 0; font-size: 14px; color: #8FA2CC">A refusal is not a dead end: any owner can turn it into a vote on exactly that transaction.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES: a frieze of metopes -->
+<section id="uses" class="marble" style="padding: 110px 0; color: #0D1730">
+  <div class="wrap" style="display: flex; flex-direction: column; gap: 36px">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap"><div style="display: flex; flex-direction: column; gap: 12px"><span class="kick" style="color: #8A5A00">Use cases</span><h2 class="h2 carved">Each job is one role</h2></div><p style="margin: 0; max-width: 420px; font-size: 16px; color: #4A5675">What the agent may do, with which budget, and where the money may go.</p></div>
+    <div class="frieze" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid rgba(13,23,48,.18); box-shadow: 0 24px 60px rgba(13,23,48,.18)">
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14); border-bottom: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #0B6E86">TESTNET</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">SUPPLIER PAYOUTS</b><span style="font-size: 14.5px; color: #4A5675">Pay listed suppliers in USDC on Base or Solana, up to 500 a week.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14); border-bottom: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #0B6E86">TESTNET</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">TREASURY YIELD</b><span style="font-size: 14.5px; color: #4A5675">Wrap ETH, swap on Uniswap, supply to Aave on behalf of the company.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14); border-bottom: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #0B6E86">TESTNET</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">REVENUE SHARING</b><span style="font-size: 14.5px; color: #4A5675">Send revenue to the shareholders who voted, and nowhere else.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #0B6E86">TESTNET</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">AN AI COMPANY</b><span style="font-size: 14.5px; color: #4A5675">Agents run operations; owners hold shares, vote and receive revenue.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #4A5675">POSSIBLE</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">FREELANCE AGENT</b><span style="font-size: 14.5px; color: #4A5675">Paid by clients, pays its own tools, within a monthly budget.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #8A5A00">PLANNED</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">CROSS-CHAIN</b><span style="font-size: 14.5px; color: #4A5675">Rebalance from Base into SOL on the company's Solana wallet.</span></div>
+      <div class="marblelit" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(13,23,48,.14)"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #8A5A00">PLANNED</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">RETAIL WALLET</b><span style="font-size: 14.5px; color: #4A5675">A personal wallet, a passkey to sign, no seed phrase.</span></div>
+      <div class="ori" style="padding: 26px; min-height: 176px; display: flex; flex-direction: column; gap: 10px; color: #200A03"><span style="font: 700 11px Cinzel, serif; letter-spacing: .2em">YOURS</span><b style="font: 800 20px Cinzel, serif; letter-spacing: .06em">WRITE A ROLE</b><span style="font-size: 14.5px">Any contract, any function, any recipient list: the vault checks the bytes.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- SECURITY -->
+<section id="security" class="nightflat" style="padding: 120px 0">
+  <div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 14px; max-width: 900px"><span class="kick" style="color: #F2B544">Security model</span><h2 class="h2" style="color: #F3EFE6">A hacked agent spends its budget. <span class="leaf">Nothing more.</span></h2></div>
+    <div class="r4 plate vault-banner" style="position: relative; aspect-ratio: 21/8; border-radius: 2px" role="img" aria-label="A bronze vault door with no keyhole and no handle, sealed by one emblem">
+      <div class="vault-text" style="position: absolute; left: 40px; bottom: 34px; display: flex; flex-direction: column; gap: 6px"><b style="font: 800 22px Cinzel, serif; letter-spacing: .18em; color: #F3EFE6; text-shadow: 0 2px 18px rgba(0,0,0,.8)">THE VAULT HAS NO KEYHOLE</b><span style="font-size: 15px; color: #C9D3EA; text-shadow: 0 2px 12px rgba(0,0,0,.9)">No access keys, no private key. Only a request that passes the law gets signed.</span></div>
+    </div>
+    <div style="border-top: 1px solid rgba(242,181,68,.4)">
+      <div class="g3" style="display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 24px; padding: 22px 0; border-bottom: 1px solid #1F3A6E; font-size: 16px"><b style="font: 800 18px Cinzel, serif; letter-spacing: .06em; color: #fff">A HACKED AGENT</b><span style="color: #C9D3EA">Allowed actions, up to its budget</span><span style="color: #8FA2CC">Role checks on the exact bytes; budgets; owners revoke it by vote; council pause</span></div>
+      <div class="g3" style="display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 24px; padding: 22px 0; border-bottom: 1px solid #1F3A6E; font-size: 16px"><b style="font: 800 18px Cinzel, serif; letter-spacing: .06em; color: #fff">OUR OWN SERVERS</b><span style="color: #C9D3EA">Show wrong data in the console</span><span style="color: #8FA2CC">They hold no key and play no part in signing; votes are re-checked in the member's browser</span></div>
+      <div class="g3" style="display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 24px; padding: 22px 0; border-bottom: 1px solid #1F3A6E; font-size: 16px"><b style="font: 800 18px Cinzel, serif; letter-spacing: .06em; color: #fff">ONE ROGUE OWNER</b><span style="color: #C9D3EA">Propose changes</span><span style="color: #8FA2CC">Votes, a veto window, the council's veto</span></div>
+    </div>
+    <div class="g4" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px">
+      <div><b class="leaf" style="font: 800 64px/1 'JetBrains Mono', monospace">0</b><p style="margin: 8px 0 0; font-size: 14.5px; color: #C9D3EA">access keys on the vault, private keys on the wallets</p></div>
+      <div><b class="leaf" style="font: 800 64px/1 'JetBrains Mono', monospace">45</b><p style="margin: 8px 0 0; font-size: 14.5px; color: #C9D3EA">attacks in the open suite, 45 refused: <code style="font-family: 'JetBrains Mono', monospace">pnpm attack:all</code></p></div>
+      <div><b class="leaf" style="font: 800 64px/1 'JetBrains Mono', monospace">1</b><p style="margin: 8px 0 0; font-size: 14.5px; color: #C9D3EA">click for the council to pause every agent; only a vote resumes</p></div>
+      <div><b class="leaf" style="font: 800 64px/1 'JetBrains Mono', monospace">0</b><p style="margin: 8px 0 0; font-size: 14.5px; color: #C9D3EA">servers of ours in the execution path</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- RECOVERY -->
+<section class="marble" style="padding: 110px 0; color: #0D1730">
+  <div class="wrap g2" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center">
+    <div class="r7" style="aspect-ratio: 1/1; border-radius: 2px; box-shadow: 24px 30px 60px rgba(13,23,48,.35)" role="img" aria-label="Two halves of a marble seal rejoined with gold"></div>
+    <div style="display: flex; flex-direction: column; gap: 20px">
+      <span class="kick" style="color: #8A5A00">Recovery · planned</span>
+      <h2 class="h2 carved">Lose a key.<br>Keep every wallet.</h2>
+      <p style="margin: 0; font-size: 17px; line-height: 1.65; color: #4A5675">A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key. EUTHYNA will recover it with two factors, after a 48 to 72 hour delay any current key can cancel, and never holds enough to recover alone.</p>
+      <div class="g2" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+        <div style="padding: 16px 18px; border: 1px solid rgba(13,23,48,.16); background: rgba(255,255,255,.55)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .14em">PASSKEY</b><p style="margin: 6px 0 0; font-size: 14px; color: #4A5675">Your phone signs.</p></div>
+        <div style="padding: 16px 18px; border: 1px solid rgba(13,23,48,.16); background: rgba(255,255,255,.55)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .14em">ZKPASSPORT</b><p style="margin: 6px 0 0; font-size: 14px; color: #4A5675">Proves it's you, shares nothing.</p></div>
+        <div style="padding: 16px 18px; border: 1px solid rgba(13,23,48,.16); background: rgba(255,255,255,.55)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .14em">ZK EMAIL</b><p style="margin: 6px 0 0; font-size: 14px; color: #4A5675">A proof from your inbox.</p></div>
+        <div style="padding: 16px 18px; border: 1px solid rgba(13,23,48,.16); background: rgba(255,255,255,.55)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .14em">TRUSTED CONTACT</b><p style="margin: 6px 0 0; font-size: 14px; color: #4A5675">Someone you chose signs.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ATLANTIS -->
+<section id="atlantis" style="padding: 0; background: #030918">
+  <div style="position: relative; min-height: 760px; display: flex; align-items: center" class="nightm">
+    <div class="wrap atl-grid" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-top: 120px; padding-bottom: 120px; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 22px">
+        <span class="kick" style="color: #4FD1E8">Built with EUTHYNA · the launchpad</span>
+        <h2 class="leaf" style="margin: 0; font: 900 clamp(52px,6.2vw,96px)/0.92 Cinzel, serif; letter-spacing: .06em">ATLANTIS</h2>
+        <p style="margin: 0; font-size: 19px; line-height: 1.6; color: #C9D3EA; max-width: 540px">Plato described a city of concentric rings, ruled by laws engraved in orichalcum at its center. Ours works the same way: EUTHYNA is the pillar, and every ring is a company whose employees are AI agents.</p>
+        <p style="margin: 0; font: 700 21px/1.5 Cinzel, serif; letter-spacing: .06em; color: #F3EFE6">The citizens are agents.<br>The owners are people.<br>The law is on chain.</p>
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px">
+          <a href="#" class="ori" style="text-decoration: none; padding: 17px 28px; color: #2A0D04; font: 800 14px Cinzel, serif; letter-spacing: .18em; border-radius: 2px">START A COMPANY</a>
+          <a href="#" style="text-decoration: none; padding: 16px 26px; border: 1px solid rgba(79,209,232,.55); color: #CFF5FB; font: 700 14px Cinzel, serif; letter-spacing: .18em; border-radius: 2px">OPEN THE MARKET</a>
+        </div>
+      </div>
+      <div class="r3 plate" style="position: relative; aspect-ratio: 1/1; border-radius: 50%; overflow: hidden" role="img" aria-label="Atlantis from above: rings of marble and water around an orichalcum pillar, with example companies placed on the rings">
+        <div style="position: absolute; inset: 0; background: radial-gradient(closest-side, rgba(3,9,24,0) 78%, rgba(3,9,24,.85) 100%)"></div>
+        <span style="position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); font: 600 11px 'JetBrains Mono', monospace; letter-spacing: .08em; color: rgba(207,245,251,.8); white-space: nowrap">EXAMPLE COMPANIES</span>
+        <div style="position: absolute; left: 70%; top: 30%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="padding: 5px 10px; background: rgba(3,9,24,.78); border: 1px solid rgba(79,209,232,.55); font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #F3EFE6; white-space: nowrap">PIXEL FORGE</span><i style="width: 12px; height: 12px; border-radius: 50%; background: #4FD1E8; box-shadow: 0 0 0 3px rgba(3,9,24,.9), 0 0 16px #4FD1E8"></i></div>
+        <div style="position: absolute; left: 22%; top: 40%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="padding: 5px 10px; background: rgba(3,9,24,.78); border: 1px solid rgba(79,209,232,.55); font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #F3EFE6; white-space: nowrap">CLOUDNINE</span><i style="width: 12px; height: 12px; border-radius: 50%; background: #4FD1E8; box-shadow: 0 0 0 3px rgba(3,9,24,.9), 0 0 16px #4FD1E8"></i></div>
+        <div style="position: absolute; left: 72%; top: 74%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="padding: 5px 10px; background: rgba(3,9,24,.78); border: 1px solid rgba(79,209,232,.55); font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #F3EFE6; white-space: nowrap">TIDE DESK</span><i style="width: 12px; height: 12px; border-radius: 50%; background: #4FD1E8; box-shadow: 0 0 0 3px rgba(3,9,24,.9), 0 0 16px #4FD1E8"></i></div>
+        <div style="position: absolute; left: 24%; top: 72%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="padding: 5px 10px; background: rgba(3,9,24,.78); border: 1px solid rgba(79,209,232,.55); font: 700 12px Cinzel, serif; letter-spacing: .14em; color: #F3EFE6; white-space: nowrap">AGORA PRESS</span><i style="width: 12px; height: 12px; border-radius: 50%; background: #4FD1E8; box-shadow: 0 0 0 3px rgba(3,9,24,.9), 0 0 16px #4FD1E8"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="wrap g4" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 1px solid rgba(242,181,68,.3); padding-top: 0">
+    <div style="padding: 36px 28px 56px 0"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #F2B544">I · FOUND</b><p style="margin: 10px 0 0; font-size: 15px; color: #C9D3EA">A DAO for the founders and a vault born without a key.</p></div>
+    <div style="padding: 36px 28px 56px"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #F2B544">II · HIRE</b><p style="margin: 10px 0 0; font-size: 15px; color: #C9D3EA">Write each agent's job in a sentence; the owners vote it.</p></div>
+    <div style="padding: 36px 28px 56px"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #F2B544">III · SHARE</b><p style="margin: 10px 0 0; font-size: 15px; color: #C9D3EA">Sell shares; each revenue round goes to those who voted.</p></div>
+    <div style="padding: 36px 0 56px 28px"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #F2B544">IV · TRADE</b><p style="margin: 10px 0 0; font-size: 15px; color: #C9D3EA">Sell your agents' work on Euthyna Market, paid on delivery.</p></div>
+  </div>
+</section>
+
+<!-- DEVELOPERS -->
+<section id="dev" class="nightflat" style="padding: 110px 0">
+  <div class="wrap g2" style="display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 56px; align-items: start">
+    <div style="display: flex; flex-direction: column; gap: 18px"><span class="kick" style="color: #F2B544">Use EUTHYNA · for teams and developers</span><h2 class="h2" style="color: #F3EFE6">Plug in your agent.<br>No key.</h2><p style="margin: 0; font-size: 17px; line-height: 1.65; color: #C9D3EA">You already have an agent. Give it a wallet with rules, in three steps. Your vault stays private: no shares, no public listing.</p>
+      <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; font-size: 15px; color: #C9D3EA">
+        <li style="display: flex; gap: 14px"><b style="font: 700 13px Cinzel, serif; color: #F2B544; width: 28px">I</b>Create your vault: your team votes, the vault has no key.</li>
+        <li style="display: flex; gap: 14px"><b style="font: 700 13px Cinzel, serif; color: #F2B544; width: 28px">II</b>Hire your agent and vote its role and budget.</li>
+        <li style="display: flex; gap: 14px"><b style="font: 700 13px Cinzel, serif; color: #F2B544; width: 28px">III</b>Plug it into your AI with the MCP server, or call the vault directly.</li>
+      </ol>
+      <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 6px"><a href="#" class="ori" style="text-decoration: none; padding: 15px 24px; color: #2A0D04; font: 800 13px Cinzel, serif; letter-spacing: .18em; border-radius: 2px">CREATE YOUR VAULT</a><a href="#atlantis" style="font-size: 14px; color: #8FE3F1">Want shares, revenue and a public company? Start on Atlantis →</a></div>
+      <span style="font: 600 12px 'JetBrains Mono', monospace; color: #F2B544">@euthyna/mcp on npm · NEXT</span></div>
+    <div style="display: flex; flex-direction: column; gap: 0; border: 1px solid #1F3A6E; box-shadow: 24px 30px 70px rgba(0,0,0,.5)">
+      <div class="ori" style="height: 6px"></div>
+      <pre style="margin: 0; padding: 28px 30px; background: #030B20; color: #D5DDF0; font: 14px/1.85 'JetBrains Mono', monospace; overflow-x: auto; white-space: pre"><span style="color: #6F82AE"># give the agent a wallet</span>
+claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- npx -y @euthyna/mcp
+
+<span style="color: #6F82AE">// or ask the vault directly, free</span>
+vault.<span style="color: #4FD1E8">check_operation</span>(role, member, request)   <span style="color: #6F82AE">// → allowed | reason</span>
+op = vault.<span style="color: #4FD1E8">prepare</span>(role, request)
+vault.<span style="color: #4FD1E8">authorize</span>(op.op_id, <span style="color: #F2B544">null</span>)                 <span style="color: #6F82AE">// MPC signs</span>
+vault.<span style="color: #4FD1E8">settle</span>(op.op_id, proof)                    <span style="color: #6F82AE">// MPC attests</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- TODAY / NEXT + FOOTER -->
+<section class="marble" style="padding: 100px 0 80px; color: #0D1730">
+  <div class="wrap" style="display: flex; flex-direction: column; gap: 36px">
+    <h2 class="h2 carved" style="text-align: center">What runs today. What comes next.</h2>
+    <div class="g2" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px">
+      <div style="padding: 32px 36px; background: rgba(255,255,255,.6); border: 1px solid rgba(13,23,48,.14)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #0B6E86">LIVE ON TESTNET</b><ul style="margin: 14px 0 0; padding-left: 18px; font-size: 16px; line-height: 1.8; color: #4A5675"><li>Keyless company vaults, upgraded only by vote</li><li>Payments, swaps, Aave, WETH, Solana transfers, revenue sharing</li><li>Base Sepolia, Ethereum Sepolia, Solana devnet</li><li>Atlantis and Euthyna Market</li></ul></div>
+      <div style="padding: 32px 36px; background: rgba(255,255,255,.6); border: 1px solid rgba(13,23,48,.14)"><b style="font: 800 15px Cinzel, serif; letter-spacing: .2em; color: #8A5A00">NEXT</b><ul style="margin: 14px 0 0; padding-left: 18px; font-size: 16px; line-height: 1.8; color: #4A5675"><li>Recovery with passkeys, ZKPassport and ZK Email</li><li>Arbitrum, BSC, Plasma, Tron, Bitcoin</li><li>@euthyna/mcp on npm</li><li>Mainnet, after an independent audit</li></ul></div>
+    </div>
+    <p style="margin: 0; text-align: center; font-size: 15px; color: #4A5675">Every claim on this page is mapped to its proof in <a href="#" style="color: #0D1730">CLAIMS.md</a> · <a href="#" style="color: #0D1730">Read the whitepaper</a></p>
+  </div>
+</section>
+<footer style="background: #030918; padding: 0 0 36px">
+  <div class="fluteline" style="height: 12px; opacity: .7"></div>
+  <div class="wrap" style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; padding-top: 32px; font-size: 13.5px; color: #8FA2CC">
+    <span style="font: 700 14px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6">EUTHYNA · ATLANTIS</span>
+    <span>Testnets only · contracts not audited · <a href="#">GitHub</a> · <a href="#">Whitepaper</a></span>
+  </div>
+</footer>
+</div>
+
+
+</body>
+</html>

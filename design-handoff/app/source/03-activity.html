@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Activity</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.row{display:grid;grid-template-columns:48px minmax(0,1fr) auto 110px;gap:16px;align-items:center;padding:10px 20px;border-top:1px solid rgba(13,23,48,.1)}
+.out{font:700 10px Cinzel,serif;letter-spacing:.16em;text-align:right}
+.proof{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 26px;margin:0 20px 14px 84px;padding:14px 18px;background:rgba(6,20,51,.04);border-left:2px solid #C9890C;font-size:12.5px}
+.proof dt{color:#66718C;font-size:11.5px}.proof dd{margin:2px 0 0;color:#0D1730;font-weight:600}
+.tab{padding:8px 14px;font:600 13px 'Plus Jakarta Sans',sans-serif;color:#4A5675;border:1px solid rgba(13,23,48,.14);background:rgba(255,255,255,.55);text-decoration:none}
+.tab span{margin-left:6px;font:600 11px 'JetBrains Mono',monospace;color:#66718C}
+.day{font:700 11px Cinzel,serif;letter-spacing:.24em;color:#8A5A00;padding:12px 20px 8px}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#"><b>II</b>Agents</a>
+      <a href="#"><b>III</b>Rules</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">IV</b>Activity</a>
+      <a href="#"><b>V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#"><b>VIII</b>Market</a>
+      <a href="#"><b>IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 16px">
+    <header style="display: flex; flex-direction: column; gap: 6px">
+      <span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Pixel Forge · the record</span>
+      <h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">ACTIVITY</h1>
+      <span style="font-size: 14px; color: #4A5675; max-width: 760px">Every payment, swap and deposit made with company money, every market sale and purchase, and every request the rules refused.</span>
+    </header>
+
+    <div style="display: flex; align-items: center; gap: 16px; padding: 12px 18px; background: #DDF4F8; border: 1px solid rgba(11,110,134,.3)">
+      <div class="seal" style="width: 40px; height: 40px"><span style="color: #0B4E5E; font-size: 6.4px; letter-spacing: .08em">INTACT</span></div>
+      <span style="font-size: 14px; color: #0D1730"><b>Every transaction went through the vault.</b> The wallets sent exactly what the vault signed.</span>
+      <span class="mono" style="margin-left: auto; font-size: 12px; color: #0B6E86">Base Sepolia · wallet 41 · vault 41</span>
+    </div>
+
+    <div style="display: flex; gap: 8px">
+      <a href="#" class="tab" style="background: #0D1730; color: #F3EFE6; border-color: #0D1730">All<span style="color: #C9D3EA">24</span></a>
+      <a href="#" class="tab">Done<span>19</span></a>
+      <a href="#" class="tab">In progress<span>2</span></a>
+      <a href="#" class="tab">Refused<span>3</span></a>
+    </div>
+
+    <section class="slab" style="display: flex; flex-direction: column; padding-bottom: 4px; background-size: cover, cover">
+      <div class="day">Today · October 30</div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Paid Studio Pixel 640 USDC</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Naomi · Payments · Base Sepolia · 14:02</div></div><span></span><span class="out" style="color: #0B6E86">DONE</span></div>
+        <dl class="proof">
+          <div><dt>Vault status</dt><dd>Confirmed</dd></div>
+          <div><dt>Signed on NEAR</dt><dd><a href="#" class="mono" style="color: #0B6E86">9xQe…T4kd ↗</a></dd></div>
+          <div><dt>Base Sepolia transaction</dt><dd><a href="#" class="mono" style="color: #0B6E86">0x7c1f…a2e9 ↗</a></dd></div>
+          <div><dt>Wallet nonce</dt><dd class="mono">41</dd></div>
+          <div><dt>Budget</dt><dd>Spent once the payment is proven on chain</dd></div>
+          <div><dt>Operation id</dt><dd class="mono">op_5b2e…91c0</dd></div>
+        </dl>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 6.2px; letter-spacing: .08em">REFUSED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Pay 1,800 USDC to 0x9f3…e21</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Naomi · Payments · Base Sepolia · 13:48</div><div style="margin-top: 5px; font-size: 12.5px; color: #A8381E">Refused: the recipient is not on the list the owners voted · <code class="mono" style="font-size: 11.5px">parameterNotAllowed</code></div><a href="#" class="ghostbtn" style="display: inline-block; margin-top: 8px; padding: 7px 12px; font-size: 10.5px">ASK THE MEMBERS TO VOTE ON IT</a></div><span></span><span class="out" style="color: #A8381E">REFUSED</span></div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #4A2C06; font-size: 6px; letter-spacing: .08em">PENDING</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Pay Cloudnine 3,200 USDC</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Naomi · Payments · Base Sepolia · 13:30 · above 2,000 USDC: a co-signature is needed</div></div><span></span><span class="out" style="color: #8A5A00">IN PROGRESS</span></div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.2px; letter-spacing: .08em">SETTLED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Sold DeFi project due diligence · 2 USDC</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">@defi-due-diligence · market sale · paid on NEAR after delivery · 14:02</div></div><span></span><span class="out" style="color: #0B6E86">DONE</span></div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Supplied 900 USDC to Aave</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Thetis · Treasury · Base Sepolia · 11:15</div></div><span></span><span class="out" style="color: #0B6E86">DONE</span></div>
+      <div class="day" style="border-top: 1px solid rgba(13,23,48,.1); margin-top: 4px">Yesterday</div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Sent 120 USDC to Inkwell</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Naomi · Payments · Solana devnet · 18:40</div></div><span></span><span class="out" style="color: #0B6E86">DONE</span></div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px"><span style="color: #0B4E5E; font-size: 6.5px; letter-spacing: .08em">SIGNED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Swapped 500 USDC for ETH on Uniswap</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Voted by members · Base Sepolia · 16:05</div></div><span></span><span class="out" style="color: #0B6E86">DONE</span></div>
+        <div class="row"><div class="seal" style="width: 44px; height: 44px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 6.2px; letter-spacing: .08em">REFUSED</span></div><div style="min-width: 0"><b style="font-size: 14.5px">Swap 50 USDC on an unknown router</b><div style="font-size: 12.5px; color: #66718C; margin-top: 2px">Thetis · Treasury · Base Sepolia · 09:12</div><div style="margin-top: 5px; font-size: 12.5px; color: #A8381E">Refused: this contract is not in the role</div></div><span></span><span class="out" style="color: #A8381E">REFUSED</span></div>
+    </section>
+  </main>
+</div>
+
+
+</body>
+</html>

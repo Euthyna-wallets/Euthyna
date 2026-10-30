@@ -1,0 +1,123 @@
+# ==============================================================
+#  Rendus EUTHYNA pour le site et l'app (brief du canevas « Marbre et orichalque »)
+#  Lancer depuis C:\GUS\gus-studio :
+#    python rendus.py --dry-run        prompts et coût, sans rien payer
+#    python rendus.py                  toutes les images manquantes (confirmation avant de payer)
+#    python rendus.py R1 R2            seulement ces emplacements
+#    python rendus.py R1 --redo        refaire R1 (les anciennes images vont dans old/)
+#    python rendus.py V1 --from R1_2.png   la vidéo du héros, à partir de l'image R1 choisie
+#  Les images arrivent dans rendus/euthyna/ : R1_1.png, R1_2.png…
+# ==============================================================
+
+output: rendus/euthyna
+
+image_model:
+  label: "Nano Banana Pro (Google)"
+  endpoint: "fal-ai/nano-banana-pro"
+  price_per_image: 0.15        # en 2K ; le 4K coûte le double
+  resolution: "2K"
+  variants: 4                  # images par emplacement (le brief en demande 4)
+
+video_model:
+  label: "Kling 3.0 Pro"
+  endpoint: "fal-ai/kling-video/v3/pro/image-to-video"
+  price_per_second: 0.112
+
+# Ajouté à la fin de chaque prompt d'image : même lumière, même matière, même nuit partout.
+style: >-
+  cinematic architectural photography, ultra-detailed carved Pentelic marble with thin gold
+  kintsugi veins, orichalcum (reddish-gold brushed metal), raking warm key light from upper left,
+  cool aegean-cyan rim light from behind, deep midnight-navy atmosphere (#061433), light volumetric
+  haze, 35mm lens, f/2.8, high dynamic range, monumental, timeless, no text, no letters, no logos
+
+# Ce générateur n'a pas de champ « prompt négatif » : cette phrase est ajoutée au prompt.
+avoid: >-
+  Strictly avoid: text, letters, readable inscriptions, watermark, logo, robot, cyborg, neon sci-fi
+  city, cartoon, plastic, CGI look, low detail, crowd, modern buildings, heavy lens flare.
+
+images:
+  R1:
+    name: "Héros du site"
+    ratio: "16:9"
+    prompt: >-
+      A monumental orichalcum stele standing alone at the center of a night-time marble agora, its
+      face engraved with five short lines of law glowing faintly gold, on a three-step marble base;
+      a ring of fluted Doric columns fading into haze behind it; concentric circular grooves carved
+      in the dark marble floor catch a thin cyan light
+  R2:
+    name: "Un agent (cartes, app, réseaux)"
+    ratio: "4:5"
+    prompt: >-
+      A serene marble statue of an androgynous young figure in Greek classical style (kouros), eyes
+      closed, contrapposto, holding a small orichalcum tablet against its chest; fine gold kintsugi
+      veins run across the marble like circuitry; plain dark navy background, museum sculpture
+      photography
+  R2B:
+    name: "Thetis, l'agent de trésorerie"
+    ratio: "4:5"
+    prompt: >-
+      A serene marble statue of a young woman in Greek classical style (kore), eyes closed, a veil
+      falling over her hair and shoulders, holding a small pair of orichalcum balance scales against
+      her chest; fine gold kintsugi veins run across the marble like circuitry; plain dark navy
+      background, museum sculpture photography, framed from head to waist
+  R2C:
+    name: "Hermes, l'agent des revenus"
+    ratio: "4:5"
+    prompt: >-
+      A serene marble statue of Hermes in Greek classical style, eyes closed, a small winged cap,
+      holding a single orichalcum coin raised in one hand; fine gold kintsugi veins run across the
+      marble like circuitry; plain dark navy background, museum sculpture photography, framed from
+      head to waist
+  R3:
+    name: "Atlantis vue du ciel"
+    ratio: "1:1"
+    prompt: >-
+      Aerial night view of a circular city of concentric rings of white marble and dark water,
+      Plato's Atlantis, a pillar of orichalcum light at the very center, bridges crossing the
+      canals, tiny warm lights in temples on each ring, a calm deep-navy sea all around
+  R4:
+    name: "Le coffre sans clé"
+    ratio: "16:9"
+    prompt: >-
+      A massive bronze temple door with no keyhole and no handle, sealed by a single carved circular
+      emblem, set in a white marble wall, lit by one raking warm light, fine dust in the air
+  R5:
+    name: "Le problème : une clé = une panne"
+    ratio: "16:9"
+    prompt: >-
+      A bronze key snapped in two lying on a black marble floor, a little gold dust scattered around
+      the break, dramatic low raking light, shallow depth of field
+  R6:
+    name: "Plutus, Rob the Agent"
+    ratio: "4:5"
+    prompt: >-
+      A marble statue of Plutus, the blind child god of wealth, eyes covered by a carved blindfold,
+      holding an overflowing cornucopia of gold coins, standing behind a row of vertical engraved
+      orichalcum bars, theatrical top spotlight
+  R7:
+    name: "Récupération"
+    ratio: "1:1"
+    prompt: >-
+      Two halves of a broken marble seal rejoined by gold kintsugi, floating slightly apart above a
+      dark polished marble surface, soft warm light, minimal composition
+  R8:
+    name: "Fond de connexion de l'app"
+    ratio: "4:5"
+    prompt: >-
+      Close-up of a fluted white marble column in raking light, half in deep shadow, ultra-detailed
+      stone texture, minimal composition, dark navy background
+
+videos:
+  V1:
+    name: "Vidéo d'arrière-plan du héros"
+    duration: 5
+    prompt: >-
+      Locked-off static camera, no camera movement at all. The orichalcum stele and its five
+      engraved horizontal gold lines stay exactly as in the start image for the whole shot: the
+      lines never change, never become letters or symbols. Only the atmosphere moves: fine gold dust
+      drifts slowly through the haze, and the cyan rings in the marble floor brighten softly once
+      and fade back. Calm, slow, seamless.
+    negative_prompt: >-
+      text, letters, words, writing, symbols, glyphs, inscriptions, captions, watermark, logo,
+      camera movement, zoom, dolly, pan, camera shake, flicker, morphing, blurry, low quality,
+      cartoon, modern buildings, people, robot

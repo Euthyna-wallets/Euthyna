@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Settings</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.r7{background:#061433 url(../assets/renders/R7-recovery-seal.jpg) center/cover no-repeat}
+.chk{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;padding:7px 0;border-top:1px solid rgba(13,23,48,.1);font-size:13.5px}
+.link{font:700 11px Cinzel,serif;letter-spacing:.16em;color:#0D1730}
+.fac{padding:12px 14px;border:1px dashed rgba(13,23,48,.28);display:flex;flex-direction:column;gap:4px;background:rgba(255,255,255,.35)}
+.fac b{font:800 12.5px Cinzel,serif;letter-spacing:.14em}
+.fac span{font-size:12px;color:#4A5675}
+.planned{font:800 10px Cinzel,serif;letter-spacing:.2em;padding:4px 9px;background:#FCF0D4;color:#8A5A00;border:1px solid rgba(201,137,12,.4)}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#"><b>II</b>Agents</a>
+      <a href="#"><b>III</b>Rules</a>
+      <a href="#"><b>IV</b>Activity</a>
+      <a href="#"><b>V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#"><b>VIII</b>Market</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; flex-direction: column; gap: 6px">
+      <span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Pixel Forge · company administration</span>
+      <h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">SETTINGS</h1>
+      <span style="font-size: 14px; color: #4A5675">Company setup, security checks, shares and suppliers. Members, rules and pauses are decided in Votes.</span>
+    </header>
+
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start">
+      <section class="slab" style="padding: 18px 22px 12px; display: flex; flex-direction: column; gap: 8px; background-size: cover, cover">
+        <div style="display: flex; justify-content: space-between; align-items: baseline"><span class="kick" style="color: #8A5A00">Security</span><span style="font-size: 12px; font-weight: 700; color: #0B6E86">● active</span></div>
+        <span style="font-size: 13px; color: #4A5675">On-chain checks of the company: who owns the vault, which code it runs, which keys can act.</span>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 4px 0">
+          <div style="padding: 10px 12px; background: rgba(6,20,51,.05)"><span class="kick" style="color: #66718C; font-size: 10px">DAO</span><b class="mono" style="display: block; margin-top: 4px; font-size: 12px; overflow-wrap: anywhere">pixelforge.sputnik-dao.testnet</b></div>
+          <div style="padding: 10px 12px; background: rgba(6,20,51,.05)"><span class="kick" style="color: #66718C; font-size: 10px">Vault</span><b class="mono" style="display: block; margin-top: 4px; font-size: 12px; overflow-wrap: anywhere">vault.pixelforge.testnet</b></div>
+        </div>
+        <b style="font-size: 14px; color: #0B6E86">✓ 8 of 8 on-chain checks pass</b>
+        <div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>DAO members are the company members</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>DAO has no access key (only votes change it)</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Vault code is a version published on Nomos</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Vault has no access key (no one can replace its code)</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Vault is owned by the DAO</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Security council is the DAO members</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Guard visa key</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div><div class="chk"><div class="seal" style="width: 24px; height: 24px"><span style="color: #0B4E5E; font-size: 11px; letter-spacing: .08em">✓</span></div><span>Guard status key</span><span class="mono" style="font-size: 11.5px; color: #66718C">ok</span></div></div>
+      </section>
+
+      <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+        <section style="background: #061433; color: #E7ECF6; padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: 14px 18px 40px rgba(13,23,48,.3)">
+          <span class="kick" style="color: #F2B544">Vault version</span>
+          <div style="display: flex; align-items: baseline; gap: 12px"><b style="font: 800 22px Cinzel, serif; color: #fff">Version 2</b><span style="font-size: 13px; color: #F2B544; font-weight: 700">Newer version available: 3</span></div>
+          <span style="font-size: 13px; color: #A9B6D6">The upgrade to version 3 is approved and in its veto window. Code hash <span class="mono">4f1c…a90e</span>: anyone can rebuild it and compare.</span>
+          <div style="display: flex; gap: 18px"><a href="#" style="font: 700 11px Cinzel, serif; letter-spacing: .16em; color: #8FE3F1">OPEN VOTES →</a><a href="#" style="font: 700 11px Cinzel, serif; letter-spacing: .16em; color: #8FA2CC">ALL PUBLISHED VERSIONS</a></div>
+        </section>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+          <a href="#" class="slab" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #0D1730"><span class="kick" style="color: #8A5A00">Company</span><span style="font-size: 12.5px; color: #4A5675">Resume or review the company setup.</span><b class="link">OPEN SETUP →</b></a>
+          <a href="#" class="slab" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #0D1730"><span class="kick" style="color: #8A5A00">Shares</span><span style="font-size: 12.5px; color: #4A5675">Shares, revenue and voting power.</span><b class="link">OPEN OWNERS →</b></a>
+          <a href="#" class="slab" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #0D1730"><span class="kick" style="color: #8A5A00">Suppliers</span><span style="font-size: 12.5px; color: #4A5675">Approved recipients. Changes need a vote.</span><b class="link">MANAGE →</b></a>
+        </div>
+        <section class="slab" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; background-size: cover, cover">
+          <span class="kick" style="color: #8A5A00">Public directory · Atlantis</span>
+          <span style="font-size: 13.5px">Listed as <b>Pixel Forge</b> · “Game assets made by AI agents, paid on delivery.”</span>
+          <a href="#" style="font-size: 12.5px; color: #4A5675">Propose a new line</a>
+        </section>
+      </div>
+    </div>
+
+    <section class="slab" style="display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 22px; padding: 18px 22px; border: 1px dashed rgba(201,137,12,.55); box-shadow: none; background-size: cover, cover">
+      <div class="r7" style="height: 170px; box-shadow: 10px 12px 24px rgba(13,23,48,.25)" role="img" aria-label="A broken marble seal rejoined with gold"></div>
+      <div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+        <div style="display: flex; align-items: center; gap: 12px"><span class="kick" style="color: #8A5A00">Recover your access</span><span class="planned">PLANNED · NOT BUILT YET</span></div>
+        <span style="font-size: 13.5px; color: #4A5675">Company wallets cannot be lost: they have no private key. What you can lose is your own key, and with it your vote. Recovery will need two of the factors you enrolled, then a delay of 48 to 72 hours during which any of your current keys or the DAO can cancel. Euthyna can be one factor, never enough on its own.</span>
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+          <div class="fac"><b>PASSKEY</b><span>Your phone signs.</span></div>
+          <div class="fac"><b>ZKPASSPORT</b><span>Proves it’s you, shares nothing.</span></div>
+          <div class="fac"><b>ZK EMAIL</b><span>A proof from your inbox.</span></div>
+          <div class="fac"><b>TRUSTED CONTACT</b><span>Someone you chose signs.</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+
+</body>
+</html>

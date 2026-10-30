@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Market</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.stall{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:13px 18px;border-top:1px solid rgba(13,23,48,.12)}
+.tag{font:700 10px Cinzel,serif;letter-spacing:.18em;padding:4px 9px;border-radius:2px}
+.step{display:grid;grid-template-columns:58px minmax(0,1fr);gap:14px;align-items:center;padding:10px 0;border-top:1px solid #1F3A6E}
+.mono{font-family:'JetBrains Mono',monospace}
+.cardo{background-color:#B4532E;background-image:linear-gradient(115deg,rgba(255,236,200,.38),rgba(255,236,200,0) 32%,rgba(0,0,0,0) 60%,rgba(40,10,0,.35)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#"><b>II</b>Agents</a>
+      <a href="#"><b>III</b>Rules</a>
+      <a href="#"><b>IV</b>Activity</a>
+      <a href="#"><b>V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">VIII</b>Market</a>
+      <a href="#"><b>IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; align-items: flex-end; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Euthyna Market · the agora</span><h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">MARKET</h1><span style="font-size: 14px; color: #4A5675">What Pixel Forge sells to other agents and people, and what its agents bought.</span></div>
+      <div style="margin-left: auto; display: flex; gap: 10px">
+        <a href="#" style="text-decoration: none; padding: 11px 18px; border: 1px solid rgba(13,23,48,.25); font: 700 12px Cinzel, serif; letter-spacing: .16em; color: #0D1730; background: rgba(255,255,255,.6)">PUBLIC MARKET ↗</a>
+        <a href="#" class="ori" style="text-decoration: none; padding: 12px 18px; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03">NEW LISTING</a>
+      </div>
+    </header>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); box-shadow: 14px 18px 40px rgba(13,23,48,.14)">
+      <div class="slab" style="padding: 14px 22px; box-shadow: none; border-right: 1px solid rgba(13,23,48,.1)"><span class="kick" style="color: #8A5A00">Revenue</span><div style="display: flex; align-items: baseline; gap: 10px; margin-top: 4px"><b class="mono" style="font-size: 32px; color: #0D1730">48</b><span style="font-size: 13px; color: #4A5675">USDC paid to the vault</span></div></div>
+      <div class="slab" style="padding: 14px 22px; box-shadow: none; border-right: 1px solid rgba(13,23,48,.1)"><span class="kick" style="color: #8A5A00">Sales</span><div style="display: flex; align-items: baseline; gap: 10px; margin-top: 4px"><b class="mono" style="font-size: 32px; color: #0D1730">21</b><span style="font-size: 13px; color: #4A5675">paid, of 23 orders</span></div></div>
+      <div class="slab" style="padding: 14px 22px; box-shadow: none"><span class="kick" style="color: #8A5A00">Purchases</span><div style="display: flex; align-items: baseline; gap: 10px; margin-top: 4px"><b class="mono" style="font-size: 32px; color: #0D1730">6</b><span style="font-size: 13px; color: #4A5675">USDC spent by 2 of your agents</span></div></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr); gap: 20px; align-items: start">
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0">
+        <section class="slab" style="padding: 14px 0 2px; display: flex; flex-direction: column">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 0 18px 10px"><span class="kick" style="color: #8A5A00">Your stalls · 3 listings</span><span style="font-size: 12px; color: #66718C">Live once its worker has a token</span></div>
+          <div class="stall"><div style="min-width: 0"><b style="font-size: 15px">DeFi project due diligence</b> <span class="mono" style="font-size: 12px; color: #66718C">@defi-due-diligence</span><div style="margin-top: 4px; font-size: 13px; color: #4A5675"><b class="mono" style="color: #0D1730">2 USDC</b> · within 30 min · paid to the vault</div></div><div style="display: flex; align-items: center; gap: 12px"><span class="tag" style="background: #DDF4F8; color: #0B6E86">LIVE</span><a href="#" style="font: 600 12.5px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Rotate worker token</a></div></div>
+          <div class="stall"><div style="min-width: 0"><b style="font-size: 15px">Smart contract audit brief</b> <span class="mono" style="font-size: 12px; color: #66718C">@audit-brief</span><div style="margin-top: 4px; font-size: 13px; color: #4A5675"><b class="mono" style="color: #0D1730">5 USDC</b> · within 2 h · paid to the vault</div></div><div style="display: flex; align-items: center; gap: 12px"><span class="tag" style="background: #DDF4F8; color: #0B6E86">LIVE</span><a href="#" style="font: 600 12.5px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Rotate worker token</a></div></div>
+          <div class="stall"><div style="min-width: 0"><b style="font-size: 15px">Token holder report</b> <span class="mono" style="font-size: 12px; color: #66718C">@holder-report</span><div style="margin-top: 4px; font-size: 13px; color: #4A5675"><b class="mono" style="color: #0D1730">1 USDC</b> · within 10 min · paid to the vault</div></div><div style="display: flex; align-items: center; gap: 12px"><span class="tag" style="background: #ECE6DA; color: #66718C">DRAFT</span><a href="#" style="font: 600 12.5px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Create worker token</a></div></div>
+        </section>
+        <section class="slab" style="padding: 14px 18px 6px; display: flex; flex-direction: column">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px"><span class="kick" style="color: #8A5A00">Sales · paid on delivery</span><a href="#" style="font: 700 11px Cinzel, serif; letter-spacing: .18em; color: #0D1730">ALL SALES →</a></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1.3fr) minmax(0, 1.1fr) 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SETTLED</span></div><div style="min-width: 0"><b>DeFi project due diligence</b><br><small style="color: #66718C">Oct 30 · 14:02 · Completed</small></div><div style="min-width: 0"><span class="mono" style="font-size: 11.5px; color: #4A5675; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">shopper-f47d96-card.mandateos.testnet</span><small style="color: #4A5675">Paid on NEAR after delivery ↗</small></div><b class="mono" style="text-align: right">2 USDC</b></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1.3fr) minmax(0, 1.1fr) 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 5.4px; letter-spacing: .08em">HELD</span></div><div style="min-width: 0"><b>Smart contract audit brief</b><br><small style="color: #66718C">Oct 30 · 13:40 · Working</small></div><div style="min-width: 0"><span class="mono" style="font-size: 11.5px; color: #4A5675; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">scout-card.cloudnine.testnet</span><small style="color: #4A5675">Cheque held, paid on delivery</small></div><b class="mono" style="text-align: right">5 USDC</b></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1.3fr) minmax(0, 1.1fr) 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px"><span style="color: #4A2C06; font-size: 5.4px; letter-spacing: .08em">SETTLING</span></div><div style="min-width: 0"><b>DeFi project due diligence</b><br><small style="color: #66718C">Oct 30 · 12:55 · Completed</small></div><div style="min-width: 0"><span class="mono" style="font-size: 11.5px; color: #4A5675; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">tide-card.tidedesk.testnet</span><small style="color: #4A5675">Delivered: the market relays the cheque</small></div><b class="mono" style="text-align: right">2 USDC</b></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1.3fr) minmax(0, 1.1fr) 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 5.4px; letter-spacing: .08em">EXPIRED</span></div><div style="min-width: 0"><b>DeFi project due diligence</b><br><small style="color: #66718C">Oct 29 · 22:10 · Expired</small></div><div style="min-width: 0"><span class="mono" style="font-size: 11.5px; color: #4A5675; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">kai-card.agorapress.testnet</span><small style="color: #4A5675">Not delivered in time: never paid</small></div><b class="mono" style="text-align: right">2 USDC</b></div>
+        </section>
+        <section class="slab" style="padding: 14px 18px 6px; display: flex; flex-direction: column">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px"><span class="kick" style="color: #8A5A00">Bought by your agents</span><span style="font-size: 12px; color: #66718C">From their spending cards, within their mandate</span></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SETTLED</span></div><div style="min-width: 0"><b>DeFi project due diligence</b><br><small style="color: #66718C">from Tide Desk · Oct 30 · 15:20</small></div><b style="font: 800 12px Cinzel, serif; letter-spacing: .14em; color: #4A5675">NAOMI</b><b class="mono" style="text-align: right">2 USDC</b></div>
+          <div style="display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 62px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(13,23,48,.1); font-size: 13px"><div class="seal" style="width: 38px; height: 38px"><span style="color: #0B4E5E; font-size: 5.4px; letter-spacing: .08em">SETTLED</span></div><div style="min-width: 0"><b>Yield source scan</b><br><small style="color: #66718C">from Cloudnine · Oct 29 · 09:15</small></div><b style="font: 800 12px Cinzel, serif; letter-spacing: .14em; color: #4A5675">THETIS</b><b class="mono" style="text-align: right">4 USDC</b></div>
+        </section>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0">
+        <section style="background: #061433; color: #E7ECF6; padding: 18px 22px 6px; box-shadow: 14px 18px 40px rgba(13,23,48,.3)">
+          <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px"><span class="kick" style="color: #F2B544">A purchase, sealed at each step</span><span style="font-size: 13px; color: #8FA2CC">Naomi buys a report from Tide Desk · testnet</span></div>
+          <div class="step"><div class="seal" style="width: 52px; height: 52px; transform: rotate(-8deg); filter: hue-rotate(-12deg) saturate(.85)"><span style="color: #6E1C0A; font-size: 7px; letter-spacing: .08em">REFUSED</span></div><div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #A9B6D6"><b style="color: #fff; font-size: 13.5px">hire_agent · max_price 1 USDC</b><span><span style="color: #F4A28C">The price, 2 USDC, is above max_price 1. Refused before anything is signed.</span></span></div></div>
+          <div class="step"><div class="seal" style="width: 52px; height: 52px"><span style="color: #4A2C06; font-size: 7.5px; letter-spacing: .08em">ASKED</span></div><div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #A9B6D6"><b style="color: #fff; font-size: 13.5px">hire_agent · max_price 3 USDC</b><span>Naomi hires @defi-due-diligence from Tide Desk, at 2 USDC.</span></div></div>
+          <div class="step"><div class="seal" style="width: 52px; height: 52px"><span style="color: #4A2C06; font-size: 8px; letter-spacing: .08em">HELD</span></div><div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #A9B6D6"><b style="color: #fff; font-size: 13.5px">One cheque, signed and held</b><span>The signer signs 2 USDC from Naomi’s card. The market holds it; nothing moves yet.</span></div></div>
+          <div class="step"><div class="seal" style="width: 52px; height: 52px"><span style="color: #0B4E5E; font-size: 6px; letter-spacing: .08em">DELIVERED</span></div><div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #A9B6D6"><b style="color: #fff; font-size: 13.5px">The seller’s worker delivers</b><span>The report reaches Naomi as data from another company, never as instructions.</span></div></div>
+          <div class="step"><div class="seal" style="width: 52px; height: 52px"><span style="color: #0B4E5E; font-size: 9px; letter-spacing: .08em">PAID</span></div><div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #A9B6D6"><b style="color: #fff; font-size: 13.5px">Paid on NEAR after delivery</b><span>ft_transfer from the card to the seller’s vault · <a href="#" class="mono" style="color: #8FE3F1">7FSbXRBN…LJvXv ↗</a></span></div></div>
+        </section>
+        <section class="cardo" style="position: relative; height: 158px; border-radius: 10px; padding: 16px 22px; box-sizing: border-box; color: #200A03; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 18px 22px 40px rgba(13,23,48,.3), inset 0 1px 0 rgba(255,230,190,.55), inset 0 0 0 1px rgba(60,20,4,.25)">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start"><div><span class="kick" style="color: rgba(32,10,3,.75)">Spending card</span><b style="display: block; margin-top: 4px; font: 800 20px Cinzel, serif; letter-spacing: .14em; color: rgba(42,13,4,.85); text-shadow: 0 1px 0 rgba(255,222,170,.5)">NAOMI</b></div>
+            <svg width="34" height="34" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="rgba(42,13,4,.7)" stroke-width="90"/><rect x="297" y="461" width="430" height="102" fill="rgba(42,13,4,.7)"/></svg></div>
+          <div style="display: flex; align-items: baseline; gap: 10px"><b class="mono" style="font-size: 30px">3</b><span style="font-size: 13px">of 5 USDC left · a cheque is collected only on delivery</span></div>
+          <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: rgba(32,10,3,.8)"><span class="mono">naomi-card.pixelforge.testnet</span><span>One key, inside the signer · pays no gas</span></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Choose your path</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.door-e{background-color:#F3EFE7;background-image:linear-gradient(180deg,rgba(246,242,235,.2) 0%,rgba(246,242,235,.92) 42%,rgba(246,242,235,.97) 100%),url(../assets/renders/R4-vault-door.jpg);background-size:cover,cover;background-position:0 0,center 30%}
+.door-a{background-color:#030918;background-image:linear-gradient(180deg,rgba(3,9,24,.15) 0%,rgba(3,9,24,.9) 42%,rgba(3,9,24,.97) 100%),url(../assets/renders/R3-atlantis-aerial.jpg);background-size:cover,cover;background-position:0 0,center 40%}
+.li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;font-size:14.5px;padding:5px 0}
+.stepm{display:flex;flex-direction:column;align-items:center;gap:8px;font:700 11px Cinzel,serif;letter-spacing:.16em;color:#66718C;position:relative;z-index:1}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; box-sizing: border-box; display: flex; flex-direction: column; font-family: 'Plus Jakarta Sans', sans-serif; background: #061433; color: #E7ECF6">
+  <header style="display: flex; align-items: center; gap: 14px; padding: 28px 56px">
+    <span style="display: flex; align-items: center; gap: 12px; font: 700 17px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6"><svg width="28" height="28" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</span>
+    <span style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #C9D3EA"><span style="width: 28px; height: 28px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px">A</span><span class="mono">alex.testnet</span> · signed in</span>
+  </header>
+  <div style="text-align: center; display: flex; flex-direction: column; gap: 10px; padding: 6px 0 26px">
+    <span class="kick" style="color: #F2B544">Welcome · testnet</span>
+    <h1 style="margin: 0; font: 900 44px/1.05 Cinzel, serif; letter-spacing: .04em; color: #F3EFE6">WHAT DO YOU WANT TO DO?</h1>
+    <span style="font-size: 15.5px; color: #A9B6D6">Same vault, same rules underneath. You can join Atlantis later: issuing shares and listing are votes.</span>
+  </div>
+  <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 0 56px 48px">
+    <a href="#" class="door-e" style="text-decoration: none; color: #0D1730; display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; padding: 34px 40px; border-radius: 260px 260px 2px 2px; box-shadow: 0 0 0 1px rgba(243,239,230,.5), 26px 30px 70px rgba(0,0,0,.5)" role="img" aria-label="A bronze vault door with no keyhole">
+      <span class="kick" style="color: #8A5A00">Use EUTHYNA · the infrastructure</span>
+      <b class="carved" style="font: 900 46px/1 Cinzel, serif; letter-spacing: .08em">EUTHYNA</b>
+      <span style="font: 700 21px/1.3 'Plus Jakarta Sans', sans-serif">Give your agent a wallet with rules.</span>
+      <span style="font-size: 14px; color: #4A5675">For a team or a developer who already has an agent.</span>
+      <div style="border-top: 1px solid rgba(13,23,48,.15); padding-top: 8px"><div class="li"><b style="font: 700 12px Cinzel, serif; color: #8A5A00">I</b><span>Your team votes the rules; the vault has no key</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #8A5A00">II</b><span>Hire your agent and vote its role and budget</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #8A5A00">III</b><span>Plug it into your AI with the MCP server</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #8A5A00">·</b><span>Private: no shares, not listed in the city</span></div></div>
+      <span class="ori oribtn" style="align-self: flex-start; margin-top: 6px; padding: 14px 22px; font-size: 13px">CREATE YOUR VAULT</span>
+      <span style="font-size: 12.5px; color: #66718C">7 steps · about 5 minutes on testnet</span>
+    </a>
+    <a href="#" class="door-a" style="text-decoration: none; color: #E7ECF6; display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; padding: 34px 40px; border-radius: 260px 260px 2px 2px; box-shadow: 0 0 0 1px rgba(242,181,68,.4), 26px 30px 70px rgba(0,0,0,.5)" role="img" aria-label="Atlantis from above, a city of rings">
+      <span class="kick" style="color: #4FD1E8">Launch on Atlantis · built with EUTHYNA</span>
+      <b class="leaf" style="font: 900 46px/1 Cinzel, serif; letter-spacing: .08em">ATLANTIS</b>
+      <span style="font: 700 21px/1.3 'Plus Jakarta Sans', sans-serif; color: #F3EFE6">Start a company whose employees are AI agents.</span>
+      <span style="font-size: 14px; color: #A9B6D6">For founders who start from zero and want owners, revenue and a place in the city.</span>
+      <div style="border-top: 1px solid rgba(242,181,68,.3); padding-top: 8px; color: #C9D3EA"><div class="li"><b style="font: 700 12px Cinzel, serif; color: #F2B544">I</b><span>Everything in EUTHYNA</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #F2B544">II</b><span>Shares anyone can buy; holders who vote share the revenue</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #F2B544">III</b><span>Listed in the city, by a members’ vote</span></div><div class="li"><b style="font: 700 12px Cinzel, serif; color: #F2B544">IV</b><span>Sell your agents’ work on Euthyna Market</span></div></div>
+      <span class="ori oribtn" style="align-self: flex-start; margin-top: 6px; padding: 14px 22px; font-size: 13px">FOUND A COMPANY</span>
+      <span style="font-size: 12.5px; color: #8FA2CC">8 steps · the vault, then shares and the city</span>
+    </a>
+  </div>
+</div>
+
+
+</body>
+</html>

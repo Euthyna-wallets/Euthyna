@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App · Rules</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(../assets/textures/marble-night.jpg);background-size:cover,500px}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(../assets/textures/marble-white.jpg);background-size:auto,auto,400px}
+.carved{color:#8E8473;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.seal span{font:800 7.5px Cinzel,serif;letter-spacing:.06em}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+.mono{font-family:'JetBrains Mono',monospace}
+.statue{background:#0A1D47 url(../assets/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(../assets/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(../assets/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.ghostbtn{text-decoration:none;padding:10px 16px;border:1px solid rgba(13,23,48,.25);font:700 12px Cinzel,serif;letter-spacing:.16em;color:#0D1730;background:rgba(255,255,255,.6)}
+.oribtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#200A03}
+.redbtn{text-decoration:none;padding:11px 16px;font:800 12px Cinzel,serif;letter-spacing:.16em;color:#fff;background:#B8442B;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.verified{font-size:12.5px;color:#0B6E86}
+.tab{padding:14px 18px;background-size:cover,cover;display:flex;flex-direction:column;gap:10px}
+.allow{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;font-size:13px;padding:5px 0}
+.allow.sub{padding-left:22px;color:#4A5675;font-size:12.5px}
+.addb{padding:8px 12px;border:1px dashed rgba(13,23,48,.35);font:600 12.5px 'Plus Jakarta Sans',sans-serif;color:#0D1730;text-decoration:none;background:rgba(255,255,255,.5)}
+.blk{border:1px solid rgba(13,23,48,.16);background:rgba(255,255,255,.62);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#66718C;flex:1;min-width:0}
+.fld span.v{padding:7px 10px;border:1px solid rgba(13,23,48,.2);background:#fff;font:13px 'JetBrains Mono',monospace;color:#0D1730}
+.box{width:14px;height:14px;border:1.5px solid #0D1730;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex:0 0 auto}
+.cat{padding:10px 12px;border:1px solid rgba(13,23,48,.14);background:rgba(255,255,255,.5);display:flex;flex-direction:column;gap:3px}
+.cat b{font:800 12px Cinzel,serif;letter-spacing:.12em}
+.cat span{font-size:11.5px;color:#4A5675;line-height:1.35}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#6F82AE;width:26px}
+</style>
+
+<div style="width: 1440px; height: 1040px; display: flex; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="width: 268px; flex: 0 0 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"/><rect x="297" y="461" width="430" height="102" fill="#C9890C"/><rect x="41" y="461" width="72" height="102" fill="#C9890C"/><rect x="911" y="461" width="72" height="102" fill="#C9890C"/></svg>EUTHYNA</div>
+    <button type="button" style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px; text-align: left; color: inherit; cursor: pointer">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.8); box-shadow: inset 0 0 0 2px rgba(255,228,180,.4)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><small style="font-size: 12px; color: #8FA2CC">On Atlantis · testnet</small></span>
+    </button>
+    <nav class="nav" aria-label="App" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a>
+      <a href="#"><b>II</b>Agents</a>
+      <a href="#" style="background: #F3EFE6; color: #0D1730"><b style="color: #8A5A00">III</b>Rules</a>
+      <a href="#"><b>IV</b>Activity</a>
+      <a href="#"><b>V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes<span style="margin-left: auto; background: #F2B544; color: #061433; border-radius: 999px; font: 800 11px 'Plus Jakarta Sans', sans-serif; padding: 2px 8px">3</span></a>
+      <a href="#"><b>VII</b>Owners</a>
+      <a href="#"><b>VIII</b>Market</a>
+      <a href="#"><b>IX</b>Settings</a>
+    </nav>
+    <div style="margin-top: auto; border: 1px solid rgba(217,87,59,.55); background: linear-gradient(160deg, rgba(74,26,16,.85), rgba(42,15,10,.9)); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <span class="kick" style="color: #F4A28C">Security council</span>
+      <span style="font-size: 13px; color: #F4C9BC">One click stops every agent. Only an owners' vote resumes them.</span>
+      <button type="button" style="border: 0; background: #D9573B; color: #fff; padding: 12px; font: 800 13px Cinzel, serif; letter-spacing: .2em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.25)">HALT ALL AGENTS</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: #C9D3EA"><span style="width: 30px; height: 30px; border-radius: 50%; background: #F2B544; color: #061433; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px">AL</span><span><b style="color: #fff">alex.testnet</b><br><small style="color: #8FA2CC">Owner · council</small></span></div>
+  </aside>
+
+  <main class="ground" style="flex: 1; min-width: 0; box-sizing: border-box; padding: 28px 40px; display: flex; flex-direction: column; gap: 16px">
+    <header style="display: flex; align-items: flex-end; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 12px 'Plus Jakarta Sans', sans-serif; color: #66718C">Pixel Forge · the law</span><h1 class="carved" style="margin: 0; font: 900 40px/1 Cinzel, serif; letter-spacing: .12em">RULES</h1><span style="font-size: 14px; color: #4A5675; max-width: 720px">A role is what an agent may do with company funds: which contracts, which counterparties, which budget. Everything else is refused by the vault.</span></div>
+      <a href="#" class="ghostbtn" style="margin-left: auto">NEW ROLE</a>
+    </header>
+
+    <div style="display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 20px; align-items: start">
+      <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+        <section class="slab tab">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><b style="font: 800 17px Cinzel, serif; letter-spacing: .1em">ROLE · PAYMENTS</b><span style="font-size: 12px; font-weight: 700; color: #0B6E86">● active · Naomi</span></div>
+          <span class="kick" style="color: #8A5A00; font-size: 10px">Budgets</span>
+          <div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #4A5675"><span>USDC · Base Sepolia · every 7 days</span><b class="mono" style="color: #0D1730">1,640 / 5,000 left</b></div><div class="groove"><i style="width: 33%"></i></div></div><div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #4A5675"><span>USDC · Solana devnet · every 7 days</span><b class="mono" style="color: #0D1730">380 / 500 left</b></div><div class="groove"><i style="width: 76%"></i></div></div>
+          <span class="kick" style="color: #8A5A00; font-size: 10px; margin-top: 4px">Allowed</span>
+          <div><div class="allow"><span style="color: #C9890C; font: 700 12px Cinzel, serif">I</span><span>Transfer USDC on Base Sepolia</span></div><div class="allow sub"><span style="color: #66718C; font: 700 12px Cinzel, serif">·</span><span>only to a supplier on the vault’s list</span></div><div class="allow sub"><span style="color: #66718C; font: 700 12px Cinzel, serif">·</span><span>above 2,000 USDC, a human from another job co-signs</span></div><div class="allow"><span style="color: #C9890C; font: 700 12px Cinzel, serif">II</span><span>Send USDC on Solana devnet to 3 listed wallets</span></div><div class="allow"><span style="color: #C9890C; font: 700 12px Cinzel, serif">III</span><span>At most 10 payments an hour</span></div></div>
+        </section>
+        <section class="slab tab">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><b style="font: 800 17px Cinzel, serif; letter-spacing: .1em">ROLE · TREASURY</b><span style="font-size: 12px; font-weight: 700; color: #0B6E86">● active · Thetis</span></div>
+          <span class="kick" style="color: #8A5A00; font-size: 10px">Budgets</span>
+          <div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #4A5675"><span>Aave V3 deposits · USDC · every 1 day</span><b class="mono" style="color: #0D1730">1,100 / 2,000 left</b></div><div class="groove"><i style="width: 55%"></i></div></div><div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #4A5675"><span>Uniswap V3 swaps · USDC · every 1 day</span><b class="mono" style="color: #0D1730">600 / 1,000 left</b></div><div class="groove"><i style="width: 60%"></i></div></div>
+          <span class="kick" style="color: #8A5A00; font-size: 10px; margin-top: 4px">Allowed</span>
+          <div><div class="allow"><span style="color: #C9890C; font: 700 12px Cinzel, serif">I</span><span>Deposit and withdraw USDC on Aave V3</span></div><div class="allow sub"><span style="color: #66718C; font: 700 12px Cinzel, serif">·</span><span>deposits earn for the company wallet only; withdrawals return to it</span></div><div class="allow"><span style="color: #C9890C; font: 700 12px Cinzel, serif">II</span><span>Swap USDC on Uniswap V3</span></div><div class="allow sub"><span style="color: #66718C; font: 700 12px Cinzel, serif">·</span><span>bought tokens always return to the company wallet</span></div></div>
+        </section>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px; min-width: 0">
+        <section class="slab" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; background-size: cover, cover; box-shadow: 0 0 0 2px rgba(201,137,12,.55), 14px 18px 40px rgba(13,23,48,.14)">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><span class="kick" style="color: #8A5A00">New role</span><a href="#" style="font-size: 12.5px; color: #4A5675">Cancel</a></div>
+          <div style="display: flex; gap: 14px; align-items: flex-end">
+            <div class="fld" style="flex: 0 0 170px">Role name<span class="v">yield</span></div>
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12.5px">
+              <span style="display: flex; gap: 8px; align-items: center"><span class="box"></span>Require Guard approval (needs the API)</span>
+              <span style="display: flex; gap: 8px; align-items: center"><span class="box"></span>Recipient must be a supplier</span>
+            </div>
+          </div>
+          <div class="blk">
+            <div style="display: flex; justify-content: space-between"><b style="font: 800 13px Cinzel, serif; letter-spacing: .12em">AAVE V3 · DEPOSIT &amp; WITHDRAW</b><a href="#" style="font-size: 12px; color: #4A5675">Remove</a></div>
+            <div style="display: flex; gap: 10px"><div class="fld">Asset<span class="v">USDC</span></div><div class="fld">Deposit budget (USDC)<span class="v">3,000</span></div><div class="fld">Every (days)<span class="v">7</span></div></div>
+          </div>
+          <div class="blk">
+            <div style="display: flex; justify-content: space-between"><b style="font: 800 13px Cinzel, serif; letter-spacing: .12em">WETH · WRAP &amp; UNWRAP</b><a href="#" style="font-size: 12px; color: #4A5675">Remove</a></div>
+            <div style="display: flex; gap: 10px"><div class="fld">Budget (ETH)<span class="v">0.5</span></div><div class="fld">Every (days)<span class="v">7</span></div></div>
+            <span style="font-size: 11.5px; color: #66718C">ETH sent to WETH counts against the budget. Unwrapping is free: WETH always pays back the company wallet.</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><a href="#" class="addb">+ Transfers</a><a href="#" class="addb">+ Solana transfers</a><a href="#" class="addb">+ Pay in NEAR tokens</a><a href="#" class="addb" style="border-style: solid; border-color: #C9890C; background: #FCF0D4">+ DeFi…</a></div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px"><div class="cat" style="box-shadow: inset 0 0 0 2px #C9890C; background: #FCF0D4"><b>WETH</b><span style="font-weight: 700; color: #8A5A00">Wrap & unwrap</span><span>Turn ETH into WETH within a budget; unwrapping returns ETH to the wallet.</span></div><div class="cat" style=""><b>UNISWAP V3</b><span style="font-weight: 700; color: #8A5A00">Swap</span><span>Swap within a budget; bought tokens always return to the company wallet.</span></div><div class="cat" style=""><b>UNISWAP V2</b><span style="font-weight: 700; color: #8A5A00">Swap</span><span>Same rules, on the V2 router.</span></div><div class="cat" style="box-shadow: inset 0 0 0 2px #C9890C; background: #FCF0D4"><b>AAVE V3</b><span style="font-weight: 700; color: #8A5A00">Deposit & withdraw</span><span>Deposits within a budget earn yield for the company wallet only.</span></div></div>
+        </section>
+
+        <section style="background: #061433; color: #E7ECF6; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; box-shadow: 14px 18px 40px rgba(13,23,48,.3)">
+          <span class="kick" style="color: #F2B544">Members will vote on</span>
+          <b style="font: 800 18px Cinzel, serif; letter-spacing: .06em; color: #fff">New role “yield”</b>
+          <div style="display: flex; flex-direction: column; font-size: 13.5px; border-top: 1px solid #1F3A6E">
+            <div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); padding: 7px 0; border-bottom: 1px solid #1F3A6E"><b style="font: 700 12px Cinzel, serif; color: #F2B544">I</b>Deposit and withdraw USDC on Aave V3, up to 3,000 USDC every 7 days</div>
+            <div style="display: grid; grid-template-columns: 30px minmax(0, 1fr); padding: 7px 0; border-bottom: 1px solid #1F3A6E"><b style="font: 700 12px Cinzel, serif; color: #F2B544">II</b>Wrap up to 0.5 ETH into WETH every 7 days; unwrap freely</div>
+          </div>
+          <span style="font-size: 12.5px; color: #8FE3F1">✓ Checked in your browser: the proposal prepared by Euthyna is exactly this role.</span>
+          <div style="display: flex; align-items: center; gap: 12px"><span style="font-size: 12px; color: #A9B6D6">Locks a 0.1 NEAR proposal bond, returned when it passes.</span><a href="#" class="ori oribtn" style="margin-left: auto; white-space: nowrap">PROPOSE THE ROLE</a></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>
