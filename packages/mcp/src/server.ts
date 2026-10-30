@@ -15,6 +15,9 @@ import {
   OnchainAgentClient,
   NearVaultGateway,
 
+  MarketBuyer,
+  nearRpc,
+  SignerCard,
   SignerSocket,
   SocketNearSigner,
 } from "@mandateos/sdk";
@@ -69,6 +72,7 @@ const socketPath = env.EUTHYNA_SIGNER_SOCKET
 const rpcUrl = process.env.EVM_RPC_URL ?? (env.EVM_CHAIN_ID === 84532 ? "https://sepolia.base.org" : "https://mainnet.base.org");
 const { publicRpc } = await import("@mandateos/sdk");
 let client: OnchainAgentClient;
+let buyer: MarketBuyer | undefined;
 if (socketPath) {
   if (env.MANDATEOS_AGENT_API_KEY || env.AGENT_KEY_PATH) {
     console.error("euthyna: euthyna-signer is used; MANDATEOS_AGENT_API_KEY and AGENT_KEY_PATH are ignored. Remove them from this config.");
@@ -94,6 +98,11 @@ if (socketPath) {
   });
   const vault = await NearVaultGateway.connect({ ...common, signer: new SocketNearSigner(socket, accountId) });
   client = new OnchainAgentClient(vault, publicRpc(rpcUrl), new SignerAgentApi(socket, accountId));
+  // The market, when the agent has a spending card in the signer.
+  const card = new SignerCard(socket, accountId);
+  if (await card.info().then(() => true, () => false)) {
+    buyer = new MarketBuyer(process.env.EUTHYNA_MARKET_URL ?? env.MANDATEOS_API_URL, card, nearRpc(common.rpcUrl));
+  }
 } else {
   // Local key mode: weaker, the AI's own user can read the file. Prefer euthyna-signer.
 
@@ -117,6 +126,6 @@ function isInside(path: string, dir: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-const server = createMandateMcpServer(new MandateMcpTools(client));
+const server = createMandateMcpServer(new MandateMcpTools(client, buyer));
 await server.connect(new StdioServerTransport());
 

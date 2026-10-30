@@ -672,3 +672,4 @@ export class NearVaultGateway implements VaultGateway {
 
 export { OnchainAgentClient, publicRpc } from "./onchain.js";
 export * from "./solana.js";
+export * from "./market.js";
