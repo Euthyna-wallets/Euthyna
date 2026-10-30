@@ -368,7 +368,8 @@ export class MarketService {
   }
 
   async fail(listingId: string, taskId: string, reason: string) {
-    const updated = await this.prisma.marketTask.updateMany({ where: { id: taskId, listingId, state: { in: ["submitted", "working"] } }, data: { state: "failed", failureReason: reason.slice(0, 500), completedAt: this.now() } });
+    // Not after a delivery: a delivered task is settled, not failed.
+    const updated = await this.prisma.marketTask.updateMany({ where: { id: taskId, listingId, state: { in: ["submitted", "working"] }, resultMarkdown: null }, data: { state: "failed", failureReason: reason.slice(0, 500), completedAt: this.now() } });
     if (updated.count !== 1) throw new MarketError(409, "not_open", "the task is already finished");
     // The cheque is never relayed: the buyer pays nothing for a failed task.
     await this.prisma.paymentHold.updateMany({ where: { taskId, state: "held" }, data: { state: "expired", settleError: "task failed", openKey: null } });
