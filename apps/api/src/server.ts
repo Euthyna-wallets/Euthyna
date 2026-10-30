@@ -14,6 +14,8 @@ import { NearClient } from "./near.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
+import { chequeChain, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
+import { MarketService } from "./market/service.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -79,6 +81,27 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
 // Rule changes activate by themselves once their veto window has passed.
 setInterval(() => void omniroles.activateAllReadyRules(), 30_000).unref();
 
+// Euthyna Market: only with its own relayer account.
+const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY && env.MARKET_WEBHOOK_SECRET
+  ? new MarketService(
+    prisma,
+    chequeChain((method, params) => near.proxyRpc(method, params)),
+    new NearChequeRelayer(env.MARKET_RELAYER_ACCOUNT_ID, env.MARKET_RELAYER_PRIVATE_KEY, env.NEAR_NETWORK_ID, env.NEAR_RPC_URL),
+    {
+      network: `near:${env.NEAR_NETWORK_ID}`,
+      webhookSecret: env.MARKET_WEBHOOK_SECRET,
+      dailySettlements: env.MARKET_DAILY_SETTLEMENTS,
+      dailyPerBuyer: env.MARKET_DAILY_PER_BUYER,
+      relayerLowYocto: BigInt(env.MARKET_RELAYER_LOW_YOCTO),
+      settlementMarginSeconds: env.MARKET_SETTLEMENT_MARGIN_SECONDS,
+    },
+    undefined,
+    undefined,
+    (token, accountId) => storageRegistered((method, params) => near.proxyRpc(method, params), token, accountId),
+  )
+  : undefined;
+if (market) setInterval(() => void market.expire().catch((error: unknown) => console.warn(`market expiry: ${String(error)}`)), 60_000).unref();
+
 const app = createApp({
   near,
   auth,
@@ -90,6 +113,9 @@ const app = createApp({
   nearParentAccount: env.NEAR_ACCOUNT_PARENT,
   pairings: new PrismaPairingStore(prisma),
   omniroles,
+  market,
+  publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
+  marketTrustProxy: env.MARKET_TRUST_PROXY,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
