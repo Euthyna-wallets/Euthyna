@@ -15,7 +15,7 @@ import type { PrismaClient } from "@mandateos/db";
 import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
 
 import { ChequeError, parsePaymentHeader, verifyCheque, X402_VERSION, type ChequeChain, type PaymentRequirement } from "./cheque.js";
-import type { ChequeRelayer } from "./near-market.js";
+import type { ChequeRelayer, FinalTransaction } from "./near-market.js";
 
 export class MarketError extends Error {
   constructor(readonly status: 400 | 401 | 402 | 403 | 404 | 409 | 413 | 503, readonly code: string, message: string) {
@@ -75,12 +75,15 @@ export const pinnedDispatch: Dispatcher = async (url, body, headers) => {
 export const MAX_INPUT_BYTES = 8 * 1024;
 export const MAX_RESULT_BYTES = 256 * 1024;
 const HANDLE = /^[a-z0-9][a-z0-9-]{2,39}$/;
+/** Time a buyer has to send the direct payment of an order. */
+export const ORDER_PAYMENT_WINDOW_MS = 15 * 60_000;
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** A2A task states, as the protocol spells them. */
 export function a2aState(state: string): string {
   return ({
+    awaiting_payment: "TASK_STATE_AUTH_REQUIRED",
     submitted: "TASK_STATE_SUBMITTED",
     working: "TASK_STATE_WORKING",
     completed: "TASK_STATE_COMPLETED",
@@ -132,7 +135,82 @@ export class MarketService {
     private readonly dispatch: Dispatcher = pinnedDispatch,
     private readonly now: () => Date = () => new Date(),
     private readonly storageRegistered: (token: string, accountId: string) => Promise<boolean> = async () => true,
+    private readonly readTransaction: (txHash: string, senderId: string) => Promise<FinalTransaction | null> = async () => null,
   ) {}
+
+  // -------------------------------------------------------------------------
+  // Direct payment, for wallets that cannot sign delegate actions (no escrow)
+  // -------------------------------------------------------------------------
+
+  /** Opens an order: the buyer pays it with a plain ft_transfer whose memo names it, within 15 minutes. */
+  async order(handle: string, buyer: string, input: string) {
+    const listing = await this.live(handle);
+    if (!/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(buyer) || buyer.length < 2 || buyer.length > 64) throw new MarketError(400, "invalid_buyer", "buyer must be a NEAR account id");
+    if (Buffer.byteLength(input, "utf8") > MAX_INPUT_BYTES) throw new MarketError(413, "input_too_large", "task input is limited to 8 KiB");
+    if (!input.trim()) throw new MarketError(400, "empty_input", "the task has no text");
+    if (!(await this.buyerCapacityLeft(buyer))) throw new MarketError(409, "buyer_daily_limit", "this account reached today's purchase limit");
+    const open = await this.prisma.marketTask.count({ where: { buyerAccountId: buyer, state: "awaiting_payment", expiresAt: { gt: this.now() } } });
+    if (open >= 3) throw new MarketError(409, "too_many_open_orders", "pay or let expire your open orders first");
+    const task = await this.prisma.marketTask.create({
+      data: { listingId: listing.id, buyerAccountId: buyer, input, state: "awaiting_payment", expiresAt: new Date(this.now().getTime() + ORDER_PAYMENT_WINDOW_MS) },
+    });
+    return { taskId: task.id, payBefore: task.expiresAt.toISOString(), payment: this.orderPayment(listing, task.id) };
+  }
+
+  orderPayment(listing: { asset: string; priceAtomic: string; payTo: string }, taskId: string) {
+    return {
+      receiverId: listing.asset,
+      methodName: "ft_transfer",
+      args: { receiver_id: listing.payTo, amount: listing.priceAtomic, memo: `market:${taskId}` },
+      deposit: "1",
+      gas: "30000000000000",
+    };
+  }
+
+  /**
+   * The buyer says it paid: the transaction must be final and successful, from
+   * the buyer, one ft_transfer on the asset with exactly the order's terms,
+   * and never used before. Then the task goes to the worker.
+   */
+  async confirmOrder(taskId: string, txHash: string) {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(txHash)) throw new MarketError(400, "invalid_tx", "txHash must be a NEAR transaction hash");
+    const task = await this.prisma.marketTask.findUnique({ where: { id: taskId }, include: { listing: true } });
+    if (!task || task.state !== "awaiting_payment") throw new MarketError(409, "not_awaiting_payment", "this order is not waiting for a payment");
+    if (task.expiresAt <= this.now()) throw new MarketError(409, "order_expired", "the payment window closed; open a new order");
+    const tx = await this.readTransaction(txHash, task.buyerAccountId);
+    if (!tx) throw new MarketError(409, "tx_not_final", "the transaction is not final yet (or unknown); retry in a few seconds");
+    const expected = this.orderPayment(task.listing, task.id);
+    const [action] = tx.actions;
+    let args: unknown = null;
+    try {
+      args = JSON.parse(Buffer.from(action?.args ?? "", "base64").toString("utf8"));
+    } catch { /* checked below */ }
+    const paid = args as Record<string, unknown> | null;
+    if (!tx.succeeded || tx.signerId !== task.buyerAccountId || tx.receiverId !== expected.receiverId || tx.actions.length !== 1 || action?.methodName !== "ft_transfer"
+      || !paid || paid.receiver_id !== expected.args.receiver_id || paid.amount !== expected.args.amount || paid.memo !== expected.args.memo) {
+      throw new MarketError(402, "payment_mismatch", `the transaction must be a successful ft_transfer from ${task.buyerAccountId} on ${expected.receiverId} of ${expected.args.amount} to ${expected.args.receiver_id} with memo ${expected.args.memo}`);
+    }
+    try {
+      await this.prisma.$transaction(async (db) => {
+        const moved = await db.marketTask.updateMany({ where: { id: taskId, state: "awaiting_payment" }, data: { state: "submitted", expiresAt: new Date(this.now().getTime() + task.listing.slaSeconds * 1000) } });
+        if (moved.count !== 1) throw new MarketError(409, "not_awaiting_payment", "this order is not waiting for a payment");
+        // Already paid: the "hold" records the transfer; there is nothing to relay.
+        await db.paymentHold.create({
+          data: {
+            taskId, signedDelegateB64: "", delegateHash: `tx:${txHash}`, sender: task.buyerAccountId, publicKey: "", nonce: "0", maxBlockHeight: "0",
+            amount: expected.args.amount, asset: expected.receiverId, payTo: expected.args.receiver_id, state: "prepaid", settleTxHash: txHash, settledAt: this.now(),
+          },
+        });
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002") throw new MarketError(409, "tx_used", "this transaction already paid an order");
+      throw error;
+    }
+    const listing = task.listing;
+    const fresh = await this.task(taskId);
+    void this.notify(listing, fresh).catch(() => undefined);
+    return fresh;
+  }
 
   // -------------------------------------------------------------------------
   // Listings (company members)
@@ -205,8 +283,26 @@ export class MarketService {
       amount: task.hold?.amount ?? null, asset: task.listing.asset, holdState: task.hold?.state ?? null, settleTxHash: task.hold?.settleTxHash ?? null,
       createdAt: task.createdAt.toISOString(), completedAt: task.completedAt?.toISOString() ?? null,
     }));
-    const revenue = rows.filter((row) => row.holdState === "settled").reduce((sum, row) => sum + BigInt(row.amount ?? "0"), 0n);
+    const revenue = rows.filter((row) => row.holdState === "settled" || row.holdState === "prepaid").reduce((sum, row) => sum + BigInt(row.amount ?? "0"), 0n);
     return { sales: rows, revenueAtomic: revenue.toString() };
+  }
+
+  /** What these accounts (a company's agents and their cards) bought. */
+  async purchases(buyers: string[]) {
+    if (buyers.length === 0) return { purchases: [], spentAtomic: "0" };
+    const tasks = await this.prisma.marketTask.findMany({
+      where: { buyerAccountId: { in: buyers }, state: { not: "awaiting_payment" } },
+      include: { hold: true, listing: { select: { handle: true, title: true, asset: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    const rows = tasks.map((task) => ({
+      taskId: task.id, handle: task.listing.handle, title: task.listing.title, buyer: task.buyerAccountId, state: task.state,
+      amount: task.hold?.amount ?? null, asset: task.listing.asset, holdState: task.hold?.state ?? null, settleTxHash: task.hold?.settleTxHash ?? null,
+      createdAt: task.createdAt.toISOString(), completedAt: task.completedAt?.toISOString() ?? null,
+    }));
+    const spent = rows.filter((row) => row.holdState === "settled" || row.holdState === "prepaid").reduce((sum, row) => sum + BigInt(row.amount ?? "0"), 0n);
+    return { purchases: rows, spentAtomic: spent.toString() };
   }
 
   // -------------------------------------------------------------------------
@@ -396,6 +492,11 @@ export class MarketService {
   async settle(taskId: string) {
     const claimed = await this.prisma.paymentHold.updateMany({ where: { taskId, state: "held" }, data: { state: "settling" } });
     const hold = await this.prisma.paymentHold.findUnique({ where: { taskId } });
+    // Paid upfront (direct transfer): delivering completes the task.
+    if (hold?.state === "prepaid") {
+      await this.prisma.marketTask.updateMany({ where: { id: taskId, state: { in: ["submitted", "working"] } }, data: { state: "completed" } });
+      return this.task(taskId);
+    }
     if (claimed.count !== 1 || !hold) {
       // Delivered after the cheque expired: the result stays, unpaid.
       if (hold && (hold.state === "expired" || hold.state === "failed")) {
@@ -421,6 +522,7 @@ export class MarketService {
   async expire() {
     const height = await this.chain.blockHeight();
     const now = this.now();
+    await this.prisma.marketTask.updateMany({ where: { state: "awaiting_payment", expiresAt: { lte: now } }, data: { state: "expired", completedAt: now } });
     const late = await this.prisma.marketTask.findMany({ where: { state: { in: ["submitted", "working"] }, expiresAt: { lte: now } }, select: { id: true } });
     for (const task of late) {
       await this.prisma.marketTask.updateMany({ where: { id: task.id, state: { in: ["submitted", "working"] } }, data: { state: "expired", completedAt: now } });

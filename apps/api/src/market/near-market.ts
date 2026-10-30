@@ -49,6 +49,37 @@ export async function storageRegistered(rpc: Rpc, token: string, accountId: stri
   return JSON.parse(Buffer.from(result.result).toString("utf8")) !== null;
 }
 
+/** A final NEAR transaction as the gateway needs to check a direct payment. */
+export type FinalTransaction = {
+  signerId: string;
+  receiverId: string;
+  actions: Array<{ methodName: string; args: string; deposit: string }>;
+  succeeded: boolean;
+};
+
+/** Reads a transaction at finality "FINAL"; null if unknown (or not final yet). */
+export function finalTransaction(rpc: Rpc) {
+  return async (txHash: string, senderId: string): Promise<FinalTransaction | null> => {
+    let result: { transaction: { signer_id: string; receiver_id: string; actions: Array<Record<string, { method_name?: string; args?: string; deposit?: string }> | string> }; status: unknown; receipts_outcome: Array<{ outcome: { status: unknown } }>; final_execution_status?: string };
+    try {
+      result = await rpc("tx", { tx_hash: txHash, sender_account_id: senderId, wait_until: "FINAL" });
+    } catch (error) {
+      if (/UNKNOWN_TRANSACTION|doesn't exist|does not exist|TIMEOUT_ERROR/i.test(String(error))) return null;
+      throw error;
+    }
+    const failed = [result.status, ...result.receipts_outcome.map((receipt) => receipt.outcome.status)].some((status) => status && typeof status === "object" && "Failure" in status);
+    return {
+      signerId: result.transaction.signer_id,
+      receiverId: result.transaction.receiver_id,
+      actions: result.transaction.actions.map((action) => {
+        const call = typeof action === "object" ? action.FunctionCall : undefined;
+        return { methodName: call?.method_name ?? (typeof action === "string" ? action : Object.keys(action)[0] ?? ""), args: call?.args ?? "", deposit: call?.deposit ?? "0" };
+      }),
+      succeeded: !failed,
+    };
+  };
+}
+
 export type RelayOutcome = { ok: true; txHash: string } | { ok: false; txHash: string | null; error: string };
 
 export interface ChequeRelayer {

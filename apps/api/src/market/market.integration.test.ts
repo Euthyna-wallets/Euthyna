@@ -41,9 +41,18 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
     balanceYocto: async () => 10n ** 25n,
   };
   const pushes: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
+  // Direct payments: transactions the fake chain knows, by hash.
+  const transactions = new Map<string, import("./near-market.js").FinalTransaction>();
   const market = new MarketService(prisma, chain, relayer, {
     network: "near:testnet", webhookSecret: "x".repeat(40), dailySettlements: 1000, relayerLowYocto: 1n, settlementMarginSeconds: 600,
-  }, async (url, body, headers) => { pushes.push({ url, body, headers }); });
+  }, async (url, body, headers) => { pushes.push({ url, body, headers }); }, undefined, async () => true,
+  async (hash, sender) => { const tx = transactions.get(hash); return tx && tx.signerId === sender ? tx : null; });
+  const transfer = (taskId: string, overrides: Partial<{ amount: string; to: string; memo: string; signer: string; succeeded: boolean; token: string }> = {}) => ({
+    signerId: overrides.signer ?? BUYER, receiverId: overrides.token ?? USDC, succeeded: overrides.succeeded ?? true,
+    actions: [{ methodName: "ft_transfer", deposit: "1", args: Buffer.from(JSON.stringify({ receiver_id: overrides.to ?? VAULT, amount: overrides.amount ?? "2000000", memo: overrides.memo ?? `market:${taskId}` })).toString("base64") }],
+  });
+  const hash = () => (randomUUID().replace(/-/g, "") + "11111111111").replace(/[0OIl]/g, "1").slice(0, 44);
+  const json = (path: string, body: unknown) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const app = new Hono();
   // As in the API: market errors are JSON with their status.
   app.onError((error, context) => (error instanceof MarketError ? context.json({ error: error.code, message: error.message }, error.status) : context.json({ error: String(error) }, 500)));
@@ -209,5 +218,47 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
     expect(card.payment.accepts).toHaveLength(1);
     const recipients = await (await app.request("/.well-known/x402")).json() as { recipients: Array<{ handle: string; payTo: string }> };
     expect(recipients.recipients).toContainEqual(expect.objectContaining({ handle, payTo: VAULT }));
+  });
+
+  it("direct payment: an order, a matching transfer, then the worker; the transfer cannot pay twice", async () => {
+    const order = await (await json("/v1/market/orders", { handle, buyer: BUYER, input: "Due diligence on curve" })).json() as { taskId: string; payment: { receiverId: string; args: { receiver_id: string; amount: string; memo: string } } };
+    expect(order.payment).toMatchObject({ receiverId: USDC, args: { receiver_id: VAULT, amount: "2000000", memo: `market:${order.taskId}` } });
+    // Not visible to the worker before it is paid.
+    expect(((await (await worker("/v1/market/tasks/assigned")).json()) as { tasks: unknown[] }).tasks).toEqual([]);
+    const wrong = [transfer(order.taskId, { amount: "1" }), transfer(order.taskId, { to: "attacker.testnet" }), transfer(order.taskId, { memo: "market:other" }), transfer(order.taskId, { succeeded: false }), transfer(order.taskId, { token: "usdc.fakes.testnet" })];
+    for (const tx of wrong) {
+      const h = hash();
+      transactions.set(h, tx);
+      expect((await json(`/v1/market/orders/${order.taskId}/paid`, { txHash: h })).status).toBe(402);
+    }
+    const unknown = await json(`/v1/market/orders/${order.taskId}/paid`, { txHash: hash() });
+    expect(unknown.status).toBe(409);
+    const good = hash();
+    transactions.set(good, transfer(order.taskId));
+    const paid = await json(`/v1/market/orders/${order.taskId}/paid`, { txHash: good });
+    expect(paid.status).toBe(200);
+    expect(((await paid.json()) as { task: { status: { state: string } } }).task.status.state).toBe("TASK_STATE_SUBMITTED");
+    // The same transaction cannot pay another order.
+    const other = await (await json("/v1/market/orders", { handle, buyer: BUYER, input: "Another one" })).json() as { taskId: string };
+    expect((await json(`/v1/market/orders/${other.taskId}/paid`, { txHash: good })).status).toBe(402);
+    // Worker delivers; nothing is relayed, the result is released.
+    await worker(`/v1/market/tasks/${order.taskId}/deliver`, { markdown: "# Curve report" });
+    expect(relays).toHaveLength(0);
+    const view = await (await app.request(`/v1/market/tasks/${order.taskId}`)).json() as { task: { status: { state: string }; artifacts: Array<{ parts: Array<{ text?: string }> }>; metadata: { payment: { state: string } } } };
+    expect(view.task.status.state).toBe("TASK_STATE_COMPLETED");
+    expect(view.task.artifacts[0]!.parts[0]!.text).toBe("# Curve report");
+    expect(view.task.metadata.payment.state).toBe("prepaid");
+  });
+
+  it("direct payment: expired orders cannot be paid, and buyers cannot pile up open orders", async () => {
+    const order = await (await json("/v1/market/orders", { handle, buyer: BUYER, input: "late" })).json() as { taskId: string };
+    await prisma.marketTask.update({ where: { id: order.taskId }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const h = hash();
+    transactions.set(h, transfer(order.taskId));
+    expect((await json(`/v1/market/orders/${order.taskId}/paid`, { txHash: h })).status).toBe(409);
+    await prisma.marketTask.updateMany({ where: { buyerAccountId: BUYER, state: "awaiting_payment" }, data: { state: "expired" } });
+    for (let i = 0; i < 3; i += 1) expect((await json("/v1/market/orders", { handle, buyer: BUYER, input: `o${i}` })).status).toBe(201);
+    expect((await json("/v1/market/orders", { handle, buyer: BUYER, input: "o4" })).status).toBe(409);
+    await prisma.marketTask.updateMany({ where: { buyerAccountId: BUYER, state: "awaiting_payment" }, data: { state: "expired" } });
   });
 });
