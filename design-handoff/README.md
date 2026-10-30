@@ -26,6 +26,12 @@ Tous les dossiers ont la même forme :
 
 Le canevas de design complet (toutes les planches côte à côte) : https://claude.ai/artifact/F8D8pMuUBrbkmpCvZNnJze
 
+**Une seule source de vérité : cette branche.**
+- Chaque `source/*.html` est l'export exact d'une planche du canevas Claude Design. Chaque `screens/*.png` est la capture de ce même HTML. Il n'y a donc pas deux versions qui pourraient diverger.
+- Si une planche change dans le canevas, cette branche est mise à jour par un nouveau commit. On ne code jamais directement depuis le canevas.
+- **Les fichiers HTML ne sont pas du code de production.** Ce sont des maquettes figées : largeur fixe (1440 px pour l'app), styles en ligne, données d'exemple, aucun appel API.
+- On les lit pour reproduire le rendu dans les composants React existants de la console, branchés sur les vraies données. On ne les copie pas dans l'app.
+
 ## 2. La décision produit : deux portes, un même moteur
 
 - **EUTHYNA, c'est ce qu'on vend : l'infrastructure.** Un agent IA reçoit un wallet avec un budget et des règles votées, jamais une clé. Le coffre vérifie chaque transaction avant de signer.
