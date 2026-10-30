@@ -115,10 +115,13 @@ export function toolPolicy(workDir: string, skillDir: string) {
         return hostAllowed(String(input.url ?? "")) ? allow() : deny(`fetching ${String(input.url)} is not allowed; use WebSearch, or a source on the allowlist`);
       case "Bash": {
         const args = bashArgs(String(input.command ?? ""));
-        return args ? { behavior: "allow", updatedInput: { ...input, command: rewriteBash(args, skillDir) } } : deny("only `python3 tools/defillama.py <command> …` may run");
+        return args ? { behavior: "allow", updatedInput: { ...input, command: rewriteBash(args, skillDir), run_in_background: false } } : deny("only `python3 tools/defillama.py <command> …` may run");
       }
-      case "Read":
       case "Glob":
+        // A pattern may carry its own root: only relative patterns, no climbing.
+        if (typeof input.pattern === "string" && (input.pattern.startsWith("/") || input.pattern.split(/[\\/]/).includes(".."))) return deny("relative patterns inside the task directory only");
+        return inside(input.path ?? ".") ? allow() : deny("read files of this task only");
+      case "Read":
       case "Grep":
         return inside(input.file_path ?? input.path ?? ".") ? allow() : deny("read files of this task only");
       case "Write":
@@ -201,7 +204,7 @@ export const claudeRunner: AgentRunner = async ({ prompt, systemPrompt: system, 
         // No settings, skills, hooks or MCP servers from the host: only what is set here.
         settingSources: [],
         // The agent's processes see the model key and nothing else: never the delivery token.
-        env: agentEnv(process.env, join(cwd, ".home")),
+        env: agentEnv(process.env, `${cwd}.home`),
         tools: AGENT_TOOLS,
         // Every tool call goes through the policy, including the ones that would not ask for permission.
         hooks: {
@@ -274,9 +277,12 @@ export async function defiDueDiligenceJob(text: string, options: { taskId: strin
   const input = parseDdInput(text);
   if (!/^[a-zA-Z0-9-]{8,64}$/.test(options.taskId)) throw new Error("unexpected task id");
   const workDir = join(options.workRoot, `task-${options.taskId}`);
+  // HOME sits next to the task directory, outside what the agent may read.
+  const home = `${workDir}.home`;
   await rm(workDir, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
   await mkdir(join(workDir, "notes"), { recursive: true });
-  await mkdir(join(workDir, ".home"), { recursive: true });
+  await mkdir(home, { recursive: true });
   // Only the instructions are copied: the CLI runs from the skill's read-only directory.
   await cp(join(options.skillDir, "SKILL.md"), join(workDir, "SKILL.md"));
   try {
@@ -297,5 +303,6 @@ export async function defiDueDiligenceJob(text: string, options: { taskId: strin
     return { markdown, json: report };
   } finally {
     await rm(workDir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 }

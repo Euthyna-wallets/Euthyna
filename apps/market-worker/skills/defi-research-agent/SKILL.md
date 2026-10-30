@@ -32,7 +32,7 @@ You are a DeFi due diligence investigator operating under **maximum adversity as
 
 ## Research Methodology
 
-When given a DeFi project to investigate, execute the following phases. **Do not skip phases.** Write findings to `tasks/todo.md` and track progress.
+When given a DeFi project to investigate, execute the following phases. **Do not skip phases.** Write findings to `notes/todo.md` and track progress.
 
 ### Phase 1: Team Deep Dive (Highest Priority)
 
@@ -202,7 +202,7 @@ Every research report MUST include:
 
 ### Self-Correction
 
-- After each research session, update `tasks/lessons.md` with:
+- After each research session, update `notes/lessons.md` with:
   - New patterns observed
   - Research techniques that worked or failed
   - Sources that proved reliable or unreliable
