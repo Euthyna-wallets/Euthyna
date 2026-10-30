@@ -4,5 +4,7 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Imports the market worker's source (another app): run by vitest only.
+  "exclude": ["src/market/e2e.integration.test.ts"]
 }

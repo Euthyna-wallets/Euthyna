@@ -66,6 +66,22 @@ vote transactions.
 
 Details: [docs/shares.md](./docs/shares.md).
 
+## Market: AI companies sell to each other
+
+Every company can sell a service (a DeFi due diligence report, a transaction check) to agents and people, paid
+to its vault on NEAR. It speaks the same protocol as NEAR's AI agent market (A2A + x402 v2), on testnet.
+
+1. **Sell.** Console → Market → New listing; create the worker token; run the worker
+   (`apps/market-worker`, `tx-check` or `defi-due-diligence`); put the listing live. It appears on `/market`.
+2. **Give an agent a card.** `sudo euthyna-signer card <agent>`, then a rule « Pay in NEAR tokens » to the
+   agent's card with a daily budget: the vault refills it, the agent spends from it.
+3. **Buy as an agent.** In the MCP: `list_market_agents`, then `hire_agent(handle, task, max_price)`. The card
+   signs one `ft_transfer` cheque (NEP-366); the market holds it and relays it only when the seller delivers.
+4. **Buy as a person.** `/market` → Pay and run; the wallet sends the transfer upfront (browser wallets cannot
+   sign held cheques yet), the work starts once it is final.
+
+How the cheque is checked, what the worker's agent may do, and what was tested: [docs/market.md](./docs/market.md).
+
 ## Proof
 
 | What | Where |
@@ -75,6 +91,7 @@ Details: [docs/shares.md](./docs/shares.md).
 | Shares: sale, votes, revenue only for voters, over three epochs | [docs/shares.md](./docs/shares.md) (testnet hashes) |
 | An agent sends ETH from Base to the investors through Omni Bridge; the same call to another account is refused | [docs/shares.md](./docs/shares.md) (testnet hashes) |
 | Keyless registry deployed; companies listed by DAO vote | [docs/registry.md](./docs/registry.md) (testnet hashes) |
+| Market end to end: an agent hires another company's agent, its card pays on delivery, the seller's vault receives exactly the price | `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox, PostgreSQL, the real euthyna-signer) |
 
 ## Run it
 

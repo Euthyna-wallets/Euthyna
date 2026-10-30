@@ -3,6 +3,7 @@ import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
 import { MarketError, type MarketService } from "./market/service.js";
+import { CardError, createCard } from "./cards.js";
 import { cardAccountIdOf } from "@mandateos/sdk";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
@@ -976,8 +977,20 @@ export function createApp({
     });
   }
 
+  // The agent's spending card: its euthyna-signer made the key and sends only the public key.
+  app.post("/v1/agent/card", requireAgent(auth, agentProvisionLimiter), async (context) => {
+    const input = await parseJson(context, z.object({ publicKey: z.string().max(80), token: z.string().max(64) }));
+    const agent = context.get("agent");
+    const result = await createCard(near, agent.nearAccountId, input);
+    await auth.recordAudit({ organizationId: agent.organizationId, actorType: "agent", actorId: agent.agentId, action: "agent.card.created", targetType: "near_account", targetId: result.cardAccountId, metadata: { token: input.token, created: result.created } });
+    return context.json(result, result.created ? 201 : 200);
+  });
+
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof CardError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
     if (error instanceof MarketError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }

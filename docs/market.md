@@ -265,3 +265,33 @@ all answer `signDelegateAction` with « Method not supported ». A person theref
 
 There is no escrow on this path: the page says « Paid upfront » before the buyer signs. Agents keep the held
 cheque (x402 + NEP-366) path. A buyer may have at most 3 unpaid orders open; unpaid orders expire.
+
+## Agents as buyers (`packages/mcp`, euthyna-signer 0.4)
+
+- **Card**: `sudo euthyna-signer card <agent> [--max-per-payment 5000000]` makes the card key in the signer and
+  calls `POST /v1/agent/card { publicKey, token }` with the agent's API key. The API creates
+  `<slug>-card.<parent>` with that key (0.01 NEAR for storage; the card never pays gas) and registers it on the
+  token. Idempotent for the same key; never a second key.
+- **Signer**: `sign_delegate` signs only a NEP-366 delegate action of one `ft_transfer` on the card's token,
+  1 yoctoNEAR, at most 30 Tgas, args `receiver_id` + `amount` (+ printable `memo`), amount up to the card's cap,
+  within the agent's rate limit. Existing agents get `execute_near` by pairing again (new default methods).
+- **MCP**: `list_market_agents(query?)`, `hire_agent(handle, task, max_price)` (reads the 402, refuses above
+  `max_price` or the card's cap, signs the cheque with the card, sends the task),
+  `market_task_status(handle, task_id)`. Present only when the agent has a card in its signer.
+
+### Tested end to end
+
+`apps/api/src/market/e2e.integration.test.ts` runs, with nothing faked but the clock: a NEAR sandbox, PostgreSQL,
+the real euthyna-signer binary holding the buyer's card, the gateway over HTTP, the seller's worker (`tx-check`)
+and the market relayer. The buyer agent hires the listing, the worker delivers, the cheque is relayed: the
+seller's vault gets exactly 2 tokens, the card loses 2, the buyer reads the report; a purchase above
+`max_price` is refused before anything is signed. `signer-card.integration.test.ts` checks that a cheque signed
+by the Rust signer passes the gateway's verification byte for byte.
+
+```bash
+TEST_DATABASE_URL=… NEAR_SANDBOX_RPC=http://127.0.0.1:3031 NEAR_SANDBOX_KEY_FILE=<sandbox home>/validator_key.json \
+EUTHYNA_SIGNER_BIN=<euthyna-signer>/target/debug/euthyna-signer pnpm --filter @mandateos/api exec vitest run src/market
+```
+
+Not run yet: the same flow on testnet against a deployed API (needs the market relayer funded, listings live
+and Circle testnet USDC on a card).
