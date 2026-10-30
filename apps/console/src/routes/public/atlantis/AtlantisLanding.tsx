@@ -7,7 +7,7 @@ import { Mark, SiteFooter, SiteHeader } from "./brand.js";
 
 /* Everything below that says "example" is illustrative. What is live is listed in CLAIMS.md at the repository root. */
 
-const REPO_URL = import.meta.env.VITE_REPO_URL ?? "https://github.com/joindefi/mandateos";
+const REPO_URL = import.meta.env.VITE_REPO_URL ?? "https://github.com/Euthyna-wallets/MandateOS";
 const CLAIMS_URL = `${REPO_URL}/blob/main/CLAIMS.md`;
 
 type Verdict = { cls: string; stamp: string; rules: number[]; text: string; code: string };

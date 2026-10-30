@@ -43,7 +43,7 @@ export function SiteFooter() {
       <footer className="g">
         <div className="w">
           <span className="foot-brand">EUTHYNA · ATLANTIS</span>
-          <span>Testnets only · contracts not audited · <Link to="/whitepaper">Whitepaper</Link> · <a href="https://github.com/joindefi/mandateos">GitHub</a></span>
+          <span>Testnets only · contracts not audited · <Link to="/whitepaper">Whitepaper</Link> · <a href="https://github.com/Euthyna-wallets/MandateOS">GitHub</a></span>
         </div>
       </footer>
     </>
