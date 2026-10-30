@@ -14,7 +14,7 @@ import { NearClient } from "./near.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
-import { chequeChain, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
+import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
 
 const env = loadEnv();
@@ -98,6 +98,7 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
     undefined,
     undefined,
     (token, accountId) => storageRegistered((method, params) => near.proxyRpc(method, params), token, accountId),
+    finalTransaction((method, params) => near.proxyRpc(method, params)),
   )
   : undefined;
 if (market) setInterval(() => void market.expire().catch((error: unknown) => console.warn(`market expiry: ${String(error)}`)), 60_000).unref();

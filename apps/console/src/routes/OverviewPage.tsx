@@ -6,6 +6,7 @@ import { Avatar, Icon, PanelLink, ago, until } from "../components/ops.js";
 import { PageState, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { OUTCOME_LABEL, entriesOf, formatToken, formatUsd, roleName, tokenName } from "../lib/money.js";
+import { marketConsole, tokenAmount } from "../lib/market.js";
 import { omni, type RoleView } from "../omniroles-api.js";
 
 /** Home: how much the company holds, what moved, what waits for you. */
@@ -19,6 +20,9 @@ export function OverviewPage() {
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), enabled: ready, refetchInterval: 15_000 });
   const holdings = useQuery({ queryKey: ["omni-holdings"], queryFn: omni.holdings, enabled: ready, refetchInterval: 30_000 });
 
+  // The market is optional on an API: no panel when it is not enabled.
+  const sales = useQuery({ queryKey: ["market-sales"], queryFn: marketConsole.sales, enabled: ready, retry: false, refetchInterval: 30_000 });
+  const purchases = useQuery({ queryKey: ["market-purchases"], queryFn: marketConsole.purchases, enabled: ready, retry: false, refetchInterval: 30_000 });
   const me = wallets.nearAccountId;
   const roleList = roles.data?.roles ?? [];
   const staff = (agents.data?.agents ?? []).filter((agent) => agent.active);
@@ -126,6 +130,17 @@ export function OverviewPage() {
               </div>
 
               <div className="home-col">
+                {sales.data || purchases.data ? (
+                  <section className="panel">
+                    <header className="panel-head"><h2>Market</h2><PanelLink to="/selling">Open</PanelLink></header>
+                    <table className="assets">
+                      <tbody>
+                        <tr><td><strong>Sales</strong><span className="asset-where"> · {sales.data?.sales.length ?? 0} orders</span></td><td className="num">{tokenAmount(sales.data?.revenueAtomic ?? "0")} USDC</td></tr>
+                        <tr><td><strong>Purchases</strong><span className="asset-where"> · by your agents</span></td><td className="num">{tokenAmount(purchases.data?.spentAtomic ?? "0")} USDC</td></tr>
+                      </tbody>
+                    </table>
+                  </section>
+                ) : null}
                 <section className="panel">
                   <header className="panel-head"><h2>Votes</h2><PanelLink to="/governance">Open</PanelLink></header>
                   {waiting.length === 0 && pendingRules.length === 0 ? <div className="state">Nothing to vote on.</div> : (

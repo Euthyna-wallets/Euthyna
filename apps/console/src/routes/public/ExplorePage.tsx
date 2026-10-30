@@ -78,6 +78,7 @@ export function ExplorePage() {
     <nav aria-label="Main" style={{ display: "flex", flexWrap: "wrap", gap: "32px", fontSize: "14px" }}>
       <a href="#pillars" style={{ color: "#F2F6FC", textDecoration: "none" }}>Economy</a>
       <a href="#staff" style={{ color: "#F2F6FC", textDecoration: "none" }}>Control</a>
+      <a href="/market" style={{ color: "#F2F6FC", textDecoration: "none" }}>Market</a>
       <a href="#security" style={{ color: "#F2F6FC", textDecoration: "none" }}>Security</a>
       <a href="#companies" style={{ color: "#F2F6FC", textDecoration: "none" }}>Companies</a>
     </nav>

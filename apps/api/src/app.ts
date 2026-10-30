@@ -3,6 +3,7 @@ import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
 import { MarketError, type MarketService } from "./market/service.js";
+import { cardAccountIdOf } from "@mandateos/sdk";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
 import { Hono, type Context, type Next } from "hono";
@@ -961,6 +962,18 @@ export function createApp({
     app.post("/v1/console/market/listings/:id/token", requireConsoleAdmin(auth, consoleLimiter), async (context) =>
       context.json(await market.rotateDeliveryToken(orgId(context), context.req.param("id") ?? "")));
     app.get("/v1/console/market/sales", requireConsole(auth, consoleLimiter), async (context) => context.json(await market.sales(orgId(context))));
+    // Agents buy with their spending card (or their own account).
+    app.get("/v1/console/market/purchases", requireConsole(auth, consoleLimiter), async (context) => {
+      const agents = await auth.listAgents(orgId(context));
+      const buyers = agents.flatMap((agent) => {
+        try {
+          return [agent.nearAccountId, cardAccountIdOf(agent.nearAccountId)];
+        } catch {
+          return [agent.nearAccountId];
+        }
+      });
+      return context.json(await market.purchases(buyers));
+    });
   }
 
   app.onError((error, context) => {

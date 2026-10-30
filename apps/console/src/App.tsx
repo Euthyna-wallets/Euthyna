@@ -18,6 +18,9 @@ import { SuppliersPage } from "./routes/SuppliersPage.js";
 import { SettingsPage } from "./routes/SettingsPage.js";
 import { CompanyPublicPage } from "./routes/public/CompanyPublicPage.js";
 import { ExplorePage } from "./routes/public/ExplorePage.js";
+import { MarketPage } from "./routes/public/MarketPage.js";
+import { MarketTaskPage } from "./routes/public/MarketTaskPage.js";
+import { MarketConsolePage } from "./routes/MarketConsolePage.js";
 
 function Gate() {
   const session = authClient.useSession();
@@ -46,6 +49,8 @@ export function App() {
           <Route path="/" element={<ExplorePage />} />
           <Route path="/explore" element={<Navigate to="/" replace />} />
           <Route path="/c/:dao" element={<CompanyPublicPage />} />
+          <Route path="/market" element={<MarketPage />} />
+          <Route path="/market/task/:id" element={<MarketTaskPage />} />
           <Route element={<Gate />}>
             <Route element={<Layout />}>
               <Route path="/overview" element={<OverviewPage />} />
@@ -53,6 +58,7 @@ export function App() {
               <Route path="/roles" element={<RolesPage />} />
               <Route path="/activity" element={<ActivityPage />} />
               <Route path="/wallet" element={<WalletPage />} />
+              <Route path="/selling" element={<MarketConsolePage />} />
               <Route path="/mandate" element={<Navigate to="/roles" replace />} />
               <Route path="/payments" element={<Navigate to="/activity" replace />} />
               <Route path="/governance" element={<GovernancePage />} />

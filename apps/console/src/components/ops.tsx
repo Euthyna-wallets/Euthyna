@@ -20,6 +20,7 @@ const PATHS: Record<string, ReactNode> = {
   pause: <><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></>,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
   setup: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></>,
+  market: <><path d="M4 9l1.5-5h13L20 9" /><path d="M4 9h16v2a3 3 0 0 1-5.3 2 3 3 0 0 1-5.4 0A3 3 0 0 1 4 11z" /><path d="M5 13v7h14v-7" /></>,
 };
 
 export function Icon({ name, size = 18 }: { name: keyof typeof PATHS | string; size?: number }) {

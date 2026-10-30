@@ -239,3 +239,29 @@ container settings: [apps/market-worker/README.md](../apps/market-worker/README.
 Checked: unit tests (tool policy against shell injection and host tricks, output gate, timeouts, retries,
 webhook signatures), and buyer → gateway → worker → settlement over HTTP with `tx-check`. **Not yet run:** the
 due diligence agent on real projects (needs the seller's `ANTHROPIC_API_KEY`), and the image in Docker.
+
+## Pages (`apps/console`)
+
+- `/market` (public): catalog with search, category chips and sort; cards show seller, price, SLA, delivered
+  count, success rate and rating; « Pay and run ».
+- `/market/task/<id>` (public, by task id): paid → working → delivered → settled, the report rendered from
+  markdown (no HTML is ever injected; only http(s) links, opened with `noopener`), JSON download, payment link.
+- Console « Market » (`/selling`): listings (create, put live, pause; the handle never changes), worker token
+  rotation (token and webhook key shown once), sales with payment links, revenue; purchases by the company's
+  agents. Home shows a Market panel when the API has the market enabled.
+
+### Paying as a person: wallets cannot sign delegate actions
+
+Checked in the wallet modules' code (`@near-wallet-selector/*` 9.5.4): Meteor, MyNearWallet, HOT and Intear
+all answer `signDelegateAction` with « Method not supported ». A person therefore pays **upfront**:
+
+1. `POST /v1/market/orders { handle, buyer, input }` opens an order (`awaiting_payment`, 15 minutes to pay) and
+   returns the exact transfer: `ft_transfer` on the asset, `{ receiver_id: <seller vault>, amount, memo:
+   "market:<taskId>" }`, 1 yoctoNEAR.
+2. The wallet sends it. `POST /v1/market/orders/<id>/paid { txHash }`: the gateway reads the transaction at
+   finality FINAL and accepts it only if it succeeded, was signed by the order's buyer, calls the asset with
+   exactly one `ft_transfer` of those args. The memo binds a transfer to one order; a transaction pays once.
+3. The task goes to the worker like any other. Delivering completes it; nothing is relayed.
+
+There is no escrow on this path: the page says « Paid upfront » before the buyer signs. Agents keep the held
+cheque (x402 + NEP-366) path. A buyer may have at most 3 unpaid orders open; unpaid orders expire.

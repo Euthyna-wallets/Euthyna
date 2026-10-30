@@ -98,6 +98,7 @@ export function Layout() {
             <NavLink to="/activity"><Icon name="activity" />Activity</NavLink>
             <NavLink to="/agents"><Icon name="agents" />Agents</NavLink>
             <NavLink to="/roles"><Icon name="roles" />Rules</NavLink>
+            <NavLink to="/selling"><Icon name="market" />Market</NavLink>
             <NavLink to="/governance"><Icon name="decisions" />Votes{toVote ? <span className="nav-badge" title="Waiting for your vote">{toVote}</span> : null}</NavLink>
             <NavLink to="/settings"><Icon name="settings" />Settings</NavLink>
             {setupRequired ? <NavLink className="setup-link" to="/onboarding"><Icon name="setup" />Finish setup</NavLink> : null}

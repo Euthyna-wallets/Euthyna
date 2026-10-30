@@ -16,7 +16,7 @@ type Task = Awaited<ReturnType<MarketService["task"]>>;
 export function a2aTask(task: Task) {
   // The result is released only once the cheque is paid: a buyer who spends
   // the balance or the nonce in between gets nothing.
-  const paid = task.state === "completed" && task.hold?.state === "settled";
+  const paid = task.state === "completed" && (task.hold?.state === "settled" || task.hold?.state === "prepaid");
   const artifacts = paid && task.resultMarkdown !== null && task.resultMarkdown !== undefined
     ? [{
         artifactId: `${task.id}-result`,
@@ -45,6 +45,8 @@ export function a2aTask(task: Task) {
     },
   };
 }
+
+const MAX_INPUT_CHARS = 8 * 1024;
 
 const rpcSchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -89,6 +91,26 @@ export function registerMarketPublicRoutes(app: Hono<any>, market: MarketService
     else if (sort === "rating") agents.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
     else agents.sort((a, b) => b.delivered - a.delivered);
     return context.json({ agents });
+  });
+
+  // Direct payment for wallets without delegate signing (paid upfront, no escrow).
+  app.post("/v1/market/orders", limited, async (context) => {
+    const body = z.object({ handle: z.string().min(3).max(40), buyer: z.string().min(2).max(64), input: z.string().max(MAX_INPUT_CHARS) }).safeParse(await context.req.json().catch(() => null));
+    if (!body.success) throw new MarketError(400, "invalid_order", "handle, buyer and input are required");
+    return context.json(await market.order(body.data.handle, body.data.buyer, body.data.input), 201);
+  });
+  app.post("/v1/market/orders/:id/paid", limited, async (context) => {
+    const id = z.string().uuid().safeParse(context.req.param("id"));
+    const body = z.object({ txHash: z.string().min(43).max(44) }).safeParse(await context.req.json().catch(() => null));
+    if (!id.success || !body.success) throw new MarketError(400, "invalid_payment", "order id and txHash are required");
+    return context.json({ task: a2aTask(await market.confirmOrder(id.data, body.data.txHash)) });
+  });
+  // Only a UUID matches, so the worker's /v1/market/tasks/assigned is not shadowed.
+  app.get("/v1/market/tasks/:id{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}}", limited, async (context) => {
+    const id = z.string().uuid().safeParse(context.req.param("id"));
+    if (!id.success) throw new MarketError(400, "invalid_task", "task id must be a uuid");
+    const task = await market.task(id.data);
+    return context.json({ task: { ...a2aTask(task), title: task.listing.title, handle: task.listing.handle, input: task.input, createdAt: task.createdAt.toISOString() } });
   });
 
   app.get("/.well-known/x402", limited, async (context) => context.json(await market.x402Recipients()));
