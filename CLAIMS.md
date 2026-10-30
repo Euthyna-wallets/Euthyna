@@ -54,6 +54,22 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | --- | --- | --- |
 | `npx -y @euthyna/mcp` | NEXT | `npm view @euthyna/mcp` returns 404 on Oct 30, 2026. Run the server from the repository for now. |
 
+## Use cases (site section "Use cases")
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| Supplier payouts on Base or Solana, treasury yield (wrap, Uniswap swap, Aave), revenue sharing, an AI company on Atlantis: "Testnet" | Reported | Whitepaper, "Use cases". Revenue sharing has hashes in [docs/shares.md](./docs/shares.md); add hashes for the others. |
+| Freelance agent: "Possible" with payment roles | Code | `payments` block in `packages/sdk/src/roles.ts` |
+| Rebalancing across chains, retail wallet | NEXT | Whitepaper, "Next" |
+
+## Site wording
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| If our servers go down, agents keep transacting through public RPCs | Code | [Architecture.md](./Architecture.md#trust-and-availability); `packages/sdk/src/onchain.ts` |
+| The vault flags any transaction that left a wallet without it (integrity check) | Reported | Whitepaper, "Operation lifecycle"; console code on `main` |
+| Problem figures (43.8% of $2.2B, 17-23% of bitcoin, $1.4B Bybit) | Outside sources | Linked under each figure on the site and in the whitepaper |
+
 ## Outside sources
 
 See the whitepaper's "The problem" and "Sources": Chainalysis (via Benzinga and PaymentsNext), NCC Group on the Bybit hack.
