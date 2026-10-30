@@ -228,3 +228,14 @@ cheques and holds no company funds.
 - `market/sandbox.integration.test.ts` (local NEAR sandbox, `NEAR_SANDBOX_RPC` + `NEAR_SANDBOX_KEY_FILE`): a real
   cheque verified by the gateway, relayed by the market relayer, paying the seller exactly the price once; the
   replay is refused by the chain and by the gateway; a function-call-key cheque is refused before relay.
+
+## Worker (`apps/market-worker`)
+
+One per listing, with the listing's delivery token; no NEAR key, no database. Jobs: `tx-check` (plain-English
+EVM call check with risk flags, deterministic) and `defi-due-diligence` (the `defi-research-agent` skill run
+headless with the Claude Agent SDK, under a tool policy, an isolated environment and an output gate). Limits and
+container settings: [apps/market-worker/README.md](../apps/market-worker/README.md).
+
+Checked: unit tests (tool policy against shell injection and host tricks, output gate, timeouts, retries,
+webhook signatures), and buyer → gateway → worker → settlement over HTTP with `tx-check`. **Not yet run:** the
+due diligence agent on real projects (needs the seller's `ANTHROPIC_API_KEY`), and the image in Docker.

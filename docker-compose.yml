@@ -85,5 +85,37 @@ services:
       timeout: 3s
       retries: 20
 
+  # Euthyna Market worker for one listing (optional): `docker compose --profile market up market-worker`.
+  # No NEAR key, no database. Read-only except /work; limited CPU, memory and processes.
+  market-worker:
+    profiles: ["market"]
+    build:
+      context: .
+      dockerfile: apps/market-worker/Dockerfile
+    environment:
+      EUTHYNA_API_URL: ${EUTHYNA_API_URL:-http://api:3000}
+      MARKET_DELIVERY_TOKEN: ${MARKET_DELIVERY_TOKEN:-}
+      MARKET_JOB: ${MARKET_JOB:-defi-due-diligence}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEFILLAMA_API_KEY: ${DEFILLAMA_API_KEY:-}
+      TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-1500}
+      # Docker's default seccomp profile blocks bubblewrap: the container is the sandbox here.
+      WORKER_SANDBOX: container
+      # Point these at an egress proxy that only allows DeFiLlama, explorers, GitHub, search and fetch.
+      HTTPS_PROXY: ${MARKET_WORKER_EGRESS_PROXY:-}
+      HTTP_PROXY: ${MARKET_WORKER_EGRESS_PROXY:-}
+    read_only: true
+    tmpfs:
+      - /work:size=256m,mode=1777
+      - /tmp:size=64m,mode=1777
+      - /home/worker:size=64m,uid=10001
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+
