@@ -14,7 +14,10 @@ type Task = Awaited<ReturnType<MarketService["task"]>>;
 
 /** A2A task view: state, and the result as artifacts (markdown text + JSON data). */
 export function a2aTask(task: Task) {
-  const artifacts = task.resultMarkdown !== null && task.resultMarkdown !== undefined
+  // The result is released only once the cheque is paid: a buyer who spends
+  // the balance or the nonce in between gets nothing.
+  const paid = task.state === "completed" && task.hold?.state === "settled";
+  const artifacts = paid && task.resultMarkdown !== null && task.resultMarkdown !== undefined
     ? [{
         artifactId: `${task.id}-result`,
         name: "result",
@@ -28,7 +31,11 @@ export function a2aTask(task: Task) {
     id: task.id,
     contextId: task.id,
     kind: "task",
-    status: { state: a2aState(task.state), timestamp: (task.completedAt ?? task.startedAt ?? task.createdAt).toISOString(), ...(task.failureReason ? { message: task.failureReason } : {}) },
+    status: {
+      state: a2aState(task.state),
+      timestamp: (task.completedAt ?? task.startedAt ?? task.createdAt).toISOString(),
+      ...(task.failureReason ? { message: task.failureReason } : task.state === "completed_unpaid" ? { message: "delivered, but the payment failed: the result is withheld" } : {}),
+    },
     artifacts,
     metadata: {
       listing: task.listing.handle,
@@ -55,9 +62,21 @@ function rpcError(id: unknown, code: number, message: string, data?: unknown) {
   return { jsonrpc: "2.0", id: id ?? null, error: { code, message, ...(data === undefined ? {} : { data }) } };
 }
 
-export function registerMarketPublicRoutes(app: Hono<any>, market: MarketService, options: { baseUrl: string; limiter: RateLimiter; syncWaitMs?: number }) {
+/** The client's address: the socket's, or the proxy's header only when told to trust it. */
+export function clientIp(context: Context, trustProxy: boolean): string {
+  if (trustProxy) {
+    // The last hop added by our own proxy is the one it saw; earlier ones are the client's claim.
+    const hops = context.req.header("x-forwarded-for")?.split(",").map((hop) => hop.trim()).filter(Boolean) ?? [];
+    if (hops.length) return hops[hops.length - 1]!;
+  }
+  const socket = (context.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket;
+  return socket?.remoteAddress ?? "unknown";
+}
+
+export function registerMarketPublicRoutes(app: Hono<any>, market: MarketService, options: { baseUrl: string; limiter: RateLimiter; syncWaitMs?: number; trustProxy?: boolean; maxWaiting?: number }) {
+  let waiting = 0;
   const limited = async (context: Context, next: () => Promise<void>) => {
-    const ip = context.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "direct";
+    const ip = clientIp(context, options.trustProxy ?? false);
     if (!options.limiter.allow(`market:${ip}`)) return context.json({ error: "rate_limited" }, 429);
     await next();
   };
@@ -98,8 +117,15 @@ export function registerMarketPublicRoutes(app: Hono<any>, market: MarketService
       const outcome = await market.submit(handle, context.req.header("x-payment"), text);
       if ("paymentRequired" in outcome) return context.json(outcome.paymentRequired, 402);
       // Answer synchronously when the work is quick; otherwise the buyer polls GetTask.
-      const task = await market.waitFor(outcome.task.id, options.syncWaitMs ?? 60_000);
-      return context.json({ jsonrpc: "2.0", id, result: a2aTask(task) });
+      // Bounded: past `maxWaiting` open waits, answer at once.
+      const wait = waiting < (options.maxWaiting ?? 50) ? options.syncWaitMs ?? 60_000 : 0;
+      waiting += 1;
+      try {
+        const task = await market.waitFor(outcome.task.id, wait, 2_000);
+        return context.json({ jsonrpc: "2.0", id, result: a2aTask(task) });
+      } finally {
+        waiting -= 1;
+      }
     } catch (error) {
       if (error instanceof MarketError) {
         if (error.status === 404) return context.json(rpcError(id, -32001, error.message, { code: error.code }), 404);

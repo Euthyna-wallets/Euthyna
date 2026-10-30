@@ -21,7 +21,7 @@ export const buyerKey = KeyPair.fromRandom("ed25519");
 
 export type Overrides = {
   key?: KeyPair; signWith?: KeyPair; sender?: string; receiver?: string; method?: string;
-  args?: Record<string, unknown>; deposit?: bigint; gas?: bigint; nonce?: bigint; maxBlockHeight?: bigint; extraAction?: boolean;
+  args?: Record<string, unknown> | Uint8Array; deposit?: bigint; gas?: bigint; nonce?: bigint; maxBlockHeight?: bigint; extraAction?: boolean;
 };
 
 export async function cheque(o: Overrides = {}): Promise<string> {
@@ -29,7 +29,7 @@ export async function cheque(o: Overrides = {}): Promise<string> {
   const call = transactions.functionCall(o.method ?? "ft_transfer", o.args ?? { receiver_id: VAULT, amount: "2000000" }, o.gas ?? 30_000_000_000_000n, o.deposit ?? 1n);
   const delegateAction = t.buildDelegateAction({
     actions: o.extraAction ? [call, transactions.transfer(1n)] : [call],
-    maxBlockHeight: o.maxBlockHeight ?? 10_000n,
+    maxBlockHeight: o.maxBlockHeight ?? 20_000n,
     nonce: o.nonce ?? 101n,
     publicKey: key.getPublicKey(),
     receiverId: o.receiver ?? USDC,

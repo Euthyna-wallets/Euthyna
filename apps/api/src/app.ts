@@ -114,6 +114,8 @@ export interface AppDependencies {
   market?: MarketService | undefined;
   /** Public base URL of this API, used in A2A agent cards. */
   publicBaseUrl?: string;
+  /** Trust the reverse proxy's X-Forwarded-For for market rate limits. */
+  marketTrustProxy?: boolean;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -218,6 +220,7 @@ export function createApp({
   omniroles,
   market,
   publicBaseUrl,
+  marketTrustProxy,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -937,7 +940,7 @@ export function createApp({
 
   if (market) {
     const marketLimiter = new MemoryRateLimiter(120, 60_000);
-    registerMarketPublicRoutes(app, market, { baseUrl: publicBaseUrl ?? "http://localhost:3000", limiter: marketLimiter });
+    registerMarketPublicRoutes(app, market, { baseUrl: publicBaseUrl ?? "http://localhost:3000", limiter: marketLimiter, trustProxy: marketTrustProxy ?? false });
     registerMarketWorkerRoutes(app, market, new MemoryRateLimiter(600, 60_000));
     const vaultOf = async (organizationId: string) => {
       const treasury = await treasuries.activeTreasury(organizationId);

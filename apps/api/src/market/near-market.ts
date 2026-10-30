@@ -81,8 +81,8 @@ export class NearChequeRelayer implements ChequeRelayer {
   }
 
   async relay(signedDelegateB64: string, senderId: string): Promise<RelayOutcome> {
-    const account = await this.account;
     try {
+      const account = await this.account;
       const outcome = await account.signAndSendTransaction({ receiverId: senderId, actions: [relayAction(signedDelegateB64)] }) as unknown as Outcome;
       const error = outcomeError(outcome);
       return error ? { ok: false, txHash: outcome.transaction_outcome.id, error } : { ok: true, txHash: outcome.transaction_outcome.id };

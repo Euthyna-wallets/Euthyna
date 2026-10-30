@@ -91,6 +91,7 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
       network: `near:${env.NEAR_NETWORK_ID}`,
       webhookSecret: env.MARKET_WEBHOOK_SECRET,
       dailySettlements: env.MARKET_DAILY_SETTLEMENTS,
+      dailyPerBuyer: env.MARKET_DAILY_PER_BUYER,
       relayerLowYocto: BigInt(env.MARKET_RELAYER_LOW_YOCTO),
       settlementMarginSeconds: env.MARKET_SETTLEMENT_MARGIN_SECONDS,
     },
@@ -114,6 +115,7 @@ const app = createApp({
   omniroles,
   market,
   publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
+  marketTrustProxy: env.MARKET_TRUST_PROXY,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

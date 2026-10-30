@@ -170,15 +170,19 @@ cheques and holds no company funds.
 1. Decodes: base64 JSON, x402 v2, borsh `SignedDelegate`, ed25519 key.
 2. `accepted` equals the listing's current requirement field by field (`requirement_mismatch`).
 3. The delegate calls the asset (`wrong_asset`), with exactly one action (`wrong_actions`), `ft_transfer`
-   (`wrong_method`), args `{ receiver_id: payTo, amount: <exact>, memo? }` and nothing else (`wrong_transfer`),
-   1 yoctoNEAR (`wrong_deposit`), at most 30 Tgas (`too_much_gas`).
+   (`wrong_method`), 1 yoctoNEAR (`wrong_deposit`), between 10 and 30 Tgas (`too_little_gas`, `too_much_gas`).
+   The args must be byte for byte `{"receiver_id":"<payTo>","amount":"<amount>"}`, optionally with
+   `,"memo":"…"` last (printable ASCII, 120 chars) (`wrong_transfer`). Anything the token could parse differently
+   (duplicate keys, other key order, escapes, bad UTF-8) or too little gas would fail on chain after the work.
 4. The signature is valid over sha256(NEP-461 prefix + delegate action) (`bad_signature`); the key exists on the
    sender (`unknown_key`) and is a **full-access** key (`function_call_key`: function-call keys cannot attach the
    1 yocto, see « Spending cards »).
-5. `nonce` above the key's on-chain nonce (`stale_nonce`); `maxBlockHeight` ≥ current height + `maxTimeoutSeconds`
-   (`expires_too_soon`).
+5. `nonce` above the key's on-chain nonce (`stale_nonce`); `maxBlockHeight` ≥ current height + 2 ×
+   `maxTimeoutSeconds` (`expires_too_soon`): testnet makes a block every ~0.6 s (measured over 1,000 blocks).
 6. Never seen before (`replayed`): the hash of the signed message is unique in `payment_hold`, so two concurrent
-   submissions of one cheque create one task.
+   submissions of one cheque create one task. One open cheque per buyer key (`cheque_open`, unique `openKey`):
+   two cheques of one key could not both be paid (relaying the higher nonce first voids the lower one), so the
+   second waits until the first settles or expires.
 7. The sender's token balance covers the amount (`insufficient_balance`).
 
 ### Settlement and expiry
@@ -190,7 +194,12 @@ cheques and holds no company funds.
   balance or the key meanwhile); the seller keeps the record.
 - Every minute: undelivered tasks past their SLA expire, and so do holds past their `maxBlockHeight` (with their
   tasks). A failed or expired task's cheque is never relayed.
-- At most `MARKET_DAILY_SETTLEMENTS` cheques are accepted per UTC day; past that, `503` before any work starts.
+- The result is released to the buyer only once the cheque is paid (task `completed`, hold `settled`); an unpaid
+  task shows « delivered, but the payment failed: the result is withheld ».
+- At most `MARKET_DAILY_SETTLEMENTS` cheques are accepted per UTC day (`503` before any work starts), and
+  `MARKET_DAILY_PER_BUYER` per buyer account (`buyer_daily_limit`).
+- Rate limits use the socket address; set `MARKET_TRUST_PROXY=1` only behind our own proxy (its last
+  `X-Forwarded-For` hop is used). At most 50 synchronous waits at once; past that `SendMessage` answers at once.
   Settlements log a warning when the relayer is low on NEAR.
 - Known limit: a hold left in `settling` by a crash during the relay call is not retried automatically. Relaying it
   again is safe on chain (the nonce allows one payment), but the outcome of the first attempt is unknown.
@@ -202,7 +211,8 @@ cheques and holds no company funds.
   `{ markdown ≤ 256 KiB, json?, files? }`, `…/fail { reason }`. A token only reaches its own listing's tasks.
 - Optional webhook `market.task.created` to the listing's `webhookUrl`, signed `x-euthyna-signature:
   sha256=HMAC(key, "<x-euthyna-timestamp>.<body>")`, 4 attempts (0, 1, 4, 16 s). The URL must be https on a public
-  domain; it is re-resolved before each push and refused if any address is private (no requests into our network).
+  domain. Before each push the name is resolved once, every address must be public, and the connection is made to
+  that checked address (no second lookup, so no DNS rebinding; no redirects).
   The key is derived per listing from `MARKET_WEBHOOK_SECRET` and shown with each token rotation.
 - Console (admins create and change listings; members read): `GET/POST /v1/console/market/listings`,
   `PATCH /v1/console/market/listings/<id>` (handle, asset and payee never change), `POST …/<id>/token`,

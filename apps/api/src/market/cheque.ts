@@ -19,8 +19,12 @@ const nearTransactions = nearRequire("@near-js/transactions") as {
 };
 
 export const X402_VERSION = 2;
-/** ft_transfer needs ~5 Tgas; the relayer pays whatever the cheque asks for. */
+/** The relayer pays the cheque's gas: at most 30 Tgas, and at least enough for ft_transfer to finish. */
 export const MAX_CHEQUE_GAS = 30_000_000_000_000n;
+export const MIN_CHEQUE_GAS = 10_000_000_000_000n;
+/** NEAR testnet makes ~1.7 blocks per second (0.6 s, measured): count 2 per second of lifetime. */
+export const BLOCKS_PER_SECOND = 2n;
+const MEMO = /^[\x20-\x7e]{0,120}$/;
 export const ONE_YOCTO = 1n;
 
 /** What the seller asks for, as sent in the 402 and expected back in `accepted`. */
@@ -47,6 +51,8 @@ export type DecodedCheque = {
   maxBlockHeight: bigint;
   methodName: string;
   args: unknown;
+  /** The args exactly as signed (utf-8), for the canonical-form check. */
+  argsText: string | null;
   gas: bigint;
   deposit: bigint;
   actionCount: number;
@@ -117,9 +123,10 @@ export function decodeCheque(signedDelegateB64: string): DecodedCheque {
   const first = action.actions[0] ?? {};
   const functionCall = first.functionCall;
   let args: unknown = null;
-  if (functionCall?.args) {
+  const argsText = functionCall?.args ? Buffer.from(Uint8Array.from(functionCall.args)).toString("utf8") : null;
+  if (argsText !== null) {
     try {
-      args = JSON.parse(Buffer.from(Uint8Array.from(functionCall.args)).toString("utf8"));
+      args = JSON.parse(argsText);
     } catch {
       args = null;
     }
@@ -132,6 +139,7 @@ export function decodeCheque(signedDelegateB64: string): DecodedCheque {
     maxBlockHeight: BigInt(action.maxBlockHeight),
     methodName: functionCall?.methodName ?? Object.keys(first)[0] ?? "",
     args,
+    argsText,
     gas: BigInt(functionCall?.gas ?? 0n),
     deposit: BigInt(functionCall?.deposit ?? 0n),
     actionCount: action.actions.length,
@@ -162,14 +170,21 @@ export async function verifyCheque(
   if (cheque.receiverId !== requirement.asset) throw new ChequeError("wrong_asset", `the delegate must call ${requirement.asset}`);
   if (cheque.actionCount !== 1) throw new ChequeError("wrong_actions", "the delegate must hold exactly one action");
   if (cheque.methodName !== "ft_transfer") throw new ChequeError("wrong_method", "the only action must be ft_transfer");
+  // The args must be exactly the canonical JSON we would write: anything the
+  // token could parse differently (duplicate keys, odd escapes, bad utf-8)
+  // could fail on chain after the work is done.
   const args = cheque.args as Record<string, unknown> | null;
-  const extra = args ? Object.keys(args).filter((key) => !["receiver_id", "amount", "memo"].includes(key)) : [];
-  if (!args || args.receiver_id !== requirement.payTo || args.amount !== requirement.amount || extra.length > 0
-    || (args.memo !== undefined && args.memo !== null && (typeof args.memo !== "string" || args.memo.length > 120))) {
-    throw new ChequeError("wrong_transfer", `ft_transfer must send exactly ${requirement.amount} to ${requirement.payTo}`);
+  const memo = args && typeof args.memo === "string" && MEMO.test(args.memo) ? args.memo : undefined;
+  const canonical = [
+    JSON.stringify({ receiver_id: requirement.payTo, amount: requirement.amount }),
+    ...(memo === undefined ? [] : [JSON.stringify({ receiver_id: requirement.payTo, amount: requirement.amount, memo })]),
+  ];
+  if (cheque.argsText === null || !canonical.includes(cheque.argsText)) {
+    throw new ChequeError("wrong_transfer", `ft_transfer args must be exactly {"receiver_id":"${requirement.payTo}","amount":"${requirement.amount}"} (optional "memo": printable ASCII, 120 chars)`);
   }
   if (cheque.deposit !== ONE_YOCTO) throw new ChequeError("wrong_deposit", "ft_transfer must attach exactly 1 yoctoNEAR");
   if (cheque.gas > MAX_CHEQUE_GAS) throw new ChequeError("too_much_gas", "the delegate may ask for at most 30 Tgas");
+  if (cheque.gas < MIN_CHEQUE_GAS) throw new ChequeError("too_little_gas", "the delegate must give ft_transfer at least 10 Tgas");
   // 4. Signed by a key of the sender. Function-call keys cannot attach the 1 yocto
   //    ft_transfer needs (DelegateActionAccessKeyError::DepositWithFunctionCall).
   if (!cheque.signatureValid) throw new ChequeError("bad_signature", "the delegate signature does not match its public key");
@@ -179,9 +194,8 @@ export async function verifyCheque(
   // 5. Not yet used on chain, and alive long enough for the work.
   if (cheque.nonce <= key.nonce) throw new ChequeError("stale_nonce", "the delegate nonce is already used on chain");
   const height = await chain.blockHeight();
-  if (cheque.maxBlockHeight < height + BigInt(requirement.maxTimeoutSeconds)) {
-    throw new ChequeError("expires_too_soon", `maxBlockHeight must be at least ${height + BigInt(requirement.maxTimeoutSeconds)}`);
-  }
+  const minHeight = height + BigInt(requirement.maxTimeoutSeconds) * BLOCKS_PER_SECOND;
+  if (cheque.maxBlockHeight < minHeight) throw new ChequeError("expires_too_soon", `maxBlockHeight must be at least ${minHeight} (current height + 2 x maxTimeoutSeconds)`);
   // 6. Never seen by us.
   if (await seen(cheque.delegateHash)) throw new ChequeError("replayed", "this cheque was already used");
   // 7. Covered today.

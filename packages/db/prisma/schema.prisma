@@ -517,6 +517,9 @@ model PaymentHold {
   payTo             String
   /// held | settling | settled | failed | expired
   state             String     @default("held")
+  /// "<sender>:<publicKey>" while held or settling, null after: one open cheque per buyer key.
+  /// Two open cheques of one key could not both be paid (nonces), so a second is refused.
+  openKey           String?    @unique
   settleTxHash      String?
   settleError       String?
   createdAt         DateTime   @default(now())

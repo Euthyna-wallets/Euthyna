@@ -23,7 +23,7 @@ const refusal = (promise: Promise<unknown>) => promise.then(() => "accepted", (e
 describe("cheque verification", () => {
   it("accepts an exact, fresh, funded cheque signed by a full-access key", async () => {
     const result = await verifyCheque(await payment(), requirement, chain(), fresh);
-    expect(result).toMatchObject({ senderId: BUYER, receiverId: USDC, nonce: 101n, maxBlockHeight: 10_000n, signatureValid: true });
+    expect(result).toMatchObject({ senderId: BUYER, receiverId: USDC, nonce: 101n, maxBlockHeight: 20_000n, signatureValid: true });
     expect(result.delegateHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -49,6 +49,13 @@ describe("cheque verification", () => {
       [{ deposit: 0n }, "wrong_deposit"],
       [{ deposit: 2n }, "wrong_deposit"],
       [{ gas: 31_000_000_000_000n }, "too_much_gas"],
+      // Too little gas would make ft_transfer fail after the work is done.
+      [{ gas: 1n }, "too_little_gas"],
+      // Only the canonical JSON: what the token parses must be what we checked.
+      [{ args: Buffer.from('{"receiver_id":"acme.nomos.euthyna.testnet","amount":"1","amount":"2000000"}') }, "wrong_transfer"],
+      [{ args: { amount: "2000000", receiver_id: VAULT } }, "wrong_transfer"],
+      [{ args: Buffer.from('{"receiver_id":"acme.nomos.euthyna.testnet","amount":"2000000","memo":"\\ud800"}') }, "wrong_transfer"],
+      [{ args: { receiver_id: VAULT, amount: "2000000", memo: "café" } }, "wrong_transfer"],
       [{ extraAction: true }, "wrong_actions"],
     ];
     for (const [overrides, code] of cases) {
@@ -65,8 +72,13 @@ describe("cheque verification", () => {
 
   it("5. refuses a used nonce and a cheque that expires before the work is due", async () => {
     await expect(refusal(verifyCheque(await payment({ nonce: 100n }), requirement, chain(), fresh))).resolves.toBe("stale_nonce");
-    await expect(refusal(verifyCheque(await payment({ maxBlockHeight: 9_399n }), requirement, chain(), fresh))).resolves.toBe("expires_too_soon");
-    await expect(refusal(verifyCheque(await payment({ maxBlockHeight: 9_400n }), requirement, chain(), fresh))).resolves.toBe("accepted");
+    // Blocks come every ~0.6 s: the cheque must outlive 2 blocks per second of the timeout.
+    await expect(refusal(verifyCheque(await payment({ maxBlockHeight: 11_799n }), requirement, chain(), fresh))).resolves.toBe("expires_too_soon");
+    await expect(refusal(verifyCheque(await payment({ maxBlockHeight: 11_800n }), requirement, chain(), fresh))).resolves.toBe("accepted");
+  });
+
+  it("accepts the canonical args with a printable memo", async () => {
+    await expect(refusal(verifyCheque(await payment({ args: { receiver_id: VAULT, amount: "2000000", memo: "market:task-1" } }), requirement, chain(), fresh))).resolves.toBe("accepted");
   });
 
   it("6. refuses a replayed cheque", async () => {

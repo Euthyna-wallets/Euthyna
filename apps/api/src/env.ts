@@ -62,6 +62,9 @@ const schema = z.object({
   /** Derives each listing's webhook signing key. */
   MARKET_WEBHOOK_SECRET: z.string().optional(),
   MARKET_DAILY_SETTLEMENTS: z.coerce.number().int().min(0).default(200),
+  MARKET_DAILY_PER_BUYER: z.coerce.number().int().min(0).default(20),
+  /** "1" when the API sits behind our own reverse proxy: rate limits then use its X-Forwarded-For hop. */
+  MARKET_TRUST_PROXY: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   MARKET_RELAYER_LOW_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MARKET_SETTLEMENT_MARGIN_SECONDS: z.coerce.number().int().min(60).default(600),
   /** Public URL of this API, as buyers reach it (agent cards). */

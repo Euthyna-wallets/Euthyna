@@ -9,13 +9,13 @@ import { a2aState, assertPublicWebhook, MarketService, privateAddress, toAtomic 
 describe("webhook targets", () => {
   const publicHost = async () => ["93.184.216.34"];
   it("accept https on public hosts only", async () => {
-    await expect(assertPublicWebhook("https://worker.example.com/hook", publicHost)).resolves.toBeUndefined();
+    await expect(assertPublicWebhook("https://worker.example.com/hook", publicHost)).resolves.toEqual(["93.184.216.34"]);
     for (const url of ["http://worker.example.com/hook", "https://user:pw@worker.example.com/", "https://127.0.0.1/", "https://[::1]/", "https://localhost/", "https://db.internal/", "not a url"]) {
       await expect(assertPublicWebhook(url, publicHost), url).rejects.toMatchObject({ code: "invalid_webhook" });
     }
   });
   it("refuse names that resolve inside a private network", async () => {
-    for (const address of ["10.0.0.5", "172.20.1.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "127.0.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1"]) {
+    for (const address of ["10.0.0.5", "172.20.1.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "127.0.0.1", "198.18.0.1", "192.0.0.8", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2002:a00:1::1", "ff02::1"]) {
       expect(privateAddress(address), address).toBe(true);
       await expect(assertPublicWebhook("https://worker.example.com/", async () => ["93.184.216.34", address])).rejects.toMatchObject({ code: "invalid_webhook" });
     }

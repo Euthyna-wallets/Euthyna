@@ -8,6 +8,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { request } from "node:https";
 import { isIP } from "node:net";
 
 import type { PrismaClient } from "@mandateos/db";
@@ -27,8 +28,10 @@ export type MarketConfig = {
   network: string;
   /** Secret that derives each listing's webhook signing key (never stored per listing). */
   webhookSecret: string;
-  /** Settlements the market relayer may pay for per UTC day. */
+  /** Settlements the market relayer may pay for per UTC day, in all. */
   dailySettlements: number;
+  /** ... and per buyer account, so one buyer cannot use up the day. */
+  dailyPerBuyer?: number;
   /** Below this, every settlement logs a warning. */
   relayerLowYocto: bigint;
   /** Extra seconds a cheque must stay valid beyond the listing's SLA. */
@@ -36,6 +39,38 @@ export type MarketConfig = {
 };
 
 export type Dispatcher = (url: string, body: string, headers: Record<string, string>) => Promise<void>;
+
+/**
+ * POSTs to a webhook, connecting only to the address checked just before:
+ * the name is resolved once, every address must be public, and the socket
+ * uses that address (TLS still checks the certificate for the name). No
+ * redirects are followed. This closes the DNS-rebinding window.
+ */
+export const pinnedDispatch: Dispatcher = async (url, body, headers) => {
+  const target = new URL(url);
+  const addresses = await assertPublicWebhook(url);
+  const address = addresses[0]!;
+  await new Promise<void>((resolve, reject) => {
+    const req = request({
+      host: target.hostname, servername: target.hostname, port: target.port || 443, path: `${target.pathname}${target.search}`, method: "POST",
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), ...headers },
+      lookup: (_host, options, callback) => {
+        const family = isIP(address);
+        if ((options as { all?: boolean }).all) (callback as unknown as (error: null, addresses: Array<{ address: string; family: number }>) => void)(null, [{ address, family }]);
+        else (callback as (error: null, address: string, family: number) => void)(null, address, family);
+      },
+      timeout: 10_000,
+    }, (response) => {
+      response.resume();
+      const status = response.statusCode ?? 0;
+      if (status >= 200 && status < 300) resolve();
+      else reject(new Error(`webhook HTTP ${status}`));
+    });
+    req.on("timeout", () => req.destroy(new Error("webhook timeout")));
+    req.on("error", reject);
+    req.end(body);
+  });
+};
 
 export const MAX_INPUT_BYTES = 8 * 1024;
 export const MAX_RESULT_BYTES = 256 * 1024;
@@ -59,7 +94,7 @@ export function a2aState(state: string): string {
  * Webhooks go to the seller's own server: https, a public host, never an IP
  * literal or a private address (no requests into our network).
  */
-export async function assertPublicWebhook(url: string, resolve: (host: string) => Promise<string[]> = async (host) => (await lookup(host, { all: true })).map((item) => item.address)): Promise<void> {
+export async function assertPublicWebhook(url: string, resolve: (host: string) => Promise<string[]> = async (host) => (await lookup(host, { all: true })).map((item) => item.address)): Promise<string[]> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -71,17 +106,21 @@ export async function assertPublicWebhook(url: string, resolve: (host: string) =
   if (isIP(host) || /^(localhost|.*\.local|.*\.internal)$/i.test(host)) throw new MarketError(400, "invalid_webhook", "webhook host must be a public domain name");
   const addresses = await resolve(host).catch(() => []);
   if (addresses.length === 0 || addresses.some(privateAddress)) throw new MarketError(400, "invalid_webhook", "webhook host must resolve to public addresses only");
+  return addresses;
 }
 
 export function privateAddress(address: string): boolean {
   if (isIP(address) === 6) {
     const lower = address.toLowerCase();
     if (lower.startsWith("::ffff:")) return privateAddress(lower.slice(7));
-    return lower === "::1" || lower === "::" || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower);
+    // Loopback, unspecified, unique-local, link-local, NAT64, 6to4, Teredo, documentation, multicast.
+    return lower === "::1" || lower === "::" || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith("64:ff9b:")
+      || lower.startsWith("2002:") || lower.startsWith("2001:0:") || lower.startsWith("2001:db8:") || lower.startsWith("ff");
   }
-  const [a, b] = address.split(".").map(Number) as [number, number];
+  const [a, b, c] = address.split(".").map(Number) as [number, number, number];
   return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+    || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
+    || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113) || a >= 224;
 }
 
 export class MarketService {
@@ -90,10 +129,7 @@ export class MarketService {
     private readonly chain: ChequeChain,
     private readonly relayer: ChequeRelayer,
     private readonly config: MarketConfig,
-    private readonly dispatch: Dispatcher = async (url, body, headers) => {
-      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body, redirect: "error", signal: AbortSignal.timeout(10_000) });
-      if (!response.ok) throw new Error(`webhook HTTP ${response.status}`);
-    },
+    private readonly dispatch: Dispatcher = pinnedDispatch,
     private readonly now: () => Date = () => new Date(),
     private readonly storageRegistered: (token: string, accountId: string) => Promise<boolean> = async () => true,
   ) {}
@@ -188,18 +224,23 @@ export class MarketService {
   async catalog(query?: string) {
     const listings = await this.prisma.marketListing.findMany({
       where: { status: "live", ...(query ? { OR: [{ title: { contains: query, mode: "insensitive" } }, { description: { contains: query, mode: "insensitive" } }, { handle: { contains: query.toLowerCase() } }] } : {}) },
-      include: { organization: { select: { name: true } }, tasks: { select: { state: true, rating: { select: { stars: true } } } } },
+      include: { organization: { select: { name: true } } },
       take: 100,
     });
+    // Counts in the database, not task rows in memory.
+    const ids = listings.map((listing) => listing.id);
+    const counts = ids.length ? await this.prisma.marketTask.groupBy({ by: ["listingId", "state"], where: { listingId: { in: ids } }, _count: { _all: true } }) : [];
+    const ratings = ids.length ? await this.prisma.marketRating.findMany({ where: { task: { listingId: { in: ids } } }, select: { stars: true, task: { select: { listingId: true } } }, take: 10_000 }) : [];
     return listings.map((listing) => {
-      const finished = listing.tasks.filter((task) => ["completed", "completed_unpaid", "failed", "expired"].includes(task.state));
-      const delivered = listing.tasks.filter((task) => task.state === "completed" || task.state === "completed_unpaid").length;
-      const stars = listing.tasks.flatMap((task) => (task.rating ? [task.rating.stars] : []));
+      const count = (states: string[]) => counts.filter((row) => row.listingId === listing.id && states.includes(row.state)).reduce((sum, row) => sum + row._count._all, 0);
+      const finished = count(["completed", "completed_unpaid", "failed", "expired"]);
+      const delivered = count(["completed"]);
+      const stars = ratings.filter((rating) => rating.task.listingId === listing.id).map((rating) => rating.stars);
       return {
         handle: listing.handle, title: listing.title, description: listing.description, category: listing.category, seller: listing.organization.name,
         price: listing.priceAtomic, asset: listing.asset, symbol: NEAR_TESTNET_TOKENS.find((item) => item.accountId === listing.asset)?.symbol ?? null,
         payTo: listing.payTo, slaSeconds: listing.slaSeconds, inputHint: listing.inputHint, outputHint: listing.outputHint,
-        delivered, successRate: finished.length ? delivered / finished.length : null,
+        delivered, successRate: finished ? delivered / finished : null,
         rating: stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : null,
       };
     });
@@ -257,6 +298,11 @@ export class MarketService {
       throw error;
     }
     const now = this.now();
+    if (!(await this.buyerCapacityLeft(cheque.senderId))) return { paymentRequired: this.paymentRequired(listing, "buyer_daily_limit: this account reached today's purchase limit") };
+    const openKey = `${cheque.senderId}:${cheque.publicKey}`;
+    if (await this.prisma.paymentHold.findUnique({ where: { openKey } })) {
+      return { paymentRequired: this.paymentRequired(listing, "cheque_open: this key already has an unsettled cheque; wait for it to settle") };
+    }
     try {
       const task = await this.prisma.$transaction(async (tx) => {
         const created = await tx.marketTask.create({
@@ -264,7 +310,7 @@ export class MarketService {
         });
         await tx.paymentHold.create({
           data: {
-            taskId: created.id, signedDelegateB64: cheque.signedDelegateB64, delegateHash: cheque.delegateHash, sender: cheque.senderId,
+            taskId: created.id, signedDelegateB64: cheque.signedDelegateB64, delegateHash: cheque.delegateHash, sender: cheque.senderId, openKey,
             publicKey: cheque.publicKey, nonce: cheque.nonce.toString(), maxBlockHeight: cheque.maxBlockHeight.toString(),
             amount: requirement.amount, asset: requirement.asset, payTo: requirement.payTo,
           },
@@ -274,7 +320,8 @@ export class MarketService {
       void this.notify(listing, task).catch(() => undefined);
       return { task };
     } catch (error) {
-      if ((error as { code?: string }).code === "P2002") return { paymentRequired: this.paymentRequired(listing, "replayed: this cheque was already used") };
+      // A unique index refused it: the same cheque, or a second open cheque of one key, raced in.
+      if ((error as { code?: string }).code === "P2002") return { paymentRequired: this.paymentRequired(listing, "replayed: this cheque (or another open cheque of this key) is already held") };
       throw error;
     }
   }
@@ -324,7 +371,7 @@ export class MarketService {
     const updated = await this.prisma.marketTask.updateMany({ where: { id: taskId, listingId, state: { in: ["submitted", "working"] } }, data: { state: "failed", failureReason: reason.slice(0, 500), completedAt: this.now() } });
     if (updated.count !== 1) throw new MarketError(409, "not_open", "the task is already finished");
     // The cheque is never relayed: the buyer pays nothing for a failed task.
-    await this.prisma.paymentHold.updateMany({ where: { taskId, state: "held" }, data: { state: "expired", settleError: "task failed" } });
+    await this.prisma.paymentHold.updateMany({ where: { taskId, state: "held" }, data: { state: "expired", settleError: "task failed", openKey: null } });
     return this.task(taskId);
   }
 
@@ -359,8 +406,8 @@ export class MarketService {
     await this.prisma.paymentHold.update({
       where: { taskId },
       data: outcome.ok
-        ? { state: "settled", settleTxHash: outcome.txHash, settledAt: this.now() }
-        : { state: "failed", settleTxHash: outcome.txHash, settleError: outcome.error },
+        ? { state: "settled", settleTxHash: outcome.txHash, settledAt: this.now(), openKey: null }
+        : { state: "failed", settleTxHash: outcome.txHash, settleError: outcome.error, openKey: null },
     });
     // Unpaid: the buyer spent the balance or the key meanwhile. The seller keeps the record.
     await this.prisma.marketTask.update({ where: { id: taskId }, data: { state: outcome.ok ? "completed" : "completed_unpaid" } });
@@ -376,13 +423,13 @@ export class MarketService {
     const late = await this.prisma.marketTask.findMany({ where: { state: { in: ["submitted", "working"] }, expiresAt: { lte: now } }, select: { id: true } });
     for (const task of late) {
       await this.prisma.marketTask.updateMany({ where: { id: task.id, state: { in: ["submitted", "working"] } }, data: { state: "expired", completedAt: now } });
-      await this.prisma.paymentHold.updateMany({ where: { taskId: task.id, state: "held" }, data: { state: "expired", settleError: "not delivered in time" } });
+      await this.prisma.paymentHold.updateMany({ where: { taskId: task.id, state: "held" }, data: { state: "expired", settleError: "not delivered in time", openKey: null } });
     }
     const held = await this.prisma.paymentHold.findMany({ where: { state: "held" }, select: { id: true, taskId: true, maxBlockHeight: true } });
     const deadHolds = held.filter((hold) => BigInt(hold.maxBlockHeight) < height);
     const dead = deadHolds.map((hold) => hold.id);
     if (dead.length) {
-      await this.prisma.paymentHold.updateMany({ where: { id: { in: dead }, state: "held" }, data: { state: "expired", settleError: "cheque expired on chain" } });
+      await this.prisma.paymentHold.updateMany({ where: { id: { in: dead }, state: "held" }, data: { state: "expired", settleError: "cheque expired on chain", openKey: null } });
       // Nobody would pay for them any more: their tasks stop too.
       await this.prisma.marketTask.updateMany({ where: { id: { in: deadHolds.map((hold) => hold.taskId) }, state: { in: ["submitted", "working"] } }, data: { state: "expired", completedAt: now } });
     }
@@ -412,8 +459,7 @@ export class MarketService {
     for (const [attempt, delay] of [0, 1_000, 4_000, 16_000].entries()) {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       try {
-        // DNS may have changed since the listing was saved: check again before each push.
-        await assertPublicWebhook(listing.webhookUrl);
+        // The dispatcher checks the name again and connects to the checked address.
         const timestamp = Math.floor(Date.now() / 1000).toString();
         await this.dispatch(listing.webhookUrl, body, { "x-euthyna-signature": this.signWebhook(listing.id, body, timestamp), "x-euthyna-timestamp": timestamp });
         return;
@@ -428,6 +474,13 @@ export class MarketService {
     day.setUTCHours(0, 0, 0, 0);
     const today = await this.prisma.paymentHold.count({ where: { createdAt: { gte: day } } });
     return today < this.config.dailySettlements;
+  }
+
+  private async buyerCapacityLeft(sender: string): Promise<boolean> {
+    const day = new Date(this.now());
+    day.setUTCHours(0, 0, 0, 0);
+    const today = await this.prisma.paymentHold.count({ where: { sender, createdAt: { gte: day } } });
+    return today < (this.config.dailyPerBuyer ?? 20);
   }
 
   private async warnIfRelayerLow() {

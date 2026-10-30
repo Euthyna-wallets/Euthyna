@@ -56,7 +56,7 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
   const nextNonce = () => (nonce += 1n);
   const header = async (o: Overrides = {}, accepted?: Record<string, unknown>) => {
     const listing = await prisma.marketListing.findUniqueOrThrow({ where: { handle } });
-    const payment = { x402Version: 2, accepted: accepted ?? market.requirement(listing), payload: { signedDelegateAction: await cheque({ maxBlockHeight: 5_000n, nonce: nextNonce(), ...o }) } };
+    const payment = { x402Version: 2, accepted: accepted ?? market.requirement(listing), payload: { signedDelegateAction: await cheque({ maxBlockHeight: 10_000n, nonce: nextNonce(), ...o }) } };
     return Buffer.from(JSON.stringify(payment)).toString("base64");
   };
   const send = (payment?: string, text = "Due diligence on aave-v3") => app.request(`/a2a/${handle}/v1`, {
@@ -84,6 +84,8 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
     relayResult = { ok: true, txHash: "settle-tx" };
     balance = 10_000_000n;
     height = 1_000n;
+    // Tests share the buyer key: close cheques earlier tests left open.
+    await prisma.paymentHold.updateMany({ where: { sender: BUYER }, data: { openKey: null } });
     const listing = await market.createListing(organizationId, VAULT, { handle, title: "DeFi due diligence", description: "A sourced report on a DeFi project.", price: "2", slaSeconds: 1800 });
     deliveryToken = (await market.rotateDeliveryToken(organizationId, listing.id)).deliveryToken;
     await market.updateListing(organizationId, listing.id, { status: "live" });
@@ -116,6 +118,13 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
     const results = await Promise.all([send(payment), send(payment), send(payment)]);
     expect(results.filter((response) => response.status === 200)).toHaveLength(1);
     expect(await prisma.paymentHold.count({ where: { task: { listing: { handle } } } })).toBe(1);
+  });
+
+  it("holds one open cheque per buyer key: a second one cannot be paid in order, so it waits", async () => {
+    expect((await send(await header())).status).toBe(200);
+    const second = await send(await header());
+    expect(second.status).toBe(402);
+    expect(((await second.json()) as { error: string }).error).toMatch(/^cheque_open/);
   });
 
   it("refuses forged cheques with a precise 402", async () => {
@@ -155,6 +164,10 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
     const { result } = await (await send(await header())).json() as { result: { id: string } };
     await worker(`/v1/market/tasks/${result.id}/deliver`, { markdown: "# Report" });
     expect(await prisma.marketTask.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ state: "completed_unpaid" });
+    // Unpaid: the buyer does not get the result.
+    const view = await (await app.request(`/a2a/${handle}/v1`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "GetTask", params: { id: result.id } }) })).json() as { result: { artifacts: unknown[]; status: { message: string } } };
+    expect(view.result.artifacts).toEqual([]);
+    expect(view.result.status.message).toMatch(/withheld/);
     expect(await prisma.paymentHold.findUniqueOrThrow({ where: { taskId: result.id } })).toMatchObject({ state: "failed", settleError: "NotEnoughBalance" });
   });
 
@@ -172,7 +185,7 @@ describe.skipIf(!databaseUrl)("market gateway (PostgreSQL)", () => {
 
   it("expires holds whose cheque died on chain", async () => {
     const { result } = await (await send(await header())).json() as { result: { id: string } };
-    height = 6_000n;
+    height = 11_000n;
     expect((await market.expire()).expiredHolds).toBeGreaterThanOrEqual(1);
     expect(await prisma.paymentHold.findUniqueOrThrow({ where: { taskId: result.id } })).toMatchObject({ state: "expired" });
     expect(await prisma.marketTask.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ state: "expired" });

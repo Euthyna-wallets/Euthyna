@@ -68,7 +68,7 @@ describe.skipIf(!rpcUrl || !keyFile)("market cheque on a NEAR sandbox", () => {
       const height = await chain.blockHeight();
       const delegateAction = t.buildDelegateAction({
         actions: [transactions.functionCall("ft_transfer", { receiver_id: ids.seller, amount: "2000000" }, 30_000_000_000_000n, 1n)],
-        maxBlockHeight: height + 1_000n, nonce: access!.nonce + 1n, publicKey: key.getPublicKey(), receiverId: ids.ft, senderId: sender,
+        maxBlockHeight: height + 2_000n, nonce: access!.nonce + 1n, publicKey: key.getPublicKey(), receiverId: ids.ft, senderId: sender,
       });
       const { signedDelegateAction } = await t.signDelegateAction({ delegateAction, signer: { sign: async (message: Uint8Array) => key.sign(createHash("sha256").update(message).digest()).signature } });
       return { x402Version: 2, accepted: requirement, payload: { signedDelegateAction: Buffer.from(t.encodeSignedDelegate(signedDelegateAction)).toString("base64") } };
