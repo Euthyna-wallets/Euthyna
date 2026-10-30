@@ -22,11 +22,11 @@ export function SiteHeader({ current }: { current?: "home" | "whitepaper" }) {
       <div className="w">
         <Link className="brand" to="/"><Mark />EUTHYNA</Link>
         <nav className="links" aria-label="Site">
-          <a href={section("#law")}>Infrastructure</a>
-          <a href={section("#chains")}>Chains</a>
-          <a href={section("#recovery")}>Recovery</a>
-          <a href={section("#build")}>Developers</a>
+          <a href={section("#law")}>How it works</a>
+          <a href={section("#usecases")}>Use cases</a>
+          <a href={section("#security")}>Security</a>
           <a className="atl" href={section("#atlantis")}>Atlantis</a>
+          <a href={section("#build")}>Developers</a>
           <Link to="/market">Market</Link>
           <Link to="/whitepaper" aria-current={current === "whitepaper" ? "page" : undefined}>Whitepaper</Link>
           <Link className="btn ink" to="/overview">Open app</Link>
@@ -43,7 +43,7 @@ export function SiteFooter() {
       <footer className="g">
         <div className="w">
           <span className="foot-brand">EUTHYNA · ATLANTIS</span>
-          <span>NEAR Hackathon 2026 · testnet only · contracts not audited · <Link to="/whitepaper">Whitepaper</Link></span>
+          <span>Testnets only · contracts not audited · <Link to="/whitepaper">Whitepaper</Link> · <a href="https://github.com/joindefi/mandateos">GitHub</a></span>
         </div>
       </footer>
     </>

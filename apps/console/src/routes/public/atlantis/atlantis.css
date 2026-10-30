@@ -293,3 +293,46 @@
   .eu-site .wp-toc{grid-template-columns:1fr}
 }
 @media (max-width:520px){ .eu-site .factors{grid-template-columns:1fr} }
+
+/* v2 (Oct 30): chains layer instead of a NEAR layer, problem, use cases, security, FAQ */
+.eu-site .l-chains{background:var(--stone);border:1px solid var(--vein);z-index:1;grid-template-columns:minmax(0,1fr) auto}
+.eu-site .l-chains .who{background:#fff;color:var(--ink3)}
+.eu-site .chain-row{display:flex;flex-wrap:wrap;gap:8px}
+.eu-site .cr{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--vein);border-radius:999px;padding:6px 12px;font-size:13.5px;font-weight:700;color:var(--ink3)}
+.eu-site .cr.on{color:var(--ink);border-color:#BFE6EE}
+.eu-site .cr .eth{font-size:13px;color:#627EEA}
+.eu-site .problem{background:var(--night);color:#EEF2FA;padding-block:88px}
+.eu-site .problem .kicker{color:var(--gold)}
+.eu-site .problem h2{color:#fff}
+.eu-site .problem .lead{color:var(--soft)}
+.eu-site .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:40px}
+.eu-site .stat{border-top:1px solid var(--line);padding-top:20px;display:flex;flex-direction:column;gap:10px}
+.eu-site .stat b{font:600 clamp(40px,4.6vw,60px)/1 var(--mono);color:var(--gold)}
+.eu-site .stat span{color:#DCE4F4;font-size:16px}
+.eu-site .stat a{color:var(--mute);font-size:13px}
+.eu-site .usecases{background:var(--stone);padding-block:96px}
+.eu-site .uc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:36px}
+.eu-site .uc{background:var(--marble);border:1px solid var(--vein);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:8px}
+.eu-site .uc-head{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.eu-site .uc-head b{font-size:17px}
+.eu-site .uc p{margin:0;color:var(--ink3);font-size:15px}
+.eu-site .security{padding-block:96px}
+.eu-site .sec-table{margin-top:36px;border:1px solid var(--vein);border-radius:20px;overflow:hidden;background:#fff}
+.eu-site .sec-row{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1fr) minmax(0,1.5fr);gap:16px;padding:14px 20px;border-top:1px solid var(--vein);font-size:15px;color:var(--ink3)}
+.eu-site .sec-row b{color:var(--ink)}
+.eu-site .sec-h{border-top:0;background:#FFFDF8;font:700 12px var(--brand);letter-spacing:.14em;text-transform:uppercase;color:var(--gold-ink)}
+.eu-site .assure{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:20px}
+.eu-site .assure div{background:var(--stone);border-radius:20px;padding:20px}
+.eu-site .assure b{display:block;font-size:16px;margin-bottom:6px}
+.eu-site .assure span{color:var(--ink3);font-size:14.5px}
+.eu-site .faq{margin-top:40px;display:flex;flex-direction:column;gap:10px}
+.eu-site .faq details{border:1px solid var(--vein);border-radius:16px;background:#fff;padding:16px 20px}
+.eu-site .faq summary{cursor:pointer;font-weight:700;font-size:16px}
+.eu-site .faq p{margin:10px 0 0;color:var(--ink3);font-size:15px}
+@media (max-width:960px){
+  .eu-site .stats{grid-template-columns:1fr}
+  .eu-site .assure{grid-template-columns:1fr 1fr}
+  .eu-site .sec-row{grid-template-columns:1fr;gap:4px}
+  .eu-site .sec-h{display:none}
+}
+@media (max-width:520px){ .eu-site .assure{grid-template-columns:1fr} .eu-site .l-chains{grid-template-columns:1fr} }

@@ -13,9 +13,9 @@ const CLAIMS_URL = `${REPO_URL}/blob/main/CLAIMS.md`;
 type Verdict = { cls: string; stamp: string; rules: number[]; text: string; code: string };
 
 const REQUESTS: Array<{ label: string; note: string; verdict: Verdict }> = [
-  { label: "Pay Studio Pixel 640 USDC", note: "invoice #118", verdict: { cls: "v-ok", stamp: "SIGNED", rules: [1, 2, 3], text: "Inside the mandate. NEAR MPC signs the transfer; the budget is spent once the payment is proven on chain.", code: "allowed: true" } },
+  { label: "Pay Studio Pixel 640 USDC", note: "invoice #118", verdict: { cls: "v-ok", stamp: "SIGNED", rules: [1, 2, 3], text: "Inside the mandate. The MPC network signs the transfer; the budget is spent once the payment is proven on chain.", code: "allowed: true" } },
   { label: "Pay 640 USDC to 0x9f3…e21", note: "new address", verdict: { cls: "v-no", stamp: "REFUSED", rules: [2], text: "This address is not on the suppliers list the owners voted. Nothing is signed.", code: "reason: ERR_PERMISSION_DENIED:parameterNotAllowed" } },
-  { label: "Pay Cloudnine 3,200 USDC", note: "GPU rental", verdict: { cls: "v-wait", stamp: "CO-SIGN", rules: [4], text: "Allowed, but above the co-signature threshold: a human from another job must co-sign before NEAR signs.", code: "allowed: true · requires_cosign: true" } },
+  { label: "Pay Cloudnine 3,200 USDC", note: "GPU rental", verdict: { cls: "v-wait", stamp: "CO-SIGN", rules: [4], text: "Allowed, but above the co-signature threshold: a human from another job must co-sign before anything is signed.", code: "allowed: true · requires_cosign: true" } },
   { label: "Swap 900 USDC for WETH", note: "not her job", verdict: { cls: "v-no", stamp: "REFUSED", rules: [1], text: "Naomi's role only calls USDC transfer. A swap is another contract and function: refused.", code: "allowed: false · reason: ERR_PERMISSION_DENIED:…" } },
 ];
 
@@ -38,10 +38,10 @@ const CHAINS: Chain[] = [
 ];
 
 const FACTORS: Array<{ name: string; how: string }> = [
-  { name: "Passkey", how: "Your phone or laptop signs. Verified on NEAR with p256_verify. Synced passkeys already cover most losses." },
+  { name: "Passkey", how: "Your phone or laptop signs. Checked on chain with p256_verify. Synced passkeys already cover most losses." },
   { name: "ZKPassport", how: "A zero-knowledge proof from your passport or ID chip. It proves you are the same person as at enrollment, without revealing the document." },
-  { name: "ZK Email", how: "A proof of a DKIM-signed email, verified on NEAR. Email takeover is the main risk, which is why one factor is never enough." },
-  { name: "Trusted contact", how: "The NEAR account of someone you chose signs for you." },
+  { name: "ZK Email", how: "A proof of a DKIM-signed email, verified on chain. Email takeover is the main risk, which is why one factor is never enough." },
+  { name: "Trusted contact", how: "The account of someone you chose signs for you." },
 ];
 
 type CityCompany = {
@@ -98,7 +98,7 @@ function Court() {
           <div className={`verdict ${verdict.cls}`} aria-live="polite"><span className="st">{verdict.stamp}</span><p>{verdict.text}<code>{verdict.code}</code></p></div>
         </div>
       </div>
-      <p className="court-note">An example mandate and example verdicts. The same question is one free view call on NEAR: <code>check_operation(role, member, request)</code>.</p>
+      <p className="court-note">An example mandate and example verdicts. The same question is one free view call on the vault: <code>check_operation(role, member, request)</code>.</p>
     </>
   );
 }
@@ -148,7 +148,7 @@ function City() {
         </svg>
         <div className="legend">
           <span><i style={{ background: "#4FD1E8" }} />A company and its agents</span>
-          <span>{live ? "Companies read from the NEAR registry" : "Example companies · tap one"}</span>
+          <span>{live ? "Companies read live from the on-chain registry" : "Example companies · tap one"}</span>
         </div>
       </div>
       <aside className="cpanel" aria-live="polite">
@@ -159,9 +159,9 @@ function City() {
             <div className="cstats">
               <div><b>{current.real.dao_id.split(".")[0]}</b><span>DAO</span></div>
               <div><b>{current.real.shares_id ? "Open" : "—"}</b><span>share sale</span></div>
-              <div><b>NEAR</b><span>testnet</span></div>
+              <div><b>Live</b><span>testnet</span></div>
             </div>
-            <div className="owners"><b>Read live from NEAR:</b> members, vault, wallets, treasury and the revenue paid to voters.</div>
+            <div className="owners"><b>Read live from the chain:</b> members, vault, wallets, treasury and the revenue paid to voters.</div>
             <Link className="btn gold" to={`/c/${current.real.dao_id}`} style={{ alignSelf: "flex-start" }}>See the company →</Link>
           </>
         ) : (
@@ -181,6 +181,42 @@ function City() {
   );
 }
 
+const PROBLEMS: Array<{ figure: string; text: string; source: string; href: string }> = [
+  { figure: "43.8%", text: "of the $2.2 billion stolen from crypto platforms in 2024 came from leaked private keys.", source: "Chainalysis, via Benzinga", href: "https://benzinga.com/content/42596818/chainalysis-estimates-2-2b-stolen-from-crypto-platforms-in-2024" },
+  { figure: "17–23%", text: "of all bitcoin is lost or out of circulation, mostly behind keys nobody can find.", source: "Chainalysis, via PaymentsNext", href: "https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/" },
+  { figure: "$1.4B", text: "left Bybit's multisig when its signers approved what a tampered screen showed them.", source: "NCC Group", href: "https://www.nccgroup.com/research/in-depth-technical-analysis-of-the-bybit-hack/" },
+];
+
+type Status = "Testnet" | "Planned" | "Possible";
+const USE_CASES: Array<{ name: string; role: string; status: Status }> = [
+  { name: "Supplier payouts", role: "Pay listed suppliers in USDC on Base or Solana, up to 500 a week.", status: "Testnet" },
+  { name: "Treasury yield", role: "Wrap ETH, swap USDC for WETH on Uniswap, supply to Aave on behalf of the company wallet.", status: "Testnet" },
+  { name: "Revenue sharing", role: "Send company revenue to the shareholders who voted, and nowhere else.", status: "Testnet" },
+  { name: "An AI company", role: "Agents run operations; owners hold shares, vote and receive revenue. That is Atlantis.", status: "Testnet" },
+  { name: "Freelance agent", role: "Get paid by clients and pay for its own tools and APIs, within a monthly budget.", status: "Possible" },
+  { name: "Rebalancing across chains", role: "Swap up to 100 USDC per quote from Base into SOL, delivered to the company's Solana wallet.", status: "Planned" },
+  { name: "Retail wallet", role: "A personal wallet on several chains, a passkey to sign, recovery without a seed phrase.", status: "Planned" },
+];
+
+const ATTACKERS: Array<[string, string, string]> = [
+  ["A hacked agent", "Allowed actions, up to its budget", "Role checks on the exact bytes; budgets; owners revoke it by vote; council pause"],
+  ["Our own servers", "Show wrong data in the console", "They hold no key and play no part in signing; votes are re-checked in the member's browser"],
+  ["One rogue owner", "Propose changes", "Votes, a veto window, the council's veto"],
+  ["A swap counterparty", "Give a poor price", "The budget caps the exposure; minimum-rate rules planned"],
+];
+
+const FAQ: Array<[string, string]> = [
+  ["Who holds the keys?", "Nobody. The company's vault is a contract with no access key, and its wallets are derived by a threshold-signature (MPC) network that signs only what the vault asks. Agents hold a key that can only ask the vault."],
+  ["Where does the vault run?", "On NEAR, which hosts the vault and the votes, and whose Chain Signatures MPC network signs for the company's wallets on Base, Ethereum and Solana. EUTHYNA is an independent project built on that technology."],
+  ["What if your servers go down?", "Agents keep transacting: they call the vault directly through public RPCs. Our API and console are conveniences, not part of the execution path."],
+  ["Is it live?", "On testnets only, and the contracts are not audited. Every claim on this page is listed with its proof in CLAIMS.md."],
+];
+
+function StatusChip({ status }: { status: Status | "Planned" }) {
+  const cls = status === "Testnet" ? "live" : "plan";
+  return <span className={`chip ${cls}`}>{status}</span>;
+}
+
 export function AtlantisLanding() {
   useEffect(() => {
     const previous = document.title;
@@ -194,9 +230,9 @@ export function AtlantisLanding() {
       <section className="hero g" id="top">
         <div className="w">
           <div>
-            <span className="kicker">Wallet infrastructure for AI agents · on NEAR</span>
+            <span className="kicker">Wallet infrastructure for AI agents</span>
             <h1 className="insc" style={{ marginTop: 18 }}>Give AI agents money. <span>Keep the law.</span></h1>
-            <p className="sub"><b>EUTHYNA</b> lets an AI agent pay, buy and earn across chains without ever holding a key. Owners write the rules once; a vault with no key enforces them on NEAR, and NEAR Chain Signatures sign on the target chain. <span style={{ fontSize: 15 }}>EVM and Solana on testnet · Bitcoin <span className="next">PLANNED</span></span></p>
+            <p className="sub"><b>EUTHYNA</b> gives your AI agents wallets on Base, Ethereum and Solana, with a budget and rules instead of a private key. Owners vote the rules. A vault with no key checks every transaction before anything is signed.</p>
             <p className="sub"><b>Atlantis</b> is the first city built on it: companies run by AI agents and owned by people.</p>
             <div className="ctas">
               <a className="btn ink" href="#build">Plug in an agent</a>
@@ -215,13 +251,30 @@ export function AtlantisLanding() {
                 <span><b>EUTHYNA</b><small>The infrastructure. Mandates, a keyless vault, a verdict with a reason for every request, an emergency stop.</small></span>
                 <span className="who">For builders</span>
               </a>
-              <a className="layer l-near" href="#chains">
-                <span className="ico" style={{ font: "800 14px var(--ui)", color: "var(--ink)" }}>NEAR</span>
-                <span><b style={{ fontSize: 16 }}>NEAR PROTOCOL</b><small>Chain Signatures sign for wallets nobody holds the key to. DAOs vote the rules.</small></span>
-                <span className="who">The ground</span>
+              <a className="layer l-chains" href="#chains">
+                <span className="chain-row">
+                  <span className="cr on"><img src="/chains/base.svg" alt="" width={18} height={18} />Base</span>
+                  <span className="cr on"><span className="eth" aria-hidden="true">◆</span>Ethereum</span>
+                  <span className="cr on"><img src="/chains/solana.svg" alt="" width={18} height={18} />Solana</span>
+                  <span className="cr"><img src="/chains/bitcoin.svg" alt="" width={18} height={18} />Bitcoin · planned</span>
+                </span>
+                <span className="who">Your chains</span>
               </a>
             </div>
-            <div className="layers-cap"><span>Atlantis is built with EUTHYNA.</span><span>EUTHYNA runs on NEAR.</span></div>
+            <div className="layers-cap"><span>Atlantis is built with EUTHYNA.</span><span>Testnets only · not audited</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="problem g" id="problem">
+        <div className="w">
+          <span className="kicker">The problem</span>
+          <h2 className="insc">One key is one failure.</h2>
+          <p className="lead">The key leaks and the funds are drained, or the key is lost and the funds are gone. Give that key to an AI agent and a single prompt injection can empty the wallet.</p>
+          <div className="stats">
+            {PROBLEMS.map((item) => (
+              <div key={item.figure} className="stat"><b>{item.figure}</b><span>{item.text}</span><a href={item.href} target="_blank" rel="noopener noreferrer">{item.source}</a></div>
+            ))}
           </div>
         </div>
       </section>
@@ -241,7 +294,7 @@ export function AtlantisLanding() {
                 <li>Every request gets a verdict and a reason before it is signed.</li>
                 <li>One mandate, wallets on several chains.</li>
               </ul>
-              <div className="foot"><span style={{ color: "var(--ink3)" }}>MCP server · direct calls on NEAR</span><a href="#build">For developers →</a></div>
+              <div className="foot"><span style={{ color: "var(--ink3)" }}>MCP server · direct calls to the vault</span><a href="#build">For developers →</a></div>
             </article>
             <article className="prod atl">
               <span className="tag" style={{ background: "rgba(79,209,232,.15)", color: "var(--aegean)", alignSelf: "flex-start" }}>Launchpad · built with EUTHYNA</span>
@@ -251,7 +304,7 @@ export function AtlantisLanding() {
                 <li>A company is a DAO with a vault it owns.</li>
                 <li>Each agent has a job, a mandate and a wallet.</li>
                 <li>Owners buy shares, vote the rules, and receive the revenue.</li>
-                <li>Anyone can inspect a company live, with no wallet.</li>
+                <li>Companies sell their agents' work on Euthyna Market.</li>
               </ul>
               <div className="foot"><span style={{ color: "var(--mute)" }}>Founders · shareholders</span><a href="#atlantis">Enter the city →</a></div>
             </article>
@@ -262,20 +315,28 @@ export function AtlantisLanding() {
 
       <section className="law g" id="law">
         <div className="w">
-          <span className="kicker">EUTHYNA · the infrastructure</span>
+          <span className="kicker">How it works</span>
           <h2 className="insc">Every payment answers to a mandate.</h2>
           <p className="lead">In Athens, the euthyna was the audit every official faced before leaving office. Here, an agent faces it before every payment.</p>
           <div className="three">
-            <div className="three-item"><span className="n">I · WRITE</span><h3>Owners set the mandate</h3><p>Voted in a NEAR DAO. Any change waits out a window in which the council can veto it.</p></div>
-            <div className="three-item"><span className="n">II · CHECK</span><h3>The vault judges the request</h3><p>A contract with no key reads the real transaction, not the agent's summary of it, and checks every rule.</p></div>
-            <div className="three-item"><span className="n">III · SIGN</span><h3>NEAR signs what passes</h3><p>Chain Signatures sign for the company wallet. The budget is consumed only with a proof the payment landed.</p></div>
+            <div className="three-item"><span className="n">I · WRITE</span><h3>Owners vote the mandate</h3><p>Which contracts, functions, recipients and budgets. Any change waits out a window in which the council can veto it.</p></div>
+            <div className="three-item"><span className="n">II · CHECK</span><h3>The vault judges the request</h3><p>A contract with no key reads the real transaction, not the agent's summary of it, and checks every rule. Anything it cannot decode is refused.</p></div>
+            <div className="three-item"><span className="n">III · SIGN</span><h3>MPC signs what passes</h3><p>A threshold-signature network signs for the company wallet, only when the vault asks. The budget is spent once the payment is proven on chain.</p></div>
           </div>
           <Court />
-          <div className="assure">
-            <div><b>No key to steal</b><span>The vault account has no access key. The agent holds a key that can only ask.</span></div>
-            <div><b>No server to trust</b><span>Authorization and settlement happen on NEAR. Our API is optional for execution.</span></div>
-            <div><b>One button to stop</b><span>The security council pauses every agent. Only an owners' vote resumes them.</span></div>
-            <div><b>Tested against attacks</b><span>45 attacks in an open suite, all refused. Run <code>pnpm attack:all</code>.</span></div>
+          <p className="court-note">A refusal is not a dead end: any owner can turn it into a vote on exactly that transaction.</p>
+        </div>
+      </section>
+
+      <section className="usecases g" id="usecases">
+        <div className="w">
+          <span className="kicker">Use cases</span>
+          <h2 className="insc">Each job is one role.</h2>
+          <p className="lead">What the agent may do, with which budget, and where the money may go.</p>
+          <div className="uc-grid">
+            {USE_CASES.map((item) => (
+              <div key={item.name} className="uc"><div className="uc-head"><b>{item.name}</b><StatusChip status={item.status} /></div><p>{item.role}</p></div>
+            ))}
           </div>
         </div>
       </section>
@@ -284,16 +345,35 @@ export function AtlantisLanding() {
         <div className="w">
           <span className="kicker">One vault, several chains</span>
           <h2 className="insc">Each chain gets the check that fits it.</h2>
-          <p className="lead">The vault derives the company's wallets through NEAR MPC. On EVM chains it checks the calldata; on Solana it builds the transaction itself.</p>
+          <p className="lead">The company's wallets are derived, not imported. On EVM chains the vault checks the calldata; on Solana it writes the transaction itself.</p>
           <div className="chain-grid">
             {CHAINS.map((chain) => (
               <div key={chain.name} className={`chain ${chain.status === "Testnet" ? "on" : ""}`}>
-                <div className="chain-head">{chain.logo ? <img src={chain.logo} alt="" width={22} height={22} /> : <span className="chain-dot" />}<b>{chain.name}</b><span className={`chip ${chain.status === "Testnet" ? "live" : "plan"}`}>{chain.status}</span></div>
+                <div className="chain-head">{chain.logo ? <img src={chain.logo} alt="" width={22} height={22} /> : <span className="chain-dot" />}<b>{chain.name}</b><StatusChip status={chain.status} /></div>
                 <p>{chain.how}</p>
               </div>
             ))}
           </div>
-          <p className="court-note">Testnet means NEAR testnet with Base Sepolia, Ethereum Sepolia and Solana devnet. Proof for each claim: <a href={CLAIMS_URL}>CLAIMS.md</a>.</p>
+          <p className="court-note">Testnet means Base Sepolia, Ethereum Sepolia and Solana devnet. Proof for each claim: <a href={CLAIMS_URL}>CLAIMS.md</a>.</p>
+        </div>
+      </section>
+
+      <section className="security g" id="security">
+        <div className="w">
+          <span className="kicker">Security model</span>
+          <h2 className="insc">A hacked agent spends its budget. Nothing more.</h2>
+          <div className="sec-table" role="table" aria-label="Attackers and what stops them">
+            <div className="sec-row sec-h" role="row"><span role="columnheader">Attacker</span><span role="columnheader">What they can do</span><span role="columnheader">What stops the rest</span></div>
+            {ATTACKERS.map(([who, can, stop]) => (
+              <div key={who} className="sec-row" role="row"><b role="cell">{who}</b><span role="cell">{can}</span><span role="cell">{stop}</span></div>
+            ))}
+          </div>
+          <div className="assure">
+            <div><b>No key to steal</b><span>The vault has no access key. The company's wallets have no private key.</span></div>
+            <div><b>No server to trust</b><span>If our servers go down, agents keep transacting through public RPCs.</span></div>
+            <div><b>One button to stop</b><span>The security council pauses every agent. Only an owners' vote resumes them.</span></div>
+            <div><b>Tested against attacks</b><span>45 attacks in an open suite, all refused: <code>pnpm attack:all</code>. The vault also flags any transaction that left a wallet without it.</span></div>
+          </div>
         </div>
       </section>
 
@@ -303,35 +383,17 @@ export function AtlantisLanding() {
             <div>
               <span className="kicker">Recovery <span className="next">PLANNED</span></span>
               <h2 className="insc">Lose a key. Keep every wallet.</h2>
-              <p className="lead">A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key, and with it the right to vote. Euthyna recovers that key with two factors out of several, and never holds enough to recover alone.</p>
+              <p className="lead">A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key, and with it the right to vote. EUTHYNA will recover that key with two factors, and never holds enough to recover alone.</p>
             </div>
-            <div className="rec-rule"><b>2 of N</b><span>factors to recover, then a 48 to 72 hour delay in which any current key can cancel</span></div>
+            <div className="rec-rule"><b>2 factors</b><span>to recover, then a 48 to 72 hour delay in which any current key can cancel</span></div>
           </div>
           <div className="factors">
             {FACTORS.map((factor) => <div key={factor.name} className="factor"><b>{factor.name}</b><span>{factor.how}</span></div>)}
           </div>
           <div className="rec-co">
-            <div><b>For a person</b><span>The NEAR account derives the wallets on every chain, so recovering the account recovers them all in one go.</span></div>
-            <div><b>For a company</b><span>If members lose keys but quorum remains, the others vote a replacement. If quorum is lost, a last resort voted at creation lets a director prove their identity with ZKPassport, followed by a 14 to 30 day public delay that any active member or the council can cancel.</span></div>
+            <div><b>For a person</b><span>One account derives the wallets on every chain, so recovering the account recovers them all in one go.</span></div>
+            <div><b>For a company</b><span>If members lose keys but quorum remains, the others vote a replacement. If quorum is lost, a last resort voted at creation lets a director prove their identity with ZKPassport, then waits out a 14 to 30 day public delay that any member or the council can cancel.</span></div>
             <div><b>Private by design</b><span>ZKPassport proves nationality, age, sanctions status and uniqueness without revealing the document.</span></div>
-          </div>
-        </div>
-      </section>
-
-      <section className="build g" id="build">
-        <div className="w">
-          <span className="kicker">For developers</span>
-          <h2 className="insc">A few lines to give your agent a wallet.</h2>
-          <p className="lead">Use the MCP server from any agent, or call the vault on NEAR directly from any language.</p>
-          <div className="codes">
-            <div className="code">
-              <div className="h"><b>From an MCP client</b><span>Claude Code, Cursor, Codex · <span className="next">NPM: NEXT</span></span></div>
-              <pre>{`# register the server\nclaude mcp add euthyna \\\n  --env EUTHYNA_AGENT=naomi.acme.testnet \\\n  -- npx -y @euthyna/mcp\n\n# tools the agent gets\npay  swap  lend  solana transfer  status\nlist_market_agents  hire_agent`}</pre>
-            </div>
-            <div className="code">
-              <div className="h"><b>Directly on NEAR</b><span>no server of ours</span></div>
-              <pre>{`// ask first, free\nvault.check_operation(role, member, request)\n// → { allowed, reason, requires_cosign, … }\n\n// then pay\nop = vault.prepare(role, request)\nvault.authorize(op.op_id, null)   // NEAR MPC signs\nchain.sendRawTransaction(op.signed)\nvault.settle(op.op_id, proof)     // MPC attests`}</pre>
-            </div>
           </div>
         </div>
       </section>
@@ -352,7 +414,7 @@ export function AtlantisLanding() {
           <div className="laws">
             <div><b>FOUND</b><p>Co-founders form the council. The company's vault is born without a key, owned by its DAO.</p></div>
             <div><b>HIRE</b><p>Write each agent's job in plain words. Owners vote it into a mandate. The agent plugs in over MCP.</p></div>
-            <div><b>SHARE</b><p>Sell shares for NEAR. Each revenue round goes to the holders who voted in it.</p></div>
+            <div><b>SHARE</b><p>Sell shares at a fixed price. Each revenue round goes to the holders who voted in it.</p></div>
           </div>
           <div className="launch">
             <div>
@@ -361,7 +423,7 @@ export function AtlantisLanding() {
               <Link className="btn ink" to="/onboarding" style={{ marginTop: 20 }}>Start a company</Link>
             </div>
             <ol>
-              <li><b>Name it</b>A Sputnik DAO and a keyless vault, created for you.</li>
+              <li><b>Name it</b>A DAO and a keyless vault, created for you.</li>
               <li><b>Hire</b>Add an agent and the job it does: pay suppliers, lend, swap.</li>
               <li><b>Vote</b>Owners approve each mandate. Changes wait out a veto window.</li>
               <li><b>Open</b>List the company, sell shares, let anyone inspect it live.</li>
@@ -374,29 +436,51 @@ export function AtlantisLanding() {
         </div>
       </section>
 
+      <section className="build g" id="build">
+        <div className="w">
+          <span className="kicker">For developers</span>
+          <h2 className="insc">A few lines to give your agent a wallet.</h2>
+          <p className="lead">Use the MCP server from any agent, or call the vault directly from any language. The vault is a NEAR contract; your agent never needs our servers.</p>
+          <div className="codes">
+            <div className="code">
+              <div className="h"><b>From an MCP client</b><span>Claude Code, Cursor, Codex · <span className="next">NPM: NEXT</span></span></div>
+              <pre>{`# register the server\nclaude mcp add euthyna \\\n  --env EUTHYNA_AGENT=naomi.acme.testnet \\\n  -- npx -y @euthyna/mcp\n\n# tools the agent gets\npay  swap  lend  solana transfer  status\nlist_market_agents  hire_agent`}</pre>
+            </div>
+            <div className="code">
+              <div className="h"><b>Directly on the vault</b><span>no server of ours</span></div>
+              <pre>{`// ask first, free\nvault.check_operation(role, member, request)\n// → { allowed, reason, requires_cosign, … }\n\n// then pay\nop = vault.prepare(role, request)\nvault.authorize(op.op_id, null)   // MPC signs\nchain.sendRawTransaction(op.signed)\nvault.settle(op.op_id, proof)     // MPC attests`}</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="today g" id="today">
         <div className="w">
           <span className="kicker">Don't take our word for it</span>
           <h2 className="insc">What runs today, what comes next.</h2>
           <div className="ledger">
             <div style={{ background: "#DDF4F8" }}><h4 style={{ color: "var(--aegean-ink)" }}>LIVE ON TESTNET</h4><ul>
-              <li>Keyless company vaults from Nomos, upgraded by DAO vote</li>
+              <li>Keyless company vaults, upgraded only by the company's vote</li>
               <li>Roles for payments, swaps, Aave lending, WETH wrapping, Solana transfers and revenue sharing</li>
-              <li>Payments signed by NEAR MPC on Base Sepolia, Ethereum Sepolia and Solana devnet</li>
+              <li>Payments signed by MPC on Base Sepolia, Ethereum Sepolia and Solana devnet</li>
               <li>Atlantis: shares, revenue to voters, public company pages</li>
               <li>Euthyna Market between agents</li>
             </ul></div>
             <div style={{ background: "#FCF0D4" }}><h4 style={{ color: "var(--gold-ink)" }}>NEXT</h4><ul>
               <li>Recovery with passkeys, ZKPassport and ZK Email</li>
               <li>Arbitrum, BSC, Plasma, Tron and Bitcoin</li>
+              <li>Cross-chain swaps and batched EVM transactions</li>
               <li>@euthyna/mcp on npm</li>
               <li>Mainnet, after an independent audit</li>
             </ul></div>
           </div>
           <div className="proofs">
             <Link to="/whitepaper"><b>Read the whitepaper →</b><span>Architecture, roles, chains, security model, recovery and Atlantis.</span></Link>
-            <a href="#atlantis"><b>Inspect a company →</b><span>Agents, mandates, treasury and owners, read from NEAR. Pick one on the Atlantis map.</span></a>
+            <a href="#atlantis"><b>Inspect a company →</b><span>Agents, mandates, treasury and owners, read live from the chain. Pick one on the map.</span></a>
             <a href={CLAIMS_URL}><b>Read CLAIMS.md →</b><span>Every claim on this page, with the test or transaction behind it.</span></a>
+          </div>
+          <div className="faq">
+            {FAQ.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}
           </div>
         </div>
       </section>
