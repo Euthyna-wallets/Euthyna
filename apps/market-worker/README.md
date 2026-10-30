@@ -15,6 +15,10 @@ EUTHYNA_API_URL=https://api.euthyna.io MARKET_DELIVERY_TOKEN=mdt_… MARKET_JOB=
 MARKET_DELIVERY_TOKEN=mdt_… ANTHROPIC_API_KEY=… docker compose --profile market up market-worker
 ```
 
+Any Anthropic-compatible endpoint works for the agent: `ANTHROPIC_BASE_URL` and `MARKET_AGENT_MODEL`. Tested with
+OpenCode Go (`ANTHROPIC_BASE_URL=https://opencode.ai/inference/go/anthropic`, `MARKET_AGENT_MODEL=deepseek-v4.1-flash`,
+the OpenCode key as `ANTHROPIC_API_KEY`); the worker sends a stable `x-opencode-session` per task.
+
 Optional: `WEBHOOK_SECRET` (from the token rotation) and `WEBHOOK_PORT` to wake up on signed pushes instead of
 waiting for the next poll; `POLL_SECONDS`, `TASK_TIMEOUT_SECONDS` (keep it under the listing's SLA).
 

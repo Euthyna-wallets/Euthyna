@@ -61,6 +61,7 @@ describe("tool policy", () => {
     expect((await policy("Glob", { pattern: "*" })).behavior).toBe("allow");
     expect((await policy("Write", { file_path: "notes/todo.md" })).behavior).toBe("allow");
     expect((await policy("Edit", { file_path: "/work/task-1/notes/todo.md" })).behavior).toBe("allow");
+    expect((await policy("StructuredOutput", { markdown: "…" })).behavior).toBe("allow");
     for (const [tool, input] of [
       ["Write", { file_path: "tools/defillama.py" }], ["Write", { file_path: "tools/json.py" }], ["Edit", { file_path: "SKILL.md" }], ["Write", { file_path: "notes/../tools/x.py" }],
       ["Read", { file_path: "/etc/passwd" }], ["Read", { file_path: "/proc/1/environ" }], ["Read", { file_path: "../task-2/SKILL.md" }], ["Write", { file_path: "/work/task-10/x" }],

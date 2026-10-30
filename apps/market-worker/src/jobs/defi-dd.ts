@@ -53,6 +53,8 @@ export const FETCH_ALLOWLIST = [
   "solscan.io", "explorer.solana.com", "nearblocks.io", "sourcify.dev", "coingecko.com", "rekt.news", "immunefi.com",
   "code4rena.com", "sherlock.xyz", "cantina.xyz", "certik.com", "openzeppelin.com", "trailofbits.com", "spearbit.com",
   "consensys.io", "chainsecurity.com", "web.archive.org", "mirror.xyz", "medium.com", "substack.com",
+  // Independent crypto press.
+  "dlnews.com", "theblock.co", "coindesk.com", "decrypt.co", "blockworks.co", "blockworks.com", "thedefiant.io", "cointelegraph.com", "protos.com",
 ];
 /** Paths that make an allowed host call or record something for whoever crafted the URL. */
 const DENIED_PATHS: Array<[string, RegExp]> = [["web.archive.org", /^\/(?!web\/)/], ["github.com", /^\/login|\/search/]];
@@ -129,6 +131,9 @@ export function toolPolicy(workDir: string, skillDir: string) {
         return within(notes, input.file_path) ? allow() : deny("write your notes under notes/ only");
       case "TodoWrite":
         return allow();
+      // How the SDK returns the structured output (the report): the answer itself, not an action.
+      case "StructuredOutput":
+        return allow();
       default:
         return deny(`${toolName} is not available for this job`);
     }
@@ -163,7 +168,8 @@ export function checkReport(output: unknown, secrets: string[] = []): { markdown
 
 /** The environment the agent runs with: no worker secret ever reaches it. */
 export function agentEnv(env: NodeJS.ProcessEnv, home?: string): Record<string, string> {
-  const keep = ["ANTHROPIC_API_KEY", "DEFILLAMA_API_KEY", "PATH", "LANG", "TZ", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"];
+  // ANTHROPIC_BASE_URL lets a seller use any Anthropic-compatible endpoint (e.g. OpenCode Go).
+  const keep = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "DEFILLAMA_API_KEY", "PATH", "LANG", "TZ", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"];
   const kept = Object.fromEntries(keep.flatMap((name) => (env[name] ? [[name, env[name]!]] : [])));
   // A HOME per task: caches (DeFiLlama, the CLI's own) never carry from one buyer to the next.
   return home ? { ...kept, HOME: home } : kept;
@@ -174,7 +180,7 @@ export function secretValues(env: NodeJS.ProcessEnv): string[] {
   return ["ANTHROPIC_API_KEY", "DEFILLAMA_API_KEY", "MARKET_DELIVERY_TOKEN", "WEBHOOK_SECRET"].flatMap((name) => (env[name] && env[name]!.length >= 8 ? [env[name]!] : []));
 }
 
-export type AgentRunner = (input: { prompt: string; systemPrompt: string; cwd: string; timeoutMs: number; policy: ReturnType<typeof toolPolicy>; schema: Record<string, unknown>; signal?: AbortSignal | undefined }) => Promise<unknown>;
+export type AgentRunner = (input: { prompt: string; systemPrompt: string; cwd: string; timeoutMs: number; policy: ReturnType<typeof toolPolicy>; schema: Record<string, unknown>; signal?: AbortSignal | undefined; sessionId?: string }) => Promise<unknown>;
 
 /** The structured-output schema, as the CLI accepts it (draft-07, no $schema key). */
 export function outputJsonSchema(): Record<string, unknown> {
@@ -186,7 +192,12 @@ export function outputJsonSchema(): Record<string, unknown> {
 export const AGENT_TOOLS = ["WebSearch", "WebFetch", "Bash", "Read", "Glob", "Grep", "Write", "Edit"];
 
 /** The Claude Agent SDK runner (needs ANTHROPIC_API_KEY in the environment). */
-export const claudeRunner: AgentRunner = async ({ prompt, systemPrompt: system, cwd, timeoutMs, policy, schema, signal }) => {
+export const claudeRunner: AgentRunner = async ({ prompt, systemPrompt: system, cwd, timeoutMs, policy, schema, signal, sessionId }) => {
+  // MARKET_AGENT_MODEL picks the model (default: the CLI's own); the same one does the small side tasks.
+  const model = process.env.MARKET_AGENT_MODEL;
+  const modelEnv: Record<string, string> = model ? { ANTHROPIC_MODEL: model, ANTHROPIC_DEFAULT_HAIKU_MODEL: model, ANTHROPIC_DEFAULT_SONNET_MODEL: model, ANTHROPIC_DEFAULT_OPUS_MODEL: model, ANTHROPIC_SMALL_FAST_MODEL: model } : {};
+  // Gateways like OpenCode Go route by a stable session id per conversation.
+  const headers = sessionId ? { ANTHROPIC_CUSTOM_HEADERS: `x-opencode-session: ${sessionId}` } : {};
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
@@ -204,7 +215,8 @@ export const claudeRunner: AgentRunner = async ({ prompt, systemPrompt: system, 
         // No settings, skills, hooks or MCP servers from the host: only what is set here.
         settingSources: [],
         // The agent's processes see the model key and nothing else: never the delivery token.
-        env: agentEnv(process.env, `${cwd}.home`),
+        env: { ...agentEnv(process.env, `${cwd}.home`), ...modelEnv, ...headers },
+        ...(model ? { model } : {}),
         tools: AGENT_TOOLS,
         // Every tool call goes through the policy, including the ones that would not ask for permission.
         hooks: {
@@ -297,7 +309,7 @@ export async function defiDueDiligenceJob(text: string, options: { taskId: strin
     ].join("\n");
     const output = await (options.runner ?? claudeRunner)({
       prompt, systemPrompt: systemPrompt(today), cwd: workDir, timeoutMs: options.timeoutMs, policy: toolPolicy(workDir, options.skillDir),
-      schema: outputJsonSchema(), signal: options.signal,
+      schema: outputJsonSchema(), signal: options.signal, sessionId: `euthyna-${options.taskId}`,
     });
     const { markdown, report } = checkReport(output, options.secrets ?? secretValues(process.env));
     return { markdown, json: report };
