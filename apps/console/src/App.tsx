@@ -18,6 +18,8 @@ import { SuppliersPage } from "./routes/SuppliersPage.js";
 import { SettingsPage } from "./routes/SettingsPage.js";
 import { CompanyPublicPage } from "./routes/public/CompanyPublicPage.js";
 import { ExplorePage } from "./routes/public/ExplorePage.js";
+import { AtlantisLanding } from "./routes/public/atlantis/AtlantisLanding.js";
+import { WhitepaperPage } from "./routes/public/atlantis/WhitepaperPage.js";
 import { MarketPage } from "./routes/public/MarketPage.js";
 import { MarketTaskPage } from "./routes/public/MarketTaskPage.js";
 import { MarketConsolePage } from "./routes/MarketConsolePage.js";
@@ -46,8 +48,9 @@ export function App() {
       <BrowserRouter>
         <Routes>
           {/* Public pages: read from NEAR, no sign-in. */}
-          <Route path="/" element={<ExplorePage />} />
-          <Route path="/explore" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<AtlantisLanding />} />
+          <Route path="/whitepaper" element={<WhitepaperPage />} />
+          <Route path="/explore" element={<ExplorePage />} />
           <Route path="/c/:dao" element={<CompanyPublicPage />} />
           <Route path="/market" element={<MarketPage />} />
           <Route path="/market/task/:id" element={<MarketTaskPage />} />

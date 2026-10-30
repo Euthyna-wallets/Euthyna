@@ -1,0 +1,59 @@
+# Claims and their proof
+
+Every statement on the public site (`/`, `/whitepaper`) and what proves it. Status:
+
+- **Testnet**: done on a testnet, with a transaction hash or a live read in this repository.
+- **Code**: implemented and covered by tests here, not yet shown with a hash in this repository.
+- **Reported**: stated in the whitepaper (Oct 29, 2026) as run on testnet; the transaction hash is not in this repository yet. Add it, then the status becomes Testnet.
+- **NEXT**: not built. The site labels it NEXT or PLANNED.
+
+## The infrastructure
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| The vault account has no access key; the company wallet has no private key, NEAR MPC signs only what the vault asks | Testnet | `view_access_key_list` on the vault; [docs/shares.md](./docs/shares.md); the company page `/c/<dao>` reads it live |
+| The agent holds a NEAR key that can only call the vault's agent methods | Code | Method list in [Architecture.md](./Architecture.md); `packages/sdk/src/index.ts` |
+| A role pins chain, contract, function and calldata conditions, with budgets that refill, delays, co-signature thresholds, velocity limits | Code | `contracts/vault/src/types.rs`, `contracts/omniroles-conditions`, `contracts/tests` |
+| Rule changes: DAO vote, delay, council veto; the council pauses all agents, only a vote resumes | Code | `contracts/tests/tests/dao_governance.rs`, `contracts/tests/tests/attacks.rs` |
+| `check_operation` answers allowed or refused with a reason, without reserving anything | Code | `contracts/vault/src/lib.rs`; `pnpm attack:testnet` calls it on a live vault |
+| Settlement uses an MPC attestation of the finalized transaction, not a server; the API is optional for execution | Code | `contracts/vault/src/foreign.rs`, `contracts/tests/tests/settlement.rs`, [Architecture.md](./Architecture.md) |
+| 45 attacks, 45 refused | Code | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
+| Vault versions published on Nomos by hash and upgraded by DAO vote, state kept | Code | `contracts/tests` (upgrade tests); the whitepaper reports three versions live on testnet |
+| Roles for payments, Uniswap swaps, Aave lending, WETH wrapping, Solana transfers, NEAR token transfers, revenue sharing | Code | `packages/sdk/src/roles.ts`, `contracts/omniroles-conditions/src/presets.rs` |
+| Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
+
+## Chains
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| Base Sepolia: payments signed by MPC and broadcast | Testnet | [docs/shares.md](./docs/shares.md), [docs/vault-testnet.md](./docs/vault-testnet.md) |
+| Solana devnet: the vault builds the transaction, MPC signs ed25519, MPC attests finality | Code, Reported | `contracts/vault/src/solana.rs`, `packages/sdk/src/solana.ts` and tests; whitepaper reports an 18 second devnet transfer. **Add the signature to the docs.** |
+| Ethereum Sepolia | Code, Reported | API, SDK and console support chain 11155111 (`apps/api/src/omniroles.ts`). The MPC settlement table in `contracts/vault/src/foreign.rs` lists Base, Arbitrum, BNB, Polygon and Avalanche, **not Ethereum**. Confirm how Ethereum settles and add a hash. |
+| Arbitrum, BSC, Plasma, Tron, Bitcoin | NEXT | Whitepaper, "Chains" and "Next". Arbitrum, BNB, Polygon and Avalanche are mapped in `foreign.rs` for settlement, not demonstrated. |
+
+## Recovery
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| Recovery of a member's NEAR account with passkey, ZK Email, ZKPassport or a trusted contact, 2 factors, 48 to 72 hour delay | NEXT | Whitepaper, "Recovery and identity (planned)". No contract or client code in the repository. |
+| Company last-resort recovery by a director's ZKPassport proof, 14 to 30 day delay | NEXT | Same |
+
+## Atlantis (built with EUTHYNA)
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| A company is a Sputnik DAO with a keyless vault from Nomos | Code | `contracts/dao-factory`, `apps/console/src/routes/OnboardingPage.tsx` |
+| Shares sold for NEAR; revenue goes to the holders who voted | Testnet | [docs/shares.md](./docs/shares.md) |
+| An agent sends revenue through Omni Bridge to the shares contract, and nowhere else | Testnet | [docs/shares.md](./docs/shares.md) |
+| Companies are listed in a registry by DAO vote; a visitor inspects a company without a wallet | Testnet | [docs/registry.md](./docs/registry.md), [docs/explore.md](./docs/explore.md) |
+| The Atlantis map on `/` shows companies read from the registry; when it is empty or unreachable it shows labelled examples | Code | `apps/console/src/routes/public/atlantis/AtlantisLanding.tsx` |
+
+## Distribution
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| `npx -y @euthyna/mcp` | NEXT | `npm view @euthyna/mcp` returns 404 on Oct 30, 2026. Run the server from the repository for now. |
+
+## Outside sources
+
+See the whitepaper's "The problem" and "Sources": Chainalysis (via Benzinga and PaymentsNext), NCC Group on the Bybit hack.
