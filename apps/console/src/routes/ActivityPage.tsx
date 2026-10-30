@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
+import { cardAccountIdOf } from "@mandateos/sdk/roles";
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { Icon } from "../components/ops.js";
 import { PageState, Status, short } from "../components/ui.js";
-import { OUTCOME_LABEL, dayLabel, entriesOf, roleName, timeOf, type Entry } from "../lib/money.js";
+import { marketConsole } from "../lib/market.js";
+import { OUTCOME_LABEL, dayLabel, entriesOf, marketEntriesOf, roleName, timeOf, type Entry } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type Sentence, type WalletIntegrity } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -23,10 +26,18 @@ export function ActivityPage() {
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), staleTime: 30_000 });
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | null>(null);
-  const all = entriesOf(query.data);
+  // Market rows are optional: a company that never sold or bought just has none.
+  const sales = useQuery({ queryKey: ["market-sales"], queryFn: marketConsole.sales, retry: false, refetchInterval: 15_000 });
+  const purchases = useQuery({ queryKey: ["market-purchases"], queryFn: marketConsole.purchases, retry: false, refetchInterval: 15_000 });
+  const all = [...entriesOf(query.data), ...marketEntriesOf(sales.data?.sales, purchases.data?.purchases)].sort((a, b) => b.at.localeCompare(a.at));
   const count = (value: Filter) => value === "all" ? all.length : all.filter((entry) => matches(entry, value)).length;
   const shown = all.filter((entry) => matches(entry, filter));
-  const nameOf = (actor: string) => (agents.data?.agents ?? []).find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 18);
+  const cardOf = (account: string) => { try { return cardAccountIdOf(account); } catch { return null; } };
+  const nameOf = (actor: string) => {
+    const agent = (agents.data?.agents ?? []).find((item) => item.nearAccountId === actor || item.name === actor || cardOf(item.nearAccountId) === actor);
+    if (!agent) return short(actor, 18);
+    return agent.nearAccountId === actor || agent.name === actor ? agent.name : `${agent.name}'s card`;
+  };
   const groups: Array<[string, Entry[]]> = [];
   for (const entry of shown) {
     const label = dayLabel(entry.at);
@@ -39,7 +50,7 @@ export function ActivityPage() {
       <header className="page-head">
         <div>
           <h1>Activity</h1>
-          <p className="muted">Every payment, swap and deposit made with company money, and every request the rules refused.</p>
+          <p className="muted">Every payment, swap and deposit made with company money, every market sale and purchase, and every request the rules refused.</p>
         </div>
       </header>
 
@@ -64,12 +75,12 @@ export function ActivityPage() {
                     <span className={`tx-icon ${entry.outcome}`}><Icon name={entry.outcome === "refused" || entry.outcome === "failed" ? "cross" : entry.outcome === "pending" ? "setup" : "check"} size={15} /></span>
                     <span className="tx-text">
                       <strong>{entry.text}</strong>
-                      <span>{nameOf(entry.actor)}{entry.role ? ` · ${roleName(entry.role)}` : entry.operation ? " · voted by members" : ""}{entry.chain ? ` · ${entry.chain}` : ""} · {timeOf(entry.at)}</span>
+                      <span>{nameOf(entry.actor)}{entry.market ? (entry.market.kind === "sale" ? " · market sale" : " · market purchase") : entry.role ? ` · ${roleName(entry.role)}` : entry.operation ? " · voted by members" : ""}{entry.chain ? ` · ${entry.chain}` : ""} · {timeOf(entry.at)}</span>
                       {entry.outcome === "refused" && entry.reason ? <span className="tx-reason">Refused: {humanReason(entry.reason)}</span> : null}
                     </span>
                     <span className={`outcome outcome-${entry.outcome}`}>{OUTCOME_LABEL[entry.outcome]}</span>
                   </button>
-                  {open === entry.id ? <Proof entry={entry} actor={nameOf(entry.actor)} /> : null}
+                  {open === entry.id ? (entry.market ? <MarketProof entry={entry} /> : <Proof entry={entry} actor={nameOf(entry.actor)} />) : null}
                 </li>
               ))}
             </ul>
@@ -122,6 +133,29 @@ function Proof({ entry, actor }: { entry: Entry; actor: string }) {
       {entry.request ? <AskMembers request={entry.request} title={`${actor}: ${entry.text}`} /> : null}
     </div>
   );
+}
+
+const PAYMENT_TEXT: Record<string, string> = {
+  held: "Buyer's signed cheque held by the market, paid on delivery",
+  settling: "Delivered: the market is relaying the cheque",
+  settled: "Paid on NEAR after delivery",
+  prepaid: "Paid upfront from a browser wallet, checked on NEAR",
+  failed: "The cheque could not be paid (balance or nonce changed)",
+  expired: "Not delivered in time: the cheque was never relayed",
+};
+
+/** A market task: who, what, and where the money is. */
+function MarketProof({ entry }: { entry: Entry }) {
+  const { kind, sale } = entry.market!;
+  const rows: Array<[string, ReactNode]> = [
+    [kind === "sale" ? "Your listing" : "Seller's listing", <span className="mono">@{sale.handle}</span>],
+    ["Buyer", <span className="mono">{sale.buyer}</span>],
+    ["Task", sale.state === "completed_unpaid" ? "Delivered, not paid" : sale.state.charAt(0).toUpperCase() + sale.state.slice(1)],
+    ["Payment", sale.holdState ? PAYMENT_TEXT[sale.holdState] ?? sale.holdState : "No payment held"],
+  ];
+  if (sale.settleTxHash) rows.push(["Paid on NEAR", <a href={`${NEAR_EXPLORER}/txns/${sale.settleTxHash}`} target="_blank" rel="noreferrer">{short(sale.settleTxHash)} ↗</a>]);
+  rows.push(["Result", <Link to={`/market/task/${sale.taskId}`}>Open the task</Link>]);
+  return <div className="proof"><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>;
 }
 
 /** One line: did anything leave the wallets outside the vault? (nonce on chain = nonce signed by the vault) */
