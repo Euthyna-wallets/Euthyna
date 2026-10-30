@@ -90,6 +90,10 @@ export class MarketBuyer {
     if (quote.status !== 402) throw new Error(`market: expected a payment request (402), got ${quote.status}: ${JSON.stringify(quote.body).slice(0, 300)}`);
     const requirement = (quote.body.accepts as PaymentRequirement[] | undefined)?.[0];
     if (!requirement || quote.body.x402Version !== 2 || requirement.scheme !== "exact") throw new Error("market: unsupported payment request");
+    // A seller's 402 is untrusted: a whole price, a sane timeout (it sets the cheque's life).
+    if (typeof requirement.amount !== "string" || !/^[1-9]\d{0,38}$/.test(requirement.amount)) throw new Error("market: the payment request has no valid amount");
+    if (!Number.isInteger(requirement.maxTimeoutSeconds) || requirement.maxTimeoutSeconds < 1 || requirement.maxTimeoutSeconds > 90_000) throw new Error("market: the payment request has no valid maxTimeoutSeconds");
+    if (typeof requirement.payTo !== "string" || typeof requirement.asset !== "string") throw new Error("market: unsupported payment request");
     const price = BigInt(requirement.amount);
     if (price > input.maxPriceAtomic) return { outcome: "refused" as const, reason: `the price ${requirement.amount} is above max_price ${input.maxPriceAtomic}` };
     const card = await this.card.info();

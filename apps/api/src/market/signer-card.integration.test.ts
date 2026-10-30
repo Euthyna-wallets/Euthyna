@@ -5,6 +5,8 @@
  * points at a built signer (cargo build in euthyna-signer).
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +25,9 @@ const VAULT = "megaai.nomos.euthyna.testnet";
 
 describe.skipIf(!bin)("market buyer with the real euthyna-signer", () => {
   let daemon: ChildProcess | null = null;
-  afterAll(() => daemon?.kill());
+  // The signer reads the chain height before signing; a stand-in NEAR RPC at height 1000.
+  const chain = createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { header: { height: 1_000 } } })));
+  afterAll(() => { daemon?.kill(); chain.close(); });
 
   it("signs a cheque the gateway accepts, and refuses one above the card's cap", async () => {
     const dir = mkdtempSync(join(tmpdir(), "signer-"));
@@ -39,7 +43,9 @@ describe.skipIf(!bin)("market buyer with the real euthyna-signer", () => {
     chmodSync(record, 0o600);
     const socketPath = join(dir, "signer.sock");
     const config = join(dir, "config.json");
-    writeFileSync(config, JSON.stringify({ socket_path: socketPath, allowed_uids: [process.getuid!()], state_dir: state, audit_log: join(dir, "audit.log"), rate_per_minute: 100 }));
+    await new Promise<void>((resolve) => chain.listen(0, "127.0.0.1", resolve));
+    const nearRpcUrl = `http://127.0.0.1:${(chain.address() as AddressInfo).port}`;
+    writeFileSync(config, JSON.stringify({ socket_path: socketPath, allowed_uids: [process.getuid!()], state_dir: state, audit_log: join(dir, "audit.log"), rate_per_minute: 100, near_rpc_url: nearRpcUrl }));
     daemon = spawn(bin!, ["--config", config, "serve"], { stdio: "ignore" });
     const socket = new SignerSocket(socketPath);
     for (let i = 0; i < 50; i += 1) {
@@ -75,6 +81,12 @@ describe.skipIf(!bin)("market buyer with the real euthyna-signer", () => {
     expect(cheque).toMatchObject({ senderId: CARD, receiverId: USDC, nonce: 42n, signatureValid: true });
 
     // Above the card's cap: the buyer refuses before asking, and the signer would refuse anyway.
+    // A seller's 402 with a broken timeout or price is not signed at all.
+    for (const broken of [{ maxTimeoutSeconds: 1e9 }, { maxTimeoutSeconds: 2.5 }, { amount: "0" }, { amount: "1e6" }]) {
+      const bad = (async () => new Response(JSON.stringify({ x402Version: 2, accepts: [{ ...requirement("2000000"), ...broken }] }), { status: 402 })) as typeof fetch;
+      await expect(new MarketBuyer("https://market.example", card, rpc, bad).hire({ handle: "defi-due-diligence", task: "a", maxPriceAtomic: 3_000_000n })).rejects.toThrow(/valid/);
+    }
+
     price = "6000000";
     await expect(buyer.hire({ handle: "defi-due-diligence", task: "aave-v3", maxPriceAtomic: 10_000_000n })).resolves.toMatchObject({ outcome: "refused", reason: expect.stringMatching(/cap/) });
   }, 30_000);

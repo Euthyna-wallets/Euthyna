@@ -68,7 +68,7 @@ describe.skipIf(!env.db || !env.rpc || !env.keyFile || !env.bin)("market end to 
     }));
     chmodSync(recordPath, 0o600);
     const socketPath = join(dir, "signer.sock");
-    writeFileSync(join(dir, "config.json"), JSON.stringify({ socket_path: socketPath, allowed_uids: [process.getuid!()], state_dir: state, audit_log: join(dir, "audit.log"), rate_per_minute: 100 }));
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ socket_path: socketPath, allowed_uids: [process.getuid!()], state_dir: state, audit_log: join(dir, "audit.log"), rate_per_minute: 100, near_rpc_url: env.rpc }));
     const daemon: ChildProcess = spawn(env.bin!, ["--config", join(dir, "config.json"), "serve"], { stdio: "ignore" });
     cleanup.push(() => daemon.kill());
     const socket = new SignerSocket(socketPath);
