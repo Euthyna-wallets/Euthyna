@@ -21,6 +21,7 @@ import { ExplorePage } from "./routes/public/ExplorePage.js";
 import { MarketPage } from "./routes/public/MarketPage.js";
 import { MarketTaskPage } from "./routes/public/MarketTaskPage.js";
 import { MarketConsolePage } from "./routes/MarketConsolePage.js";
+import { RecoverPage } from "./routes/public/RecoverPage.js";
 
 function Gate() {
   const session = authClient.useSession();
@@ -51,6 +52,8 @@ export function App() {
           <Route path="/c/:dao" element={<CompanyPublicPage />} />
           <Route path="/market" element={<MarketPage />} />
           <Route path="/market/task/:id" element={<MarketTaskPage />} />
+          {/* Signed in, but not a member yet: the new account of a founder. */}
+          <Route path="/recover" element={<RecoverPage />} />
           <Route element={<Gate />}>
             <Route element={<Layout />}>
               <Route path="/overview" element={<OverviewPage />} />

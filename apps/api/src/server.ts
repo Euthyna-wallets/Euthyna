@@ -16,6 +16,8 @@ import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
+import { ZkPassportVerifier } from "./recovery/passport.js";
+import { RecoveryService } from "./recovery/service.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -103,6 +105,17 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
   : undefined;
 if (market) setInterval(() => void market.expire().catch((error: unknown) => console.warn(`market expiry: ${String(error)}`)), 60_000).unref();
 
+// Founder seat recovery: ZKPassport proofs, verified here; the members' vote changes the seat.
+const recovery = new RecoveryService(prisma, new ZkPassportVerifier({
+  domain: env.ZKPASSPORT_DOMAIN ?? new URL(env.CONSOLE_ORIGIN).hostname,
+  devMode: env.ZKPASSPORT_DEV_MODE ? env.ZKPASSPORT_DEV_MODE === "1" : env.NEAR_NETWORK_ID === "testnet",
+  sepoliaRpcUrl: env.ETHEREUM_SEPOLIA_RPC_URL,
+}), {
+  councilOf: (organizationId) => omniroles.councilOf(organizationId),
+  organizationOfDao: (daoAccountId) => omniroles.organizationOfDao(daoAccountId),
+  membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
+}, env.RECOVERY_DELAY_SECONDS * 1000);
+
 const app = createApp({
   near,
   auth,
@@ -117,6 +130,7 @@ const app = createApp({
   market,
   publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
   marketTrustProxy: env.MARKET_TRUST_PROXY,
+  recovery,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

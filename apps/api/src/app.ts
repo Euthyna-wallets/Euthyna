@@ -4,6 +4,8 @@ import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
 import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
+import type { PassportEvidence } from "./recovery/passport.js";
+import { RecoveryError, type RecoveryService } from "./recovery/service.js";
 import { cardAccountIdOf } from "@mandateos/sdk";
 
 import { proposedAgentAccountId } from "@mandateos/sdk";
@@ -118,6 +120,8 @@ export interface AppDependencies {
   publicBaseUrl?: string;
   /** Trust the reverse proxy's X-Forwarded-For for market rate limits. */
   marketTrustProxy?: boolean;
+  /** Founder seat recovery with ZKPassport; absent when the company feature is off. */
+  recovery?: RecoveryService | undefined;
 }
 
 function isAdmin(identity: ConsoleIdentity): boolean {
@@ -223,6 +227,7 @@ export function createApp({
   market,
   publicBaseUrl,
   marketTrustProxy,
+  recovery,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -297,6 +302,7 @@ export function createApp({
   app.use("*", (context, next) => (isPublicMarket(context.req.path) ? publicCors(context, next) : consoleCors(context, next)));
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
+  app.use("/v1/recovery/*", requireConsoleRequest(consoleOrigin));
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     const path = context.req.path;
@@ -986,8 +992,56 @@ export function createApp({
     return context.json(result, result.created ? 201 : 200);
   });
 
+  if (recovery) {
+    const recoveryLimiter = new MemoryRateLimiter(10, 60 * 60_000);
+    const evidenceSchema = z.object({
+      proofs: z.array(z.unknown()).min(1).max(12),
+      query: z.record(z.string(), z.unknown()),
+      result: z.record(z.string(), z.unknown()),
+    }) as z.ZodType<PassportEvidence>;
+    const recoveryId = (context: AppContext) => z.string().uuid().parse(context.req.param("id"));
+    const limited = (key: string) => {
+      if (!recoveryLimiter.allow(key)) throw new HTTPException(429, { message: "rate limit exceeded" });
+    };
+    app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await recovery.list(context.get("console").organizationId)));
+    app.post("/v1/console/recovery/enroll", requireConsole(auth, consoleLimiter), async (context) => {
+      const identity = context.get("console");
+      limited(`recovery-enroll:${identity.userId}`);
+      const input = await parseJson(context, z.object({ evidence: evidenceSchema }));
+      const result = await recovery.enroll(identity.organizationId, identity.nearAccountId, input.evidence);
+      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.enrolled", targetType: "near_account", targetId: result.enrolled, metadata: { devMode: result.devMode } });
+      return context.json(result);
+    });
+    app.get("/v1/console/recovery/:id/evidence", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await recovery.evidence(context.get("console").organizationId, recoveryId(context))));
+    app.post("/v1/console/recovery/:id/cancel", requireConsole(auth, consoleLimiter), async (context) => {
+      const identity = context.get("console");
+      const result = await recovery.cancel(identity.organizationId, recoveryId(context), identity.nearAccountId);
+      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.cancelled", targetType: "seat_recovery", targetId: result.id, metadata: {} });
+      return context.json(result);
+    });
+    app.post("/v1/console/recovery/:id/proposals", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await recovery.proposals(context.get("console").organizationId, recoveryId(context))));
+    // The new account is not a member yet: any signed-in NEAR account may ask, with the right proof.
+    app.post("/v1/recovery/requests", async (context) => {
+      const account = await auth.identifyNearAccount(context.req.raw.headers);
+      if (!account) throw new HTTPException(401, { message: "sign in with the new NEAR account" });
+      limited(`recovery-request:${account}`);
+      const input = await parseJson(context, z.object({
+        daoAccountId: z.string().min(2).max(64),
+        lostAccountId: z.string().min(2).max(64),
+        evidence: evidenceSchema,
+      }));
+      return context.json(await recovery.request({ ...input, newAccount: account }), 201);
+    });
+  }
+
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof RecoveryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
     if (error instanceof CardError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }

@@ -424,6 +424,19 @@ export class OmniRolesService {
   // Members: NEAR accounts entered by an admin before the DAO exists
   // -------------------------------------------------------------------------
 
+  /** The DAO's council members as on chain (seat recovery). */
+  async councilOf(organizationId: string): Promise<string[]> {
+    const treasury = await this.requireTreasury(organizationId);
+    const policy = await this.near.viewFunction<{ roles: Array<{ name: string; kind: unknown }> }>(treasury.daoAccountId, "get_policy", {});
+    return policy.roles.filter((role) => role.name === "council").flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+  }
+
+  /** The company that owns this DAO, once its treasury is active. */
+  async organizationOfDao(daoAccountId: string): Promise<string | null> {
+    const treasury = await this.prisma.treasury.findFirst({ where: { daoAccountId, status: "active" } });
+    return treasury?.organizationId ?? null;
+  }
+
   /** The company treasury, for routes that need the vault (agents). */
   async activeTreasury(organizationId: string) {
     const treasury = await this.treasury(organizationId);

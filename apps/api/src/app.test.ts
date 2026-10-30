@@ -115,6 +115,11 @@ class FakeAuth implements AuthGateway {
   }
 
 
+  identifyNearAccount(headers: Headers): Promise<string | null> {
+    const cookie = headers.get("cookie");
+    return Promise.resolve(cookie ? (this.consoles.get(cookie)?.nearAccountId ?? null) : null);
+  }
+
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {
     const cookie = headers.get("cookie");
     return Promise.resolve(cookie ? (this.consoles.get(cookie) ?? null) : null);

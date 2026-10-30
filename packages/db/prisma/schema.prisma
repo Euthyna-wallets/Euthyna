@@ -103,6 +103,8 @@ model Organization {
   agentProvisionings      AgentProvisioning[]
   agentPairings           AgentPairing[]
   marketListings          MarketListing[]
+  passportEnrollments     PassportEnrollment[]
+  seatRecoveries          SeatRecovery[]
 
   @@unique([slug])
   @@map("organization")
@@ -538,4 +540,43 @@ model MarketRating {
   createdAt DateTime   @default(now())
 
   @@map("market_rating")
+}
+
+/// A founder's ID, enrolled for seat recovery: only a hash of ZKPassport's scoped unique identifier.
+model PassportEnrollment {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nearAccountId  String
+  /// sha256(scope + ":" + uniqueIdentifier), hex. Never the identifier, never personal data.
+  identityHash   String
+  /// The proofs and the query, public: anyone can verify them again (Ethereum Sepolia verifier).
+  evidence       Json
+  devMode        Boolean
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, nearAccountId])
+  @@map("passport_enrollment")
+}
+
+/// A new account asks for the seat of a founder who lost theirs, with a proof from the same ID.
+model SeatRecovery {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lostAccountId  String
+  newAccountId   String
+  identityHash   String
+  evidence       Json
+  devMode        Boolean
+  /// waiting | cancelled | proposed | done
+  state          String       @default("waiting")
+  /// The founder who still holds the lost account can cancel until then; the members' vote opens after it.
+  notBefore      DateTime
+  cancelledBy    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, state])
+  @@map("seat_recovery")
 }

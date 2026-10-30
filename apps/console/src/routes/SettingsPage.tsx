@@ -6,6 +6,7 @@ import { omni } from "../omniroles-api.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 import { TreasuryChecks } from "./TreasurySetup.js";
 import { DirectoryCard } from "./DirectoryCard.js";
+import { RecoveryCard } from "./RecoveryCard.js";
 import { VersionCard } from "./VersionCard.js";
 
 export function SettingsPage() {
@@ -43,6 +44,7 @@ export function SettingsPage() {
           <p className="muted">Approved recipients. Changes need a members' vote.</p>
           <Link className="text-action" to="/suppliers">Manage suppliers →</Link>
         </Card>
+        {treasury?.status === "active" ? <RecoveryCard /> : null}
         <VersionCard />
         <DirectoryCard />
       </div>

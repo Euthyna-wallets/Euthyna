@@ -21,6 +21,7 @@
     "@mandateos/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",
     "@noble/ed25519": "^2.2.3",
+    "@zkpassport/sdk": "0.18.2",
     "better-auth": "^1.7.12",
     "bs58": "^5",
     "hono": "^4.7.11",
