@@ -18,6 +18,8 @@ RUN apt-get update \
 ENV NODE_ENV=production WORK_DIR=/work HOME=/home/worker
 WORKDIR /app
 COPY --from=build --chown=root:root /app /app
+# The host umask may strip read access; the worker runs as an unprivileged user.
+RUN chmod 0755 /app/apps/market-worker/docker-entrypoint.sh
 USER worker
 WORKDIR /app/apps/market-worker
 CMD ["node", "--import", "tsx", "src/main.ts"]
