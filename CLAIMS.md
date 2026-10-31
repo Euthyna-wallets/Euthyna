@@ -35,7 +35,8 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 
 | Claim | Status | Proof |
 | --- | --- | --- |
-| Recovery of a member's NEAR account with passkey, ZK Email, ZKPassport or a trusted contact, 2 factors, 48 to 72 hour delay | NEXT | Whitepaper, "Recovery and identity (planned)". No contract or client code in the repository. |
+| A founder who lost their NEAR account gets their DAO seat back: ZK Email proof of the enrolled mailbox (DKIM, proved in the browser, address never revealed), 48 hour cancel window for the lost account, then the founders' vote (DAO policy and vault council) | Testnet | [docs/recovery.md](./docs/recovery.md); `circuits/email-recovery`, `apps/api/src/recovery`; browser run of 2026-10-31 on `e2e-buyer-73429.sputnikv2.testnet` (proposals #3 and #4: `eut-newthird` replaced by `eut-fourth` in the DAO and the vault council). The test used a test mail domain signed by mailauth; a real iCloud email is proved and verified in `apps/api/src/recovery/email.test.ts`. |
+| Recovery of a member's NEAR account with passkey, ZKPassport or a trusted contact, 2 factors | NEXT | Whitepaper, "Recovery and identity (planned)". No code yet. |
 | Company last-resort recovery by a director's ZKPassport proof, 14 to 30 day delay | NEXT | Same |
 
 ## Atlantis (built with EUTHYNA)
