@@ -1,26 +1,30 @@
 /**
- * Seat recovery against PostgreSQL, with a stand-in for the ZK verifier (the real one is
- * covered by passport.test.ts and, with a proof made by the ZKPassport app, by
- * passport.proof.integration.test.ts). TEST_DATABASE_URL=… vitest run src/recovery
+ * Seat recovery against PostgreSQL, with a stand-in for the ZK Email verifier (the real
+ * one is covered by email.test.ts and email.prove.integration.test.ts).
+ * TEST_DATABASE_URL=… vitest run src/recovery
  */
 import { randomUUID } from "node:crypto";
 
 import { PrismaClient } from "@mandateos/db";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { assertBoundTo, identityHash, type PassportEvidence, type PassportVerifier } from "./passport.js";
+import type { RecoveryAction } from "@mandateos/sdk/email-proof";
+
+import { IdentityError, type IdentityVerifier } from "./email.js";
 import { RecoveryService } from "./service.js";
 
 const url = process.env.TEST_DATABASE_URL;
 
-/** The ID is evidence.result.id; the binding checks are the real ones. */
-const verifier: PassportVerifier = {
-  async verify(evidence: PassportEvidence, account: string) {
-    assertBoundTo(evidence, account);
-    return { identityHash: identityHash(String(evidence.result.id)), devMode: true };
+type Fake = { mailbox: string; subject: string };
+/** The mailbox is the identity; the subject binding is checked as the real verifier does. */
+const verifier: IdentityVerifier = {
+  async verify(evidence: unknown, account: string, action: RecoveryAction) {
+    const { mailbox, subject } = evidence as Fake;
+    if (subject !== `Euthyna ${action} near:${account}`) throw new IdentityError("email_not_bound", "wrong subject");
+    return { identityHash: `hash-of-${mailbox}`, method: "email:test" };
   },
 };
-const proof = (account: string, id: string): PassportEvidence => ({ proofs: [{ name: "outer" }], query: { bind: { custom_data: `near:${account}` } }, result: { id, bind: { custom_data: `near:${account}` } } });
+const proof = (account: string, mailbox: string, action: RecoveryAction = account.startsWith("carol.") || account.startsWith("alice.") || account.startsWith("eve.") ? "enroll" : "recovery"): Fake => ({ mailbox, subject: `Euthyna ${action} near:${account}` });
 
 describe.skipIf(!url)("founder seat recovery", () => {
   // describe.skipIf still runs this body: build the client only with a database.
@@ -45,15 +49,16 @@ describe.skipIf(!url)("founder seat recovery", () => {
   it("replaces a lost founder by a vote, only with the enrolled ID, after the cancel window", async () => {
     await prisma.organization.create({ data: { id: org, name: "Recovery Co", slug: `recovery-${org.slice(0, 8)}`, createdAt: new Date() } });
     await expect(service.enroll(org, "eve.testnet", proof("eve.testnet", "eve-id"))).rejects.toMatchObject({ code: "not_a_founder" });
-    await expect(service.enroll(org, "carol.testnet", proof("bob.testnet", "carol-id"))).rejects.toMatchObject({ code: "passport_not_bound" });
-    await expect(service.enroll(org, "carol.testnet", proof("carol.testnet", "carol-id"))).resolves.toEqual({ enrolled: "carol.testnet", devMode: true });
+    await expect(service.enroll(org, "carol.testnet", proof("bob.testnet", "carol-id"))).rejects.toMatchObject({ code: "email_not_bound" });
+    await expect(service.enroll(org, "carol.testnet", proof("carol.testnet", "carol-id"))).resolves.toEqual({ enrolled: "carol.testnet", method: "email:test" });
 
-    const ask = (newAccount: string, id: string, lost = "carol.testnet") => service.request({ daoAccountId: dao, lostAccountId: lost, newAccount, evidence: proof(newAccount, id) });
-    await expect(ask("mallory.testnet", "mallory-id")).rejects.toMatchObject({ code: "different_id" });
+    const ask = (newAccount: string, id: string, lost = "carol.testnet") => service.request({ daoAccountId: dao, lostAccountId: lost, newAccount, evidence: proof(newAccount, id, "recovery") });
+    await expect(ask("mallory.testnet", "mallory-id")).rejects.toMatchObject({ code: "different_mailbox" });
     await expect(ask("carol2.testnet", "carol-id", "bob.testnet")).rejects.toMatchObject({ code: "not_enrolled" });
     await expect(ask("bob.testnet", "carol-id")).rejects.toMatchObject({ code: "already_a_founder" });
-    // A proof bound to another account cannot be reused for this one.
-    await expect(service.request({ daoAccountId: dao, lostAccountId: "carol.testnet", newAccount: "carol2.testnet", evidence: proof("mallory.testnet", "carol-id") })).rejects.toMatchObject({ code: "passport_not_bound" });
+    // An enrollment email cannot be used to ask for a seat, and a proof bound to another account cannot be reused.
+    await expect(service.request({ daoAccountId: dao, lostAccountId: "carol.testnet", newAccount: "carol2.testnet", evidence: proof("carol2.testnet", "carol-id", "enroll") })).rejects.toMatchObject({ code: "email_not_bound" });
+    await expect(service.request({ daoAccountId: dao, lostAccountId: "carol.testnet", newAccount: "carol2.testnet", evidence: proof("mallory.testnet", "carol-id", "recovery") })).rejects.toMatchObject({ code: "email_not_bound" });
 
     const recovery = await ask("carol2.testnet", "carol-id");
     expect(recovery).toMatchObject({ state: "waiting", lostAccountId: "carol.testnet", newAccountId: "carol2.testnet", notBefore: "2026-11-03T10:00:00.000Z" });
@@ -78,8 +83,8 @@ describe.skipIf(!url)("founder seat recovery", () => {
     council = ["alice.testnet", "bob.testnet", "carol.testnet"];
     now = new Date("2026-11-10T10:00:00Z");
     await service.enroll(org, "alice.testnet", proof("alice.testnet", "alice-id"));
-    // Someone with Alice's passport (stolen) tries to take her seat.
-    const theft = await service.request({ daoAccountId: dao, lostAccountId: "alice.testnet", newAccount: "thief.testnet", evidence: proof("thief.testnet", "alice-id") });
+    // Someone who took over Alice's mailbox tries to take her seat.
+    const theft = await service.request({ daoAccountId: dao, lostAccountId: "alice.testnet", newAccount: "thief.testnet", evidence: proof("thief.testnet", "alice-id", "recovery") });
     await expect(service.cancel(org, theft.id, "alice.testnet")).resolves.toMatchObject({ state: "cancelled", cancelledBy: "alice.testnet" });
     now = new Date("2026-11-20T10:00:00Z");
     await expect(service.proposals(org, theft.id)).rejects.toMatchObject({ code: "recovery_closed" });

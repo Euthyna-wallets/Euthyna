@@ -16,7 +16,7 @@ import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
-import { ZkPassportVerifier } from "./recovery/passport.js";
+import { dkimKeys, EmailVerifier } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
 
 const env = loadEnv();
@@ -105,16 +105,16 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
   : undefined;
 if (market) setInterval(() => void market.expire().catch((error: unknown) => console.warn(`market expiry: ${String(error)}`)), 60_000).unref();
 
-// Founder seat recovery: ZKPassport proofs, verified here; the members' vote changes the seat.
-const recovery = new RecoveryService(prisma, new ZkPassportVerifier({
-  domain: env.ZKPASSPORT_DOMAIN ?? new URL(env.CONSOLE_ORIGIN).hostname,
-  devMode: env.ZKPASSPORT_DEV_MODE ? env.ZKPASSPORT_DEV_MODE === "1" : env.NEAR_NETWORK_ID === "testnet",
-  sepoliaRpcUrl: env.ETHEREUM_SEPOLIA_RPC_URL,
-}), {
+// Founder seat recovery: ZK Email proofs, verified here; the members' vote changes the seat.
+const testDkimKeys = env.NEAR_NETWORK_ID === "testnet" && env.RECOVERY_TEST_DKIM_KEYS
+  ? JSON.parse(env.RECOVERY_TEST_DKIM_KEYS) as Record<string, string>
+  : undefined;
+const dkimSource = dkimKeys({ testKeys: testDkimKeys });
+const recovery = new RecoveryService(prisma, new EmailVerifier(dkimSource), {
   councilOf: (organizationId) => omniroles.councilOf(organizationId),
   organizationOfDao: (daoAccountId) => omniroles.organizationOfDao(daoAccountId),
   membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
-}, env.RECOVERY_DELAY_SECONDS * 1000);
+}, env.RECOVERY_DELAY_SECONDS * 1000, undefined, dkimSource);
 
 const app = createApp({
   near,

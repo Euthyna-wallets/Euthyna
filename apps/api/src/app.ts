@@ -4,7 +4,6 @@ import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
 import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
-import type { PassportEvidence } from "./recovery/passport.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
 import { cardAccountIdOf } from "@mandateos/sdk";
 
@@ -120,7 +119,7 @@ export interface AppDependencies {
   publicBaseUrl?: string;
   /** Trust the reverse proxy's X-Forwarded-For for market rate limits. */
   marketTrustProxy?: boolean;
-  /** Founder seat recovery with ZKPassport; absent when the company feature is off. */
+  /** Founder seat recovery with ZK Email; absent when not configured. */
   recovery?: RecoveryService | undefined;
 }
 
@@ -995,10 +994,10 @@ export function createApp({
   if (recovery) {
     const recoveryLimiter = new MemoryRateLimiter(10, 60 * 60_000);
     const evidenceSchema = z.object({
-      proofs: z.array(z.unknown()).min(1).max(12),
-      query: z.record(z.string(), z.unknown()),
-      result: z.record(z.string(), z.unknown()),
-    }) as z.ZodType<PassportEvidence>;
+      proof: z.string().max(40_000),
+      publicInputs: z.array(z.string().max(66)).max(400),
+      selector: z.string().max(63),
+    });
     const recoveryId = (context: AppContext) => z.string().uuid().parse(context.req.param("id"));
     const limited = (key: string) => {
       if (!recoveryLimiter.allow(key)) throw new HTTPException(429, { message: "rate limit exceeded" });
@@ -1010,7 +1009,7 @@ export function createApp({
       limited(`recovery-enroll:${identity.userId}`);
       const input = await parseJson(context, z.object({ evidence: evidenceSchema }));
       const result = await recovery.enroll(identity.organizationId, identity.nearAccountId, input.evidence);
-      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.enrolled", targetType: "near_account", targetId: result.enrolled, metadata: { devMode: result.devMode } });
+      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.enrolled", targetType: "near_account", targetId: result.enrolled, metadata: { method: result.method } });
       return context.json(result);
     });
     app.get("/v1/console/recovery/:id/evidence", requireConsole(auth, consoleLimiter), async (context) =>
@@ -1024,6 +1023,13 @@ export function createApp({
     app.post("/v1/console/recovery/:id/proposals", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await recovery.proposals(context.get("console").organizationId, recoveryId(context))));
     // The new account is not a member yet: any signed-in NEAR account may ask, with the right proof.
+    // The browser builds the proof's inputs with the same DKIM key the API will accept.
+    app.get("/v1/recovery/dkim-key", async (context) => {
+      const domain = (context.req.query("domain") ?? "").toLowerCase();
+      const selector = context.req.query("selector") ?? "";
+      limited(`recovery-dkim:${domain}`);
+      return context.json({ records: await recovery.dkimRecords(domain, selector) });
+    });
     app.post("/v1/recovery/requests", async (context) => {
       const account = await auth.identifyNearAccount(context.req.raw.headers);
       if (!account) throw new HTTPException(401, { message: "sign in with the new NEAR account" });

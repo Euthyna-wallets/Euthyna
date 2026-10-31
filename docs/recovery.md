@@ -1,46 +1,72 @@
-# Founder seat recovery (ZKPassport)
+# Founder seat recovery (ZK Email)
 
 A founder who loses their NEAR account gets their DAO seat back through the other founders' vote. The new
-account proves, with ZKPassport, that it holds the same passport or ID card the founder enrolled. Nothing
-changes a seat by itself.
+account proves, with a zero-knowledge proof of an email, that it controls the same mailbox the founder enrolled.
+Nothing changes a seat by itself.
 
 ## Flow
 
-1. **Enroll** (Settings → Seat recovery). The founder scans a QR code with the ZKPassport app. The proof is
-   bound to `near:<founder account>` and made for the scope `euthyna-recovery`. The API verifies it and keeps
-   `sha256("euthyna-recovery:" + uniqueIdentifier)` plus the proofs, which are public and can be re-verified.
-   It never keeps a name, a number or a birth date. Re-enrolling replaces the old proof, for example after a
-   renewed passport.
-2. **Ask** (`/recover`, signed in with the new account). The person gives the DAO and the lost account and
-   proves their ID again. This time the proof is bound to `near:<new account>`, so it cannot be reused by
-   anyone else. The API checks that it is the enrolled ID.
-3. **Wait.** For `RECOVERY_DELAY_SECONDS` (48 h by default), the holder of the "lost" account can cancel. This
-   covers a stolen passport: the real founder still has their key.
-4. **Vote.** After the wait, any member can submit the two usual votes: the DAO policy (members) and the vault
-   council (`SetCouncil`, with its veto window). Before voting, each member can press **Check the proofs on
-   Ethereum Sepolia**. Their browser asks ZKPassport's verifier contract directly (`verifyProof`,
-   `0xDDeFf76024052D26B78A7Fac66FFbd6fbc5bd9Ad`), so they do not have to trust Euthyna's server.
+1. **Enroll** (Settings → Seat recovery).
+   - The founder sends themself an email with the subject `Euthyna enroll near:<founder account>`, downloads
+     it (`.eml`) and drops it in the page.
+   - The browser proves, with the Noir circuit `circuits/email-recovery`, that the mail provider signed it
+     (DKIM). The proof reveals only a hash of the sender address, the sender's domain and the subject.
+   - The API verifies the proof, checks that the DKIM key is the one the domain publishes, and keeps
+     `sha256("euthyna-email:" + address hash)` with the proof.
+   - The email never leaves the browser.
+2. **Ask** (`/recover`, signed in with the new account). The person proves a second email from the same
+   mailbox, with the subject `Euthyna recovery near:<new account>`. The subject binds the proof to that
+   account, so nobody else can reuse it.
+3. **Wait.** During `RECOVERY_DELAY_SECONDS` (48 h by default), the holder of the "lost" account can cancel.
+   This is the answer to a mailbox takeover: the real founder still has their key.
+4. **Vote.** Any member submits the two usual votes: the DAO policy (members) and the vault council
+   (`SetCouncil`, with its veto window). Before voting, **Check the proofs in my browser** verifies both proofs
+   with the circuit's verification key. It also shows whether the two proofs come from the same mailbox
+   (same address hash).
+
+## What the circuit proves
+
+`circuits/email-recovery/src/main.nr` is built on [zkemail.nr](https://github.com/zkemail/zkemail.nr) v2.0.0,
+which is audited. It checks:
+
+- the 2048-bit RSA DKIM signature over the signed headers; the key is a public input;
+- that the `From` and `Subject` fields are real header fields;
+- that the address is well formed.
+
+It outputs:
+
+- a Pedersen hash of the lowercased address, packed 31 bytes per field;
+- the domain after the last `@`;
+- the subject.
+
+The API accepts the DKIM key only if the domain publishes it: through DNS, then DNS over HTTPS, then
+[ZK Email's archive](https://archive.zk.email) for keys a provider has rotated. So a key from another domain
+cannot vouch for a Gmail address.
+
+Size: 275,542 gates (UltraHonk, bb.js 0.84.0, Noir 1.0.0-beta.5). Proving takes about 40 s in Node with 2
+threads, and about 60 s in a headless browser with 1 thread. Verifying takes under a second with the key.
+
+To rebuild: `node circuits/email-recovery/build.mjs` (needs `nargo` 1.0.0-beta.5). It writes
+`apps/console/public/circuits/email_recovery.json` and `packages/sdk/src/email-recovery-vk.ts`.
 
 ## Trust and limits
 
-- **Verification on Euthyna's server.** The proofs are verified with the SDK's local verifier, never
-  ZKPassport's API, against the certificate and circuit registries on Ethereum Sepolia. No NEAR contract
-  verifies ZKPassport proofs, and NEAR MPC's foreign transaction check does not cover Ethereum Sepolia. The
-  vote, the waiting period and the members' own on-chain check are what make it safe.
-- **Testnet uses dev mode.** Only ZKPassport's mock IDs (issuer ZKR) are accepted there. They all share the
-  identifier `1`, so on testnet any mock ID matches any enrolled mock ID; the waiting period and the vote still
-  apply. Turn `ZKPASSPORT_DEV_MODE` off on mainnet.
-- **Known gaps (from Safe's research).**
-  - There is no liveness check: someone holding the founder's stolen passport can prove. This is why the
-    waiting period, the cancel and the vote exist.
-  - A renewed document gets a new identifier: enroll again.
-  - A person with two passports counts twice.
+- **No NEAR contract verifies the proof.** The API verifies it, every member can verify it again in their
+  browser, and the vote decides.
+- **Mailbox takeover is the main risk.** The 48 h cancel window and the founders' vote are the defence, and a
+  second factor should come later.
+- **The provider must sign with its own domain** (`d=` equal to the `From` domain). Gmail, Outlook and iCloud
+  do this; relays that rewrite headers break the signature.
+- **The address hash is not salted.** Someone who guesses an address can check it against a stored hash. It
+  is never published on chain.
+- **Testnet test domains.** On testnet, `RECOVERY_TEST_DKIM_KEYS` lets tests sign their own emails for test
+  domains. It is ignored on mainnet.
 
 ## Tested
 
 | What | How |
 | --- | --- |
-| Enroll, ask, wrong ID, proof bound to another account, cancel by the founder, too early, the votes drafted, done when the DAO changed | `apps/api/src/recovery/service.integration.test.ts` (PostgreSQL) |
-| Proofs must be bound to the account in both the query and the proved result | `apps/api/src/recovery/passport.test.ts` |
-| A real proof from the ZKPassport app goes through the real verifier, and is refused for another account and outside dev mode | `apps/api/src/recovery/passport.proof.integration.test.ts` (`ZKPASSPORT_PROOF`, `ZKPASSPORT_ACCOUNT`) |
-| Replacing a founder on testnet: DAO policy and vault council, voted 2 of 3 | `e2e-buyer-73429`: `eut-third` replaced by `eut-newthird`, then `council` on `e2e-buyer-73429.nomos.euthyna.testnet` |
+| Enroll, ask, wrong mailbox, proof bound to another account or action, cancel by the founder, too early, the votes drafted, done when the DAO changed | `apps/api/src/recovery/service.integration.test.ts` (PostgreSQL) |
+| The real circuit and the verifier. Emails are signed by mailauth, an independent DKIM implementation, and proved as the browser does. Checked: another account, another action, a key the domain does not publish, a tampered public input, the same mailbox in another case, another mailbox | `apps/api/src/recovery/email.prove.integration.test.ts` (`ZK_EMAIL_PROVE=1`) |
+| A real iCloud email: our header canonicalization matches its DKIM signature, and it is proved and verified | `apps/api/src/recovery/email.test.ts`, fixture from zk-email's test data |
+| In a browser (Chromium, production build) against NEAR testnet: the founder enrolls, another mailbox is refused, the new account asks, a member checks the proofs in their browser and submits the votes, two founders approve, and the DAO's council changes on chain | Run of 2026-10-31 on `e2e-buyer-73429.sputnikv2.testnet`: `eut-newthird` replaced by `eut-fourth` (DAO proposals #3 and #4) |

@@ -1,82 +1,80 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import QRCode from "qrcode";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { api } from "../api.js";
 import { Card, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { checkOnSepolia, PASSPORT_DEV_MODE, requestPassportProof, type PassportEvidence } from "../lib/passport.js";
+import { checkEmailProof, proveEmailFile, recoverySubject, type EmailEvidence } from "../lib/email-proof.js";
 import type { ProposalDraft } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 
-type Recovery = { id: string; lostAccountId: string; newAccountId: string; state: "waiting" | "cancelled" | "proposed" | "done"; notBefore: string; devMode: boolean; createdAt: string };
-type RecoveryView = { enrollments: Array<{ nearAccountId: string; devMode: boolean; enrolledAt: string }>; recoveries: Recovery[] };
+type Recovery = { id: string; lostAccountId: string; newAccountId: string; state: "waiting" | "cancelled" | "proposed" | "done"; notBefore: string; method: string; createdAt: string };
+type RecoveryView = { enrollments: Array<{ nearAccountId: string; method: string; enrolledAt: string }>; recoveries: Recovery[] };
 
 const recoveryApi = {
   list: () => api<RecoveryView>("/v1/console/recovery"),
-  enroll: (evidence: PassportEvidence) => api<{ enrolled: string }>("/v1/console/recovery/enroll", { method: "POST", body: JSON.stringify({ evidence }) }),
+  enroll: (evidence: EmailEvidence) => api<{ enrolled: string; method: string }>("/v1/console/recovery/enroll", { method: "POST", body: JSON.stringify({ evidence }) }),
   cancel: (id: string) => api<Recovery>(`/v1/console/recovery/${id}/cancel`, { method: "POST", body: "{}" }),
   proposals: (id: string) => api<{ proposals: ProposalDraft[] }>(`/v1/console/recovery/${id}/proposals`, { method: "POST", body: "{}" }),
-  evidence: (id: string) => api<{ recoveryEvidence: PassportEvidence; enrollmentEvidence: PassportEvidence | null }>(`/v1/console/recovery/${id}/evidence`),
+  evidence: (id: string) => api<{ recoveryEvidence: EmailEvidence; enrollmentEvidence: EmailEvidence | null }>(`/v1/console/recovery/${id}/evidence`),
 };
 
-/** The QR code the ZKPassport app scans, and what is happening. */
-export function PassportQr({ url, scanned }: { url: string | null; scanned: boolean }) {
-  const [image, setImage] = useState<string | null>(null);
-  useEffect(() => { if (url) void QRCode.toDataURL(url, { margin: 1, width: 220 }).then(setImage); }, [url]);
-  if (!url) return null;
+/** How to make the email, and the drop zone that proves it in the browser. */
+export function EmailProofStep({ subject, busy, onFile }: { subject: string; busy: boolean; onFile: (file: File) => void }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="stack">
-      {scanned ? <p className="small">Scanned. Confirm in the ZKPassport app; the proof takes a minute on the phone.</p> : <p className="small">Scan with the ZKPassport app, or open the link on your phone.</p>}
-      {image ? <img src={image} alt="ZKPassport request" width={220} height={220} /> : null}
-      <a className="small" href={url}>Open in ZKPassport</a>
-    </div>
+    <ol className="stack small">
+      <li>
+        From the mailbox you will recover with (Gmail, Outlook, iCloud…), send an email to yourself with exactly this subject:{" "}
+        <code className="mono">{subject}</code>{" "}
+        <button className="ghost compact" onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
+      </li>
+      <li>Open it in your Sent folder and download it as a file (Gmail: ⋮ → Download message, a <span className="mono">.eml</span>).</li>
+      <li>
+        Drop it here. Your browser proves your provider signed it; the email itself is not uploaded.{" "}
+        <input type="file" accept=".eml,message/rfc822" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} />
+      </li>
+    </ol>
   );
 }
 
-/** Founders enroll their ID once; a lost seat comes back by a vote, never by itself. */
+/** Founders enroll their mailbox once; a lost seat comes back by a vote, never by itself. */
 export function RecoveryCard() {
   const queryClient = useQueryClient();
   const wallets = useWallets();
   const view = useQuery({ queryKey: ["recovery"], queryFn: recoveryApi.list, refetchInterval: 20_000 });
-  const [url, setUrl] = useState<string | null>(null);
-  const [scanned, setScanned] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const me = wallets.nearAccountId;
-  const enrolled = view.data?.enrollments.some((item) => item.nearAccountId === me) ?? false;
+  const enrolled = view.data?.enrollments.find((item) => item.nearAccountId === me);
 
   const run = (action: () => Promise<string | void>) => {
     setBusy(true);
     setMessage(null);
     void action().then((text) => { if (text) setMessage(text); }, (cause: unknown) => setMessage(cause instanceof Error ? cause.message : String(cause)))
-      .finally(() => { setBusy(false); setUrl(null); setScanned(false); void queryClient.invalidateQueries({ queryKey: ["recovery"] }); });
+      .finally(() => { setBusy(false); void queryClient.invalidateQueries({ queryKey: ["recovery"] }); });
   };
 
   return (
     <Card title="Seat recovery" action={<Status value={enrolled ? "active" : "pending"} />}>
       <p className="muted">
-        Lost your NEAR account? Enroll your passport or ID card once. A new account that proves the same ID can ask
-        for your seat: you can cancel for 48 hours, then the other founders vote. Only a hash of a ZKPassport identifier
-        is kept, never your data.
+        Lost your NEAR account? Enroll your mailbox once, with a zero-knowledge proof of an email you send yourself
+        (ZK Email). A new account that proves the same mailbox can ask for your seat: you can cancel for 48 hours,
+        then the other founders vote. Only a hash of your address is kept, never the address.
       </p>
-      {PASSPORT_DEV_MODE ? <p className="small">Testnet: ZKPassport's mock IDs (developer mode in the app) are accepted.</p> : null}
+      {enrolled ? <p className="small">Enrolled with a mailbox at <strong>{enrolled.method.replace(/^email:/, "")}</strong>. Enroll again to change it.</p> : null}
       {me ? (
-        <button className="primary compact" disabled={busy} onClick={() => run(async () => {
-          const evidence = await requestPassportProof(me, "Enroll your ID to recover your founder seat", setUrl, () => setScanned(true));
+        <EmailProofStep subject={recoverySubject("enroll", me)} busy={busy} onFile={(file) => run(async () => {
+          const { evidence, domain } = await proveEmailFile(file, setMessage);
+          setMessage("Checking the proof…");
           await recoveryApi.enroll(evidence);
-          return enrolled ? "Your ID was enrolled again." : "Your ID is enrolled for seat recovery.";
-        })}>{enrolled ? "Enroll again (renewed ID)" : "Enroll my ID"}</button>
+          return `Enrolled: a mailbox at ${domain} can recover your seat.`;
+        })} />
       ) : <p className="small">Connect your NEAR wallet to enroll.</p>}
-      <PassportQr url={url} scanned={scanned} />
-      {view.data?.enrollments.length ? (
-        <p className="small">Enrolled: {view.data.enrollments.map((item) => item.nearAccountId).join(", ")}</p>
-      ) : null}
-      {(view.data?.recoveries ?? []).map((recovery) => (
-        <RecoveryRow key={recovery.id} recovery={recovery} me={me} busy={busy} run={run} />
-      ))}
-      {message ? <p className="small">{message}</p> : null}
-      <p className="small">A founder who lost their account asks from <a href="/recover">euthyna.io/recover</a>, signed in with the new account.</p>
+      {view.data?.enrollments.length ? <p className="small">Founders enrolled: {view.data.enrollments.map((item) => item.nearAccountId).join(", ")}</p> : null}
+      {(view.data?.recoveries ?? []).map((recovery) => <RecoveryRow key={recovery.id} recovery={recovery} me={me} busy={busy} run={run} />)}
+      {message ? <p className="small" role="status">{message}</p> : null}
+      <p className="small">A founder who lost their account asks from <a href="/recover">/recover</a>, signed in with the new account.</p>
     </Card>
   );
 }
@@ -93,11 +91,11 @@ function RecoveryRow({ recovery, me, busy, run }: { recovery: Recovery; me: stri
       <div className="row">
         <button className="ghost compact" disabled={busy} onClick={() => run(async () => {
           const { recoveryEvidence, enrollmentEvidence } = await recoveryApi.evidence(recovery.id);
-          const asked = await checkOnSepolia(recoveryEvidence);
-          const enrolledProof = enrollmentEvidence ? await checkOnSepolia(enrollmentEvidence) : null;
-          const same = enrolledProof ? enrolledProof.uniqueIdentifier === asked.uniqueIdentifier : false;
-          return `Ethereum Sepolia verifier: proof ${asked.ok ? "valid" : "INVALID"}, bound to ${asked.boundTo ?? "nothing"}, ${same ? "same ID as the enrolled one" : "NOT the enrolled ID"}.`;
-        })}>Check the proofs on Ethereum Sepolia</button>
+          const asked = await checkEmailProof(recoveryEvidence);
+          const enrolledProof = enrollmentEvidence ? await checkEmailProof(enrollmentEvidence) : null;
+          const same = Boolean(enrolledProof?.valid) && enrolledProof!.addressHash === asked.addressHash;
+          return `Checked in your browser: proof ${asked.valid ? "valid" : "INVALID"}, email from ${asked.domain}, subject "${asked.subject}", ${same ? "same mailbox as the enrolled one" : "NOT the enrolled mailbox"}.`;
+        })}>Check the proofs in my browser</button>
         {me === recovery.lostAccountId && (recovery.state === "waiting" || recovery.state === "proposed") ? (
           <button className="ghost compact" disabled={busy} onClick={() => run(async () => { await recoveryApi.cancel(recovery.id); return "Recovery cancelled: your seat stays yours."; })}>This is not me: cancel</button>
         ) : null}
