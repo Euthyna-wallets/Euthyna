@@ -30,7 +30,8 @@ type Pairing = {
 };
 
 const INSTALL_URL = "https://raw.githubusercontent.com/joindefi/euthyna-signer/main/install.sh";
-const MCP_PACKAGE = "@euthyna/mcp";
+/** The MCP server, packed and served by this site until @euthyna/mcp is on npm (npx installs from the URL). */
+const MCP_PACKAGE = `${typeof window === "undefined" ? "https://euthyna.io" : window.location.origin}/mcp/euthyna-mcp.tgz`;
 
 /** What the vault gives a new owner, in a private EUTHYNA company. */
 const HAVE_LINES = [
@@ -346,7 +347,7 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
               {shown}
             </pre>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderTop: "1px solid #1F3A6E", flexWrap: "wrap" }}>
-              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>{MCP_PACKAGE} on npm · NEXT</span>
+              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>@euthyna/mcp on npm · NEXT (served from this site meanwhile)</span>
               <span style={{ fontSize: 12, color: "#A9B6D6" }}>until it is published, build the MCP server from the repository</span>
               <button
                 type="button"

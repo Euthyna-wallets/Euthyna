@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "prepare": "tsc -p tsconfig.json",
-    "bundle": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=esm --outfile=npm/dist/euthyna-mcp.mjs --banner:js=\"#!/usr/bin/env node\nimport { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\""
+    "bundle": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=esm --outfile=npm/dist/euthyna-mcp.mjs --banner:js=\"#!/usr/bin/env node\nimport { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+    "pack:console": "pnpm bundle && cd npm && npm pack --pack-destination ../../../apps/console/public/mcp && mv ../../../apps/console/public/mcp/euthyna-mcp-*.tgz ../../../apps/console/public/mcp/euthyna-mcp.tgz"
   },
   "dependencies": {
     "@mandateos/sdk": "workspace:^",

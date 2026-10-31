@@ -1,9 +1,9 @@
 # @euthyna/mcp
 
-The Euthyna MCP server, in one file with no dependencies.
+The Euthyna MCP server, in one file. Until it is on npm, euthyna.io serves the same package.
 
 ```bash
-claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y @euthyna/mcp
+claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y https://euthyna.io/mcp/euthyna-mcp.tgz
 ```
 
 With [euthyna-signer](https://github.com/joindefi/euthyna-signer) installed, that is the whole config:

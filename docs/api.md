@@ -118,11 +118,11 @@ With euthyna-signer, the config is one line and holds no secret: the socket is
 found by itself, and the vault, role and network are read from the signer.
 
 ```bash
-claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y @euthyna/mcp
+claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y https://euthyna.io/mcp/euthyna-mcp.tgz
 ```
 
-`@euthyna/mcp` is this server bundled in one file (`pnpm --filter @mandateos/mcp
-bundle`, published from `packages/mcp/npm`). From the repository, with a local
+`euthyna-mcp.tgz` is this server bundled in one file and packed (`pnpm --filter @mandateos/mcp
+pack:console`); the console serves it until `@euthyna/mcp` is published on npm from `packages/mcp/npm`. From the repository, with a local
 key instead:
 
 ```bash

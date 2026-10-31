@@ -53,7 +53,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 
 | Claim | Status | Proof |
 | --- | --- | --- |
-| `npx -y @euthyna/mcp` | NEXT | `npm view @euthyna/mcp` returns 404 on Oct 30, 2026. Run the server from the repository for now. |
+| `npx -y @euthyna/mcp` | NEXT | Not on npm yet. The same package is served at `https://euthyna.io/mcp/euthyna-mcp.tgz` (`npx -y <that URL>`), built by `pnpm --filter @mandateos/mcp pack:console`; started this way against the real euthyna-signer on Oct 31, 2026 (14 tools listed). |
 
 ## Use cases (site section "Use cases")
 
