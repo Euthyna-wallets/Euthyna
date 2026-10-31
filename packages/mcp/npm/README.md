@@ -1,6 +1,6 @@
 # @euthyna/mcp
 
-The Euthyna MCP server, in one file with no dependencies.
+The Euthyna MCP server, in one file. Not published yet: until then, run it from the repository (docs/api.md).
 
 ```bash
 claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- npx -y @euthyna/mcp

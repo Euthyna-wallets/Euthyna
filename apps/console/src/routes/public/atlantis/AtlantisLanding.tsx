@@ -554,13 +554,13 @@ export function AtlantisLanding() {
               <Link to="/onboarding?path=euthyna" className="ori btno" style={{ font: `800 13px ${BRAND}`, padding: "15px 24px" }}>CREATE YOUR VAULT</Link>
               <Link to="/onboarding?path=atlantis" style={{ fontSize: 14, color: "#8FE3F1" }}>Want shares, revenue and a public company? Start on Atlantis →</Link>
             </div>
-            <span style={{ font: `600 12px ${MONO}`, color: "#F2B544" }}>@euthyna/mcp on npm · NEXT</span>
+            <span style={{ font: `600 12px ${MONO}`, color: "#F2B544" }}>from the repository today · @euthyna/mcp on npm: NEXT</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #1F3A6E", boxShadow: "24px 30px 70px rgba(0,0,0,.5)" }}>
             <div className="ori" style={{ height: 6 }} />
             <pre style={{ margin: 0, padding: "28px 30px", background: "#030B20", color: "#D5DDF0", font: `14px/1.85 ${MONO}`, overflowX: "auto", whiteSpace: "pre" }}>
               <span style={{ color: "#6F82AE" }}># give the agent a wallet</span>
-              {"\n"}claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- npx -y @euthyna/mcp{"\n\n"}
+              {"\n"}claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- pnpm --silent --dir MandateOS/packages/mcp exec tsx src/server.ts{"\n\n"}
               <span style={{ color: "#6F82AE" }}>{"// or ask the vault directly, free"}</span>
               {"\n"}vault.<span style={{ color: "#4FD1E8" }}>check_operation</span>(role, member, request) <span style={{ color: "#6F82AE" }}>{"// → allowed | reason"}</span>
               {"\n"}op = vault.<span style={{ color: "#4FD1E8" }}>prepare</span>(role, request){"\n"}vault.<span style={{ color: "#4FD1E8" }}>authorize</span>(op.op_id,{" "}

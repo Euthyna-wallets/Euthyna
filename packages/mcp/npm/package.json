@@ -4,9 +4,25 @@
   "description": "Euthyna MCP server: lets an AI agent act through its company vault. With euthyna-signer it holds no key and no secret.",
   "license": "MIT",
   "type": "module",
-  "bin": { "euthyna-mcp": "dist/euthyna-mcp.mjs" },
-  "files": ["dist"],
-  "engines": { "node": ">=20" },
-  "repository": { "type": "git", "url": "git+https://github.com/joindefi/MandateOS.git", "directory": "packages/mcp" },
-  "publishConfig": { "access": "public", "provenance": true }
+  "bin": {
+    "euthyna-mcp": "dist/euthyna-mcp.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joindefi/MandateOS.git",
+    "directory": "packages/mcp"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "near-api-js": "5.1.1"
+  }
 }
