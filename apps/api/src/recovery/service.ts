@@ -134,6 +134,7 @@ export class RecoveryService {
       }
     }
     return {
+      cancelWindowSeconds: Math.round(this.delayMs / 1000),
       enrollments: enrollments.map((item) => ({ nearAccountId: item.nearAccountId, method: item.method, enrolledAt: item.createdAt.toISOString() })),
       recoveries: recoveries.map(view),
     };
