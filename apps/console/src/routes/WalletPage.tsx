@@ -5,10 +5,11 @@ import { BASE_SEPOLIA, chainName, decodeVaultCalls, describeCall, describeVaultC
 import { encodeFunctionData, erc20Abi, getAddress, parseAbi, parseEther, parseUnits, type Hex } from "viem";
 
 import { PageState } from "../components/ui.js";
-import { ColumnGauge, Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
+import { chainLabel, ColumnGauge, Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
+import { formatUsd } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
-import { omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
+import { formatAmount, omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { HoldingsCard } from "./HoldingsCard.js";
 
@@ -114,7 +115,11 @@ export function WalletPage() {
   }
 
   const describe = (item: Requested) => describeCall(getAddress(item.to), (item.data || "0x") as Hex, BigInt(item.value), { profile: BASE_SEPOLIA, labels: address ? { [address]: "company wallet" } : {} });
-  const tokens = status.data?.wallet?.tokens.filter((token) => Number(token.amount) > 0) ?? [];
+  const holdings = useQuery({ queryKey: ["omni-holdings"], queryFn: omni.holdings, enabled: Boolean(address), refetchInterval: 30_000 });
+  const byChain = (holdings.data?.chains ?? [])
+    .map((chain) => ({ chain: chain.chain, usd: chain.assets.reduce((sum, asset) => sum + (asset.usd ?? 0), 0) }))
+    .sort((a, b) => b.usd - a.usd);
+  const maxChain = Math.max(1, ...byChain.map((item) => item.usd));
 
   return (
     <div className="page" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -142,23 +147,20 @@ export function WalletPage() {
               />
               {status.data?.wallet ? (
                 <>
-                  <b className="mono" style={{ font: "600 44px/1 var(--font-mono)", color: "#200A03" }}>{status.data.wallet.eth} ETH</b>
-                  <span style={{ fontSize: 13, color: "rgba(32,10,3,.75)" }}>
-                    Base Sepolia{tokens.length ? ` · ${tokens.map((token) => `${token.amount} ${token.symbol}`).join(" · ")}` : ""}
+                  <b className="mono" style={{ font: "700 48px/1 var(--font-mono)", color: "rgba(32,10,3,.85)", textShadow: "0 1px 0 rgba(255,222,170,.55), 0 -1px 0 rgba(30,6,0,.4)" }}>
+                    {holdings.isLoading ? "…" : holdings.data ? formatUsd(holdings.data.totalUsd) : `${formatAmount(status.data.wallet.eth, "ETH")}`}
+                  </b>
+                  <span style={{ fontSize: 13, color: "rgba(32,10,3,.75)", maxWidth: 360 }}>
+                    {byChain.length ? `On ${byChain.map((item) => item.chain).join(", ")}.` : "Base Sepolia."} Every wallet is derived from the vault and has no private key.
+                    {holdings.data?.chains.some((chain) => chain.assets.some((asset) => asset.usd === null)) ? " Test tokens are not counted." : ""}
                   </span>
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", paddingTop: 6, flexWrap: "wrap" }}>
-                    {(status.data?.chains ?? []).map((chain) => (
-                      <div key={chain.chainId} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "1 1 100px" }}>
-                        <ColumnGauge
-                          value={chain.enabled ? 1 : 0}
-                          max={1}
-                          label={chain.name.replace(/ Sepolia$/, "").toUpperCase()}
-                          amount={chain.enabled ? "active" : "—"}
-                          height={chain.enabled ? 104 : 32}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {byChain.length ? (
+                    <div style={{ display: "flex", gap: 18, alignItems: "flex-end", paddingTop: 6, flexWrap: "wrap" }} role="img" aria-label={`Holdings by chain: ${byChain.map((item) => `${item.chain} ${formatUsd(item.usd)}`).join(", ")}`}>
+                      {byChain.map((item) => (
+                        <ColumnGauge key={item.chain} value={item.usd} max={maxChain} label={chainLabel(item.chain)} amount={formatUsd(item.usd)} height={Math.max(24, Math.round((item.usd / maxChain) * 120))} />
+                      ))}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <span style={{ fontSize: 14, color: "#200A03" }}>

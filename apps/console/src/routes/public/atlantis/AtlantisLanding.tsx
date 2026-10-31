@@ -136,10 +136,10 @@ export function AtlantisLanding() {
         <HeroVideo />
         <div className="hero-body">
           <SiteHeader />
-          <div className="wrap hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(0, .65fr)", gap: 40, alignItems: "end", paddingTop: 40, paddingBottom: 0 }}>
+          <div className="wrap hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.05fr) minmax(0, 1fr)", gap: 40, alignItems: "end", paddingTop: 40, paddingBottom: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 26, paddingBottom: 96 }}>
               <Kicker>Wallet infrastructure for AI agents</Kicker>
-              <h1 className="anim-engrave hero-title" style={{ margin: 0, font: `900 clamp(38px,3.9vw,56px)/0.98 ${BRAND}`, letterSpacing: ".02em" }}>
+              <h1 className="anim-engrave hero-title" style={{ margin: 0, font: `900 clamp(44px,5.4vw,80px)/0.98 ${BRAND}`, letterSpacing: ".02em" }}>
                 <span className="leaf">GIVE AI AGENTS MONEY.</span>
                 <br />
                 <span style={{ color: "#F3EFE6" }}>KEEP THE LAW.</span>

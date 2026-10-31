@@ -1,9 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@near-wallet-selector/modal-ui/styles.css";
+// The legacy stylesheet loads first so the Marbre et orichalque styles (imported by the routes) win over it.
+import "./styles.css";
 import { enforceWalletStoragePolicy } from "./lib/wallet-store.js";
 import { App } from "./App.js";
-import "./styles.css";
 
 async function boot() {
   enforceWalletStoragePolicy();

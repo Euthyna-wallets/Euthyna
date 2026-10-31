@@ -10,7 +10,7 @@ import { Link } from "react-router-dom";
 import { api, type AgentRow } from "../api.js";
 import { PanelLink, ago, until } from "../components/ops.js";
 import { PageState, short } from "../components/ui.js";
-import { ColumnGauge, Kicker, Niche, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
+import { chainLabel, ColumnGauge, Kicker, Niche, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { OUTCOME_LABEL, entriesOf, formatToken, formatUsd, roleName, tokenName } from "../lib/money.js";
 import { marketConsole, tokenAmount } from "../lib/market.js";
@@ -104,7 +104,7 @@ export function OverviewPage() {
                   {byChain.length > 0 ? (
                     <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 140 }} role="img" aria-label={`Holdings by chain: ${byChain.map((item) => `${item.chain} ${formatUsd(item.usd)}`).join(", ")}`}>
                       {byChain.slice(0, 4).map((item) => (
-                        <ColumnGauge key={item.chain} value={item.usd} max={maxChain} label={item.chain.toUpperCase().slice(0, 5)} amount={formatUsd(item.usd)} height={Math.max(24, Math.round((item.usd / maxChain) * 104))} />
+                        <ColumnGauge key={item.chain} value={item.usd} max={maxChain} label={chainLabel(item.chain)} amount={formatUsd(item.usd)} height={Math.max(24, Math.round((item.usd / maxChain) * 104))} />
                       ))}
                     </div>
                   ) : null}
@@ -201,7 +201,7 @@ export function OverviewPage() {
               )}
             </section>
 
-            <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, .85fr)", gap: 22 }}>
+            <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, .85fr)", gap: 22, alignItems: "start" }}>
               <Slab style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
                 <SectionHead
                   left={<Kicker>The verdicts</Kicker>}
