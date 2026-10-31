@@ -1,0 +1,50 @@
+{
+  email admin@euthyna.io
+}
+
+euthyna.io {
+  encode zstd gzip
+
+  handle /near-rpc {
+    rewrite * /v1/console/near-rpc
+    reverse_proxy api:3000
+  }
+
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+
+  handle /v1/* {
+    reverse_proxy api:3000
+  }
+
+  handle /health {
+    reverse_proxy api:3000
+  }
+
+  # Euthyna Market: x402 discovery and A2A endpoints are served by the API.
+  handle /.well-known/* {
+    reverse_proxy api:3000
+  }
+
+  handle /a2a/* {
+    reverse_proxy api:3000
+  }
+
+  handle {
+    root * /srv
+    # Built files carry a hash in their name: cache them for good. Everything else,
+    # index.html first, is revalidated on every visit so a returning visitor never
+    # gets the previous design from cache.
+    @hashed path /assets/*
+    header @hashed Cache-Control "public, max-age=31536000, immutable"
+    @fresh not path /assets/*
+    header @fresh Cache-Control "no-cache"
+    try_files {path} /index.html
+    file_server
+  }
+}
+
+www.euthyna.io {
+  redir https://euthyna.io{uri} permanent
+}

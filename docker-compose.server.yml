@@ -1,0 +1,16 @@
+# Server-only: public HTTPS on 80/443 with Let's Encrypt certificates persisted.
+services:
+  console:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:2019/config/"]
+
+volumes:
+  caddy-data:
+  caddy-config:
