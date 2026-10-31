@@ -18,7 +18,7 @@ export function RecoverPage() {
   // A NEAR user's email is "<account>@near.mandateos.invalid": the account the API sees.
   const me = session.data.user.email.replace(/@near\.mandateos\.invalid$/, "");
 
-  async function ask(file: File) {
+  async function ask(file: File | string) {
     setBusy(true);
     setMessage(null);
     try {

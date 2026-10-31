@@ -40,6 +40,14 @@ describe("ZK Email evidence", () => {
     expect(inputs.header.storage).toHaveLength(1024);
   });
 
+  it("gives the same inputs for a pasted source (LF line ends) as for a downloaded .eml (CRLF)", () => {
+    const pasted = readFileSync(resolve(import.meta.dirname, "fixtures/icloud-hello.eml"), "latin1");
+    const downloaded = pasted.replace(/\r?\n/g, "\r\n");
+    expect(pasted).not.toContain("\r");
+    expect(downloaded).toContain("\r\n");
+    expect(circuitInputs(pasted, 1n << 2047n).inputs).toEqual(circuitInputs(downloaded, 1n << 2047n).inputs);
+  });
+
   it("takes test DKIM keys only for the names configured", async () => {
     const keys = dkimKeys({ testKeys: { "s._domainkey.test.dev": "v=DKIM1; k=rsa; p=AAAA" }, fetcher: (async () => { throw new Error("offline"); }) as unknown as typeof fetch });
     await expect(keys("test.dev", "s")).resolves.toEqual(["v=DKIM1; k=rsa; p=AAAA"]);
