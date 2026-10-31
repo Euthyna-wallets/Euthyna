@@ -67,6 +67,13 @@ const schema = z.object({
   MARKET_TRUST_PROXY: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   MARKET_RELAYER_LOW_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MARKET_SETTLEMENT_MARGIN_SECONDS: z.coerce.number().int().min(60).default(600),
+  /** Founder seat recovery: how long the lost account can cancel before the members vote (default 48 h). */
+  RECOVERY_DELAY_SECONDS: z.coerce.number().int().min(60).default(172_800),
+  /**
+   * Testnet only: DKIM keys of test mail domains, as JSON {"<selector>._domainkey.<domain>": "v=DKIM1; k=rsa; p=…"}.
+   * Lets tests sign their own emails. Ignored unless NEAR_NETWORK_ID is testnet.
+   */
+  RECOVERY_TEST_DKIM_KEYS: z.string().optional(),
   /** Public URL of this API, as buyers reach it (agent cards). */
   PUBLIC_API_URL: z.string().url().optional(),
 });

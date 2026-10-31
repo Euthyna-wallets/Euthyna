@@ -4,6 +4,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), nodePolyfills({ globals: { Buffer: true, global: true, process: true } })],
+  // Noir and Barretenberg load their own WebAssembly: let them, unbundled (seat recovery's ZK Email prover).
+  optimizeDeps: { exclude: ["@noir-lang/noirc_abi", "@noir-lang/acvm_js", "@noir-lang/noir_js", "@aztec/bb.js"] },
   server: {
     port: 5173,
     proxy: {

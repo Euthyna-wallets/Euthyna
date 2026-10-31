@@ -103,6 +103,8 @@ model Organization {
   agentProvisionings      AgentProvisioning[]
   agentPairings           AgentPairing[]
   marketListings          MarketListing[]
+  recoveryEnrollments     RecoveryEnrollment[]
+  seatRecoveries          SeatRecovery[]
 
   @@unique([slug])
   @@map("organization")
@@ -538,4 +540,44 @@ model MarketRating {
   createdAt DateTime   @default(now())
 
   @@map("market_rating")
+}
+
+/// A founder's mailbox, enrolled for seat recovery (ZK Email): only a hash, never the address.
+model RecoveryEnrollment {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nearAccountId  String
+  /// sha256("euthyna-email:" + the circuit's hash of the address). Never the address.
+  identityHash   String
+  /// The proof and its public inputs: anyone can verify it again.
+  evidence       Json
+  /// How the identity was proved, e.g. "email:gmail.com".
+  method         String
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, nearAccountId])
+  @@map("recovery_enrollment")
+}
+
+/// A new account asks for the seat of a founder who lost theirs, with a proof from the same mailbox.
+model SeatRecovery {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lostAccountId  String
+  newAccountId   String
+  identityHash   String
+  evidence       Json
+  method         String
+  /// waiting | cancelled | proposed | done
+  state          String       @default("waiting")
+  /// The founder who still holds the lost account can cancel until then; the members' vote opens after it.
+  notBefore      DateTime
+  cancelledBy    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, state])
+  @@map("seat_recovery")
 }

@@ -98,6 +98,8 @@ export interface AuthGateway {
   handler(request: Request): Promise<Response>;
   identifyAgent(apiKey: string | undefined): Promise<AgentIdentity | null>;
   identifyConsole(headers: Headers): Promise<ConsoleIdentity | null>;
+  /** The NEAR account signed in with these cookies, member of a company or not. */
+  identifyNearAccount(headers: Headers): Promise<string | null>;
   listAgents(organizationId: string): Promise<AgentView[]>;
   getAgent(organizationId: string, agentId: string): Promise<AgentView | null>;
   setAgentEvmAddress(organizationId: string, agentId: string, evmAddress: string): Promise<AgentView | null>;
@@ -209,6 +211,10 @@ export class BetterAuthGateway implements AuthGateway {
       select: { accountId: true },
     });
     return nearAccount ? { ...session, nearAccountId: nearAccount.accountId } : null;
+  }
+
+  async identifyNearAccount(headers: Headers): Promise<string | null> {
+    return (await this.nearSession(headers))?.nearAccountId ?? null;
   }
 
   async identifyConsole(headers: Headers): Promise<ConsoleIdentity | null> {

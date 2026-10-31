@@ -35,6 +35,10 @@
     "./solana": {
       "types": "./dist/solana.d.ts",
       "default": "./dist/solana.js"
+    },
+    "./email-proof": {
+      "types": "./dist/email-proof.d.ts",
+      "default": "./dist/email-proof.js"
     }
   }
 }

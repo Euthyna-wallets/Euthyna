@@ -6,6 +6,7 @@ import { short } from "../components/ui.js";
 import { omni } from "../omniroles-api.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 import { DirectoryCard } from "./DirectoryCard.js";
+import { RecoveryCard } from "./RecoveryCard.js";
 import { VersionCard } from "./VersionCard.js";
 
 const LINKS = [
@@ -15,10 +16,10 @@ const LINKS = [
 ];
 
 const RECOVERY_FACTORS = [
-  { name: "PASSKEY", text: "Your phone signs." },
-  { name: "ZKPASSPORT", text: "Proves it’s you, shares nothing." },
-  { name: "ZK EMAIL", text: "A proof from your inbox." },
-  { name: "TRUSTED CONTACT", text: "Someone you chose signs." },
+  { name: "ZK EMAIL", text: "A proof from your inbox. Live on testnet for founder seats.", live: true },
+  { name: "PASSKEY", text: "Your phone signs. Next.", live: false },
+  { name: "ZKPASSPORT", text: "Proves it’s you, shares nothing. Next.", live: false },
+  { name: "TRUSTED CONTACT", text: "Someone you chose signs. Next.", live: false },
 ];
 
 export function SettingsPage() {
@@ -106,17 +107,17 @@ export function SettingsPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <Kicker>Recover your access</Kicker>
               <span style={{ font: "800 10px var(--font-brand)", letterSpacing: ".2em", padding: "4px 9px", background: "var(--gold-bg)", color: "var(--gold-ink)", border: "1px solid rgba(201,137,12,.4)" }}>
-                PLANNED · NOT BUILT YET
+                ZK EMAIL · TESTNET
               </span>
             </div>
             <span style={{ fontSize: 13.5, color: "#4A5675", lineHeight: 1.55 }}>
-              Company wallets cannot be lost: they have no private key. What you can lose is your own key, and with it your vote. Recovery will
-              need two of the factors you enrolled, then a delay of 48 to 72 hours during which any of your current keys or the DAO can cancel.
-              Euthyna can be one factor, never enough on its own.
+              Company wallets cannot be lost: they have no private key. What you can lose is your own key, and with it your seat. Today a
+              founder enrolls their mailbox with ZK Email; a new account that proves the same mailbox asks for the seat, the lost account can
+              cancel for 48 hours, then the other founders vote. More factors come next.
             </span>
             <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
               {RECOVERY_FACTORS.map((factor) => (
-                <div key={factor.name} style={{ padding: "12px 14px", border: "1px dashed rgba(13,23,48,.28)", display: "flex", flexDirection: "column", gap: 4, background: "rgba(255,255,255,.35)" }}>
+                <div key={factor.name} style={{ padding: "12px 14px", border: factor.live ? "1px solid rgba(11,78,94,.45)" : "1px dashed rgba(13,23,48,.28)", display: "flex", flexDirection: "column", gap: 4, background: "rgba(255,255,255,.35)" }}>
                   <b style={{ font: "800 12.5px var(--font-brand)", letterSpacing: ".14em" }}>{factor.name}</b>
                   <span style={{ fontSize: 12, color: "#4A5675" }}>{factor.text}</span>
                 </div>
@@ -124,6 +125,8 @@ export function SettingsPage() {
             </div>
           </div>
         </Slab>
+
+      {treasury?.status === "active" ? <RecoveryCard /> : null}
 
       {demoWalletsEnabled() ? (
         <Slab style={{ padding: "14px 18px" }}>

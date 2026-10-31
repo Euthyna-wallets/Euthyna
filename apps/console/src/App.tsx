@@ -25,6 +25,7 @@ import { MarketPage } from "./routes/public/MarketPage.js";
 import { MarketTaskPage } from "./routes/public/MarketTaskPage.js";
 import { RobPage } from "./routes/public/RobPage.js";
 import { MarketConsolePage } from "./routes/MarketConsolePage.js";
+import { RecoverPage } from "./routes/public/RecoverPage.js";
 
 function Gate() {
   const session = authClient.useSession();
@@ -57,6 +58,8 @@ export function App() {
           <Route path="/market" element={<MarketPage />} />
           <Route path="/market/task/:id" element={<MarketTaskPage />} />
           <Route path="/rob" element={<RobPage />} />
+          {/* Signed in, but not a member yet: the new account of a founder. */}
+          <Route path="/recover" element={<RecoverPage />} />
           <Route element={<Gate />}>
             <Route path="/choose-path" element={<ChoosePathPage />} />
             {/* Setup is a full screen of its own (design-handoff/app 07 and 17), outside the console shell. */}
