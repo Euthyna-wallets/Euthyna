@@ -300,7 +300,8 @@ export function GovernancePage() {
                 <>
                   {closed.map((proposal) => (
                     <div key={`p-${proposal.id}`} style={{ display: "grid", gridTemplateColumns: "40px minmax(0, 1fr)", gap: 12, alignItems: "center", padding: "8px 0", borderTop: "1px solid rgba(13,23,48,.1)" }}>
-                      {proposal.status === "Approved" ? <Seal word="APPLIED" size={36} /> : <Seal word={proposal.status.toUpperCase()} size={36} tone="refused" />}
+                      {/* A passed vote queues its rule changes: they apply after the veto window, listed below. */}
+                      {proposal.status === "Approved" ? <Seal word="VOTED" size={36} /> : <Seal word={proposal.status.toUpperCase()} size={36} tone="refused" />}
                       <div style={{ fontSize: 13, minWidth: 0 }}>
                         <b>#{proposal.id} {proposal.title}</b>
                         <br /><small style={{ color: "var(--ink-3)" }}>{proposal.status} · {new Date(proposal.submittedAt).toLocaleString()}</small>

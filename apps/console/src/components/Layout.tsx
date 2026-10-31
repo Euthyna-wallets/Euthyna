@@ -72,6 +72,8 @@ export function Layout() {
     enabled: Boolean(status.data?.treasury),
     refetchInterval: 30_000,
   });
+  // Listed in the Atlantis directory, or a private vault (the default).
+  const directory = useQuery({ queryKey: ["omni-directory"], queryFn: omni.directory, enabled: Boolean(status.data?.treasury), staleTime: 60_000 });
   const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: Boolean(active), staleTime: 60_000 });
   const myAccount = members.data?.me ?? "";
   const toVote = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress" && Boolean(myAccount) && !(myAccount in proposal.votes)).length;
@@ -144,7 +146,9 @@ export function Layout() {
                   ))}
                   <option value={NEW_COMPANY}>+ New company</option>
                 </select>
-                <small style={{ display: "block" }}>{status.data?.treasury ? "On Atlantis · testnet" : "Setting up · testnet"}</small>
+                <small style={{ display: "block" }}>
+                  {!status.data ? "testnet" : !status.data.treasury ? "Setting up · testnet" : directory.data?.listing ? "On Atlantis · testnet" : "Private vault · testnet"}
+                </small>
               </span>
             </div>
           ) : null}
@@ -190,7 +194,10 @@ export function Layout() {
         <div className="ground">
           <header className="app-topbar">
             <h1 className="company-name">{active?.name ?? "EUTHYNA"}</h1>
-            {status.data?.treasury ? (
+            {status.data?.treasury && !paused && setupRequired ? (
+              // No voted role yet: no agent can work.
+              <span className="state-pill paused">Setting up</span>
+            ) : status.data?.treasury ? (
               <span className={`state-pill${paused ? " paused" : ""}`}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: paused ? "var(--terra-ink)" : "var(--aegean-ink)" }} />
                 {paused ? "Agents paused" : "Agents at work"}

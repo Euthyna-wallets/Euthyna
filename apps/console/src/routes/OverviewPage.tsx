@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
-import { PanelLink, ago, until } from "../components/ops.js";
+import { PanelLink, agentState, ago, feedOf, until } from "../components/ops.js";
 import { PageState, short } from "../components/ui.js";
 import { chainLabel, ColumnGauge, Kicker, Niche, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
@@ -97,7 +97,7 @@ export function OverviewPage() {
                       {holdings.isLoading ? "…" : !status.data.wallet ? formatUsd(0) : formatUsd(holdings.data?.totalUsd ?? 0)}
                     </div>
                     <p style={{ margin: "8px 0 0", fontSize: 13.5, color: "#3A1608", maxWidth: 280 }}>
-                      {chains.length ? `On ${chains.map((chain) => chain.chain).join(", ")}.` : "No wallet yet."} Every wallet is derived from the vault and has no private key.
+                      {chains.length ? `On ${chains.map((chain) => chain.chain).join(", ")}.` : status.data.wallet ? `Wallet open on ${status.data.treasury?.chainName ?? "Base Sepolia"}, still empty.` : "No wallet yet."} Every wallet is derived from the vault and has no private key.
                       {unpriced ? " Test tokens are not counted." : ""}
                     </p>
                   </div>
@@ -180,13 +180,15 @@ export function OverviewPage() {
                     const held = roleList.filter((role) => role.members.some((member) => member.member === agent.nearAccountId));
                     const last = entries.find((entry) => entry.actor === agent.nearAccountId || entry.actor === agent.name);
                     const paused = status.data?.paused ?? false;
+                    const state = agentState(agent, roleList, feedOf(activity.data), paused);
+                    const stateLabel = state === "no role" ? "waiting for a role" : state;
                     return (
                       <Slab key={agent.id} as="article" style={{ padding: 16, display: "grid", gridTemplateColumns: "92px minmax(0,1fr)", gap: 16 }}>
-                        <Niche role={held[0]?.name ?? "agent"} state={paused ? "paused" : "working"} height={132} />
+                        <Niche role={held[0]?.name ?? "agent"} state={state === "paused" || state === "fired" ? "paused" : state === "working" ? "working" : "idle"} height={132} />
                         <div style={{ display: "flex", flexDirection: "column", gap: 9, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                             <b style={{ font: "800 17px var(--font-brand)", letterSpacing: ".1em" }}>{agent.name.toUpperCase()}</b>
-                            <span style={{ fontSize: 12, color: paused ? "var(--terra-ink)" : "var(--aegean-ink)", fontWeight: 700 }}>· {paused ? "paused" : "working"}</span>
+                            <span style={{ fontSize: 12, color: state === "paused" ? "var(--terra-ink)" : state === "working" ? "var(--aegean-ink)" : "var(--ink-3)", fontWeight: 700 }}>· {stateLabel}</span>
                           </div>
                           <span style={{ fontSize: 13, color: "#4A5675" }}>{held.length ? held.map((role) => roleName(role.name)).join(", ") : "No rule yet"}</span>
                           {held.flatMap((role) => role.budgets).slice(0, 2).map((budget) => (

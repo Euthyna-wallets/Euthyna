@@ -2,7 +2,7 @@ import { KeyPair } from "near-api-js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { API_BASE, api } from "../api.js";
+import { PUBLIC_API_URL, api } from "../api.js";
 import { Kicker, Niche, PageTitle, Slab } from "../components/design.js";
 import { readAgentAccessKeyRpc } from "../wallets.js";
 
@@ -145,8 +145,8 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
   }
 
   const secondsLeft = pairing ? Math.max(0, Math.floor((Date.parse(pairing.expiresAt) - now) / 1000)) : 0;
-  const pairCommand = code ? `sudo euthyna-signer pair ${code} --api-url ${API_BASE}` : "";
-  const installCommand = code ? `curl -fsSL ${INSTALL_URL} | sudo sh -s -- pair ${code} --api-url ${API_BASE}` : "";
+  const pairCommand = code ? `sudo euthyna-signer pair ${code} --api-url ${PUBLIC_API_URL}` : "";
+  const installCommand = code ? `curl -fsSL ${INSTALL_URL} | sudo sh -s -- pair ${code} --api-url ${PUBLIC_API_URL}` : "";
   const locked = pairing !== null && pairing.status !== "expired";
 
   return (
@@ -215,11 +215,11 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
 }
 
 /** Shown once after creation: the API key, as an MCP server for any agent, or as the demo agent's environment. */
-export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
+export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void; doneLabel?: string }) {
   const [mode, setMode] = useState<"mcp" | "env">("mcp");
   if (props.agent.keyMode === "signer") return <RunWithSigner {...props} />;
   const mcpEnv: Record<string, string> = {
-    MANDATEOS_API_URL: API_BASE,
+    MANDATEOS_API_URL: PUBLIC_API_URL,
     MANDATEOS_AGENT_API_KEY: props.agent.apiKey,
     AGENT_NEAR_ACCOUNT_ID: props.agent.nearAccountId,
     AGENT_KEY_PATH: `/path/to/${props.agent.keyFile}`,
@@ -238,7 +238,7 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
     },
   }, null, 2);
   const env = [
-    `MANDATEOS_API_URL=${API_BASE}`,
+    `MANDATEOS_API_URL=${PUBLIC_API_URL}`,
     `MANDATEOS_AGENT_API_KEY=${props.agent.apiKey}`,
     `AGENT_NEAR_ACCOUNT_ID=${props.agent.nearAccountId}`,
     `AGENT_KEY_PATH=./${props.agent.keyFile}`,
@@ -286,7 +286,7 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
 }
 
 /** euthyna-signer holds the key and the API key: the MCP config has no secret. */
-function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
+function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void; doneLabel?: string }) {
   const [client, setClient] = useState<"claude" | "json">("claude");
   const claude = `claude mcp add euthyna --env EUTHYNA_AGENT=${props.agent.nearAccountId} -- pnpm --silent --dir ${MCP_DIR} exec tsx src/server.ts`;
   const json = JSON.stringify({
@@ -369,7 +369,7 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
           {props.onDone ? (
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
               <button type="button" className="btn-ori" style={{ padding: "14px 22px", fontSize: 13 }} onClick={props.onDone}>
-                DONE · GO TO YOUR HQ
+                {props.doneLabel ?? "DONE"}
               </button>
             </div>
           ) : null}

@@ -95,7 +95,7 @@ export function AgentsPage() {
           {notice}
         </div>
       ) : null}
-      {!treasury ? (
+      {status.data && !treasury ? (
         <Slab style={{ padding: "18px 22px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, color: "#4A5675" }}>Create the company first.</span>
           <Link to="/onboarding" className="btn-ori" style={{ marginLeft: "auto", textDecoration: "none" }}>

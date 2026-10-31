@@ -1,5 +1,11 @@
 export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
+/**
+ * The API's full URL, for text the user copies elsewhere (signer command, MCP config).
+ * In production the API is on the console's own origin, so API_BASE is "" (fine for fetch, not for a command).
+ */
+export const PUBLIC_API_URL = API_BASE || (typeof window === "undefined" ? "" : window.location.origin);
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
