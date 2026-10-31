@@ -143,7 +143,7 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
       ) : null}
       {!walletProposal ? (
         <p className="small muted" style={{ margin: 0 }}>
-          Proposing costs your NEAR account about 0.25 NEAR. Testnet NEAR is free from the{" "}
+          Proposing asks your NEAR account for a 0.1 NEAR bond, returned when the proposal passes, plus a little gas. Testnet NEAR is free from the{" "}
           <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noreferrer">NEAR faucet</a>.
         </p>
       ) : walletProposal.status === "InProgress" ? (
