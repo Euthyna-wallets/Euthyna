@@ -45,7 +45,7 @@ Le backend est le même. **Seul l'onboarding diffère** :
 | Launch on Atlantis | START A COMPANY ON ATLANTIS / FOUND A COMPANY | Company, Founders, Incorporate, Wallet, Shares, First hire, Role, City | Rien |
 
 - **Le choix** se fait sur l'écran `app/screens/16-choose-your-path-desktop.png`, juste après la connexion. Il peut aussi passer en paramètre : `/onboarding?path=euthyna` ou `?path=atlantis`, depuis les boutons du site.
-- **Un coffre EUTHYNA peut rejoindre Atlantis plus tard** par deux votes : émettre des parts (`/shares`) et s'inscrire dans l'annuaire (`DirectoryCard`). Aucune migration n'est nécessaire.
+- **Un coffre EUTHYNA peut rejoindre Atlantis plus tard** par des votes du conseil : émettre des parts (`/shares`, deux propositions) et s'inscrire dans l'annuaire (`DirectoryCard`, une proposition). Aucune migration n'est nécessaire.
 
 ## 3. Ce qu'on copie dans `main`, et où
 

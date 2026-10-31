@@ -22,7 +22,7 @@ EUTHYNA, c'est ce qu'on vend : l'infrastructure. Atlantis est un produit constru
 | **Launch on Atlantis** (« Found a company ») | Un fondateur qui part de zéro | Company, Founders, Incorporate, Wallet, Shares, First hire, Role, **City** (proposition d'inscription dans l'annuaire, le vote de `DirectoryCard`) | Rien |
 
 - Juste après la connexion, quand le membre n'a encore aucune société, l'écran 16 lui fait choisir son parcours. On peut le passer en paramètre, par exemple `/onboarding?path=euthyna` ou `?path=atlantis`, pour que les boutons du site y mènent directement.
-- **Le parcours EUTHYNA reste privé** : pas de parts, pas d'annuaire. Rejoindre Atlantis plus tard se fait depuis l'app, avec deux votes : émettre des parts (`/shares`) et s'inscrire dans l'annuaire (Settings, `DirectoryCard`). Aucune migration n'est nécessaire.
+- **Le parcours EUTHYNA reste privé** : pas de parts, pas d'annuaire. Rejoindre Atlantis plus tard se fait depuis l'app, par des votes du conseil (deux propositions pour émettre les parts, une pour l'inscription) : émettre des parts (`/shares`) et s'inscrire dans l'annuaire (Settings, `DirectoryCard`). Aucune migration n'est nécessaire.
 - **Le choix doit être mémorisé** : l'étape « Shares » est marquée « skipped » pour un coffre EUTHYNA, ce que `SetupProgress` sait déjà faire.
 
 ## Le principe

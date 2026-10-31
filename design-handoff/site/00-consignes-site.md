@@ -75,7 +75,7 @@ Même en-tête et même pied de page que l'accueil. En-tête nuit, corps en marb
 | 13 company-page | `/c/:dao` | `CompanyPublicPage.tsx` | `CompanyProfile` et `Treasury`. Héros : fil d'Ariane Atlantis / nom, puces (« Vault: no one holds the keys » si `vaultKeys`, « Paused by the council » si `paused`, NEAR testnet, « Selling shares » si `shares`), nom en `.leaf`, description, carte orichalque (trésorerie, payé aux associés, parts vendues). Trésorerie : `holdings` (montant, `place`, valeur USD) et la mention « Testnet tokens valued at mainnet prices (CoinGecko) ». Parts : `shares` (symbol, priceNear, sold/total, epochHours, distributedNear, distributedToken). Agents : une statue par `employees` selon le rôle (payments → R2 Naomi, treasury → R2B Thetis, revenue → R2C Hermes ; un autre rôle → R2), lignes `details` en chiffres romains, jauges `budgets` (available/max). Gouvernance : `council`, puis `wallets`. |
 | 14 market | `/market` | `MarketPage.tsx` | `MarketAgent`. Recherche, catégories ALL · RESEARCH · SECURITY · DATA, tri (Most delivered, Cheapest, Best rated). Un étal par service : titre, vendeur (lien vers `/c/:dao`), description, catégorie, `slaSeconds`, `delivered`, `successRate`, `rating`, prix, bouton PAY AND RUN. Dessous, deux panneaux : « If you are an AI agent » (held cheque, `list_market_agents`, `hire_agent` avec `max_price`) et le tiroir de paiement « If you are a person ». |
 | 15 market-task | `/market/task/:id` | `MarketTaskPage.tsx` | `MarketTaskView`. Frise de quatre sceaux : PAYMENT HELD (ou PAID UPFRONT pour une personne) → WORKING → DELIVERED → SETTLED. En cas d'échec : sceau de refus tourné, « Failed (not charged on held payments) » ou « Payment failed ». Colonne gauche : « Your request » (`input`), le résultat (`artifacts`) et DOWNLOAD JSON. Colonne droite : `metadata.payment` (state, amount, payTo, buyer, lien du hash `settleTxHash`). Pendant le travail : « The seller's agent is on it. This page updates by itself. » |
-| 16 atlantis-directory | `/explore` | `ExplorePage.tsx` | `DirectoryEntry` lus dans le contrat registry : nom, description, `dao_id`, date tirée de `registered_at_ns`, puce « Selling shares » si `shares_id`. Bouton START A COMPANY ON ATLANTIS (`/onboarding?path=atlantis`). Bloc final : un coffre EUTHYNA rejoint la cité par deux votes. |
+| 16 atlantis-directory | `/explore` | `ExplorePage.tsx` | `DirectoryEntry` lus dans le contrat registry : nom, description, `dao_id`, date tirée de `registered_at_ns`, puce « Selling shares » si `shares_id`. Bouton START A COMPANY ON ATLANTIS (`/onboarding?path=atlantis`). Bloc final : un coffre EUTHYNA rejoint la cité par des votes de son conseil. |
 
 Page société : `employees`, `council` et `wallets` sont déjà chargés par `companyProfile()` dans `lib/directory.ts`, mais la page ne les affiche pas encore. Il suffit de les afficher.
 
@@ -83,10 +83,12 @@ Page société : `employees`, `council` et `wallets` sont déjà chargés par `c
 
 **À retirer d'`ExplorePage.tsx`** : les promesses que le code ne tient pas (compte bancaire, Bitcoin, actions). L'annuaire ne montre que ce que le registre contient.
 
-**Ajouts à valider par Alex avant de les coder** (ils ne sont pas dans le code aujourd'hui) :
-- sur la page société, le bloc « Sells on Euthyna Market » : les services du Market filtrés par vendeur ;
-- sur la page société, le bouton « HIRE ITS AGENTS » qui y mène ;
-- sur l'annuaire, le bloc « Already have a vault on EUTHYNA? ».
+**Ajouts validés par Alex le 31 octobre** (ils ne sont pas encore dans le code ; ce ne sont que des changements d'affichage, sans contrat ni API à modifier). Ordre conseillé si le temps manque : 3, puis 1 et 2 ensemble, puis 4.
+
+1. **Page société, bloc « Sells on Euthyna Market »** (voir `13-company-page`). Lire la liste publique du Market (`lib/market.ts`) et garder les services de cette société : un service lui appartient si son `payTo` est l'un des comptes de la société (son coffre ou l'un de ses `wallets`). Afficher pour chacun le titre, le prix, la description, `slaSeconds` et `delivered`, avec un lien « Hire on the Market → » vers `/market`. Sous la liste : « Agents pay with a held cheque: <nom> is paid only once it delivers. » Si la société ne vend rien, ne pas afficher le bloc.
+2. **Page société, bouton « HIRE ITS AGENTS »** dans le héros, à côté de BUY SHARES. Il descend jusqu'au bloc 1 (ancre `#sells`). Il n'apparaît que si le bloc 1 est affiché.
+3. **Annuaire, bloc « Already have a vault on EUTHYNA? »** en bas de `/explore` (voir `16-atlantis-directory`). Texte : « Join the city through your council’s votes: issue shares, then list the company in the directory. » Bouton « PROPOSE IT TO YOUR COUNCIL », qui mène à l'app (`/governance`, connexion demandée).
+4. **Market, nom du vendeur cliquable** (voir `14-market`). « by <vendeur> » mène à `/c/:dao` de la société qui vend. `MarketAgent` ne contient pas l'identifiant de la société : le retrouver en comparant `payTo` aux sociétés de l'annuaire, comme au point 1. Si aucune société ne correspond, laisser le nom en texte simple.
 
 ## La vidéo du héros
 
