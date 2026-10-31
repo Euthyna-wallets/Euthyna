@@ -389,27 +389,27 @@ export function AtlantisLanding() {
         </div>
       </section>
 
-      {/* 07 · RECOVERY (planned) */}
+      {/* 07 · RECOVERY (ZK Email on testnet; other factors next) */}
       <section className="marble" style={{ ...sectionPad(110), color: "#0D1730" }}>
         <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 56, alignItems: "center" }}>
           <div className="r7" style={{ aspectRatio: "1/1", borderRadius: 2, boxShadow: "24px 30px 60px rgba(13,23,48,.35)" }} role="img" aria-label="Two halves of a marble seal rejoined with gold" />
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <Kicker color="#8A5A00">Recovery · planned</Kicker>
+            <Kicker color="#8A5A00">Recovery · ZK Email on testnet</Kicker>
             <h2 className="h2 carved">
               Lose a key.
               <br />
               Keep every wallet.
             </h2>
             <p style={{ margin: 0, fontSize: 17, lineHeight: 1.65, color: "#4A5675" }}>
-              A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key. EUTHYNA will recover it with two factors,
-              after a 48 to 72 hour delay any current key can cancel, and never holds enough to recover alone.
+              A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key. Today a founder proves their mailbox
+              with ZK Email, the lost account can cancel for 48 hours, then the other founders vote the seat back. EUTHYNA never holds enough to recover alone.
             </p>
             <div className="g2" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
               {[
-                ["PASSKEY", "Your phone signs."],
-                ["ZKPASSPORT", "Proves it's you, shares nothing."],
-                ["ZK EMAIL", "A proof from your inbox."],
-                ["TRUSTED CONTACT", "Someone you chose signs."],
+                ["ZK EMAIL", "A proof from your inbox. Live on testnet."],
+                ["PASSKEY", "Your phone signs. Next."],
+                ["ZKPASSPORT", "Proves it's you, shares nothing. Next."],
+                ["TRUSTED CONTACT", "Someone you chose signs. Next."],
               ].map(([name, text]) => (
                 <div key={name} style={{ padding: "16px 18px", border: "1px solid rgba(13,23,48,.16)", background: "rgba(255,255,255,.55)" }}>
                   <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".14em" }}>{name}</b>
@@ -583,12 +583,13 @@ export function AtlantisLanding() {
                 <li>Payments, swaps, Aave, WETH, Solana transfers, revenue sharing</li>
                 <li>Base Sepolia, Ethereum Sepolia, Solana devnet</li>
                 <li>Atlantis and Euthyna Market</li>
+                <li>Founder seat recovery with ZK Email</li>
               </ul>
             </div>
             <div style={{ padding: "32px 36px", background: "rgba(255,255,255,.6)", border: "1px solid rgba(13,23,48,.14)" }}>
               <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".2em", color: "#8A5A00" }}>NEXT</b>
               <ul style={{ margin: "14px 0 0", paddingLeft: 18, fontSize: 16, lineHeight: 1.8, color: "#4A5675" }}>
-                <li>Recovery with passkeys, ZKPassport and ZK Email</li>
+                <li>Recovery with passkeys and ZKPassport</li>
                 <li>Arbitrum, BSC, Plasma, Tron, Bitcoin</li>
                 <li>@euthyna/mcp on npm</li>
                 <li>Mainnet, after an independent audit</li>
