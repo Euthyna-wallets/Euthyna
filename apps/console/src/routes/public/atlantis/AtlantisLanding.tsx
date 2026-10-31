@@ -376,7 +376,7 @@ export function AtlantisLanding() {
           <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 24 }}>
             {[
               ["0", "access keys on the vault, private keys on the wallets"],
-              ["45", "attacks in the open suite, 45 refused: pnpm attack:all"],
+              ["48", "attacks in the open suite, 48 refused: pnpm attack:all"],
               ["1", "click for the council to pause every agent; only a vote resumes"],
               ["0", "servers of ours in the execution path"],
             ].map(([figure, label]) => (

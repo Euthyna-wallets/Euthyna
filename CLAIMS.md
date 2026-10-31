@@ -17,7 +17,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Rule changes: DAO vote, delay, council veto; the council pauses all agents, only a vote resumes | Code | `contracts/tests/tests/dao_governance.rs`, `contracts/tests/tests/attacks.rs` |
 | `check_operation` answers allowed or refused with a reason, without reserving anything | Code | `contracts/vault/src/lib.rs`; `pnpm attack:testnet` calls it on a live vault |
 | Settlement uses an MPC attestation of the finalized transaction, not a server; the API is optional for execution | Code | `contracts/vault/src/foreign.rs`, `contracts/tests/tests/settlement.rs`, [Architecture.md](./Architecture.md) |
-| 45 attacks, 45 refused | Code | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
+| 48 attacks, 48 refused | Code | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
 | Vault versions published on Nomos by hash and upgraded by DAO vote, state kept | Code | `contracts/tests` (upgrade tests); the whitepaper reports three versions live on testnet |
 | Roles for payments, Uniswap swaps, Aave lending, WETH wrapping, Solana transfers, NEAR token transfers, revenue sharing | Code | `packages/sdk/src/roles.ts`, `contracts/omniroles-conditions/src/presets.rs` |
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |

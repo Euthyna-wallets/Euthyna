@@ -6,7 +6,7 @@ make the agent sign anything its NEAR key can sign. The suite plays that
 attacker, and a few others, and shows which lock refuses each attack.
 
 ```bash
-pnpm attack:all       # vault in a NEAR sandbox + Guard, 45 attacks
+pnpm attack:all       # vault in a NEAR sandbox + Guard, 48 attacks
 pnpm attack:testnet   # the live testnet vault, view calls only, nothing moves
 ```
 
