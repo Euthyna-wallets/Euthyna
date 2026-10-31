@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { API_BASE } from "../api.js";
+import { Kicker, PageTitle, Slab } from "../components/design.js";
 import { demoWalletsEnabled } from "../lib/wallet-store.js";
 import { connectNearWallet, nearAccounts, signNearMessage, switchNearWallet } from "../wallets.js";
 
@@ -15,6 +16,14 @@ async function authPost<T>(path: string, body: unknown): Promise<T> {
   if (!response.ok) throw new Error(payload.message ?? `HTTP ${response.status}`);
   return payload;
 }
+
+const INTRO_LINES = [
+  "Members vote the rules in a NEAR DAO",
+  "A vault checks every agent request against them",
+  "No key on our servers can move company funds",
+];
+
+const NUMERALS = ["I", "II", "III"];
 
 /** The console identity is a NEAR account: the one the person votes with in the company DAO. */
 export function SignIn() {
@@ -54,50 +63,236 @@ export function SignIn() {
 
   const demo = demoWalletsEnabled();
   return (
-    <div className="auth">
-      <aside className="auth-intro">
-        <div className="brand">Euthyna</div>
-        <h2>AI agents move company funds. Humans set the limits.</h2>
-        <ul>
-          <li>Members vote the rules in a NEAR DAO</li>
-          <li>A vault checks every agent request against them</li>
-          <li>No key on our servers can move company funds</li>
-        </ul>
-        <a className="text-action" href="/">Explore the AI companies →</a>
-      </aside>
-      <div className="auth-card">
-        <div className="auth-head">
-          <span className="brand">Euthyna</span>
-          {demo ? <span className="test-pill" title="UAT demo mode: test-only private keys are stored in this browser.">Test mode</span> : null}
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+        fontFamily: "var(--font-ui)",
+        color: "var(--ink)",
+      }}
+    >
+      {/* The R8 column is not in this build: the marble column texture carries the light. */}
+      <aside
+        className="col"
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          gap: 48,
+          padding: "40px 56px 56px",
+          boxShadow: "none",
+          color: "#E7ECF6",
+        }}
+      >
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            background:
+              "linear-gradient(180deg, rgba(3,9,24,.72) 0%, rgba(3,9,24,.45) 30%, rgba(3,9,24,.82) 72%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.15) 0%, rgba(3,9,24,0) 40%, rgba(3,9,24,.55) 100%)",
+          }}
+        />
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            font: "700 18px var(--font-brand)",
+            letterSpacing: ".24em",
+            color: "#F3EFE6",
+          }}
+        >
+          <svg width="30" height="30" viewBox="0 0 1024 1024" aria-hidden="true">
+            <circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" strokeWidth="102" />
+            <rect x="297" y="461" width="430" height="102" fill="#C9890C" />
+            <rect x="41" y="461" width="72" height="102" fill="#C9890C" />
+            <rect x="911" y="461" width="72" height="102" fill="#C9890C" />
+          </svg>
+          EUTHYNA
         </div>
-        <h1>Sign in</h1>
-        <p className="muted">With the NEAR account you vote with. You sign a message: it is free and sends no transaction.</p>
-        {account ? (
-          <>
-            <div className="account-chip" title={account}>
-              <span className="account-avatar" style={{ background: accountColor(account) }} aria-hidden="true">{account.slice(0, 1).toUpperCase()}</span>
-              <span className="account-text">
-                <span className="account-label">Connected wallet</span>
-                <span className="account-id mono">{shortAccount(account)}</span>
-              </span>
-              {demo ? null : (
-                <button className="link-button" type="button" disabled={busy} onClick={() => { setAccount(null); void switchNearWallet().catch((cause: unknown) => setError(String(cause))); }}>Change</button>
-              )}
+
+        <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 22, maxWidth: 560 }}>
+          <h2 style={{ margin: 0, font: "900 clamp(34px, 3.6vw, 52px)/1.02 var(--font-brand)", letterSpacing: ".02em" }}>
+            <span
+              style={{
+                backgroundImage: "url(/media/textures/orichalcum.jpg)",
+                backgroundSize: "100% 240%",
+                backgroundPosition: "0 32%",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              AI AGENTS MOVE COMPANY FUNDS.
+            </span>
+            <br />
+            <span style={{ color: "#F3EFE6" }}>HUMANS SET THE LIMITS.</span>
+          </h2>
+          <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, fontSize: 16, color: "#C9D3EA" }}>
+            {INTRO_LINES.map((line, index) => (
+              <li key={line} style={{ display: "flex", gap: 16 }}>
+                <b style={{ font: "700 14px var(--font-brand)", color: "#F2B544", width: 26, flex: "0 0 auto" }}>{NUMERALS[index]}</b>
+                {line}
+              </li>
+            ))}
+          </ol>
+          <a href="/" style={{ font: "700 13px var(--font-brand)", letterSpacing: ".2em", color: "#8FE3F1", textDecoration: "none" }}>
+            EXPLORE THE AI COMPANIES →
+          </a>
+        </div>
+      </aside>
+
+      <main
+        style={{
+          position: "relative",
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "clamp(28px, 4vw, 40px)",
+          backgroundColor: "var(--marble)",
+          backgroundImage: "linear-gradient(rgba(246,242,235,.86), rgba(246,242,235,.86)), url(/media/textures/marble-white.jpg)",
+          backgroundSize: "cover, cover",
+        }}
+      >
+        <span style={{ position: "absolute", top: 34, right: 40, font: "600 11px var(--font-mono)", letterSpacing: ".08em", color: "var(--ink-3)" }}>
+          TESTNET · NOT AUDITED
+        </span>
+
+        <Slab
+          as="div"
+          style={{
+            width: "min(440px, 100%)",
+            boxSizing: "border-box",
+            padding: "44px 44px 36px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 22,
+            boxShadow: "26px 30px 60px rgba(13,23,48,.22), inset 0 0 0 1px rgba(13,23,48,.08)",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Kicker>Enter the assembly</Kicker>
+              {demo ? (
+                <span
+                  title="UAT demo mode: test-only private keys are stored in this browser."
+                  style={{
+                    marginLeft: "auto",
+                    font: "700 10px var(--font-brand)",
+                    letterSpacing: ".14em",
+                    border: "1px solid rgba(13,23,48,.2)",
+                    padding: "3px 8px",
+                    color: "var(--ink-2)",
+                  }}
+                >
+                  TEST MODE
+                </span>
+              ) : null}
             </div>
-            <button className="primary block" disabled={busy} onClick={() => void signIn(account)}>
-              {busy ? "Confirm in your wallet…" : "Sign in"}
+            <PageTitle style={{ fontSize: 46 }}>SIGN IN</PageTitle>
+            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "var(--ink-2)" }}>
+              With the NEAR account you vote with. You sign a message: it is free and sends no transaction.
+            </p>
+          </div>
+
+          {account ? (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "14px 16px",
+                  background: "rgba(255,255,255,.7)",
+                  border: "1px solid rgba(13,23,48,.14)",
+                }}
+              >
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: "50%",
+                    flex: "0 0 auto",
+                    background: accountColor(account),
+                    color: "#F3EFE6",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 800,
+                  }}
+                  aria-hidden="true"
+                >
+                  {account.slice(0, 1).toUpperCase()}
+                </span>
+                <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <small style={{ fontSize: 12, color: "var(--ink-3)" }}>Connected wallet</small>
+                  <b title={account} style={{ font: "600 14px var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {shortAccount(account)}
+                  </b>
+                </span>
+                {demo ? null : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setAccount(null);
+                      void switchNearWallet().catch((cause: unknown) => setError(String(cause)));
+                    }}
+                    style={{
+                      marginLeft: "auto",
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      font: "600 13px var(--font-ui)",
+                      color: "var(--ink-2)",
+                      cursor: busy ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Change
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn-ori"
+                style={{ width: "100%", padding: "17px" }}
+                disabled={busy}
+                onClick={() => void signIn(account)}
+              >
+                {busy ? "CONFIRM IN YOUR WALLET…" : "SIGN IN"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn-ori"
+              style={{ width: "100%", padding: "17px" }}
+              disabled={busy}
+              onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}
+            >
+              CONNECT A NEAR WALLET
             </button>
-          </>
-        ) : (
-          <button className="primary block" disabled={busy} onClick={() => void connectNearWallet().catch((cause: unknown) => setError(String(cause)))}>
-            Connect a NEAR wallet
-          </button>
-        )}
-        {error ? <div className="alert error auth-error">{error}</div> : null}
-        <p className="auth-foot">
-          New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account.
-        </p>
-      </div>
+          )}
+
+          {error ? (
+            <div style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(217,87,59,.08)", padding: "10px 12px", fontSize: 13, color: "var(--terra-ink)" }} role="alert">
+              {error}
+            </div>
+          ) : null}
+
+          <p style={{ margin: 0, paddingTop: 18, borderTop: "1px solid rgba(13,23,48,.12)", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
+            New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account.
+          </p>
+        </Slab>
+      </main>
     </div>
   );
 }

@@ -1,9 +1,16 @@
+/**
+ * Company setup. Visual reference: design-handoff/app/source/07-atlantis-found-a-company.html
+ * (Launch on Atlantis, steps I to VIII) and 17-euthyna-path-plug-in.html (Use EUTHYNA, steps I to VII).
+ * The path is read from ?path=euthyna|atlantis; a EUTHYNA vault is private, so Shares is skipped and
+ * remembered, and the last step is Plug in instead of City. Data, queries and handlers are main's.
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
+import { Kicker, Niche, PageTitle, Slab } from "../components/design.js";
 import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
@@ -12,6 +19,8 @@ import { FundWallet, TreasuryCreate, WalletSetup } from "./TreasurySetup.js";
 
 type Organization = { id: string; name: string; slug: string };
 type Stage = "company" | "members" | "treasury" | "wallet" | "shares" | "agent" | "role" | "done";
+type Path = "euthyna" | "atlantis";
+type StepView = { id: string; label: string };
 
 const STEPS: Array<{ id: Exclude<Stage, "done">; label: string }> = [
   { id: "company", label: "Company" },
@@ -23,8 +32,34 @@ const STEPS: Array<{ id: Exclude<Stage, "done">; label: string }> = [
   { id: "role", label: "Role" },
 ];
 
+const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+
+const ATLANTIS_STEPS: StepView[] = [...STEPS, { id: "city", label: "City" }];
+
+/** A EUTHYNA vault is private: no Shares step; the last step is Plug in. */
+const EUTHYNA_STEPS: StepView[] = [
+  ...STEPS
+    .filter((step) => step.id !== "shares")
+    .map((step): StepView => ({ id: step.id, label: step.id === "company" ? "Team" : step.id === "members" ? "Members" : step.label })),
+  { id: "plug", label: "Plug in" },
+];
+
+const TITLES: Record<Stage, string> = {
+  company: "Name your AI company",
+  members: "Who votes on the rules?",
+  treasury: "Incorporate on NEAR",
+  wallet: "Open the company wallet",
+  shares: "Open the company to shareholders?",
+  agent: "What should your first agent do?",
+  role: "Write its role",
+  done: "Your AI company is live",
+};
+
+const JOB_ORDER = ["payments", "treasury", "revenue"];
+
 const confirmedKey = (organizationId: string) => `mandateos.members-confirmed.${organizationId}`;
 const sharesSkippedKey = (organizationId: string) => `mandateos.shares-skipped.${organizationId}`;
+const PATH_KEY = "mandateos.path";
 const readFlag = (key: string) => {
   try {
     return localStorage.getItem(key) === "1";
@@ -59,6 +94,26 @@ export function OnboardingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const creating = searchParams.has("new");
 
+  // The chosen path: the two doors of /choose-path write it in the query; it is remembered.
+  const explicitPath = searchParams.get("path");
+  const [path, setPath] = useState<Path>(() => {
+    if (explicitPath === "euthyna" || explicitPath === "atlantis") return explicitPath;
+    try {
+      return localStorage.getItem(PATH_KEY) === "euthyna" ? "euthyna" : "atlantis";
+    } catch {
+      return "atlantis";
+    }
+  });
+  useEffect(() => {
+    if (explicitPath !== "euthyna" && explicitPath !== "atlantis") return;
+    setPath(explicitPath);
+    try {
+      localStorage.setItem(PATH_KEY, explicitPath);
+    } catch {
+      // A convenience only.
+    }
+  }, [explicitPath]);
+
   useEffect(() => {
     if (!active) return;
     setReady(false);
@@ -71,6 +126,13 @@ export function OnboardingPage() {
       void queryClient.invalidateQueries();
     });
   }, [active?.id]);
+
+  // EUTHYNA stays private: no shares, not listed. The choice is remembered for this company.
+  useEffect(() => {
+    if (path !== "euthyna" || !active) return;
+    writeFlag(sharesSkippedKey(active.id), true);
+    setSharesSkipped(true);
+  }, [path, active?.id]);
 
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, enabled: ready, refetchInterval: 8_000 });
   const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: ready });
@@ -87,7 +149,7 @@ export function OnboardingPage() {
       ? (memberCount < 3 || !membersConfirmed ? "members" : "treasury")
       : !status.data?.wallet
         ? "wallet"
-        : !shares.data?.deployed && !sharesSkipped
+        : !shares.data?.deployed && !sharesSkipped && path !== "euthyna"
           ? "shares"
           : newAgent || activeAgents.length === 0
           ? "agent"
@@ -97,6 +159,13 @@ export function OnboardingPage() {
   const loading = organizations.isLoading || (Boolean(active) && !creating && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
   const firstAgent = activeAgents[0];
   const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
+
+  const steps = path === "euthyna" ? EUTHYNA_STEPS : ATLANTIS_STEPS;
+  const plugging = path === "euthyna" && stage === "agent" && newAgent?.keyMode === "signer";
+  // On Atlantis the last step is the city: listing is a members' vote, still to come once the company is live.
+  const currentIndex = stage === "done"
+    ? (path === "atlantis" ? steps.findIndex((step) => step.id === "city") : steps.length)
+    : steps.findIndex((step) => step.id === (plugging ? "plug" : stage));
 
   const waitingFor: Record<Stage, string> = {
     company: "Name your AI company",
@@ -110,30 +179,70 @@ export function OnboardingPage() {
   };
 
   return (
-    <div className="page onboarding-page">
-      <header className="page-head">
-        <div>
-          <span className="eyebrow">Create your AI company</span>
-          <h1>{active?.name ?? "Your AI company"}</h1>
-          <p className="muted">
-            Agents do the work. Founders and shareholders own the company and vote on the rules. The vault on NEAR
-            enforces them: an agent cannot sign anything its role does not allow.
-          </p>
-          {!loading ? <p className="setup-actor">{waitingFor[stage]}</p> : null}
+    <div
+      style={{
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        gap: "clamp(18px, 2.4vw, 30px)",
+        padding: "clamp(22px, 2.8vw, 34px) clamp(20px, 3.5vw, 56px) clamp(30px, 4vw, 56px)",
+        backgroundColor: "#030918",
+        backgroundImage:
+          "radial-gradient(60% 70% at 78% 40%, rgba(3,9,24,0) 0%, rgba(3,9,24,.6) 60%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.96) 0%, rgba(3,9,24,.85) 45%, rgba(3,9,24,.55) 100%), url(/media/renders/R3-atlantis-aerial.jpg)",
+        backgroundSize: "cover, cover, 1100px auto",
+        backgroundPosition: "0 0, 0 0, right -180px center",
+        backgroundRepeat: "no-repeat",
+        color: "#E7ECF6",
+        // Bleed over the marble ground, without overflowing it on a narrow screen.
+        marginLeft: "calc(-1 * min(40px, 4.1vw))",
+        marginRight: "calc(-1 * min(40px, 4.1vw))",
+        marginBottom: "calc(-1 * min(60px, 20.5vw))",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Kicker color={path === "euthyna" ? "#F2B544" : "#4FD1E8"}>
+          {path === "euthyna" ? "· Create your vault" : "· Launch on Atlantis"}
+        </Kicker>
+        <span style={{ marginLeft: "auto", font: "600 11px var(--font-mono)", letterSpacing: ".08em", color: "#6F82AE" }}>
+          TESTNET · NOT AUDITED
+        </span>
+      </div>
+
+      {error ? (
+        <div
+          role="alert"
+          style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(74,26,16,.65)", padding: "12px 16px", fontSize: 13.5, color: "#F4C9BC" }}
+        >
+          {error}
         </div>
-        <div className="pill">Base Sepolia · NEAR testnet</div>
-      </header>
-      {error ? <div className="alert error">{error}</div> : null}
-      {loading ? <div className="state">Loading…</div> : (
+      ) : null}
+
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }} aria-busy="true">
+          <div className="loading-slab" style={{ height: 46, maxWidth: 1000 }} />
+          <div className="loading-slab" style={{ height: 64, maxWidth: 720 }} />
+          <div className="loading-slab" style={{ height: 120 }} />
+        </div>
+      ) : (
         <>
-          <SetupProgress stage={stage} skipped={sharesSkipped && !shares.data?.deployed ? ["shares"] : []} />
+          <SetupProgress steps={steps} current={currentIndex} skipped={sharesSkipped && !shares.data?.deployed ? ["shares"] : []} />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 760 }}>
+            <Kicker color="#F2B544">
+              {active?.name ?? "Your AI company"} · {path === "euthyna" ? "private vault" : "on Atlantis"}
+            </Kicker>
+            <PageTitle style={{ color: "#F3EFE6", textShadow: "none", fontSize: 44, lineHeight: 1.05 }}>
+              {TITLES[stage]}
+            </PageTitle>
+            <p style={{ margin: 0, fontSize: 15.5, color: "#C9D3EA" }}>{waitingFor[stage]}</p>
+          </div>
 
           {stage === "company" ? (
             <CompanyStep
               organizations={organizations.data ?? []}
               onCreated={async (organization) => {
                 setActiveId(organization.id);
-                setSearchParams({});
+                setSearchParams(path === "euthyna" ? { path: "euthyna" } : {});
                 await organizations.refetch();
               }}
               onError={setError}
@@ -153,28 +262,32 @@ export function OnboardingPage() {
           ) : null}
 
           {stage === "treasury" && active ? (
-            <>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 960 }}>
               <TreasuryCreate companyName={active.name} onCreated={async () => { await status.refetch(); }} />
-              <button className="ghost" onClick={() => setMembersConfirmed(false)}>← Change members</button>
-            </>
+              <div>
+                <button className="btn-line on-dark" onClick={() => setMembersConfirmed(false)}>← CHANGE MEMBERS</button>
+              </div>
+            </div>
           ) : null}
 
           {stage === "wallet" && status.data ? <WalletSetup status={status.data} onChanged={async () => { await status.refetch(); }} /> : null}
 
           {stage === "shares" && active ? (
-            <section className="card empty-action">
-              <div>
-                <h2>Open the company to shareholders?</h2>
-                <p className="muted">
+            <Slab style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Kicker>Shares</Kicker>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
                   Anyone with a NEAR wallet can then buy shares. Locked shares vote on company decisions, and the revenue
                   the company shares goes to the holders who vote. Founders keep their vote and their veto.
                 </p>
               </div>
-              <div className="row wrap">
-                <Link className="button primary" to="/shares">Issue shares</Link>
-                <button className="ghost" onClick={() => { writeFlag(sharesSkippedKey(active.id), true); setSharesSkipped(true); }}>Skip for now</button>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/shares">ISSUE SHARES</Link>
+                <button className="btn-line" onClick={() => { writeFlag(sharesSkippedKey(active.id), true); setSharesSkipped(true); }}>
+                  SKIP FOR NOW
+                </button>
               </div>
-            </section>
+            </Slab>
           ) : null}
 
           {stage === "agent" && treasury && !newAgent && !job ? (
@@ -198,61 +311,65 @@ export function OnboardingPage() {
                 }}
               />
             ) : (
-              <section className="card">
-                <span className="eyebrow">First hire · {job!.title}</span>
-                <h2>Hire the {job!.agentName.toLowerCase()}</h2>
-                <p className="muted">
-                  The agent gets its own NEAR account. It can only ask the vault for operations, and only those its voted
-                  role allows.
-                </p>
+              <Slab style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 960 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <Kicker>First hire · {job!.title}</Kicker>
+                  <b style={{ font: "800 24px var(--font-brand)", letterSpacing: ".04em" }}>HIRE THE {job!.agentName.toUpperCase()}</b>
+                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
+                    The agent gets its own NEAR account. It can only ask the vault for operations, and only those its voted
+                    role allows.
+                  </p>
+                </div>
                 <NewAgent vaultAccountId={treasury.vaultAccountId} defaultName={job!.agentName} defaultRole={job!.role} onReady={setNewAgent} />
-                <button className="ghost" onClick={() => setJob(null)}>← Another role</button>
-              </section>
+                <div>
+                  <button className="btn-line" onClick={() => setJob(null)}>← ANOTHER ROLE</button>
+                </div>
+              </Slab>
             )
           ) : null}
 
           {stage === "role" ? (
-            <section className="card empty-action">
-              <div>
-                <span className="eyebrow">Role</span>
-                <h2>What {firstAgent?.name ?? "the agent"} may do</h2>
-                <p className="muted">
+            <Slab style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Kicker>Role</Kicker>
+                <b style={{ font: "800 24px var(--font-brand)", letterSpacing: ".04em" }}>WHAT {firstAgent?.name ?? "THE AGENT"} MAY DO</b>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
                   {contractJob ? `${contractJob.allows}. ` : ""}Everything else is refused by the vault. You set the budget;
                   the founders vote on it.
                 </p>
-                <ol className="small muted role-steps">
-                  <li>The role <span className="mono">{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: "var(--ink-2)", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <li>The role <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
                   <li>Preview, then submit it to the founders' vote.</li>
                   <li>They approve it in Decisions; it applies after the veto window, and the agent can start.</li>
                 </ol>
               </div>
               <Link
-                className="button primary"
+                className="btn-ori"
+                style={{ textDecoration: "none", display: "inline-block", alignSelf: "flex-start" }}
                 to={`/roles?new=1&role=${encodeURIComponent(firstAgent?.role ?? "treasury")}${contractJob ? `&job=${contractJob.id}` : ""}`}
               >
-                Write the role
+                WRITE THE ROLE
               </Link>
-            </section>
+            </Slab>
           ) : null}
 
           {(stage === "agent" || stage === "role") && status.data ? <FundWallet status={status.data} showNext={false} /> : null}
 
           {stage === "done" ? (
-            <section className="card empty-action">
-              <div>
-                <span className="eyebrow">Live</span>
-                <h2>{active?.name ?? "Your AI company"} is live</h2>
-                <p className="muted">
+            <Slab style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Kicker>Live</Kicker>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
                   Founders and {shares.data?.deployed ? "shareholders" : "members"} set the rules, {activeAgents.length} agent{activeAgents.length > 1 ? "s" : ""} work
                   inside them, and every operation is checked by the vault on NEAR before the company wallet signs.
                 </p>
               </div>
-              <div className="row wrap">
-                <Link className="button primary" to="/overview">Overview</Link>
-                <Link className="button" to="/activity">What the agents did</Link>
-                {shares.data?.deployed ? <Link className="button" to="/shares">Shares</Link> : null}
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/overview">OVERVIEW</Link>
+                <Link className="btn-line" style={{ textDecoration: "none", display: "inline-block" }} to="/activity">WHAT THE AGENTS DID</Link>
+                {shares.data?.deployed ? <Link className="btn-line" style={{ textDecoration: "none", display: "inline-block" }} to="/shares">SHARES</Link> : null}
               </div>
-            </section>
+            </Slab>
           ) : null}
         </>
       )}
@@ -260,39 +377,163 @@ export function OnboardingPage() {
   );
 }
 
-function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
+/** The eight (or seven) seals: done, current, still to come, and the steps a private vault skips. */
+function SetupProgress({ steps, current, skipped }: { steps: StepView[]; current: number; skipped: string[] }) {
+  const progress = steps.length > 1 ? Math.min(1, Math.max(0, current / (steps.length - 1))) : 0;
   return (
-    <section className="card">
-      <span className="eyebrow">First hire</span>
-      <h2>What should your first agent do?</h2>
-      <p className="muted">Pick a role. You set its budget next, and the founders vote on it.</p>
-      <div className="job-grid">
-        {JOBS.map((item) => {
-          const blocked = item.needsShares && !props.hasShares;
-          return (
-            <button key={item.id} className="job-card" disabled={blocked} onClick={() => props.onPick(item)}>
-              <strong>{item.title}</strong>
-              <span>{item.pitch}</span>
-              <span className="small muted">{blocked ? "Issue shares first (Shares page)." : `Allowed: ${item.allows}.`}</span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+    <div style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`, gap: 4, maxWidth: 1000 }}>
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "6%",
+          right: "6%",
+          top: 20,
+          height: 2,
+          background: `linear-gradient(90deg, #C9890C 0%, #C9890C ${(progress * 100).toFixed(1)}%, #36507F ${(progress * 100).toFixed(1)}%)`,
+        }}
+      />
+      {steps.map((step, index) => {
+        const done = index < current;
+        const active = index === current;
+        const skippedHere = done && skipped.includes(step.id);
+        return (
+          <div
+            key={step.id}
+            style={{
+              position: "relative",
+              zIndex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+              textAlign: "center",
+              font: "700 11px var(--font-brand)",
+              letterSpacing: ".16em",
+              color: active ? "#F2B544" : done ? "#C9D3EA" : "#8FA2CC",
+            }}
+          >
+            {done ? (
+              <span className="app-seal" style={{ width: 40, height: 40 }}>
+                <span style={{ fontSize: 15, color: "#4A2C06" }}>{skippedHere ? "–" : "✓"}</span>
+              </span>
+            ) : (
+              <span
+                style={{
+                  width: active ? 46 : 40,
+                  height: active ? 46 : 40,
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#061433",
+                  boxShadow: active ? "0 0 0 2px #F2B544, 0 0 26px rgba(242,181,68,.55)" : "inset 0 0 0 1.5px #36507F",
+                  font: `${active ? 800 : 700} ${active ? 14 : 13}px var(--font-brand)`,
+                  color: active ? "#F2B544" : "#6F82AE",
+                }}
+              >
+                {NUMERALS[index] ?? String(index + 1)}
+              </span>
+            )}
+            <span style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {step.label}
+              {skippedHere ? " (skipped)" : ""}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-function SetupProgress({ stage, skipped = [] }: { stage: Stage; skipped?: Stage[] }) {
-  const current = stage === "done" ? STEPS.length : STEPS.findIndex((step) => step.id === stage);
+function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
+  const [selected, setSelected] = useState<Job | null>(null);
   return (
-    <nav className="setup-progress" aria-label="Company setup progress">
-      {STEPS.map((step, index) => (
-        <div key={step.id} className={`${index < current ? "done" : ""} ${index === current ? "current" : ""}`}>
-          <span>{index < current ? (skipped.includes(step.id) ? "–" : "✓") : index + 1}</span>
-          {step.label}{index < current && skipped.includes(step.id) ? " (skipped)" : ""}
-        </div>
-      ))}
-    </nav>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 26, alignItems: "start", maxWidth: 1200 }}>
+      {JOB_ORDER.map((id) => JOBS.find((item) => item.id === id))
+        .filter((item): item is Job => Boolean(item))
+        .map((item) => {
+          const blocked = item.needsShares && !props.hasShares;
+          const on = selected?.id === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              disabled={blocked}
+              onClick={() => setSelected(item)}
+              className="slab"
+              style={{
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                padding: 0,
+                border: 0,
+                borderRadius: 2,
+                textAlign: "left",
+                whiteSpace: "normal",
+                color: "var(--ink)",
+                cursor: blocked ? "not-allowed" : "pointer",
+                opacity: blocked ? 0.6 : 1,
+                boxShadow: on
+                  ? "0 0 0 3px #F2B544, 0 0 40px rgba(242,181,68,.35), 24px 30px 60px rgba(0,0,0,.45)"
+                  : "24px 30px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(13,23,48,.08)",
+              }}
+            >
+              {on ? (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 30,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "5px 12px",
+                    background: "#F2B544",
+                    color: "#061433",
+                    font: "800 10px var(--font-brand)",
+                    letterSpacing: ".18em",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  SELECTED
+                </span>
+              ) : null}
+              <div style={{ margin: "18px 18px 0", borderRadius: "150px 150px 2px 2px", overflow: "hidden" }}>
+                <Niche role={item.role} height={240} />
+              </div>
+              <div style={{ padding: "18px 22px 22px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <Kicker>{item.agentName}</Kicker>
+                <b style={{ font: "800 20px var(--font-brand)", letterSpacing: ".06em" }}>{item.title}</b>
+                <span style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>{item.pitch}</span>
+                <span style={{ fontSize: 12.5, color: "var(--ink-3)", borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 8, lineHeight: 1.5 }}>
+                  <b style={{ color: "var(--ink)" }}>Allows:</b>{" "}
+                  {blocked ? "Issue shares first (Shares page)." : `${item.allows}. Everything else is refused.`}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+
+      <div
+        className="night-panel"
+        style={{ alignSelf: "end", display: "flex", flexDirection: "column", gap: 14, padding: 22, border: "1px solid rgba(242,181,68,.35)" }}
+      >
+        <Kicker color="#F2B544">Next · VII · Role</Kicker>
+        <span style={{ fontSize: 14, color: "#C9D3EA" }}>
+          Name the agent and set its budget. The founders vote on it before it can ask the vault for anything.
+        </span>
+        <button
+          type="button"
+          className="btn-ori"
+          disabled={!selected}
+          onClick={() => {
+            if (selected) props.onPick(selected);
+          }}
+        >
+          {selected ? `HIRE THE ${selected.agentName.toUpperCase()}` : "PICK A ROLE"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -313,14 +554,22 @@ function CompanyStep(props: { organizations: Organization[]; onCreated: (organiz
     }
   }
   return (
-    <section className="card">
-      <h2>Create your company</h2>
-      <p className="muted">The name is also used for the DAO and vault accounts on NEAR.</p>
-      <div className="row">
-        <input placeholder="Company name" value={name} onChange={(event) => setName(event.target.value)} />
-        <button className="primary" disabled={busy || name.trim().length < 2} onClick={() => void create()}>Create company</button>
+    <Slab style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Kicker>Company</Kicker>
+        <b style={{ font: "800 24px var(--font-brand)", letterSpacing: ".04em" }}>CREATE YOUR COMPANY</b>
+        <span style={{ fontSize: 14, color: "var(--ink-2)" }}>The name is also used for the DAO and vault accounts on NEAR.</span>
       </div>
-    </section>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div className="field-app" style={{ flex: "1 1 280px", maxWidth: 420 }}>
+          <label htmlFor="company-name">Company name</label>
+          <input id="company-name" placeholder="Company name" value={name} onChange={(event) => setName(event.target.value)} />
+        </div>
+        <button className="btn-ori" disabled={busy || name.trim().length < 2} onClick={() => void create()}>
+          CREATE COMPANY
+        </button>
+      </div>
+    </Slab>
   );
 }
 
@@ -351,31 +600,45 @@ function MembersStep(props: {
   }
 
   return (
-    <section className="card">
-      <h2>Who votes on the rules?</h2>
-      <p className="muted">
-        Add the NEAR accounts of the people who will vote. No invitation is sent: each person signs in here with that wallet.
-        Like the owners of a Safe, they become the DAO members when the treasury is created.
-      </p>
-      <table>
-        <thead><tr><th>NEAR account</th><th>Name</th><th>Signed in</th><th /></tr></thead>
-        <tbody>
-          {props.members.map((member) => (
-            <tr key={member.id}>
-              <td className="mono">{member.nearAccountId ?? <span className="muted">—</span>}{member.nearAccountId === wallets.nearAccountId ? <span className="small muted"> (you)</span> : null}</td>
-              <td>{member.name ?? <span className="muted">—</span>}</td>
-              <td className="small">{member.signedIn ? "yes" : <span className="muted">not yet</span>}</td>
-              <td>
-                {member.role !== "owner" ? (
-                  <button className="ghost" disabled={busy} onClick={() => void run(() => omni.removeMember(member.id))}>Remove</button>
-                ) : <span className="small muted">founder</span>}
-              </td>
+    <Slab style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 960 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Kicker>Founders</Kicker>
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
+          Add the NEAR accounts of the people who will vote. No invitation is sent: each person signs in here with that wallet.
+          Like the owners of a Safe, they become the DAO members when the treasury is created.
+        </p>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ minWidth: 520 }}>
+          <thead>
+            <tr>
+              <th>NEAR account</th>
+              <th>Name</th>
+              <th>Signed in</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {props.members.map((member) => (
+              <tr key={member.id}>
+                <td style={{ font: "500 13px var(--font-mono)" }}>
+                  {member.nearAccountId ?? <span style={{ color: "var(--ink-3)" }}>—</span>}
+                  {member.nearAccountId === wallets.nearAccountId ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}> (you)</span> : null}
+                </td>
+                <td>{member.name ?? <span style={{ color: "var(--ink-3)" }}>—</span>}</td>
+                <td style={{ fontSize: 13 }}>{member.signedIn ? "yes" : <span style={{ color: "var(--ink-3)" }}>not yet</span>}</td>
+                <td>
+                  {member.role !== "owner" ? (
+                    <button className="btn" disabled={busy} onClick={() => void run(() => omni.removeMember(member.id))}>Remove</button>
+                  ) : <span style={{ fontSize: 12, color: "var(--ink-3)" }}>founder</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <form
-        className="row wrap"
+        style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}
         onSubmit={(event) => {
           event.preventDefault();
           void run(async () => {
@@ -385,20 +648,25 @@ function MembersStep(props: {
           });
         }}
       >
-        <label>NEAR account<input placeholder="bob.testnet" value={account} onChange={(event) => setAccount(event.target.value)} /></label>
-        <label>Name (optional)<input placeholder="Bob" value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <button className="secondary" type="submit" disabled={busy || account.trim().length < 2}>{busy ? "Checking on NEAR…" : "Add member"}</button>
+        <div className="field-app" style={{ flex: "1 1 220px", maxWidth: 320 }}>
+          <label htmlFor="member-account">NEAR account</label>
+          <input id="member-account" placeholder="bob.testnet" value={account} onChange={(event) => setAccount(event.target.value)} />
+        </div>
+        <div className="field-app" style={{ flex: "1 1 180px", maxWidth: 260 }}>
+          <label htmlFor="member-name">Name (optional)</label>
+          <input id="member-name" placeholder="Bob" value={name} onChange={(event) => setName(event.target.value)} />
+        </div>
+        <button className="btn-ori" type="submit" disabled={busy || account.trim().length < 2}>{busy ? "CHECKING ON NEAR…" : "ADD MEMBER"}</button>
       </form>
-      <p className="small muted">
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-3)" }}>
         The account must exist on NEAR testnet. Each member needs about 0.3 NEAR to pay for votes.
       </p>
-      <div className="row">
-        <span className="small">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
           {count < 3 ? `Add at least ${3 - count} more member${3 - count > 1 ? "s" : ""}.` : `${count} members · a decision will need ${threshold} of ${count} approvals.`}
         </span>
-        <div className="spacer" />
-        <button className="primary" disabled={count < 3} onClick={props.onContinue}>Continue</button>
+        <button className="btn-ori" style={{ marginLeft: "auto" }} disabled={count < 3} onClick={props.onContinue}>CONTINUE</button>
       </div>
-    </section>
+    </Slab>
   );
 }
