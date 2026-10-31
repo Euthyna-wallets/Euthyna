@@ -12,6 +12,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
 import { Kicker, Niche, PageTitle, Slab } from "../components/design.js";
+import { short } from "../components/ui.js";
 import { SigningInbox } from "../components/SigningInbox.js";
 import { WalletBar } from "../components/WalletBar.js";
 import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
@@ -154,13 +155,13 @@ export function OnboardingPage() {
     : steps.findIndex((step) => step.id === stage);
 
   const waitingFor: Record<Stage, string> = {
-    company: "Name your AI company",
+    company: "It names the DAO and the vault on NEAR",
     members: `${memberCount} of 3 founders · the NEAR accounts that vote on the rules`,
-    treasury: "Incorporate on NEAR: the DAO and the vault",
+    treasury: "Two contracts: the DAO for the members, the vault for the rules",
     wallet: "Founders vote to open the company wallet",
     shares: "Open the company to shareholders, or skip",
     agent: "Hire the first agent",
-    role: "Write its role",
+    role: "What it may do, and its budget. The founders vote on it",
     done: "Set up. One step left, only if you want it: Atlantis",
   };
 
@@ -306,6 +307,8 @@ export function OnboardingPage() {
               <RunYourAgent
                 agent={newAgent}
                 vaultAccountId={treasury.vaultAccountId}
+                // The next setup step is the role, not the HQ.
+                doneLabel={(roles.data?.roles.length ?? 0) === 0 ? "NEXT · WRITE ITS ROLE" : "DONE · GO TO YOUR HQ"}
                 onDone={() => {
                   setNewAgent(null);
                   void agents.refetch();
@@ -530,7 +533,7 @@ function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
                 <span style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>{item.pitch}</span>
                 <span style={{ fontSize: 12.5, color: "var(--ink-3)", borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 8, lineHeight: 1.5 }}>
                   <b style={{ color: "var(--ink)" }}>Allows:</b>{" "}
-                  {blocked ? "Issue shares first (Shares page)." : `${item.allows}. Everything else is refused.`}
+                  {blocked ? "Needs company shares: issue them after setup, from Owners." : `${item.allows}. Everything else is refused.`}
                 </span>
               </div>
             </button>
@@ -541,7 +544,7 @@ function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
         className="night-panel"
         style={{ alignSelf: "end", display: "flex", flexDirection: "column", gap: 14, padding: 22, border: "1px solid rgba(242,181,68,.35)" }}
       >
-        <Kicker color="#F2B544">Next · VII · Role</Kicker>
+        <Kicker color="#F2B544">Next · {NUMERALS[SETUP_STEPS.findIndex((step) => step.id === "role")]} · Role</Kicker>
         <span style={{ fontSize: 14, color: "#C9D3EA" }}>
           Name the agent and set its budget. The founders vote on it before it can ask the vault for anything.
         </span>
@@ -628,7 +631,7 @@ function MembersStep(props: {
         <Kicker>Founders</Kicker>
         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
           Add the NEAR accounts of the people who will vote. No invitation is sent: each person signs in here with that wallet.
-          Like the owners of a Safe, they become the DAO members when the treasury is created.
+          They become the DAO members when the treasury is created.
         </p>
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -644,8 +647,8 @@ function MembersStep(props: {
           <tbody>
             {props.members.map((member) => (
               <tr key={member.id}>
-                <td style={{ font: "500 13px var(--font-mono)" }}>
-                  {member.nearAccountId ?? <span style={{ color: "var(--ink-3)" }}>—</span>}
+                <td style={{ font: "500 13px var(--font-mono)" }} title={member.nearAccountId ?? undefined}>
+                  {member.nearAccountId ? short(member.nearAccountId, 14) : <span style={{ color: "var(--ink-3)" }}>—</span>}
                   {member.nearAccountId === wallets.nearAccountId ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}> (you)</span> : null}
                 </td>
                 <td>{member.name ?? <span style={{ color: "var(--ink-3)" }}>—</span>}</td>

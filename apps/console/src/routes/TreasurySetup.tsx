@@ -8,6 +8,9 @@ import { approvalsNeeded, omni, type OmniStatus } from "../omniroles-api.js";
 import { signDaoAction, signDaoProposal } from "../wallets.js";
 import { SentenceList } from "./GovernancePage.js";
 
+/** Card titles of the setup steps, as on the company step. */
+const STEP_TITLE = { margin: 0, font: "800 24px var(--font-brand)", letterSpacing: ".04em", textTransform: "uppercase" } as const;
+
 /** Step 3: one click creates the DAO and the vault; the browser shows what was verified on chain. */
 export function TreasuryCreate(props: { companyName: string; onCreated: () => Promise<void> }) {
   const plan = useQuery({ queryKey: ["omni-plan", props.companyName], queryFn: () => omni.plan(props.companyName) });
@@ -15,7 +18,7 @@ export function TreasuryCreate(props: { companyName: string; onCreated: () => Pr
   const [error, setError] = useState<string | null>(null);
   return (
     <section className="card">
-      <h2>Create the company treasury</h2>
+      <h2 style={STEP_TITLE}>Create the company treasury</h2>
       <p className="muted">
         Euthyna creates and pays for two contracts on NEAR. Nobody, not even Euthyna, keeps a key to them afterwards.
       </p>
@@ -42,7 +45,7 @@ export function TreasuryCreate(props: { companyName: string; onCreated: () => Pr
       ) : null}
       {error ? <div className="alert error">{error}</div> : null}
       <button
-        className="primary"
+        className="btn-ori"
         disabled={!plan.data || busy}
         onClick={() => void (async () => {
           setBusy(true);
@@ -118,7 +121,7 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
 
   return (
     <section className="card">
-      <h2>Create the company wallet</h2>
+      <h2 style={STEP_TITLE}>Create the company wallet</h2>
       <p className="muted">
         The wallet is an address on {status.treasury?.chainName} controlled only by the vault. Creating it is the DAO's first decision.
       </p>
@@ -127,7 +130,7 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
       {!me ? <div className="notice">Connect your NEAR wallet (top right) to propose and vote.</div> : null}
       {!walletProposal ? (
         <button
-          className="primary"
+          className="btn-ori"
           disabled={!isMember || Boolean(busy)}
           title={isMember ? "Propose the wallet creation to the members" : "Connect the NEAR wallet of a member"}
           onClick={() => void run("propose", async () => {
@@ -137,6 +140,12 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
         >
           {busy === "propose" ? "Signing…" : "Propose: create the wallet"}
         </button>
+      ) : null}
+      {!walletProposal ? (
+        <p className="small muted" style={{ margin: 0 }}>
+          Proposing costs your NEAR account about 0.25 NEAR. Testnet NEAR is free from the{" "}
+          <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noreferrer">NEAR faucet</a>.
+        </p>
       ) : walletProposal.status === "InProgress" ? (
         <div className="decision">
           <header>
@@ -149,7 +158,7 @@ export function WalletSetup({ status, onChanged }: { status: OmniStatus; onChang
             <div className="spacer" />
             {walletProposal.votes[me] ? <span className="small">You voted {walletProposal.votes[me]}</span> : (
               <button
-                className="primary"
+                className="btn-ori"
                 disabled={!isMember || Boolean(busy)}
                 onClick={() => void run("vote", async () => {
                   await signDaoAction(me, data!.dao.accountId, walletProposal.id, walletProposal.kind, "VoteApprove");
@@ -174,7 +183,7 @@ export function FundWallet({ status, showNext = true }: { status: OmniStatus; sh
   const usdc = status.wallet.tokens.filter((token) => Number(token.amount) > 0);
   return (
     <section className="card">
-      <h2>Fund the company wallet</h2>
+      <h2 style={STEP_TITLE}>Fund the company wallet</h2>
       <div className="explain">
         <div>
           <span className="eyebrow">Address on {status.treasury?.chainName}</span>
@@ -188,10 +197,10 @@ export function FundWallet({ status, showNext = true }: { status: OmniStatus; sh
         </div>
       </div>
       <div className="row wrap">
-        <button onClick={() => void navigator.clipboard.writeText(status.wallet!.address)}>Copy address</button>
-        <a className="button" href={`https://sepolia.basescan.org/address/${status.wallet.address}`} target="_blank" rel="noreferrer">Open in explorer</a>
+        <button type="button" className="btn-line" onClick={() => void navigator.clipboard.writeText(status.wallet!.address)}>COPY ADDRESS</button>
+        <a className="btn-line" style={{ textDecoration: "none" }} href={`https://sepolia.basescan.org/address/${status.wallet.address}`} target="_blank" rel="noreferrer">OPEN IN EXPLORER</a>
         <div className="spacer" />
-        {showNext ? <Link className="button primary" to="/roles">Next: create a role →</Link> : null}
+        {showNext ? <Link className="btn-ori" style={{ textDecoration: "none" }} to="/roles">NEXT: CREATE A ROLE →</Link> : null}
       </div>
     </section>
   );

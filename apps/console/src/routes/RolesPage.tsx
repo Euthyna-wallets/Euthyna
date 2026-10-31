@@ -26,7 +26,7 @@ const PLAIN_BUTTON: CSSProperties = { border: 0, background: "none", color: "#4A
 const MINI_BUTTON: CSSProperties = { padding: "7px 10px", font: "700 10.5px var(--font-brand)", letterSpacing: ".14em", border: "1px solid rgba(13,23,48,.25)", background: "rgba(255,255,255,.6)", color: "#0D1730", cursor: "pointer" };
 const SUB_INPUT: CSSProperties = { padding: "7px 10px", border: "1px solid rgba(13,23,48,.2)", background: "#fff", font: "12px var(--font-mono)", color: "#0D1730", minWidth: 0 };
 const ADD_BUTTON: CSSProperties = { padding: "8px 12px", border: "1px dashed rgba(13,23,48,.35)", background: "rgba(255,255,255,.5)", font: "600 12.5px var(--font-ui)", color: "#0D1730", cursor: "pointer" };
-const CHECK_ROW: CSSProperties = { display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: "#0D1730", marginBottom: 0 };
+const CHECK_ROW: CSSProperties = { display: "flex", flexDirection: "row", gap: 8, alignItems: "center", fontSize: 12.5, color: "#0D1730", marginBottom: 0 };
 const CHECKBOX: CSSProperties = { width: 14, height: 14, minWidth: 0, minHeight: 0, accentColor: "#C9890C", margin: 0 };
 const ERROR_BOX: CSSProperties = { border: "1px solid rgba(217,87,59,.55)", background: "#FBE3D6", color: "var(--terra-ink)", padding: "10px 14px", fontSize: 13 };
 
@@ -42,6 +42,10 @@ function Field({ label, children, style }: { label: ReactNode; children: ReactNo
 
 export function RolesPage() {
   const roles = useQuery({ queryKey: ["omni-roles"], queryFn: omni.roles, refetchInterval: 15_000 });
+  // Same query as "On its way" above: a role voted or being voted is not "no role yet, create one".
+  const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, refetchInterval: 15_000 });
+  const onItsWay = (governance.data?.rules ?? []).some((rule) => rule.state === "Queued")
+    || (governance.data?.proposals ?? []).some((proposal) => proposal.status === "InProgress");
   const [params, setParams] = useSearchParams();
   const [building, setBuilding] = useState(params.get("new") === "1");
   const suggested = params.get("role") ?? "";
@@ -76,9 +80,11 @@ export function RolesPage() {
             emptyContent={building ? <></> : (
               <Slab style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
                 <span className="empty-state">
-                  No active role yet. Create one, the members vote on it, and it applies after the veto window.
+                  {onItsWay
+                    ? "No active role yet. The role on its way applies once its vote and veto window are over."
+                    : "No active role yet. Create one, the members vote on it, and it applies after the veto window."}
                 </span>
-                <button className="btn-ori" style={{ alignSelf: "flex-start" }} onClick={() => setBuilding(true)}>CREATE THE FIRST ROLE</button>
+                {onItsWay ? null : <button className="btn-ori" style={{ alignSelf: "flex-start" }} onClick={() => setBuilding(true)}>CREATE THE FIRST ROLE</button>}
               </Slab>
             )}
           >
@@ -351,12 +357,13 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
     if (!decoded || (canonical(decoded) !== canonical(expected) && !(clearAllowed && canonical(decoded) === canonical(cleared)))) {
       throw new Error("The proposal prepared by the server does not match the role built here. Nothing was signed.");
     }
+    const voted = canonical(decoded) === canonical(expected) ? expected : cleared;
     const labels: Record<string, string> = Object.fromEntries(supplierOptions.map((option) => [option.address, option.label]));
     for (const block of role.blocks) if (block.kind === "payments") for (const recipient of block.recipients) labels[recipient.address] ??= recipient.label ?? recipient.address;
     if (status.data?.wallet) labels[status.data.wallet.address] = "company wallet";
     if (sharesAccountId) labels[stringHash(nearRecipient(sharesAccountId))] = `${nearRecipient(sharesAccountId)} (company shares)`;
     const context = { profile: PROFILE, labels, budgets: budgetsOf(changes, PROFILE), fullAddresses: true };
-    return { ...draft, summary: expected.map((call) => describeVaultCall(call, context)) };
+    return { ...draft, summary: voted.map((call) => describeVaultCall(call, context)) };
   }
 
   async function run(label: string, action: () => Promise<void>) {

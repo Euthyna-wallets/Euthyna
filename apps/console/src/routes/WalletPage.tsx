@@ -243,7 +243,8 @@ export function WalletPage() {
 
           <div className="g2" style={{ display: "grid", gridTemplateColumns: preview ? "minmax(0, .9fr) minmax(0, 1.1fr)" : "minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-              {address ? (
+              {/* Without a WalletConnect project id the block has nothing to offer a member: hide it. */}
+              {address && walletConnect.enabled ? (
                 <Slab style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
                   <Kicker>Connect an app</Kicker>
                   {!walletConnect.enabled ? <div className="empty-state">WalletConnect is not configured on this console.</div> : (
