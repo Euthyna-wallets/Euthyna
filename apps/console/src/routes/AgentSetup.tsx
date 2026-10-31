@@ -1,7 +1,9 @@
 import { KeyPair } from "near-api-js";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { API_BASE, api } from "../api.js";
+import { Kicker, Niche, PageTitle, Slab } from "../components/design.js";
 import { readAgentAccessKeyRpc } from "../wallets.js";
 
 type CreatedAgent = { apiKey: string; agent: { id: string; name: string; role: string; nearAccountId: string } };
@@ -29,6 +31,13 @@ type Pairing = {
 
 const INSTALL_URL = "https://raw.githubusercontent.com/joindefi/euthyna-signer/main/install.sh";
 const MCP_PACKAGE = "@euthyna/mcp";
+
+/** What the vault gives a new owner, in a private EUTHYNA company. */
+const HAVE_LINES = [
+  "A DAO whose members vote the rules",
+  "A vault with no key, owned by the DAO",
+  "An agent account that can only call the vault",
+];
 
 const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -286,26 +295,134 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
   }, null, 2);
   const shown = client === "claude" ? claude : json;
   return (
-    <section className="card secret">
-      <span className="eyebrow">{props.agent.name} is hired{props.agent.hostname ? ` · paired with ${props.agent.hostname}` : ""}</span>
-      <h3>Plug it into your AI</h3>
-      <p className="small">
-        Its key and API key are with euthyna-signer on that machine. This config holds <strong>no secret</strong>: the vault,
-        role and network are read from the signer.
-      </p>
-      <div className="row">
-        <button className={client === "claude" ? "primary" : "ghost"} onClick={() => setClient("claude")}>Claude Code</button>
-        <button className={client === "json" ? "primary" : "ghost"} onClick={() => setClient("json")}>Claude Desktop, Cursor, Codex</button>
+    <Slab style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 28, alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Kicker>
+              {props.agent.name} is hired{props.agent.hostname ? ` · paired with ${props.agent.hostname}` : ""}
+            </Kicker>
+            <PageTitle style={{ fontSize: 36 }}>PLUG IT INTO YOUR AI</PageTitle>
+            <span style={{ fontSize: 15, lineHeight: 1.6, color: "var(--ink-2)", maxWidth: 640 }}>
+              Its key and API key stay with euthyna-signer on that machine. This config holds <b style={{ color: "var(--ink)" }}>no secret</b>: the
+              vault, role and network are read from the signer.
+            </span>
+          </div>
+
+          <div className="night-panel" style={{ color: "#E7ECF6" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", borderBottom: "1px solid #1F3A6E" }}>
+              <button
+                type="button"
+                onClick={() => setClient("claude")}
+                style={{
+                  padding: "12px 18px",
+                  border: 0,
+                  cursor: "pointer",
+                  font: "700 12px var(--font-brand)",
+                  letterSpacing: ".14em",
+                  color: client === "claude" ? "#061433" : "#8FA2CC",
+                  background: client === "claude" ? "#F2B544" : "transparent",
+                }}
+              >
+                CLAUDE CODE
+              </button>
+              <button
+                type="button"
+                onClick={() => setClient("json")}
+                style={{
+                  padding: "12px 18px",
+                  border: 0,
+                  cursor: "pointer",
+                  font: "700 12px var(--font-brand)",
+                  letterSpacing: ".14em",
+                  color: client === "json" ? "#061433" : "#8FA2CC",
+                  background: client === "json" ? "#F2B544" : "transparent",
+                }}
+              >
+                CLAUDE DESKTOP, CURSOR, CODEX
+              </button>
+            </div>
+            <pre style={{ margin: 0, padding: "22px 24px", font: "13.5px/1.7 var(--font-mono)", color: "#D5DDF0", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+              {shown}
+            </pre>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderTop: "1px solid #1F3A6E", flexWrap: "wrap" }}>
+              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>{MCP_PACKAGE} on npm · NEXT</span>
+              <span style={{ fontSize: 12, color: "#A9B6D6" }}>until it is published, build the MCP server from the repository</span>
+              <button
+                type="button"
+                className="btn-ori"
+                style={{ marginLeft: "auto", padding: "9px 16px", fontSize: 11 }}
+                onClick={() => void navigator.clipboard.writeText(shown)}
+              >
+                COPY
+              </button>
+            </div>
+          </div>
+
+          <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
+            The agent can do nothing until a role that includes{" "}
+            <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{props.agent.nearAccountId}</span> is voted and out of
+            its veto window. Then it has the tools to check, pay and read its status, and nothing else.
+          </p>
+
+          {props.onDone ? (
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+              <button type="button" className="btn-ori" style={{ padding: "14px 22px", fontSize: 13 }} onClick={props.onDone}>
+                DONE · GO TO YOUR HQ
+              </button>
+            </div>
+          ) : null}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", background: "#061433", color: "#C9D3EA", boxShadow: "14px 18px 40px rgba(13,23,48,.25)" }}>
+            <div style={{ padding: "18px 20px", borderRight: "1px solid #1F3A6E", display: "flex", flexDirection: "column", gap: 6 }}>
+              <Kicker color="#F2B544">Next · I</Kicker>
+              <span style={{ fontSize: 13.5 }}>
+                Your members vote {props.agent.name}’s role in <b style={{ color: "#fff" }}>Votes</b>.
+              </span>
+            </div>
+            <div style={{ padding: "18px 20px", borderRight: "1px solid #1F3A6E", display: "flex", flexDirection: "column", gap: 6 }}>
+              <Kicker color="#F2B544">Next · II</Kicker>
+              <span style={{ fontSize: 13.5 }}>The veto window runs; any council member can still stop it.</span>
+            </div>
+            <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <Kicker color="#F2B544">Next · III</Kicker>
+              <span style={{ fontSize: 13.5 }}>
+                {props.agent.name} asks the vault; every verdict appears in <b style={{ color: "#fff" }}>Activity</b>.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          <div style={{ border: "1px solid rgba(13,23,48,.12)", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 4 }}>
+            <Kicker style={{ marginBottom: 6 }}>What you now have</Kicker>
+            {HAVE_LINES.map((line) => (
+              <div
+                key={line}
+                style={{ display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "6px 0", borderTop: "1px solid rgba(13,23,48,.1)", fontSize: 13.5 }}
+              >
+                <span className="app-seal" style={{ width: 26, height: 26 }}>
+                  <span style={{ fontSize: 9, color: "#0B4E5E" }}>✓</span>
+                </span>
+                <span>{line}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ padding: "16px 18px", border: "1px dashed rgba(201,137,12,.55)", display: "flex", flexDirection: "column", gap: 8 }}>
+            <Kicker>Private by default</Kicker>
+            <span style={{ fontSize: 13, lineHeight: 1.6, color: "var(--ink-2)" }}>
+              Your vault is not listed in Atlantis and has no shares. Both can come later, each by a members’ vote.
+            </span>
+            <Link to="/shares" style={{ font: "700 11px var(--font-brand)", letterSpacing: ".16em", color: "var(--ink)", textDecoration: "none" }}>
+              JOIN ATLANTIS LATER →
+            </Link>
+          </div>
+
+          <Niche role={props.agent.role} height={300} />
+        </div>
       </div>
-      <pre>{shown}</pre>
-      <div className="row">
-        <button className="primary" onClick={() => void navigator.clipboard.writeText(shown)}>Copy</button>
-        {props.onDone ? <button className="ghost" onClick={props.onDone}>Done</button> : null}
-      </div>
-      <p className="small muted">
-        The agent can do nothing until a role that includes <span className="mono">{props.agent.nearAccountId}</span> is voted and out of its veto window.
-      </p>
-    </section>
+    </Slab>
   );
 }
 

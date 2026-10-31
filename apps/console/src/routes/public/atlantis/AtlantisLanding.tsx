@@ -1,487 +1,604 @@
+/**
+ * EUTHYNA home. Visual reference: design-handoff/site/source/site-home.html
+ * and screens/00..11. The Market section (09) and the Atlantis map read the
+ * live data: the market API for services, the registry for companies. When
+ * there is nothing to show, the handoff's examples are shown and labelled as
+ * examples — never as live data.
+ */
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { listCompanies, type DirectoryEntry } from "../../../lib/directory.js";
-import { Mark, SiteFooter, SiteHeader } from "./brand.js";
+import { listCompanies } from "../../../lib/directory.js";
+import { market, slaText, tokenAmount, type MarketAgent } from "../../../lib/market.js";
+import "../../../styles/site.css";
+import { HeroVideo, Kicker, Seal, SiteFooter, SiteHeader } from "../site/SiteChrome.js";
 
-/* Everything below that says "example" is illustrative. What is live is listed in CLAIMS.md at the repository root. */
+const MONO = "'JetBrains Mono', monospace";
+const SANS = "'Plus Jakarta Sans', sans-serif";
+const BRAND = "Cinzel, serif";
 
-const REPO_URL = import.meta.env.VITE_REPO_URL ?? "https://github.com/Euthyna-wallets/MandateOS";
-const CLAIMS_URL = `${REPO_URL}/blob/main/CLAIMS.md`;
+const kicker = (color: string): CSSProperties => ({ color });
+const sectionPad = (y = 120): CSSProperties => ({ padding: `${y}px 0` });
 
-type Verdict = { cls: string; stamp: string; rules: number[]; text: string; code: string };
-
-const REQUESTS: Array<{ label: string; note: string; verdict: Verdict }> = [
-  { label: "Pay Studio Pixel 640 USDC", note: "invoice #118", verdict: { cls: "v-ok", stamp: "SIGNED", rules: [1, 2, 3], text: "Inside the mandate. The MPC network signs the transfer; the budget is spent once the payment is proven on chain.", code: "allowed: true" } },
-  { label: "Pay 640 USDC to 0x9f3…e21", note: "new address", verdict: { cls: "v-no", stamp: "REFUSED", rules: [2], text: "This address is not on the suppliers list the owners voted. Nothing is signed.", code: "reason: ERR_PERMISSION_DENIED:parameterNotAllowed" } },
-  { label: "Pay Cloudnine 3,200 USDC", note: "GPU rental", verdict: { cls: "v-wait", stamp: "CO-SIGN", rules: [4], text: "Allowed, but above the co-signature threshold: a human from another job must co-sign before anything is signed.", code: "allowed: true · requires_cosign: true" } },
-  { label: "Swap 900 USDC for WETH", note: "not her job", verdict: { cls: "v-no", stamp: "REFUSED", rules: [1], text: "Naomi's role only calls USDC transfer. A swap is another contract and function: refused.", code: "allowed: false · reason: ERR_PERMISSION_DENIED:…" } },
-];
-
-const RULES = [
-  "Call USDC transfer, nothing else",
-  "Only to the suppliers the DAO voted: Studio Pixel, Cloudnine",
-  "5,000 USDC, refilled every 7 days",
-  "Above 2,000 USDC, a human from another job co-signs",
-  "At most 10 payments an hour",
-];
-
-type Chain = { name: string; status: "Testnet" | "Planned"; how: string; logo?: string };
-const CHAINS: Chain[] = [
-  { name: "Base Sepolia", status: "Testnet", how: "EVM. The vault checks each transaction's calldata against the role; MPC signs; settlement is attested by MPC.", logo: "/chains/base.svg" },
-  { name: "Ethereum Sepolia", status: "Testnet", how: "EVM, same model as Base." },
-  { name: "Solana devnet", status: "Testnet", how: "The vault builds the transaction itself (System, Token and Associated Token programs only); MPC signs with ed25519.", logo: "/chains/solana.svg" },
-  { name: "Arbitrum · BSC · Plasma", status: "Planned", how: "EVM, same model as Base." },
-  { name: "Tron", status: "Planned", how: "Its own transaction format and address encoding, built and checked by the vault." },
-  { name: "Bitcoin", status: "Planned", how: "A wallet derived by MPC; the vault builds and signs its transactions.", logo: "/chains/bitcoin.svg" },
-];
-
-const FACTORS: Array<{ name: string; how: string }> = [
-  { name: "Passkey", how: "Your phone or laptop signs. Checked on chain with p256_verify. Synced passkeys already cover most losses." },
-  { name: "ZKPassport", how: "A zero-knowledge proof from your passport or ID chip. It proves you are the same person as at enrollment, without revealing the document." },
-  { name: "ZK Email", how: "A proof of a DKIM-signed email, verified on chain. Email takeover is the main risk, which is why one factor is never enough." },
-  { name: "Trusted contact", how: "The account of someone you chose signs for you." },
-];
-
-type CityCompany = {
-  id: string; name: string; kind: string; pitch: string; ring: number; angle: number;
-  stats?: Array<[string, string]>; crew?: Array<[string, string, string]>; real?: DirectoryEntry;
-};
-
-const EXAMPLES: CityCompany[] = [
-  { id: "pixel", name: "Pixel Forge", kind: "Design studio", pitch: "Sells brand kits. Its agents take the brief, pay the illustrators, deliver and invoice.", ring: 250, angle: -60, stats: [["3", "agents"], ["38", "owners"], ["6", "rounds"]], crew: [["N", "Naomi · Payments", "pays the 2 voted suppliers · 5,000 USDC / 7 days"], ["I", "Iris · Ads", "spends on 1 ad network · 1,200 USDC / 7 days"], ["H", "Hermes · Revenue", "sends income to the shares contract, nowhere else"]] },
-  { id: "delos", name: "Oracle of Delos", kind: "Research desk", pitch: "Writes paid market reports. Its agents buy data feeds and sell each report.", ring: 175, angle: 30, stats: [["3", "agents"], ["112", "owners"], ["11", "rounds"]], crew: [["P", "Pythia · Data buyer", "pays 3 data vendors · 800 USDC / 7 days"], ["A", "Apollo · Sales", "receives payments, cannot send them"], ["H", "Hermes · Revenue", "weekly revenue round to voters"]] },
-  { id: "tide", name: "Tide Desk", kind: "Treasury", pitch: "Keeps a company's idle cash working. Its agent supplies to Aave inside a strict budget.", ring: 250, angle: 95, stats: [["2", "agents"], ["21", "owners"], ["3", "rounds"]], crew: [["T", "Thetis · Lending", "Aave only, on behalf of the company wallet · 2,000 USDC / day"], ["H", "Hermes · Revenue", "sends yield to the shares contract"]] },
-  { id: "cloud", name: "Cloudnine Compute", kind: "GPU reseller", pitch: "Rents GPU time to other agents in the city and pays its upstream providers.", ring: 175, angle: -150, stats: [["3", "agents"], ["64", "owners"], ["8", "rounds"]], crew: [["D", "Daedalus · Procurement", "pays 2 GPU providers · 10,000 USDC / 7 days"], ["H", "Hermes · Revenue", "daily revenue round"], ["A", "Argus · Monitor", "read-only: checks, never pays"]] },
-  { id: "press", name: "Agora Press", kind: "Media", pitch: "An agent-written newsletter. Pays its tools, sells subscriptions.", ring: 250, angle: 175, stats: [["2", "agents"], ["290", "owners"], ["14", "rounds"]], crew: [["C", "Clio · Editor", "pays 4 tools · 300 USDC / 7 days"], ["H", "Hermes · Revenue", "sends subscriptions to owners"]] },
-];
-
-function realCompanies(entries: DirectoryEntry[]): CityCompany[] {
-  const list = entries.slice(0, 9);
-  const rings = [250, 175, 250, 175, 250, 175, 250, 175, 250];
-  return list.map((entry, index) => ({
-    id: entry.dao_id,
-    name: entry.name,
-    kind: entry.shares_id ? "Selling shares" : "Company",
-    pitch: entry.description || "No description yet.",
-    ring: rings[index] ?? 250,
-    angle: -90 + (index * 360) / Math.max(list.length, 5) + (index % 2 ? 24 : 0),
-    real: entry,
-  }));
+/** Small roman numeral used by the mandate and the friezes. */
+function Numeral({ children }: { children: ReactNode }) {
+  return <b style={{ font: `700 14px ${BRAND}`, color: "#8A5A00", width: 28, flex: "0 0 28px" }}>{children}</b>;
 }
 
-function nodePosition(company: CityCompany): [number, number] {
-  const rad = (company.angle * Math.PI) / 180;
-  return [300 + company.ring * Math.cos(rad), 300 + company.ring * Math.sin(rad)];
-}
-
-function Court() {
-  const [selected, setSelected] = useState(0);
-  const { verdict } = REQUESTS[selected]!;
+function MandateLine({ numeral, children, highlighted = false }: { numeral: string; children: ReactNode; highlighted?: boolean }) {
   return (
-    <>
-      <div className="court">
-        <div className="mandate">
-          <h4>Naomi's mandate · job “payments”</h4>
-          {RULES.map((rule, index) => (
-            <div key={rule} className={`rule${verdict.rules.includes(index + 1) ? " hit" : ""}`}><i>{["I", "II", "III", "IV", "V"][index]}</i><span>{rule}</span></div>
-          ))}
-        </div>
-        <div className="ask">
-          <h4>Ask as Naomi</h4>
-          <div className="reqs" role="group" aria-label="Example requests">
-            {REQUESTS.map((request, index) => (
-              <button key={request.label} type="button" className="req" aria-pressed={selected === index} onClick={() => setSelected(index)}>{request.label}<small>{request.note}</small></button>
-            ))}
-          </div>
-          <div className={`verdict ${verdict.cls}`} aria-live="polite"><span className="st">{verdict.stamp}</span><p>{verdict.text}<code>{verdict.code}</code></p></div>
-        </div>
-      </div>
-      <p className="court-note">An example mandate and example verdicts. The same question is one free view call on the vault: <code>check_operation(role, member, request)</code>.</p>
-    </>
-  );
-}
-
-function City() {
-  const directory = useQuery({ queryKey: ["directory"], queryFn: listCompanies, staleTime: 30_000 });
-  const real = realCompanies(directory.data ?? []);
-  const companies = real.length > 0 ? real : EXAMPLES;
-  const live = real.length > 0;
-  const [pick, setPick] = useState(companies[0]!.id);
-  useEffect(() => {
-    if (!companies.some((company) => company.id === pick)) setPick(companies[0]!.id);
-  }, [companies, pick]);
-  const current = companies.find((company) => company.id === pick) ?? companies[0]!;
-  return (
-    <div className="city">
-      <div className="map">
-        <svg viewBox="0 0 600 600" role="img" aria-label="Map of Atlantis: companies on concentric rings around the EUTHYNA pillar">
-          <defs><radialGradient id="eu-sea" cx="50%" cy="50%" r="50%"><stop offset="0" stopColor="#0E4A8A" /><stop offset="1" stopColor="#04102B" stopOpacity="0" /></radialGradient></defs>
-          <circle cx="300" cy="300" r="290" fill="url(#eu-sea)" />
-          <g fill="none">
-            <circle cx="300" cy="300" r="250" stroke="#4FD1E8" strokeOpacity=".16" strokeWidth="34" /><circle cx="300" cy="300" r="250" stroke="#4FD1E8" strokeOpacity=".35" />
-            <circle cx="300" cy="300" r="175" stroke="#4FD1E8" strokeOpacity=".16" strokeWidth="30" /><circle cx="300" cy="300" r="175" stroke="#4FD1E8" strokeOpacity=".35" />
-            <circle cx="300" cy="300" r="100" stroke="#F2B544" strokeOpacity=".22" strokeWidth="26" /><circle cx="300" cy="300" r="100" stroke="#F2B544" strokeOpacity=".5" />
-          </g>
-          <g stroke="#4FD1E8" strokeWidth="1.5" fill="none" strokeOpacity=".55">
-            {companies.map((company) => { const [x, y] = nodePosition(company); return <line key={company.id} x1={x} y1={y} x2={300} y2={300} className="flow" />; })}
-          </g>
-          <circle cx="300" cy="300" r="56" fill="#FAF8F3" /><circle cx="300" cy="300" r="56" fill="none" stroke="#F2B544" strokeWidth="3" />
-          <svg x="272" y="266" width="56" height="56" viewBox="0 0 1024 1024"><circle cx="512" cy="512" r="307" fill="none" stroke="#0D1730" strokeWidth="102" /><rect x="297" y="461" width="430" height="102" fill="#C9890C" /><rect x="41" y="461" width="72" height="102" fill="#C9890C" /><rect x="911" y="461" width="72" height="102" fill="#C9890C" /></svg>
-          <text x="300" y="340" textAnchor="middle" className="map-label gold">EUTHYNA</text>
-          <text x="300" y="196" textAnchor="middle" className="ring-label gold">THE COUNCIL RING</text>
-          <text x="300" y="120" textAnchor="middle" className="ring-label">THE MARKET RING</text>
-          <text x="300" y="44" textAnchor="middle" className="ring-label">THE HARBOUR RING</text>
-          {companies.map((company) => {
-            const [x, y] = nodePosition(company);
-            const below = y > 300 ? 30 : -22;
-            return (
-              <g key={company.id} className={`node${company.id === current.id ? " sel" : ""}`} tabIndex={0} role="button" aria-label={company.name} onClick={() => setPick(company.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPick(company.id); } }}>
-                <circle className="halo" cx={x} cy={y} r="11" fill="none" stroke="#4FD1E8" />
-                <circle className="dot" cx={x} cy={y} r="11" fill="#4FD1E8" stroke="#04102B" strokeWidth="3" />
-                <circle cx={x} cy={y} r="3.5" fill="#F2B544" />
-                <text x={x} y={y + below} textAnchor="middle">{company.name.length > 18 ? `${company.name.slice(0, 17)}…` : company.name}</text>
-              </g>
-            );
-          })}
-        </svg>
-        <div className="legend">
-          <span><i style={{ background: "#4FD1E8" }} />A company and its agents</span>
-          <span>{live ? "Companies read live from the on-chain registry" : "Example companies · tap one"}</span>
-        </div>
-      </div>
-      <aside className="cpanel" aria-live="polite">
-        <div><span className="kind">{current.kind}{live ? "" : " · example"}</span><h3>{current.name}</h3></div>
-        <p className="pitch">{current.pitch}</p>
-        {current.real ? (
-          <>
-            <div className="cstats">
-              <div><b>{current.real.dao_id.split(".")[0]}</b><span>DAO</span></div>
-              <div><b>{current.real.shares_id ? "Open" : "—"}</b><span>share sale</span></div>
-              <div><b>Live</b><span>testnet</span></div>
-            </div>
-            <div className="owners"><b>Read live from the chain:</b> members, vault, wallets, treasury and the revenue paid to voters.</div>
-            <Link className="btn gold" to={`/c/${current.real.dao_id}`} style={{ alignSelf: "flex-start" }}>See the company →</Link>
-          </>
-        ) : (
-          <>
-            <div className="cstats">{current.stats?.map(([value, label]) => <div key={label}><b>{value}</b><span>{label}</span></div>)}</div>
-            <div className="crew">
-              <h5>THE CITIZENS · AI AGENTS</h5>
-              {current.crew?.map(([initial, who, mandate]) => (
-                <div key={who} className="citizen"><span className="av">{initial}</span><span><b>{who}</b><small><em>Mandate:</em> {mandate}</small></span></div>
-              ))}
-            </div>
-            <div className="owners"><b>The owners</b> vote every mandate, can veto any change, and receive each revenue round. Any council member can pause every agent at once.</div>
-          </>
-        )}
-      </aside>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "44px minmax(0, 1fr)",
+        padding: "13px 0",
+        borderTop: "1px solid rgba(13,23,48,.14)",
+        fontSize: 16,
+        ...(highlighted ? { background: "linear-gradient(90deg, rgba(242,181,68,.22), rgba(242,181,68,0))" } : {}),
+      }}
+    >
+      <b style={{ font: `700 15px ${BRAND}`, color: "#8A5A00" }}>{numeral}</b>
+      <span>{children}</span>
     </div>
   );
 }
 
-const PROBLEMS: Array<{ figure: string; text: string; source: string; href: string }> = [
-  { figure: "43.8%", text: "of the $2.2 billion stolen from crypto platforms in 2024 came from leaked private keys.", source: "Chainalysis, via Benzinga", href: "https://benzinga.com/content/42596818/chainalysis-estimates-2-2b-stolen-from-crypto-platforms-in-2024" },
-  { figure: "17–23%", text: "of all bitcoin is lost or out of circulation, mostly behind keys nobody can find.", source: "Chainalysis, via PaymentsNext", href: "https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/" },
-  { figure: "$1.4B", text: "left Bybit's multisig when its signers approved what a tampered screen showed them.", source: "NCC Group", href: "https://www.nccgroup.com/research/in-depth-technical-analysis-of-the-bybit-hack/" },
-];
-
-type Status = "Testnet" | "Planned" | "Possible";
-const USE_CASES: Array<{ name: string; role: string; status: Status }> = [
-  { name: "Supplier payouts", role: "Pay listed suppliers in USDC on Base or Solana, up to 500 a week.", status: "Testnet" },
-  { name: "Treasury yield", role: "Wrap ETH, swap USDC for WETH on Uniswap, supply to Aave on behalf of the company wallet.", status: "Testnet" },
-  { name: "Revenue sharing", role: "Send company revenue to the shareholders who voted, and nowhere else.", status: "Testnet" },
-  { name: "An AI company", role: "Agents run operations; owners hold shares, vote and receive revenue. That is Atlantis.", status: "Testnet" },
-  { name: "Freelance agent", role: "Get paid by clients and pay for its own tools and APIs, within a monthly budget.", status: "Possible" },
-  { name: "Rebalancing across chains", role: "Swap up to 100 USDC per quote from Base into SOL, delivered to the company's Solana wallet.", status: "Planned" },
-  { name: "Retail wallet", role: "A personal wallet on several chains, a passkey to sign, recovery without a seed phrase.", status: "Planned" },
-];
-
-const ATTACKERS: Array<[string, string, string]> = [
-  ["A hacked agent", "Allowed actions, up to its budget", "Role checks on the exact bytes; budgets; owners revoke it by vote; council pause"],
-  ["Our own servers", "Show wrong data in the console", "They hold no key and play no part in signing; votes are re-checked in the member's browser"],
-  ["One rogue owner", "Propose changes", "Votes, a veto window, the council's veto"],
-  ["A swap counterparty", "Give a poor price", "The budget caps the exposure; minimum-rate rules planned"],
-];
-
-const FAQ: Array<[string, string]> = [
-  ["Who holds the keys?", "Nobody. The company's vault is a contract with no access key, and its wallets are derived by a threshold-signature (MPC) network that signs only what the vault asks. Agents hold a key that can only ask the vault."],
-  ["Where does the vault run?", "On NEAR, which hosts the vault and the votes, and whose Chain Signatures MPC network signs for the company's wallets on Base, Ethereum and Solana. EUTHYNA is an independent project built on that technology."],
-  ["What if your servers go down?", "Agents keep transacting: they call the vault directly through public RPCs. Our API and console are conveniences, not part of the execution path."],
-  ["Is it live?", "On testnets only, and the contracts are not audited. Every claim on this page is listed with its proof in CLAIMS.md."],
-];
-
-function StatusChip({ status }: { status: Status | "Planned" }) {
-  const cls = status === "Testnet" ? "live" : "plan";
-  return <span className={`chip ${cls}`}>{status}</span>;
+function Verdict({ seal, tone, title, children, code }: { seal: string; tone: "signed" | "refused" | "cosign"; title: string; children: ReactNode; code?: string }) {
+  const border =
+    tone === "signed" ? "1px solid rgba(79,209,232,.35)" : tone === "refused" ? "1px solid rgba(217,87,59,.5)" : "1px solid rgba(242,181,68,.45)";
+  const background = tone === "refused" ? "rgba(40,10,6,.45)" : "rgba(6,20,51,.6)";
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "112px minmax(0, 1fr)", gap: 22, alignItems: "center", padding: "20px 22px", border, background, borderRadius: 2 }}>
+      <Seal label={seal} size={104} refused={tone === "refused"} fontSize={tone === "refused" ? 11 : undefined} />
+      <div>
+        <b style={{ fontSize: 18, color: "#fff" }}>{title}</b>
+        <p style={{ margin: "6px 0 0", fontSize: 15, color: "#C9D3EA" }}>{children}</p>
+        {code ? (
+          <code style={{ display: "block", overflowWrap: "anywhere", marginTop: 6, font: `12.5px ${MONO}`, color: "#F4A28C" }}>{code}</code>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
-export function AtlantisLanding() {
-  useEffect(() => {
-    const previous = document.title;
-    document.title = "EUTHYNA · Wallet infrastructure for AI agents";
-    return () => { document.title = previous; };
-  }, []);
+function Metope({ tag, tagColor, title, text, last = false, ori = false }: { tag: string; tagColor: string; title: string; text: string; last?: boolean; ori?: boolean }) {
+  const border: CSSProperties = last ? {} : { borderRight: "1px solid rgba(13,23,48,.14)" };
+  if (ori) {
+    return (
+      <div className="ori" style={{ padding: 26, minHeight: 176, display: "flex", flexDirection: "column", gap: 10, color: "#200A03", ...border }}>
+        <span style={{ font: `700 11px ${BRAND}`, letterSpacing: ".2em" }}>{tag}</span>
+        <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".06em" }}>{title}</b>
+        <span style={{ fontSize: 14.5 }}>{text}</span>
+      </div>
+    );
+  }
   return (
-    <div className="eu-site">
-      <SiteHeader current="home" />
+    <div className="marblelit" style={{ padding: 26, minHeight: 176, display: "flex", flexDirection: "column", gap: 10, borderBottom: "1px solid rgba(13,23,48,.14)", ...border }}>
+      <span style={{ font: `700 11px ${BRAND}`, letterSpacing: ".2em", color: tagColor }}>{tag}</span>
+      <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".06em" }}>{title}</b>
+      <span style={{ fontSize: 14.5, color: "#4A5675" }}>{text}</span>
+    </div>
+  );
+}
 
-      <section className="hero g" id="top">
-        <div className="w">
-          <div>
-            <span className="kicker">Wallet infrastructure for AI agents</span>
-            <h1 className="insc" style={{ marginTop: 18 }}>Give AI agents money. <span>Keep the law.</span></h1>
-            <p className="sub"><b>EUTHYNA</b> gives your AI agents wallets on Base, Ethereum and Solana, with a budget and rules instead of a private key. Owners vote the rules. A vault with no key checks every transaction before anything is signed.</p>
-            <p className="sub"><b>Atlantis</b> is the first city built on it: companies run by AI agents and owned by people.</p>
-            <div className="ctas">
-              <a className="btn ink" href="#build">Plug in an agent</a>
-              <a className="btn line" href="#atlantis" style={{ color: "var(--aegean-ink)" }}>Visit Atlantis</a>
+function Stall({ agent, featured = false }: { agent: MarketAgent; featured?: boolean }) {
+  return (
+    <article className={`stall${featured ? " stall-featured" : ""}`}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+        <b style={{ font: `800 19px/1.25 ${BRAND}`, letterSpacing: ".03em" }}>{agent.title}</b>
+        <b style={{ font: `600 15px ${MONO}`, whiteSpace: "nowrap" }}>
+          {tokenAmount(agent.price)} {agent.symbol ?? "USDC"}
+        </b>
+      </div>
+      <span style={{ fontSize: 13, color: "#66718C" }}>
+        by <b style={{ color: "#0D1730" }}>{agent.seller}</b>, an AI company on Atlantis
+      </span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <span className="mchip">{agent.category}</span>
+        <span className="mchip">delivers in {slaText(agent.slaSeconds)}</span>
+        <span className="mchip">{agent.delivered} delivered</span>
+        {agent.successRate !== null ? <span className="mchip">{Math.round(agent.successRate * 100)}% success</span> : null}
+        {agent.rating !== null ? <span className="mchip mchip-rating">★ {agent.rating.toFixed(1)}</span> : null}
+      </div>
+      <Link to="/market" className="ori pay" style={{ marginTop: 4 }}>
+        PAY AND RUN
+      </Link>
+    </article>
+  );
+}
+
+const EXAMPLE_STALLS: MarketAgent[] = [
+  { handle: "defi-due-diligence", title: "DeFi project due diligence", description: "Team, contracts, liquidity and risks of a DeFi project, in one report.", category: "research", seller: "Pixel Forge", price: "2000000", asset: "", symbol: "USDC", payTo: "", slaSeconds: 1800, inputHint: "", outputHint: "", delivered: 21, successRate: 0.95, rating: 4.8 },
+  { handle: "audit-brief", title: "Smart contract audit brief", description: "A first pass on a contract: known patterns, risky calls, what to audit next.", category: "security", seller: "Pixel Forge", price: "5000000", asset: "", symbol: "USDC", payTo: "", slaSeconds: 7200, inputHint: "", outputHint: "", delivered: 9, successRate: 1, rating: 4.9 },
+  { handle: "token-report", title: "Token research report", description: "Supply, holders, unlocks and where the token trades.", category: "research", seller: "Tide Desk", price: "2000000", asset: "", symbol: "USDC", payTo: "", slaSeconds: 1200, inputHint: "", outputHint: "", delivered: 14, successRate: 0.93, rating: 4.7 },
+];
+
+/** Live pins for the Atlantis medallion: real companies when the registry has some. */
+const PIN_POSITIONS = [
+  { left: "70%", top: "30%" },
+  { left: "22%", top: "40%" },
+  { left: "72%", top: "74%" },
+  { left: "24%", top: "72%" },
+];
+
+export function AtlantisLanding() {
+  const services = useQuery({ queryKey: ["market-home"], queryFn: () => market.agents("", "delivered"), staleTime: 60_000 });
+  const companies = useQuery({ queryKey: ["directory"], queryFn: listCompanies, staleTime: 60_000 });
+  const live = (services.data?.agents ?? []).slice(0, 3);
+  const stalls = live.length > 0 ? live : EXAMPLE_STALLS;
+  const pinned = (companies.data ?? []).slice(0, 4);
+
+  return (
+    <div className="site-root">
+      {/* 01 · HERO */}
+      <section className="hero-r1" style={{ position: "relative", overflow: "hidden" }} aria-label="EUTHYNA">
+        <HeroVideo />
+        <div className="hero-body">
+          <SiteHeader />
+          <div className="wrap hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(0, .65fr)", gap: 40, alignItems: "end", paddingTop: 40, paddingBottom: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 26, paddingBottom: 96 }}>
+              <Kicker>Wallet infrastructure for AI agents</Kicker>
+              <h1 className="anim-engrave hero-title" style={{ margin: 0, font: `900 clamp(38px,3.9vw,56px)/0.98 ${BRAND}`, letterSpacing: ".02em" }}>
+                <span className="leaf">GIVE AI AGENTS MONEY.</span>
+                <br />
+                <span style={{ color: "#F3EFE6" }}>KEEP THE LAW.</span>
+              </h1>
+              <p style={{ margin: 0, maxWidth: 560, fontSize: 19, lineHeight: 1.6, color: "#C9D3EA" }}>
+                EUTHYNA gives your AI agents wallets on Base, Ethereum and Solana, with a budget and rules instead of a private key. Owners vote the rules. A
+                vault with no key checks every transaction before anything is signed.
+              </p>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <Link to="/onboarding?path=euthyna" className="ori btno" style={{ font: `800 14px ${BRAND}`, padding: "17px 28px", boxShadow: "0 10px 30px rgba(180,83,46,.35), inset 0 1px 0 rgba(255,230,190,.5)" }}>
+                  PLUG IN YOUR AGENT
+                </Link>
+                <Link to="/onboarding?path=atlantis" className="btnl btn-ghost" style={{ font: `700 14px ${BRAND}`, padding: "16px 26px" }}>
+                  START A COMPANY ON ATLANTIS
+                </Link>
+              </div>
+              <div style={{ display: "flex", gap: 22, flexWrap: "wrap", font: `600 12px ${MONO}`, color: "#8FA2CC", letterSpacing: ".06em" }}>
+                <span>BASE</span>
+                <span>ETHEREUM</span>
+                <span>SOLANA</span>
+                <span style={{ opacity: 0.55 }}>BITCOIN · PLANNED</span>
+                <span style={{ opacity: 0.55 }}>TESTNET · NOT AUDITED</span>
+              </div>
+            </div>
+            <div className="stele-stage" style={{ height: 680 }} aria-hidden="true" />
+          </div>
+        </div>
+        <div className="fluteline" style={{ height: 10, opacity: 0.6 }} />
+      </section>
+
+      {/* 02 · THE PROBLEM */}
+      <section className="nightflat" style={sectionPad()}>
+        <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,.9fr) minmax(0,1.1fr)", gap: 64, alignItems: "center" }}>
+          <div className="r5 plate" style={{ aspectRatio: "16/11", borderRadius: 2 }} role="img" aria-label="A key snapped in two on a black marble floor" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+            <Kicker>The problem</Kicker>
+            <h2 className="h2" style={{ color: "#F3EFE6" }}>
+              One key is
+              <br />
+              one failure.
+            </h2>
+            <p style={{ margin: 0, fontSize: 18, lineHeight: 1.65, color: "#C9D3EA", maxWidth: 560 }}>
+              The key leaks and the funds are drained, or it is lost and the funds are gone. Give that key to an AI agent and a single prompt injection can empty
+              the wallet.
+            </p>
+            <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 26, marginTop: 12 }}>
+              {[
+                {
+                  figure: "43.8%",
+                  text: "of the $2.2B stolen from crypto platforms in 2024 came from leaked private keys",
+                  href: "https://benzinga.com/content/42596818/chainalysis-estimates-2-2b-stolen-from-crypto-platforms-in-2024",
+                  source: "Chainalysis",
+                },
+                {
+                  figure: "17–23%",
+                  text: "of all bitcoin is lost or out of circulation",
+                  href: "https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/",
+                  source: "Chainalysis",
+                },
+                {
+                  figure: "$1.4B",
+                  text: "left Bybit's multisig when its signers approved a tampered screen",
+                  href: "https://www.nccgroup.com/research/in-depth-technical-analysis-of-the-bybit-hack/",
+                  source: "NCC Group",
+                },
+              ].map((item) => (
+                <div key={item.figure} style={{ borderTop: "1px solid rgba(242,181,68,.45)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <b className="leaf" style={{ font: `700 46px/1 ${MONO}` }}>{item.figure}</b>
+                  <span style={{ fontSize: 14.5, color: "#C9D3EA" }}>{item.text}</span>
+                  <a href={item.href} style={{ fontSize: 12, color: "#8FA2CC" }}>{item.source}</a>
+                </div>
+              ))}
             </div>
           </div>
-          <div>
-            <div className="layers">
-              <a className="layer l-atl" href="#atlantis">
-                <span className="ico"><svg width="30" height="30" viewBox="0 0 40 40" fill="none" stroke="#4FD1E8" strokeWidth="2.4" aria-hidden="true"><circle cx="20" cy="20" r="17" /><circle cx="20" cy="20" r="11" /><circle cx="20" cy="20" r="4.5" fill="#4FD1E8" /></svg></span>
-                <span><b>ATLANTIS</b><small>The launchpad. Found a company, hire AI agents, sell shares, share revenue with the owners who vote.</small></span>
-                <span className="who">For founders</span>
-              </a>
-              <a className="layer l-eu" href="#law">
-                <span className="ico"><Mark size={32} /></span>
-                <span><b>EUTHYNA</b><small>The infrastructure. Mandates, a keyless vault, a verdict with a reason for every request, an emergency stop.</small></span>
-                <span className="who">For builders</span>
-              </a>
-              <a className="layer l-chains" href="#chains">
-                <span className="chain-row">
-                  <span className="cr on"><img src="/chains/base.svg" alt="" width={18} height={18} />Base</span>
-                  <span className="cr on"><span className="eth" aria-hidden="true">◆</span>Ethereum</span>
-                  <span className="cr on"><img src="/chains/solana.svg" alt="" width={18} height={18} />Solana</span>
-                  <span className="cr"><img src="/chains/bitcoin.svg" alt="" width={18} height={18} />Bitcoin · planned</span>
-                </span>
-                <span className="who">Your chains</span>
-              </a>
+        </div>
+      </section>
+
+      {/* 03 · TWO PRODUCTS */}
+      <section className="marble" style={{ ...sectionPad(), color: "#0D1730" }}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 40 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "center", textAlign: "center" }}>
+            <Kicker color="#8A5A00">Two products, one idea</Kicker>
+            <h2 className="h2 carved" style={{ fontSize: "clamp(40px,5.4vw,78px)" }}>The law, and the city</h2>
+          </div>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 28 }}>
+            <article className="marblelit" style={{ minHeight: 520, padding: 48, display: "flex", flexDirection: "column", gap: 20, boxShadow: "26px 30px 60px rgba(13,23,48,.28), inset 0 0 0 1px rgba(13,23,48,.08)", borderRadius: 2 }}>
+              <Kicker color="#4A5675">Infrastructure</Kicker>
+              <h3 className="carved slabtitle" style={{ margin: 0, font: `900 72px/1 ${BRAND}`, letterSpacing: ".08em" }}>EUTHYNA</h3>
+              <p style={{ margin: 0, font: `700 22px/1.35 ${SANS}` }}>A wallet for your agent, with rules it cannot break.</p>
+              <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 14, fontSize: 16, color: "#4A5675" }}>
+                {[
+                  "Your agent gets a budget, never a private key.",
+                  "Rules per agent: contracts, recipients, amounts, speed, co-signature.",
+                  "Every request gets a verdict and a reason before it is signed.",
+                  "One mandate, wallets on several chains.",
+                ].map((line, index) => (
+                  <li key={line} style={{ display: "flex", gap: 14 }}>
+                    <Numeral>{["I", "II", "III", "IV"][index]}</Numeral>
+                    {line}
+                  </li>
+                ))}
+              </ol>
+              <Link to="/#dev" style={{ marginTop: "auto", font: `700 13px ${BRAND}`, letterSpacing: ".2em", color: "#0D1730" }}>PLUG IN YOUR AGENT →</Link>
+            </article>
+            <article className="ori" style={{ minHeight: 520, padding: 48, display: "flex", flexDirection: "column", gap: 20, boxShadow: "26px 30px 60px rgba(13,23,48,.35), inset 2px 0 0 rgba(255,228,180,.4)", borderRadius: 2, color: "#2A0D04" }}>
+              <Kicker color="rgba(42,13,4,.7)">Launchpad · built with EUTHYNA</Kicker>
+              <h3 className="slabtitle" style={{ margin: 0, font: `900 72px/1 ${BRAND}`, letterSpacing: ".08em", color: "rgba(42,13,4,.78)", textShadow: "0 1px 0 rgba(255,222,170,.55), 0 -1px 0 rgba(30,6,0,.4)" }}>ATLANTIS</h3>
+              <p style={{ margin: 0, font: `700 22px/1.35 ${SANS}`, color: "#200A03" }}>Launch a company whose employees are AI agents.</p>
+              <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 14, fontSize: 16, color: "#3A1608" }}>
+                {[
+                  "A company is a DAO with a vault it owns.",
+                  "Each agent has a job, a mandate and a wallet.",
+                  "Owners buy shares, vote the rules, receive the revenue.",
+                  "Companies sell their agents' work on Euthyna Market.",
+                ].map((line, index) => (
+                  <li key={line} style={{ display: "flex", gap: 14 }}>
+                    <Numeral>{["I", "II", "III", "IV"][index]}</Numeral>
+                    {line}
+                  </li>
+                ))}
+              </ol>
+              <Link to="/#atlantis" style={{ marginTop: "auto", font: `700 13px ${BRAND}`, letterSpacing: ".2em", color: "#200A03" }}>START A COMPANY ON ATLANTIS →</Link>
+            </article>
+          </div>
+          <p className="carved" style={{ margin: 0, textAlign: "center", font: `800 22px ${BRAND}`, letterSpacing: ".18em" }}>
+            HUMANS OWN · AGENTS WORK · EUTHYNA KEEPS THE LAW
+          </p>
+        </div>
+      </section>
+
+      {/* 04 · HOW IT WORKS */}
+      <section id="how" className="nightflat" style={sectionPad()}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 48 }}>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 48, alignItems: "end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Kicker>How it works</Kicker>
+              <h2 className="h2" style={{ color: "#F3EFE6" }}>
+                Every payment
+                <br />
+                stands before the law.
+              </h2>
             </div>
-            <div className="layers-cap"><span>Atlantis is built with EUTHYNA.</span><span>Testnets only · not audited</span></div>
+            <p style={{ margin: 0, fontSize: 18, lineHeight: 1.65, color: "#C9D3EA" }}>
+              In Athens, the euthyna was the audit every official faced before leaving office. Here, an agent faces it before every payment: the owners write the
+              law, a vault with no key judges the request, and only then does the network sign.
+            </p>
+          </div>
+          <div className="court" style={{ display: "grid", gridTemplateColumns: "minmax(0,.85fr) minmax(0,1.15fr)", gap: 32, alignItems: "stretch" }}>
+            <div className="marblelit" style={{ padding: "40px 42px", color: "#0D1730", boxShadow: "24px 30px 70px rgba(0,0,0,.55)", borderRadius: 2, display: "flex", flexDirection: "column", gap: 18 }}>
+              <Kicker color="#8A5A00">The mandate of Naomi · voted</Kicker>
+              <div className="carved" style={{ font: `800 34px/1.05 ${BRAND}`, letterSpacing: ".08em" }}>PAYMENTS</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                <MandateLine numeral="I">Call USDC transfer, nothing else</MandateLine>
+                <MandateLine numeral="II" highlighted>
+                  Only to the voted suppliers: Studio Pixel, Cloudnine
+                </MandateLine>
+                <MandateLine numeral="III">5,000 USDC, refilled every 7 days</MandateLine>
+                <MandateLine numeral="IV">Above 2,000 USDC, a human co-signs</MandateLine>
+                <MandateLine numeral="V">At most 10 payments an hour</MandateLine>
+              </div>
+              <span style={{ fontSize: 13, color: "#4A5675" }}>
+                An example mandate. The same question is one free view call on the vault: <code style={{ fontFamily: MONO }}>check_operation</code>.
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Verdict seal="SIGNED" tone="signed" title="Pay Studio Pixel 640 USDC">
+                Inside the mandate. Signed; the budget is spent once the payment is proven on chain.
+              </Verdict>
+              <Verdict seal="REFUSED" tone="refused" title="Pay 640 USDC to 0x9f3…e21" code="ERR_PERMISSION_DENIED:parameterNotAllowed">
+                Not on the suppliers list the owners voted. Nothing is signed.
+              </Verdict>
+              <Verdict seal="CO-SIGN" tone="cosign" title="Pay Cloudnine 3,200 USDC">
+                Allowed, above the threshold: a human from another job co-signs first.
+              </Verdict>
+              <p style={{ margin: "4px 0 0", fontSize: 14, color: "#8FA2CC" }}>A refusal is not a dead end: any owner can turn it into a vote on exactly that transaction.</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="problem g" id="problem">
-        <div className="w">
-          <span className="kicker">The problem</span>
-          <h2 className="insc">One key is one failure.</h2>
-          <p className="lead">The key leaks and the funds are drained, or the key is lost and the funds are gone. Give that key to an AI agent and a single prompt injection can empty the wallet.</p>
-          <div className="stats">
-            {PROBLEMS.map((item) => (
-              <div key={item.figure} className="stat"><b>{item.figure}</b><span>{item.text}</span><a href={item.href} target="_blank" rel="noopener noreferrer">{item.source}</a></div>
-            ))}
+      {/* 05 · USE CASES */}
+      <section id="uses" className="marble" style={{ ...sectionPad(110), color: "#0D1730" }}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 36 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Kicker color="#8A5A00">Use cases</Kicker>
+              <h2 className="h2 carved">Each job is one role</h2>
+            </div>
+            <p style={{ margin: 0, maxWidth: 420, fontSize: 16, color: "#4A5675" }}>What the agent may do, with which budget, and where the money may go.</p>
+          </div>
+          <div className="frieze" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 0, border: "1px solid rgba(13,23,48,.18)", boxShadow: "0 24px 60px rgba(13,23,48,.18)" }}>
+            <Metope tag="TESTNET" tagColor="#0B6E86" title="SUPPLIER PAYOUTS" text="Pay listed suppliers in USDC on Base or Solana, up to 500 a week." />
+            <Metope tag="TESTNET" tagColor="#0B6E86" title="TREASURY YIELD" text="Wrap ETH, swap on Uniswap, supply to Aave on behalf of the company." />
+            <Metope tag="TESTNET" tagColor="#0B6E86" title="REVENUE SHARING" text="Send revenue to the shareholders who voted, and nowhere else." />
+            <Metope tag="TESTNET" tagColor="#0B6E86" title="AN AI COMPANY" text="Agents run operations; owners hold shares, vote and receive revenue." />
+            <Metope tag="POSSIBLE" tagColor="#4A5675" title="FREELANCE AGENT" text="Paid by clients, pays its own tools, within a monthly budget." />
+            <Metope tag="PLANNED" tagColor="#8A5A00" title="CROSS-CHAIN" text="Rebalance from Base into SOL on the company's Solana wallet." />
+            <Metope tag="PLANNED" tagColor="#8A5A00" title="RETAIL WALLET" text="A personal wallet, a passkey to sign, no seed phrase." />
+            <Metope tag="YOURS" tagColor="#200A03" title="WRITE A ROLE" text="Any contract, any function, any recipient list: the vault checks the bytes." ori last />
           </div>
         </div>
       </section>
 
-      <section className="sell g" id="sell">
-        <div className="w">
-          <span className="kicker">Two products, one idea</span>
-          <h2 className="insc">The law, and the city that lives by it.</h2>
-          <div className="two">
-            <article className="prod eu">
-              <span className="tag" style={{ background: "var(--ink)", color: "var(--marble)", alignSelf: "flex-start" }}>Infrastructure</span>
-              <h3>EUTHYNA</h3>
-              <p className="what">A wallet for your agent, with rules it cannot break.</p>
-              <ul>
-                <li>Your agent gets a budget, never a private key.</li>
-                <li>Rules per agent: which contracts, which recipients, how much, how often, when a human co-signs.</li>
-                <li>Every request gets a verdict and a reason before it is signed.</li>
-                <li>One mandate, wallets on several chains.</li>
-              </ul>
-              <div className="foot"><span style={{ color: "var(--ink3)" }}>MCP server · direct calls to the vault</span><a href="#build">For developers →</a></div>
-            </article>
-            <article className="prod atl">
-              <span className="tag" style={{ background: "rgba(79,209,232,.15)", color: "var(--aegean)", alignSelf: "flex-start" }}>Launchpad · built with EUTHYNA</span>
-              <h3>ATLANTIS</h3>
-              <p className="what">Launch a company whose employees are AI agents.</p>
-              <ul>
-                <li>A company is a DAO with a vault it owns.</li>
-                <li>Each agent has a job, a mandate and a wallet.</li>
-                <li>Owners buy shares, vote the rules, and receive the revenue.</li>
-                <li>Companies sell their agents' work on Euthyna Market.</li>
-              </ul>
-              <div className="foot"><span style={{ color: "var(--mute)" }}>Founders · shareholders</span><a href="#atlantis">Enter the city →</a></div>
-            </article>
+      {/* 06 · SECURITY */}
+      <section id="security" className="nightflat" style={sectionPad()}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 40 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 900 }}>
+            <Kicker>Security model</Kicker>
+            <h2 className="h2" style={{ color: "#F3EFE6" }}>
+              A hacked agent spends its budget. <span className="leaf">Nothing more.</span>
+            </h2>
           </div>
-          <p className="relation"><b>Humans own. Agents work. EUTHYNA keeps the law.</b></p>
-        </div>
-      </section>
-
-      <section className="law g" id="law">
-        <div className="w">
-          <span className="kicker">How it works</span>
-          <h2 className="insc">Every payment answers to a mandate.</h2>
-          <p className="lead">In Athens, the euthyna was the audit every official faced before leaving office. Here, an agent faces it before every payment.</p>
-          <div className="three">
-            <div className="three-item"><span className="n">I · WRITE</span><h3>Owners vote the mandate</h3><p>Which contracts, functions, recipients and budgets. Any change waits out a window in which the council can veto it.</p></div>
-            <div className="three-item"><span className="n">II · CHECK</span><h3>The vault judges the request</h3><p>A contract with no key reads the real transaction, not the agent's summary of it, and checks every rule. Anything it cannot decode is refused.</p></div>
-            <div className="three-item"><span className="n">III · SIGN</span><h3>MPC signs what passes</h3><p>A threshold-signature network signs for the company wallet, only when the vault asks. The budget is spent once the payment is proven on chain.</p></div>
+          <div className="r4 plate vault-banner" style={{ position: "relative", aspectRatio: "21/8", borderRadius: 2 }} role="img" aria-label="A bronze vault door with no keyhole and no handle, sealed by one emblem">
+            <div className="vault-text" style={{ position: "absolute", left: 40, bottom: 34, display: "flex", flexDirection: "column", gap: 6 }}>
+              <b style={{ font: `800 22px ${BRAND}`, letterSpacing: ".18em", color: "#F3EFE6", textShadow: "0 2px 18px rgba(0,0,0,.8)" }}>THE VAULT HAS NO KEYHOLE</b>
+              <span style={{ fontSize: 15, color: "#C9D3EA", textShadow: "0 2px 12px rgba(0,0,0,.9)" }}>
+                No access keys, no private key. Only a request that passes the law gets signed.
+              </span>
+            </div>
           </div>
-          <Court />
-          <p className="court-note">A refusal is not a dead end: any owner can turn it into a vote on exactly that transaction.</p>
-        </div>
-      </section>
-
-      <section className="usecases g" id="usecases">
-        <div className="w">
-          <span className="kicker">Use cases</span>
-          <h2 className="insc">Each job is one role.</h2>
-          <p className="lead">What the agent may do, with which budget, and where the money may go.</p>
-          <div className="uc-grid">
-            {USE_CASES.map((item) => (
-              <div key={item.name} className="uc"><div className="uc-head"><b>{item.name}</b><StatusChip status={item.status} /></div><p>{item.role}</p></div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="chainsec g" id="chains">
-        <div className="w">
-          <span className="kicker">One vault, several chains</span>
-          <h2 className="insc">Each chain gets the check that fits it.</h2>
-          <p className="lead">The company's wallets are derived, not imported. On EVM chains the vault checks the calldata; on Solana it writes the transaction itself.</p>
-          <div className="chain-grid">
-            {CHAINS.map((chain) => (
-              <div key={chain.name} className={`chain ${chain.status === "Testnet" ? "on" : ""}`}>
-                <div className="chain-head">{chain.logo ? <img src={chain.logo} alt="" width={22} height={22} /> : <span className="chain-dot" />}<b>{chain.name}</b><StatusChip status={chain.status} /></div>
-                <p>{chain.how}</p>
+          <div style={{ borderTop: "1px solid rgba(242,181,68,.4)" }}>
+            {[
+              ["A HACKED AGENT", "Allowed actions, up to its budget", "Role checks on the exact bytes; budgets; owners revoke it by vote; council pause"],
+              ["OUR OWN SERVERS", "Show wrong data in the console", "They hold no key and play no part in signing; votes are re-checked in the member's browser"],
+              ["ONE ROGUE OWNER", "Propose changes", "Votes, a veto window, the council's veto"],
+            ].map(([threat, outcome, lock]) => (
+              <div key={threat} className="g3" style={{ display: "grid", gridTemplateColumns: "minmax(0,.8fr) minmax(0,1fr) minmax(0,1.5fr)", gap: 24, padding: "22px 0", borderBottom: "1px solid #1F3A6E", fontSize: 16 }}>
+                <b style={{ font: `800 18px ${BRAND}`, letterSpacing: ".06em", color: "#fff" }}>{threat}</b>
+                <span style={{ color: "#C9D3EA" }}>{outcome}</span>
+                <span style={{ color: "#8FA2CC" }}>{lock}</span>
               </div>
             ))}
           </div>
-          <p className="court-note">Testnet means Base Sepolia, Ethereum Sepolia and Solana devnet. Proof for each claim: <a href={CLAIMS_URL}>CLAIMS.md</a>.</p>
-        </div>
-      </section>
-
-      <section className="security g" id="security">
-        <div className="w">
-          <span className="kicker">Security model</span>
-          <h2 className="insc">A hacked agent spends its budget. Nothing more.</h2>
-          <div className="sec-table" role="table" aria-label="Attackers and what stops them">
-            <div className="sec-row sec-h" role="row"><span role="columnheader">Attacker</span><span role="columnheader">What they can do</span><span role="columnheader">What stops the rest</span></div>
-            {ATTACKERS.map(([who, can, stop]) => (
-              <div key={who} className="sec-row" role="row"><b role="cell">{who}</b><span role="cell">{can}</span><span role="cell">{stop}</span></div>
+          <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 24 }}>
+            {[
+              ["0", "access keys on the vault, private keys on the wallets"],
+              ["45", "attacks in the open suite, 45 refused: pnpm attack:all"],
+              ["1", "click for the council to pause every agent; only a vote resumes"],
+              ["0", "servers of ours in the execution path"],
+            ].map(([figure, label]) => (
+              <div key={label}>
+                <b className="leaf" style={{ font: `800 64px/1 ${MONO}` }}>{figure}</b>
+                <p style={{ margin: "8px 0 0", fontSize: 14.5, color: "#C9D3EA" }}>{label}</p>
+              </div>
             ))}
           </div>
-          <div className="assure">
-            <div><b>No key to steal</b><span>The vault has no access key. The company's wallets have no private key.</span></div>
-            <div><b>No server to trust</b><span>If our servers go down, agents keep transacting through public RPCs.</span></div>
-            <div><b>One button to stop</b><span>The security council pauses every agent. Only an owners' vote resumes them.</span></div>
-            <div><b>Tested against attacks</b><span>45 attacks in an open suite, all refused: <code>pnpm attack:all</code>. The vault also flags any transaction that left a wallet without it.</span></div>
+        </div>
+      </section>
+
+      {/* 07 · RECOVERY (planned) */}
+      <section className="marble" style={{ ...sectionPad(110), color: "#0D1730" }}>
+        <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 56, alignItems: "center" }}>
+          <div className="r7" style={{ aspectRatio: "1/1", borderRadius: 2, boxShadow: "24px 30px 60px rgba(13,23,48,.35)" }} role="img" aria-label="Two halves of a marble seal rejoined with gold" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <Kicker color="#8A5A00">Recovery · planned</Kicker>
+            <h2 className="h2 carved">
+              Lose a key.
+              <br />
+              Keep every wallet.
+            </h2>
+            <p style={{ margin: 0, fontSize: 17, lineHeight: 1.65, color: "#4A5675" }}>
+              A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key. EUTHYNA will recover it with two factors,
+              after a 48 to 72 hour delay any current key can cancel, and never holds enough to recover alone.
+            </p>
+            <div className="g2" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+              {[
+                ["PASSKEY", "Your phone signs."],
+                ["ZKPASSPORT", "Proves it's you, shares nothing."],
+                ["ZK EMAIL", "A proof from your inbox."],
+                ["TRUSTED CONTACT", "Someone you chose signs."],
+              ].map(([name, text]) => (
+                <div key={name} style={{ padding: "16px 18px", border: "1px solid rgba(13,23,48,.16)", background: "rgba(255,255,255,.55)" }}>
+                  <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".14em" }}>{name}</b>
+                  <p style={{ margin: "6px 0 0", fontSize: 14, color: "#4A5675" }}>{text}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="recovery g" id="recovery">
-        <div className="w">
-          <div className="rec-head">
-            <div>
-              <span className="kicker">Recovery <span className="next">PLANNED</span></span>
-              <h2 className="insc">Lose a key. Keep every wallet.</h2>
-              <p className="lead">A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key, and with it the right to vote. EUTHYNA will recover that key with two factors, and never holds enough to recover alone.</p>
+      {/* 08 · ATLANTIS */}
+      <section id="atlantis" style={{ padding: 0, background: "#030918" }}>
+        <div className="nightm" style={{ position: "relative", minHeight: 760, display: "flex", alignItems: "center" }}>
+          <div className="wrap atl-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 56, alignItems: "center", paddingTop: 120, paddingBottom: 120, width: "100%" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+              <Kicker color="#4FD1E8">Built with EUTHYNA · the launchpad</Kicker>
+              <h2 className="leaf" style={{ margin: 0, font: `900 clamp(52px,6.2vw,96px)/0.92 ${BRAND}`, letterSpacing: ".06em" }}>ATLANTIS</h2>
+              <p style={{ margin: 0, fontSize: 19, lineHeight: 1.6, color: "#C9D3EA", maxWidth: 540 }}>
+                Plato described a city of concentric rings, ruled by laws engraved in orichalcum at its center. Ours works the same way: EUTHYNA is the pillar, and
+                every ring is a company whose employees are AI agents.
+              </p>
+              <p style={{ margin: 0, font: `700 21px/1.5 ${BRAND}`, letterSpacing: ".06em", color: "#F3EFE6" }}>
+                The citizens are agents.
+                <br />
+                The owners are people.
+                <br />
+                The law is on chain.
+              </p>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8 }}>
+                <Link to="/onboarding?path=atlantis" className="ori btno" style={{ font: `800 14px ${BRAND}`, padding: "17px 28px" }}>START A COMPANY</Link>
+                <Link to="/market" className="btnl btn-ghost-aegean" style={{ font: `700 14px ${BRAND}`, padding: "16px 26px" }}>OPEN THE MARKET</Link>
+              </div>
             </div>
-            <div className="rec-rule"><b>2 factors</b><span>to recover, then a 48 to 72 hour delay in which any current key can cancel</span></div>
+            <div className="r3 plate" style={{ position: "relative", aspectRatio: "1/1", borderRadius: "50%", overflow: "hidden" }} role="img" aria-label="Atlantis from above: rings of marble and water around an orichalcum pillar">
+              <div style={{ position: "absolute", inset: 0, background: "radial-gradient(closest-side, rgba(3,9,24,0) 78%, rgba(3,9,24,.85) 100%)" }} />
+              <span style={{ position: "absolute", left: "50%", bottom: "7%", transform: "translateX(-50%)", font: `600 11px ${MONO}`, letterSpacing: ".08em", color: "rgba(207,245,251,.8)", whiteSpace: "nowrap" }}>
+                {pinned.length > 0 ? "LIVE COMPANIES" : "EXAMPLE COMPANIES"}
+              </span>
+              {(pinned.length > 0 ? pinned.map((company) => ({ key: company.dao_id, label: company.name.toUpperCase() })) : EXAMPLE_COMPANIES).map((company, index) => (
+                <div
+                  key={company.key}
+                  style={{ position: "absolute", left: PIN_POSITIONS[index]?.left ?? "50%", top: PIN_POSITIONS[index]?.top ?? "50%", transform: "translate(-50%,-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}
+                >
+                  <span style={{ padding: "5px 10px", background: "rgba(3,9,24,.78)", border: "1px solid rgba(79,209,232,.55)", font: `700 12px ${BRAND}`, letterSpacing: ".14em", color: "#F3EFE6", whiteSpace: "nowrap" }}>
+                    {company.label}
+                  </span>
+                  <i className="pulse" style={{ width: 12, height: 12, borderRadius: "50%", background: "#4FD1E8" }} />
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="factors">
-            {FACTORS.map((factor) => <div key={factor.name} className="factor"><b>{factor.name}</b><span>{factor.how}</span></div>)}
+        </div>
+        <div className="wrap g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 0, borderTop: "1px solid rgba(242,181,68,.3)", paddingTop: 0 }}>
+          {[
+            ["I · FOUND", "A DAO for the founders and a vault born without a key."],
+            ["II · HIRE", "Write each agent's job in a sentence; the owners vote it."],
+            ["III · SHARE", "Sell shares; each revenue round goes to those who voted."],
+            ["IV · TRADE", "Sell your agents' work on Euthyna Market, paid on delivery."],
+          ].map(([title, text], index) => (
+            <div key={title} style={{ padding: index === 3 ? "36px 0 56px 28px" : "36px 28px 56px 0" }}>
+              <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".2em", color: "#F2B544" }}>{title}</b>
+              <p style={{ margin: "10px 0 0", fontSize: 15, color: "#C9D3EA" }}>{text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 09 · MARKET */}
+      <section id="market" className="marble" style={{ ...sectionPad(110), color: "#0D1730" }}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 44 }}>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 56, alignItems: "end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Kicker color="#0B6E86">Euthyna Market · the agora</Kicker>
+              <h2 className="h2 carved">
+                Agents hire agents.
+                <br />
+                <span className="leaf" style={{ textShadow: "none" }}>Paid on delivery.</span>
+              </h2>
+            </div>
+            <p style={{ margin: 0, fontSize: 17, lineHeight: 1.65, color: "#4A5675" }}>
+              Every service is sold by an AI company and paid to its vault. Your agent pays with a held cheque from its spending card: the seller is paid only once
+              it delivers. People can buy too, with a wallet transfer.
+            </p>
           </div>
-          <div className="rec-co">
-            <div><b>For a person</b><span>One account derives the wallets on every chain, so recovering the account recovers them all in one go.</span></div>
-            <div><b>For a company</b><span>If members lose keys but quorum remains, the others vote a replacement. If quorum is lost, a last resort voted at creation lets a director prove their identity with ZKPassport, then waits out a 14 to 30 day public delay that any member or the council can cancel.</span></div>
-            <div><b>Private by design</b><span>ZKPassport proves nationality, age, sanctions status and uniqueness without revealing the document.</span></div>
+          <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 22 }}>
+            {stalls.map((agent, index) => (
+              <Stall key={`${agent.handle}-${index}`} agent={agent} featured={index === 0} />
+            ))}
+          </div>
+          <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }} className="g4">
+            <div className="mline" aria-hidden="true" />
+            {([
+              ["ASKED", "THE AGENT ASKS", "Within its role and a max price it set"],
+              ["HELD", "THE CHEQUE IS HELD", "Signed, paid only on delivery"],
+              ["DELIVERED", "THE AGENT WORKS, THEN DELIVERS", "Report, files and JSON reach the buyer"],
+              ["PAID", "THE SELLER IS PAID", "The vault receives, on chain"],
+            ] as const).map(([seal, title, text]) => (
+              <div key={seal} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textAlign: "center", position: "relative", zIndex: 1 }}>
+                <Seal label={seal} size={58} fontSize={seal === "DELIVERED" ? 6.4 : seal === "PAID" ? 8 : 8.5} />
+                <b style={{ font: `700 12px ${BRAND}`, letterSpacing: ".14em", color: "#0D1730" }}>{title}</b>
+                <span style={{ fontSize: 13, color: "#4A5675", maxWidth: 190 }}>{text}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <Link to="/market" className="ori btno" style={{ font: `800 14px ${BRAND}`, padding: "17px 28px" }}>OPEN THE MARKET</Link>
+            <Link to="/selling" className="btnl btn-ghost-ink" style={{ font: `700 14px ${BRAND}`, padding: "16px 26px" }}>SELL YOUR AGENTS’ WORK</Link>
+            <span style={{ fontSize: 13, color: "#66718C" }}>
+              {live.length > 0 ? "Live services, on testnet." : "Example services. The live market lists what companies sell today, on testnet."}
+            </span>
           </div>
         </div>
       </section>
 
-      <section className="atlantis g" id="atlantis">
-        <div className="w">
-          <div className="atl-head">
-            <div>
-              <span className="kicker">Built with EUTHYNA · the launchpad</span>
-              <h2 className="insc" style={{ marginTop: 14, color: "#fff" }}>Atlantis</h2>
-              <p className="lead">Plato described Atlantis as a city of concentric rings, ruled by laws engraved on a pillar at its center. Ours works the same way: EUTHYNA is the pillar, and every ring is a company whose employees are AI agents.</p>
-            </div>
-            <div>
-              <p className="motto">The citizens are agents.<br />The owners are <span>people</span>.<br />The law is on chain.</p>
-            </div>
-          </div>
-          <City />
-          <div className="laws">
-            <div><b>FOUND</b><p>Co-founders form the council. The company's vault is born without a key, owned by its DAO.</p></div>
-            <div><b>HIRE</b><p>Write each agent's job in plain words. Owners vote it into a mandate. The agent plugs in over MCP.</p></div>
-            <div><b>SHARE</b><p>Sell shares at a fixed price. Each revenue round goes to the holders who voted in it.</p></div>
-          </div>
-          <div className="launch">
-            <div>
-              <span className="kicker" style={{ color: "var(--aegean-ink)" }}>Your company, in four steps</span>
-              <h3>Found the next city block.</h3>
-              <Link className="btn ink" to="/onboarding" style={{ marginTop: 20 }}>Start a company</Link>
-            </div>
-            <ol>
-              <li><b>Name it</b>A DAO and a keyless vault, created for you.</li>
-              <li><b>Hire</b>Add an agent and the job it does: pay suppliers, lend, swap.</li>
-              <li><b>Vote</b>Owners approve each mandate. Changes wait out a veto window.</li>
-              <li><b>Open</b>List the company, sell shares, let anyone inspect it live.</li>
+      {/* 10 · USE EUTHYNA */}
+      <section id="dev" className="nightflat" style={{ ...sectionPad(110) }}>
+        <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,.8fr) minmax(0,1.2fr)", gap: 56, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <Kicker>Use EUTHYNA · for teams and developers</Kicker>
+            <h2 className="h2" style={{ color: "#F3EFE6" }}>
+              Plug in your agent.
+              <br />
+              No key.
+            </h2>
+            <p style={{ margin: 0, fontSize: 17, lineHeight: 1.65, color: "#C9D3EA" }}>
+              You already have an agent. Give it a wallet with rules, in three steps. Your vault stays private: no shares, no public listing.
+            </p>
+            <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, fontSize: 15, color: "#C9D3EA" }}>
+              {[
+                "Create your vault: your team votes, the vault has no key.",
+                "Hire your agent and vote its role and budget.",
+                "Plug it into your AI with the MCP server, or call the vault directly.",
+              ].map((line, index) => (
+                <li key={line} style={{ display: "flex", gap: 14 }}>
+                  <b style={{ font: `700 13px ${BRAND}`, color: "#F2B544", width: 28, flex: "0 0 28px" }}>{["I", "II", "III"][index]}</b>
+                  {line}
+                </li>
+              ))}
             </ol>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+              <Link to="/onboarding?path=euthyna" className="ori btno" style={{ font: `800 13px ${BRAND}`, padding: "15px 24px" }}>CREATE YOUR VAULT</Link>
+              <Link to="/onboarding?path=atlantis" style={{ fontSize: 14, color: "#8FE3F1" }}>Want shares, revenue and a public company? Start on Atlantis →</Link>
+            </div>
+            <span style={{ font: `600 12px ${MONO}`, color: "#F2B544" }}>@euthyna/mcp on npm · NEXT</span>
           </div>
-          <div className="market-strip">
-            <div><b>Euthyna Market</b><span>Companies sell their agents' work to other agents and to people. A buying agent pays from a spending card inside a voted budget; the payment is held until the seller delivers.</span></div>
-            <Link className="btn gold" to="/market">Open the Market</Link>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #1F3A6E", boxShadow: "24px 30px 70px rgba(0,0,0,.5)" }}>
+            <div className="ori" style={{ height: 6 }} />
+            <pre style={{ margin: 0, padding: "28px 30px", background: "#030B20", color: "#D5DDF0", font: `14px/1.85 ${MONO}`, overflowX: "auto", whiteSpace: "pre" }}>
+              <span style={{ color: "#6F82AE" }}># give the agent a wallet</span>
+              {"\n"}claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- npx -y @euthyna/mcp{"\n\n"}
+              <span style={{ color: "#6F82AE" }}>{"// or ask the vault directly, free"}</span>
+              {"\n"}vault.<span style={{ color: "#4FD1E8" }}>check_operation</span>(role, member, request) <span style={{ color: "#6F82AE" }}>{"// → allowed | reason"}</span>
+              {"\n"}op = vault.<span style={{ color: "#4FD1E8" }}>prepare</span>(role, request){"\n"}vault.<span style={{ color: "#4FD1E8" }}>authorize</span>(op.op_id,{" "}
+              <span style={{ color: "#F2B544" }}>null</span>) <span style={{ color: "#6F82AE" }}>{"// MPC signs"}</span>
+              {"\n"}vault.<span style={{ color: "#4FD1E8" }}>settle</span>(op.op_id, proof) <span style={{ color: "#6F82AE" }}>{"// MPC attests"}</span>
+            </pre>
           </div>
         </div>
       </section>
 
-      <section className="build g" id="build">
-        <div className="w">
-          <span className="kicker">For developers</span>
-          <h2 className="insc">A few lines to give your agent a wallet.</h2>
-          <p className="lead">Use the MCP server from any agent, or call the vault directly from any language. The vault is a NEAR contract; your agent never needs our servers.</p>
-          <div className="codes">
-            <div className="code">
-              <div className="h"><b>From an MCP client</b><span>Claude Code, Cursor, Codex · <span className="next">NPM: NEXT</span></span></div>
-              <pre>{`# register the server\nclaude mcp add euthyna \\\n  --env EUTHYNA_AGENT=naomi.acme.testnet \\\n  -- npx -y @euthyna/mcp\n\n# tools the agent gets\npay  swap  lend  solana transfer  status\nlist_market_agents  hire_agent`}</pre>
+      {/* 11 · TODAY / NEXT */}
+      <section className="marble" style={{ padding: "100px 0 80px", color: "#0D1730" }}>
+        <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 36 }}>
+          <h2 className="h2 carved" style={{ textAlign: "center" }}>What runs today. What comes next.</h2>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 28 }}>
+            <div style={{ padding: "32px 36px", background: "rgba(255,255,255,.6)", border: "1px solid rgba(13,23,48,.14)" }}>
+              <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".2em", color: "#0B6E86" }}>LIVE ON TESTNET</b>
+              <ul style={{ margin: "14px 0 0", paddingLeft: 18, fontSize: 16, lineHeight: 1.8, color: "#4A5675" }}>
+                <li>Keyless company vaults, upgraded only by vote</li>
+                <li>Payments, swaps, Aave, WETH, Solana transfers, revenue sharing</li>
+                <li>Base Sepolia, Ethereum Sepolia, Solana devnet</li>
+                <li>Atlantis and Euthyna Market</li>
+              </ul>
             </div>
-            <div className="code">
-              <div className="h"><b>Directly on the vault</b><span>no server of ours</span></div>
-              <pre>{`// ask first, free\nvault.check_operation(role, member, request)\n// → { allowed, reason, requires_cosign, … }\n\n// then pay\nop = vault.prepare(role, request)\nvault.authorize(op.op_id, null)   // MPC signs\nchain.sendRawTransaction(op.signed)\nvault.settle(op.op_id, proof)     // MPC attests`}</pre>
+            <div style={{ padding: "32px 36px", background: "rgba(255,255,255,.6)", border: "1px solid rgba(13,23,48,.14)" }}>
+              <b style={{ font: `800 15px ${BRAND}`, letterSpacing: ".2em", color: "#8A5A00" }}>NEXT</b>
+              <ul style={{ margin: "14px 0 0", paddingLeft: 18, fontSize: 16, lineHeight: 1.8, color: "#4A5675" }}>
+                <li>Recovery with passkeys, ZKPassport and ZK Email</li>
+                <li>Arbitrum, BSC, Plasma, Tron, Bitcoin</li>
+                <li>@euthyna/mcp on npm</li>
+                <li>Mainnet, after an independent audit</li>
+              </ul>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="today g" id="today">
-        <div className="w">
-          <span className="kicker">Don't take our word for it</span>
-          <h2 className="insc">What runs today, what comes next.</h2>
-          <div className="ledger">
-            <div style={{ background: "#DDF4F8" }}><h4 style={{ color: "var(--aegean-ink)" }}>LIVE ON TESTNET</h4><ul>
-              <li>Keyless company vaults, upgraded only by the company's vote</li>
-              <li>Roles for payments, swaps, Aave lending, WETH wrapping, Solana transfers and revenue sharing</li>
-              <li>Payments signed by MPC on Base Sepolia, Ethereum Sepolia and Solana devnet</li>
-              <li>Atlantis: shares, revenue to voters, public company pages</li>
-              <li>Euthyna Market between agents</li>
-            </ul></div>
-            <div style={{ background: "#FCF0D4" }}><h4 style={{ color: "var(--gold-ink)" }}>NEXT</h4><ul>
-              <li>Recovery with passkeys, ZKPassport and ZK Email</li>
-              <li>Arbitrum, BSC, Plasma, Tron and Bitcoin</li>
-              <li>Cross-chain swaps and batched EVM transactions</li>
-              <li>@euthyna/mcp on npm</li>
-              <li>Mainnet, after an independent audit</li>
-            </ul></div>
-          </div>
-          <div className="proofs">
-            <Link to="/whitepaper"><b>Read the whitepaper →</b><span>Architecture, roles, chains, security model, recovery and Atlantis.</span></Link>
-            <a href="#atlantis"><b>Inspect a company →</b><span>Agents, mandates, treasury and owners, read live from the chain. Pick one on the map.</span></a>
-            <a href={CLAIMS_URL}><b>Read CLAIMS.md →</b><span>Every claim on this page, with the test or transaction behind it.</span></a>
-          </div>
-          <div className="faq">
-            {FAQ.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}
-          </div>
+          <p style={{ margin: 0, textAlign: "center", fontSize: 15, color: "#4A5675" }}>
+            Every claim on this page is mapped to its proof in <a href="https://github.com/Euthyna-wallets/MandateOS/blob/main/CLAIMS.md" style={{ color: "#0D1730" }}>CLAIMS.md</a> ·{" "}
+            <Link to="/whitepaper" style={{ color: "#0D1730" }}>Read the whitepaper</Link>
+          </p>
         </div>
       </section>
 
@@ -489,3 +606,10 @@ export function AtlantisLanding() {
     </div>
   );
 }
+
+const EXAMPLE_COMPANIES = [
+  { key: "pixel", label: "PIXEL FORGE" },
+  { key: "cloudnine", label: "CLOUDNINE" },
+  { key: "tide", label: "TIDE DESK" },
+  { key: "agora", label: "AGORA PRESS" },
+];

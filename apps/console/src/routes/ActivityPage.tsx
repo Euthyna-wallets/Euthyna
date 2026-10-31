@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { cardAccountIdOf } from "@mandateos/sdk/roles";
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
+import { Seal, Slab, PageTitle } from "../components/design.js";
 import { Icon } from "../components/ops.js";
-import { PageState, Status, short } from "../components/ui.js";
+import { PageState, short } from "../components/ui.js";
 import { marketConsole } from "../lib/market.js";
-import { OUTCOME_LABEL, dayLabel, entriesOf, marketEntriesOf, roleName, timeOf, type Entry } from "../lib/money.js";
+import { OUTCOME_LABEL, dayLabel, entriesOf, marketEntriesOf, roleName, timeOf, type Entry, type Outcome } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type Sentence, type WalletIntegrity } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -20,6 +21,14 @@ const NEAR_EXPLORER = "https://testnet.nearblocks.io";
 type Filter = "all" | "done" | "pending" | "refused";
 
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["done", "Done"], ["pending", "In progress"], ["refused", "Refused"]];
+
+/** The evidence block: a pale plate under the row, aligned with its text column. */
+const PROOF_BOX: CSSProperties = { margin: "0 20px 14px 84px", padding: "14px 18px", background: "rgba(6,20,51,.04)", borderLeft: "2px solid var(--gold-deep)", fontSize: 12.5 };
+const PROOF_GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px 26px", margin: 0 };
+const PROOF_DT: CSSProperties = { color: "var(--ink-3)", fontSize: 11.5 };
+const PROOF_DD: CSSProperties = { margin: "2px 0 0", color: "var(--ink)", fontWeight: 600, overflowWrap: "anywhere" };
+const PROOF_LINK: CSSProperties = { color: "var(--aegean-ink)", fontFamily: "var(--font-mono)" };
+const MONO: CSSProperties = { fontFamily: "var(--font-mono)" };
 
 export function ActivityPage() {
   const query = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, refetchInterval: 10_000 });
@@ -46,46 +55,66 @@ export function ActivityPage() {
     else groups.push([label, [entry]]);
   }
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>Activity</h1>
-          <p className="muted">Every payment, swap and deposit made with company money, every market sale and purchase, and every request the rules refused.</p>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <header style={{ display: "flex", flexDirection: "column", gap: 6, margin: 0 }}>
+        <span style={{ font: "600 12px var(--font-ui)", color: "var(--ink-3)" }}>The record</span>
+        <PageTitle style={{ font: "900 40px/1 var(--font-brand)", letterSpacing: ".12em" }}>Activity</PageTitle>
+        <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", maxWidth: 760 }}>Every payment, swap and deposit made with company money, every market sale and purchase, and every request the rules refused.</p>
       </header>
 
       <Trust items={query.data?.integrity ?? []} />
 
-      <div className="filters" role="tablist" aria-label="Filter activity">
+      <div className="tab-line" role="tablist" aria-label="Filter activity">
         {FILTERS.map(([value, label]) => (
-          <button key={value} role="tab" aria-selected={filter === value} className={`filter${filter === value ? " active" : ""}`} onClick={() => setFilter(value)}>
-            {label} <span>{count(value)}</span>
+          <button key={value} role="tab" aria-selected={filter === value} className={filter === value ? "on" : undefined}
+            style={{ borderRadius: 2, padding: "8px 14px", font: "600 13px var(--font-ui)", background: filter === value ? "var(--ink)" : "rgba(255,255,255,.55)", border: `1px solid ${filter === value ? "var(--ink)" : "rgba(13,23,48,.14)"}`, color: filter === value ? "var(--marble)" : "var(--ink-2)" }}
+            onClick={() => setFilter(value)}>
+            {label} <span style={{ marginLeft: 6, font: "600 11px var(--font-mono)", color: filter === value ? "var(--night-soft)" : "var(--ink-3)" }}>{count(value)}</span>
           </button>
         ))}
       </div>
 
-      <PageState loading={query.isLoading} error={query.error} empty={shown.length === 0} emptyContent={<div className="state">Nothing here yet.</div>}>
-        {groups.map(([label, entries]) => (
-          <section key={label} className="panel day">
-            <h2 className="day-label">{label}</h2>
-            <ul className="tx-list">
-              {entries.map((entry) => (
-                <li key={entry.id} className={open === entry.id ? "open" : undefined}>
-                  <button className="tx-row" aria-expanded={open === entry.id} onClick={() => setOpen(open === entry.id ? null : entry.id)}>
-                    <span className={`tx-icon ${entry.outcome}`}><Icon name={entry.outcome === "refused" || entry.outcome === "failed" ? "cross" : entry.outcome === "pending" ? "setup" : "check"} size={15} /></span>
-                    <span className="tx-text">
-                      <strong>{entry.text}</strong>
-                      <span>{nameOf(entry.actor)}{entry.market ? (entry.market.kind === "sale" ? " · market sale" : " · market purchase") : entry.role ? ` · ${roleName(entry.role)}` : entry.operation ? " · voted by members" : ""}{entry.chain ? ` · ${entry.chain}` : ""} · {timeOf(entry.at)}</span>
-                      {entry.outcome === "refused" && entry.reason ? <span className="tx-reason">Refused: {humanReason(entry.reason)}</span> : null}
-                    </span>
-                    <span className={`outcome outcome-${entry.outcome}`}>{OUTCOME_LABEL[entry.outcome]}</span>
-                  </button>
-                  {open === entry.id ? (entry.market ? <MarketProof entry={entry} /> : <Proof entry={entry} actor={nameOf(entry.actor)} />) : null}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+      <PageState loading={query.isLoading} error={query.error} empty={shown.length === 0} emptyContent={<Slab style={{ padding: "20px 22px" }}><span className="empty-state">Nothing here yet.</span></Slab>}>
+        <Slab style={{ paddingBottom: 4 }}>
+          {groups.map(([label, entries], index) => (
+            <div key={label} style={{ display: "flex", flexDirection: "column" }}>
+              <div style={{ font: "700 11px var(--font-brand)", letterSpacing: ".24em", color: "var(--gold-ink)", padding: "12px 20px 8px", borderTop: index === 0 ? "none" : "1px solid rgba(13,23,48,.1)", marginTop: index === 0 ? 0 : 4 }}>{label}</div>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {entries.map((entry) => {
+                  const seal = sealOf(entry);
+                  const translated = entry.reason ? humanReason(entry.reason) !== entry.reason : false;
+                  return (
+                    <li key={entry.id} style={{ borderTop: "1px solid rgba(13,23,48,.1)" }}>
+                      <button aria-expanded={open === entry.id} onClick={() => setOpen(open === entry.id ? null : entry.id)}
+                        style={{ display: "grid", gridTemplateColumns: "48px minmax(0,1fr) auto", gap: 16, alignItems: "center", width: "100%", padding: "10px 20px", border: 0, background: "none", textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}>
+                        <Seal word={seal.word} size={44} {...(seal.tone ? { tone: seal.tone } : {})} />
+                        <span style={{ minWidth: 0 }}>
+                          <b style={{ fontSize: 14.5 }}>{entry.text}</b>
+                          <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 2 }}>
+                            {nameOf(entry.actor)}{entry.market ? (entry.market.kind === "sale" ? " · market sale" : " · market purchase") : entry.role ? ` · ${roleName(entry.role)}` : entry.operation ? " · voted by members" : ""}{entry.chain ? ` · ${entry.chain}` : ""} · {timeOf(entry.at)}
+                          </span>
+                          {entry.outcome === "refused" && entry.reason ? (
+                            <span style={{ display: "block", fontSize: 12.5, color: "var(--terra-ink)", marginTop: 5 }}>
+                              Refused: {humanReason(entry.reason)}
+                              {translated ? <> · <code className="mono" style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "var(--ink-2)" }}>{entry.reason}</code></> : null}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span style={{ font: "700 10px var(--font-brand)", letterSpacing: ".16em", textAlign: "right", color: OUTCOME_COLOR[entry.outcome] }}>{OUTCOME_LABEL[entry.outcome].toUpperCase()}</span>
+                      </button>
+                      {entry.request ? (
+                        <div style={{ padding: "0 20px 10px 84px" }}>
+                          <AskMembers request={entry.request} title={`${nameOf(entry.actor)}: ${entry.text}`} />
+                        </div>
+                      ) : null}
+                      {open === entry.id ? (entry.market ? <MarketProof entry={entry} /> : <Proof entry={entry} />) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </Slab>
       </PageState>
     </div>
   );
@@ -96,6 +125,35 @@ function matches(entry: Entry, filter: Filter): boolean {
   if (filter === "refused") return entry.outcome === "refused" || entry.outcome === "failed" || entry.outcome === "cancelled";
   return entry.outcome === filter;
 }
+
+/** The inked word on the seal: what the vault answered, or where the market's money is. */
+function sealOf(entry: Entry): { word: string; tone?: "refused" | "expired" } {
+  if (entry.market) {
+    const { sale } = entry.market;
+    if (sale.holdState === "settled" || sale.holdState === "prepaid") return { word: "SETTLED" };
+    if (sale.holdState === "held") return { word: "HELD" };
+    if (sale.holdState === "settling") return { word: "SETTLING" };
+    if (sale.holdState === "expired" || sale.state === "expired") return { word: "EXPIRED", tone: "expired" };
+    if (sale.holdState === "failed" || sale.state === "failed") return { word: "FAILED", tone: "refused" };
+    return { word: "PENDING" };
+  }
+  const state = entry.operation?.vaultState;
+  if (entry.outcome === "refused") return { word: "REFUSED", tone: "refused" };
+  if (state === "Vetoed") return { word: "VETOED", tone: "expired" };
+  if (state === "Expired" || state === "Cancelled") return { word: "EXPIRED", tone: "expired" };
+  if (entry.outcome === "failed" || state === "Failed") return { word: "FAILED", tone: "refused" };
+  if (entry.outcome === "done") return { word: "SIGNED" };
+  return { word: "PENDING" };
+}
+
+/** The word at the right of the row, in the colour of its meaning. */
+const OUTCOME_COLOR: Record<Outcome, string> = {
+  done: "var(--aegean-ink)",
+  pending: "var(--gold-ink)",
+  failed: "var(--terra-ink)",
+  refused: "var(--terra-ink)",
+  cancelled: "var(--ink-3)",
+};
 
 /** Vault error codes, in words. */
 function humanReason(reason: string): string {
@@ -110,27 +168,26 @@ function humanReason(reason: string): string {
 }
 
 /** The evidence, for whoever wants to check: vault record on NEAR, transaction on the destination chain. */
-function Proof({ entry, actor }: { entry: Entry; actor: string }) {
+function Proof({ entry }: { entry: Entry }) {
   const operation = entry.operation;
-  const rows: Array<[string, ReactNode]> = [["Requested by", <span className="mono">{entry.actor}</span>]];
+  const rows: Array<[string, ReactNode]> = [["Requested by", <span className="mono" style={MONO}>{entry.actor}</span>]];
   if (!operation) {
     rows.push(["Recorded by", "Euthyna: a refused request never becomes a transaction"]);
-    if (entry.reason) rows.push(["Vault answer", <span className="mono">{entry.reason}</span>]);
+    if (entry.reason) rows.push(["Vault answer", <span className="mono" style={MONO}>{entry.reason}</span>]);
   } else {
-    rows.push(["Vault status", <Status value={operation.vaultState} />]);
-    if (operation.nearAuthorizationTxHash) rows.push(["Signed on NEAR", <a href={`${NEAR_EXPLORER}/txns/${operation.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">{short(operation.nearAuthorizationTxHash)} ↗</a>]);
-    if (operation.evm) rows.push([`${operation.chain} transaction`, <a href={`${EXPLORERS[operation.chainId] ?? ""}/tx/${operation.evm.hash}`} target="_blank" rel="noreferrer">{short(operation.evm.hash)} ↗</a>]);
-    if (operation.solana) rows.push([`${operation.chain} transaction`, <a href={operation.solana.explorer} target="_blank" rel="noreferrer">{short(operation.solana.signature)} ↗</a>]);
+    rows.push(["Vault status", operation.vaultState]);
+    if (operation.nearAuthorizationTxHash) rows.push(["Signed on NEAR", <a className="mono" style={PROOF_LINK} href={`${NEAR_EXPLORER}/txns/${operation.nearAuthorizationTxHash}`} target="_blank" rel="noreferrer">{short(operation.nearAuthorizationTxHash)} ↗</a>]);
+    if (operation.evm) rows.push([`${operation.chain} transaction`, <a className="mono" style={PROOF_LINK} href={`${EXPLORERS[operation.chainId] ?? ""}/tx/${operation.evm.hash}`} target="_blank" rel="noreferrer">{short(operation.evm.hash)} ↗</a>]);
+    if (operation.solana) rows.push([`${operation.chain} transaction`, <a className="mono" style={PROOF_LINK} href={operation.solana.explorer} target="_blank" rel="noreferrer">{short(operation.solana.signature)} ↗</a>]);
     if (operation.near) rows.push(["Token transfer", operation.vaultState === "Confirmed" ? "ft_transfer succeeded, budget spent" : operation.vaultState === "Failed" ? "ft_transfer failed, budget released" : operation.vaultState === "Unconfirmed" ? "No result came back: budget kept spent, check the transaction" : "Waiting for the token's answer"]);
     if (operation.solana) rows.push(["Finality", operation.vaultState === "Confirmed" ? "Attested by NEAR's MPC network" : "Waiting"]);
-    if (operation.nonce !== null) rows.push(["Wallet nonce", <span className="mono">{operation.nonce}</span>]);
-    if (operation.reference) rows.push(["Reference", <span className="mono">{operation.reference}</span>]);
-    rows.push(["Operation id", <span className="mono">{short(operation.opId, 18)}</span>]);
+    if (operation.nonce !== null) rows.push(["Wallet nonce", <span className="mono" style={MONO}>{operation.nonce}</span>]);
+    if (operation.reference) rows.push(["Reference", <span className="mono" style={MONO}>{operation.reference}</span>]);
+    rows.push(["Operation id", <span className="mono" style={MONO}>{short(operation.opId, 18)}</span>]);
   }
   return (
-    <div className="proof">
-      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-      {entry.request ? <AskMembers request={entry.request} title={`${actor}: ${entry.text}`} /> : null}
+    <div style={PROOF_BOX}>
+      <dl style={PROOF_GRID}>{rows.map(([label, value]) => <div key={label}><dt style={PROOF_DT}>{label}</dt><dd style={PROOF_DD}>{value}</dd></div>)}</dl>
     </div>
   );
 }
@@ -148,14 +205,14 @@ const PAYMENT_TEXT: Record<string, string> = {
 function MarketProof({ entry }: { entry: Entry }) {
   const { kind, sale } = entry.market!;
   const rows: Array<[string, ReactNode]> = [
-    [kind === "sale" ? "Your listing" : "Seller's listing", <span className="mono">@{sale.handle}</span>],
-    ["Buyer", <span className="mono">{sale.buyer}</span>],
+    [kind === "sale" ? "Your listing" : "Seller's listing", <span className="mono" style={MONO}>@{sale.handle}</span>],
+    ["Buyer", <span className="mono" style={MONO}>{sale.buyer}</span>],
     ["Task", sale.state === "completed_unpaid" ? "Delivered, not paid" : sale.state.charAt(0).toUpperCase() + sale.state.slice(1)],
     ["Payment", sale.holdState ? PAYMENT_TEXT[sale.holdState] ?? sale.holdState : "No payment held"],
   ];
-  if (sale.settleTxHash) rows.push(["Paid on NEAR", <a href={`${NEAR_EXPLORER}/txns/${sale.settleTxHash}`} target="_blank" rel="noreferrer">{short(sale.settleTxHash)} ↗</a>]);
-  rows.push(["Result", <Link to={`/market/task/${sale.taskId}`}>Open the task</Link>]);
-  return <div className="proof"><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>;
+  if (sale.settleTxHash) rows.push(["Paid on NEAR", <a className="mono" style={PROOF_LINK} href={`${NEAR_EXPLORER}/txns/${sale.settleTxHash}`} target="_blank" rel="noreferrer">{short(sale.settleTxHash)} ↗</a>]);
+  rows.push(["Result", <Link style={PROOF_LINK} to={`/market/task/${sale.taskId}`}>Open the task</Link>]);
+  return <div style={PROOF_BOX}><dl style={PROOF_GRID}>{rows.map(([label, value]) => <div key={label}><dt style={PROOF_DT}>{label}</dt><dd style={PROOF_DD}>{value}</dd></div>)}</dl></div>;
 }
 
 /** One line: did anything leave the wallets outside the vault? (nonce on chain = nonce signed by the vault) */
@@ -164,19 +221,23 @@ function Trust({ items }: { items: WalletIntegrity[] }) {
   const alert = items.find((item) => item.status === "alert");
   if (alert) {
     return (
-      <div className="trust bad">
-        <Icon name="cross" size={16} />
-        <span><strong>Check {alert.chain} now.</strong> The wallet sent {alert.walletNonce} transactions, the vault signed {alert.vaultNonce}. Something left {short(alert.address)} without the vault.</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", padding: "12px 18px", background: "#FDECEB", border: "1px solid rgba(217,87,59,.45)" }}>
+        <span style={{ color: "var(--terra-ink)", display: "inline-flex" }}><Icon name="cross" size={18} /></span>
+        <span style={{ fontSize: 14, color: "var(--ink)" }}><strong>Check {alert.chain} now.</strong> The wallet sent {alert.walletNonce} transactions, the vault signed {alert.vaultNonce}. Something left {short(alert.address)} without the vault.</span>
+        <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--terra-ink)" }}>{alert.chain} · wallet {alert.walletNonce ?? "—"} · vault {alert.vaultNonce}</span>
       </div>
     );
   }
   const pending = items.filter((item) => item.status === "pending");
   return (
-    <div className="trust ok">
-      <Icon name="check" size={16} />
-      <span>
+    <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", padding: "12px 18px", background: "var(--aegean-bg)", border: "1px solid rgba(11,110,134,.3)" }}>
+      <Seal word="INTACT" size={40} />
+      <span style={{ fontSize: 14, color: "var(--ink)" }}>
         <strong>Every transaction went through the vault.</strong> The wallets sent exactly what the vault signed.
         {pending.length ? ` ${pending.map((item) => `${item.vaultNonce - (item.walletNonce ?? 0)} on ${item.chain}`).join(", ")} still being mined.` : ""}
+      </span>
+      <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--aegean-ink)" }}>
+        {items.map((item) => `${item.chain} · wallet ${item.walletNonce ?? "—"} · vault ${item.vaultNonce}`).join("  ·  ")}
       </span>
     </div>
   );
@@ -196,11 +257,11 @@ function AskMembers(props: { request: Requested; title: string }) {
   if (!treasury || !wallets.nearAccountId) return null;
   if (state.preview) {
     return (
-      <span className="stack">
+      <span style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
         <SentenceList items={state.preview.summary} />
-        <span className="row">
-          <button className="ghost compact" onClick={() => setState({ busy: false, message: null, preview: null })}>Cancel</button>
-          <button className="primary compact" disabled={state.busy} onClick={() => act(async () => {
+        <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn-line" style={{ padding: "7px 12px", font: "700 10.5px var(--font-brand)", letterSpacing: ".16em" }} onClick={() => setState({ busy: false, message: null, preview: null })}>Cancel</button>
+          <button className="btn-ori" style={{ padding: "8px 14px", font: "800 11px var(--font-brand)", letterSpacing: ".16em" }} disabled={state.busy} onClick={() => act(async () => {
             const result = await signDaoProposal(wallets.nearAccountId, state.preview!.draft);
             setState({ busy: false, message: `Proposal #${result.proposalId} submitted to the members.`, preview: null });
           })}>Submit to the members' vote</button>
@@ -210,12 +271,12 @@ function AskMembers(props: { request: Requested; title: string }) {
   }
   return (
     <span>
-      <button className="ghost compact" disabled={state.busy} onClick={() => act(async () => {
+      <button className="btn-line" style={{ padding: "7px 12px", font: "700 10.5px var(--font-brand)", letterSpacing: ".16em" }} disabled={state.busy} onClick={() => act(async () => {
         const requested = [{ chainId: props.request.chainId, to: props.request.to, value: props.request.value, data: props.request.data }];
         const draft = await omni.transactionProposal({ title: props.title.slice(0, 120), transactions: requested });
         setState({ busy: false, message: null, preview: { draft, summary: verifyTransactions(draft, requested, treasury.daoAccountId, treasury.vaultAccountId) } });
-      })}>Ask the members</button>
-      {state.message ? <span className="small"> {state.message}</span> : null}
+      })}>Ask the members to vote on it</button>
+      {state.message ? <span className="small" style={{ marginLeft: 8, color: "var(--ink-2)" }}>{state.message}</span> : null}
     </span>
   );
 }

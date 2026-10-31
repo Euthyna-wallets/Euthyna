@@ -9,6 +9,7 @@ import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
 import { SharesPage } from "./routes/SharesPage.js";
 import { OnboardingPage } from "./routes/OnboardingPage.js";
+import { ChoosePathPage } from "./routes/ChoosePathPage.js";
 import { SignIn } from "./routes/SignIn.js";
 import { WalletPage } from "./routes/WalletPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
@@ -22,6 +23,7 @@ import { AtlantisLanding } from "./routes/public/atlantis/AtlantisLanding.js";
 import { WhitepaperPage } from "./routes/public/atlantis/WhitepaperPage.js";
 import { MarketPage } from "./routes/public/MarketPage.js";
 import { MarketTaskPage } from "./routes/public/MarketTaskPage.js";
+import { RobPage } from "./routes/public/RobPage.js";
 import { MarketConsolePage } from "./routes/MarketConsolePage.js";
 
 function Gate() {
@@ -36,8 +38,8 @@ function Gate() {
   if (!session.data) return <SignIn />;
   if (organizations.isLoading) return <div className="state">Loading organization…</div>;
   if (organizations.error) return <div className="state error">Error: {organizations.error.message}</div>;
-  if (!organizations.data?.length && location.pathname !== "/onboarding") {
-    return <Navigate to="/onboarding" replace />;
+  if (!organizations.data?.length && location.pathname !== "/onboarding" && location.pathname !== "/choose-path") {
+    return <Navigate to="/choose-path" replace />;
   }
   return <Outlet />;
 }
@@ -54,7 +56,9 @@ export function App() {
           <Route path="/c/:dao" element={<CompanyPublicPage />} />
           <Route path="/market" element={<MarketPage />} />
           <Route path="/market/task/:id" element={<MarketTaskPage />} />
+          <Route path="/rob" element={<RobPage />} />
           <Route element={<Gate />}>
+            <Route path="/choose-path" element={<ChoosePathPage />} />
             <Route element={<Layout />}>
               <Route path="/overview" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />

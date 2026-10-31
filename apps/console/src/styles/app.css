@@ -1,0 +1,113 @@
+/* EUTHYNA · console · direction « Marbre et orichalque ».
+   Values from design-handoff/app/tokens.css and the <style> of each screen. */
+
+.app-shell{display:flex;min-height:100vh;font-family:var(--font-ui);background:var(--marble);color:var(--ink)}
+
+/* ---------- sidebar ---------- */
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(/media/textures/marble-night.jpg);background-size:cover,700px;color:#E7ECF6;width:268px;flex:0 0 268px;box-sizing:border-box;padding:24px 18px;display:flex;flex-direction:column;gap:22px}
+.side .brand{display:flex;align-items:center;gap:10px;font:700 15px var(--font-brand);letter-spacing:.24em;color:#F3EFE6;padding:0 6px;text-decoration:none}
+.side-company{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.04);border:1px solid var(--night-line);border-radius:2px;padding:12px;text-align:left;color:inherit;cursor:pointer;width:100%;box-sizing:border-box}
+.side-company .mark{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 15px var(--font-brand);color:rgba(42,13,4,.8);box-shadow:inset 0 0 0 2px rgba(255,228,180,.4);flex:0 0 auto}
+.side-company b{display:block;font:700 14px var(--font-brand);letter-spacing:.1em;color:#F3EFE6}
+.side-company small{font-size:12px;color:var(--night-mute)}
+.side-company select{background:transparent;border:0;color:#F3EFE6;font:700 14px var(--font-brand);letter-spacing:.1em;cursor:pointer;max-width:170px}
+.side-company select option{color:#0D1730}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:var(--night-soft);font:600 14.5px var(--font-ui)}
+.nav a b{font:700 11px var(--font-brand);letter-spacing:.14em;color:#6F82AE;width:26px}
+.nav a:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav a.active{background:#F3EFE6;color:#0D1730}
+.nav a.active b{color:var(--gold-ink)}
+.nav .nav-badge{margin-left:auto;background:var(--gold);color:#061433;border-radius:999px;font:800 11px var(--font-ui);padding:2px 8px}
+.council{border:1px solid rgba(217,87,59,.55);background:linear-gradient(160deg,rgba(74,26,16,.85),rgba(42,15,10,.9));padding:16px;display:flex;flex-direction:column;gap:12px}
+.council .kick{color:var(--terra-soft)}
+.council p{margin:0;font-size:13px;color:#F4C9BC}
+.council button{border:0;background:var(--terra);color:#fff;padding:12px;font:800 13px var(--font-brand);letter-spacing:.2em;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.council button:disabled{opacity:.6;cursor:not-allowed}
+.side-user{display:flex;align-items:center;gap:10px;padding:0 6px;font-size:13px;color:var(--night-soft)}
+.side-user .avatar{width:30px;height:30px;border-radius:50%;background:var(--gold);color:#061433;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.side-user b{color:#fff}
+.side-user small{color:var(--night-mute)}
+.signout{border:1px solid var(--night-line);background:none;color:var(--night-mute);font:600 12px var(--font-ui);padding:8px;cursor:pointer}
+
+/* ---------- main ---------- */
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(/media/textures/marble-white.jpg);background-size:cover,cover;flex:1;min-width:0;box-sizing:border-box;padding:30px 40px 60px;display:flex;flex-direction:column;gap:22px}
+.app-topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.app-topbar .company-name{margin:0;font:900 34px var(--font-brand);letter-spacing:.1em;color:var(--carved);text-shadow:var(--carved-shadow)}
+.app-topbar .state-pill{display:inline-flex;align-items:center;gap:8px;font:700 12px var(--font-ui);color:var(--aegean-ink);background:var(--aegean-bg);border-radius:999px;padding:5px 12px}
+.app-topbar .state-pill.paused{color:var(--terra-ink);background:#FBE3D6}
+.app-topbar .tesnet-pill{margin-left:auto;font:700 12px var(--font-ui);color:var(--ink-2);border:1px solid rgba(13,23,48,.18);border-radius:999px;padding:5px 12px}
+.app-topbar .who{border:1px solid rgba(13,23,48,.18);background:#fff;border-radius:999px;padding:6px 14px 6px 6px;display:flex;align-items:center;gap:8px;font:600 13px var(--font-ui);color:var(--ink);cursor:pointer}
+.app-topbar .who .avatar{width:24px;height:24px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+
+/* ---------- surfaces ---------- */
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(/media/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08);color:var(--ink);border-radius:2px}
+.night-panel{background:var(--night);color:#E7ECF6;box-shadow:var(--shadow-night);border-radius:2px}
+.ori-panel{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(/media/textures/orichalcum.jpg);background-size:cover,cover;color:var(--orichalcum-ink);border-radius:2px}
+.app-kick{font:700 11px var(--font-brand);letter-spacing:.26em;text-transform:uppercase}
+.page-title{margin:0;font:900 34px var(--font-brand);letter-spacing:.1em;text-transform:uppercase;color:var(--carved);text-shadow:var(--carved-shadow)}
+.section-link{font:700 12px var(--font-brand);letter-spacing:.16em;text-decoration:none}
+.section-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+
+/* ---------- seals ---------- */
+.app-seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--seal);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.app-seal span{font:800 7.5px var(--font-brand);letter-spacing:.06em;color:#4A2C06}
+.app-seal.refused{transform:rotate(-8deg);filter:saturate(.85) hue-rotate(-14deg)}
+.app-seal.refused span{color:#6E1C0A}
+.app-seal.expired{filter:grayscale(.5)}
+.app-seal.big{box-shadow:inset 0 0 0 5px rgba(255,236,196,.28),inset 0 0 0 7px rgba(60,32,8,.35),inset 0 -6px 12px rgba(40,18,0,.45),0 12px 26px rgba(0,0,0,.5)}
+.app-seal.big span{font-size:11px;letter-spacing:.12em}
+
+/* ---------- niche, statue, columns ---------- */
+.niche{background-color:#0A1D47;background-image:radial-gradient(70% 60% at 50% 30%,rgba(242,181,68,.25),rgba(0,0,0,0)),url(/media/textures/marble-night.jpg);background-size:cover,500px;border-radius:999px 999px 2px 2px;overflow:hidden;display:flex;align-items:flex-end;justify-content:center}
+.statue{background:#0A1D47 url(/media/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat;border-radius:46px 46px 2px 2px;box-shadow:inset 0 0 0 3px rgba(243,239,230,.6),inset 0 8px 18px rgba(0,0,0,.45)}
+.statue.idle{filter:saturate(.55) brightness(.95)}
+.statue.paused{filter:grayscale(1) brightness(.8)}
+.statue-t{background:#0A1D47 url(/media/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(/media/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.col{background-image:linear-gradient(90deg,rgba(13,23,48,.30),rgba(13,23,48,0) 22%,rgba(255,255,255,0) 60%,rgba(13,23,48,.22)),repeating-linear-gradient(90deg,rgba(255,255,255,0) 0 7px,rgba(13,23,48,.14) 7px 8px,rgba(255,255,255,.7) 8px 9px),url(/media/textures/marble-white.jpg);background-size:auto,auto,400px;box-shadow:4px 6px 10px rgba(40,10,0,.35)}
+.groove{height:8px;border-radius:4px;background:var(--groove);box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+
+/* ---------- votes ---------- */
+.token{width:18px;height:18px;border-radius:50%;background:var(--seal);box-shadow:inset 0 0 0 2px rgba(255,236,196,.3),inset 0 -2px 4px rgba(40,18,0,.45)}
+.token.empty{background:#E7E1D4;box-shadow:inset 0 0 0 1px rgba(13,23,48,.18)}
+.veto-ring{transform:rotate(-90deg)}
+
+/* ---------- spending card ---------- */
+.spending-card{border-radius:10px;background-color:#B4532E;background-image:linear-gradient(140deg,rgba(255,236,200,.28),rgba(0,0,0,0) 45%,rgba(30,8,0,.45)),url(/media/textures/orichalcum.jpg);background-size:cover,cover;color:var(--orichalcum-ink);box-shadow:18px 22px 44px rgba(90,30,10,.32),inset 0 1px 0 rgba(255,230,190,.5)}
+
+/* ---------- forms and buttons (app) ---------- */
+.btn{border:1px solid rgba(13,23,48,.18);background:#fff;color:var(--ink);border-radius:999px;padding:9px 16px;font:600 13px var(--font-ui);cursor:pointer}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-ori{border:0;background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.2),rgba(0,0,0,0) 40%),url(/media/textures/orichalcum.jpg);background-size:cover,cover;color:#2A0D04;border-radius:2px;padding:13px 22px;font:800 12.5px var(--font-brand);letter-spacing:.18em;cursor:pointer;box-shadow:0 8px 22px rgba(180,83,46,.28)}
+.btn-ori:disabled{opacity:.5;cursor:not-allowed}
+.btn-line{border:1px solid rgba(13,23,48,.35);background:none;color:var(--ink);border-radius:2px;padding:12px 20px;font:700 12px var(--font-brand);letter-spacing:.18em;cursor:pointer}
+.btn-line.on-dark{border-color:rgba(79,209,232,.55);color:#CFF5FB}
+.btn-danger{border:1px solid rgba(217,87,59,.6);background:none;color:var(--terra-ink);border-radius:2px;padding:10px 16px;font:700 12px var(--font-brand);letter-spacing:.16em;cursor:pointer}
+.field-app{display:flex;flex-direction:column;gap:6px}
+.field-app label{font:700 10.5px var(--font-brand);letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+.field-app input,.field-app select,.field-app textarea{background:#fff;border:1px solid rgba(13,23,48,.2);border-radius:2px;padding:10px 12px;font:14px var(--font-ui);color:var(--ink);width:100%;box-sizing:border-box}
+.row-rule{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;padding:6px 0;font-size:13.5px}
+.row-rule b{font:700 12px var(--font-brand);color:var(--gold-ink)}
+.tab-line{display:flex;gap:8px;flex-wrap:wrap}
+.tab-line button{border:1px solid rgba(13,23,48,.2);background:none;color:var(--ink-2);border-radius:999px;padding:6px 12px;font:600 12px var(--font-ui);cursor:pointer}
+.tab-line button.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.empty-state{font-size:14px;color:var(--ink-2)}
+.loading-slab{background:#EDE8DD;border-radius:2px;min-height:72px;animation:pulse-soft 1.6s ease-in-out infinite}
+@keyframes pulse-soft{50%{opacity:.65}}
+
+/* ---------- mobile ---------- */
+@media (max-width:900px){
+  .app-shell{flex-direction:column}
+  .side{width:auto;flex:none;padding:14px 16px;gap:12px}
+  .side .nav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px}
+  .side .nav a{white-space:nowrap;background:rgba(255,255,255,.06)}
+  .side .nav a b{display:none}
+  .council{flex-direction:row;align-items:center;gap:10px}
+  .council p{display:none}
+  .council button{padding:10px 14px;font-size:12px}
+  .ground{padding:18px 16px 80px}
+  .app-topbar .company-name{font-size:26px}
+  .g2,.g3,.g4{grid-template-columns:minmax(0,1fr) !important}
+}

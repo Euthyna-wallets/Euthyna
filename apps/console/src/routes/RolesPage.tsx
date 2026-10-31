@@ -1,22 +1,44 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type CSSProperties, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
 import { isSolanaAddress, SOLANA_DEVNET } from "@mandateos/sdk/solana";
 import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, validNearAccountId, validRoleName, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
-import { Card, PageState, Status, everyDays, short } from "../components/ui.js";
+import { Kicker, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";
+import { PageState, everyDays, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { summarizeRoleChanges, type RoleSummary } from "../lib/role-summary.js";
-import { SentenceList } from "./GovernancePage.js";
 
 type Registry = { suppliers: Array<{ id: string; name: string; wallets: Array<{ chainId: number; address: string }> }> };
 
 const PROFILE = BASE_SEPOLIA;
 const PROTOCOLS = Object.entries(PROFILE.protocols) as Array<[ProtocolId, { name: string; router: string }]>;
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV"];
+
+const FIELD_ROW: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" };
+const BLOCK: CSSProperties = { border: "1px solid rgba(13,23,48,.16)", background: "rgba(255,255,255,.62)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 };
+const NOTE: CSSProperties = { fontSize: 11.5, color: "#66718C", lineHeight: 1.4, margin: 0 };
+const PLAIN_BUTTON: CSSProperties = { border: 0, background: "none", color: "#4A5675", fontSize: 12, cursor: "pointer", padding: 0 };
+const MINI_BUTTON: CSSProperties = { padding: "7px 10px", font: "700 10.5px var(--font-brand)", letterSpacing: ".14em", border: "1px solid rgba(13,23,48,.25)", background: "rgba(255,255,255,.6)", color: "#0D1730", cursor: "pointer" };
+const SUB_INPUT: CSSProperties = { padding: "7px 10px", border: "1px solid rgba(13,23,48,.2)", background: "#fff", font: "12px var(--font-mono)", color: "#0D1730", minWidth: 0 };
+const ADD_BUTTON: CSSProperties = { padding: "8px 12px", border: "1px dashed rgba(13,23,48,.35)", background: "rgba(255,255,255,.5)", font: "600 12.5px var(--font-ui)", color: "#0D1730", cursor: "pointer" };
+const CHECK_ROW: CSSProperties = { display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: "#0D1730", marginBottom: 0 };
+const CHECKBOX: CSSProperties = { width: 14, height: 14, minWidth: 0, minHeight: 0, accentColor: "#C9890C", margin: 0 };
+const ERROR_BOX: CSSProperties = { border: "1px solid rgba(217,87,59,.55)", background: "#FBE3D6", color: "var(--terra-ink)", padding: "10px 14px", fontSize: 13 };
+
+/** One labelled field of the role builder: same frame for every block. */
+function Field({ label, children, style }: { label: ReactNode; children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div className="field-app" style={{ flex: 1, minWidth: 180, ...style }}>
+      <label style={{ marginBottom: 0 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
 
 export function RolesPage() {
   const roles = useQuery({ queryKey: ["omni-roles"], queryFn: omni.roles, refetchInterval: 15_000 });
@@ -25,32 +47,52 @@ export function RolesPage() {
   const suggested = params.get("role") ?? "";
   const job = params.get("job");
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>Rules</h1>
-          <p className="muted">
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <header style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ font: "600 12px var(--font-ui)", color: "#66718C" }}>The law</span>
+          <PageTitle>RULES</PageTitle>
+          <span style={{ fontSize: 14, color: "#4A5675", maxWidth: 720 }}>
             A role is what an agent may do with company funds: which contracts, which counterparties, which budget.
             Everything else is refused by the vault.
-          </p>
+          </span>
         </div>
-        {!building ? <button className="primary" onClick={() => setBuilding(true)}>New role</button> : null}
+        {!building ? (
+          <button className="btn-line" style={{ marginLeft: "auto", whiteSpace: "nowrap" }} onClick={() => setBuilding(true)}>
+            NEW ROLE
+          </button>
+        ) : null}
       </header>
-      {building ? <RoleBuilder initialName={suggested} initialJob={job} onClose={() => { setBuilding(false); setParams({}); }} /> : null}
-      <RolesInProgress />
-      <PageState
-        loading={roles.isLoading}
-        error={roles.error}
-        empty={roles.data?.roles.length === 0}
-        emptyContent={building ? <></> : (
-          <div className="state empty-action">
-            <span>No active role yet. Create one, the members vote on it, and it applies after the veto window.</span>
-            <button className="primary" onClick={() => setBuilding(true)}>Create the first role</button>
-          </div>
-        )}
+      <div
+        className="g2"
+        style={{ display: "grid", gridTemplateColumns: building ? "minmax(0, .92fr) minmax(0, 1.08fr)" : "minmax(0, 1fr)", gap: 20, alignItems: "start" }}
       >
-        {(roles.data?.roles ?? []).map((role) => <RoleCard key={role.name} role={role} />)}
-      </PageState>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          <RolesInProgress />
+          <PageState
+            loading={roles.isLoading}
+            error={roles.error}
+            empty={roles.data?.roles.length === 0}
+            emptyContent={building ? <></> : (
+              <Slab style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+                <span className="empty-state">
+                  No active role yet. Create one, the members vote on it, and it applies after the veto window.
+                </span>
+                <button className="btn-ori" style={{ alignSelf: "flex-start" }} onClick={() => setBuilding(true)}>CREATE THE FIRST ROLE</button>
+              </Slab>
+            )}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {(roles.data?.roles ?? []).map((role) => <RoleCard key={role.name} role={role} />)}
+            </div>
+          </PageState>
+        </div>
+        {building ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+            <RoleBuilder initialName={suggested} initialJob={job} onClose={() => { setBuilding(false); setParams({}); }} />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -66,7 +108,7 @@ function RolesInProgress() {
   const needed = (() => {
     const threshold = data.dao.threshold as unknown;
     if (typeof threshold === "string" || typeof threshold === "number") return Number(threshold);
-    if (threshold && typeof threshold === "object" && "Weight" in threshold) return Number((threshold as { Weight: string }).Weight);
+    if (threshold && typeof threshold === "object" && "Weight" in threshold) return Number(threshold.Weight);
     return null;
   })();
   // A vote on a role is several rule changes; fold each vote back into its role(s).
@@ -91,69 +133,91 @@ function RolesInProgress() {
   }
   if (items.length === 0) return null;
   return (
-    <Card title="On its way" action={<Link className="small" to="/governance">Open Decisions</Link>}>
-      <div className="stack">
+    <Slab style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <SectionHead
+        left={<Kicker>On its way</Kicker>}
+        right={<Link className="section-link" to="/governance">OPEN DECISIONS →</Link>}
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {items.flatMap((item) => item.roles.map((role) => (
-          <div key={`${item.key}-${role.role}`} className="role-progress">
-            <div className="row wrap" style={{ justifyContent: "space-between" }}>
-              <strong>Role "{role.role}"{role.deleted ? " · deleted" : role.disabled ? " · disabled" : ""}</strong>
-              <span className="small muted">{item.status}</span>
+          <div key={`${item.key}-${role.role}`} style={{ padding: "12px 14px", border: "1px solid rgba(13,23,48,.12)", background: "rgba(255,255,255,.55)", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 13.5 }}>Role "{role.role}"{role.deleted ? " · deleted" : role.disabled ? " · disabled" : ""}</strong>
+              <span style={{ fontSize: 12.5, color: "#66718C" }}>{item.status}</span>
             </div>
             {role.allows.length ? (
-              <ul className="small role-progress-list">
-                {role.allows.map((line, index) => <li key={index} className={line.startsWith("  ·") ? "sub" : undefined}>{line.replace(/^\s*·\s*/, "")}</li>)}
-              </ul>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {role.allows.map((line, index) => (
+                  <span key={index} style={{ fontSize: 12.5, color: line.startsWith("  ·") ? "#66718C" : "#4A5675", paddingLeft: line.startsWith("  ·") ? 12 : 0 }}>
+                    {line.replace(/^\s*·\s*/, "")}
+                  </span>
+                ))}
+              </div>
             ) : null}
-            {role.budgets.length ? <div className="small">Budget: {role.budgets.join(" · ")}</div> : null}
-            {role.holders.length ? <div className="small">Held by {role.holders.join(", ")}</div> : null}
-            {role.removedHolders.length ? <div className="small">No longer held by {role.removedHolders.join(", ")}</div> : null}
+            {role.budgets.length ? <span style={{ fontSize: 12.5 }}>Budget: {role.budgets.join(" · ")}</span> : null}
+            {role.holders.length ? <span style={{ fontSize: 12.5 }}>Held by {role.holders.join(", ")}</span> : null}
+            {role.removedHolders.length ? <span style={{ fontSize: 12.5 }}>No longer held by {role.removedHolders.join(", ")}</span> : null}
           </div>
         )))}
       </div>
-    </Card>
+    </Slab>
   );
 }
 
 function RoleCard({ role }: { role: RoleView }) {
+  const details = role.description?.details ?? [];
+  let permission = 0;
   return (
-    <Card title={`Role · ${role.name}`} action={<Status value={role.enabled ? "active" : "disabled"} />}>
-      <div className="role-grid">
-        <div>
-          <h3>Budgets</h3>
-          {role.budgets.length === 0 ? <p className="muted small">No budget: this role cannot move value.</p> : role.budgets.map((budget) => {
-            const available = Number(budget.available ?? 0);
-            const max = Number(budget.max ?? 0);
-            const left = max > 0 ? Math.max(0, Math.min(100, Math.round((available / max) * 100))) : 0;
-            return (
-              <div key={budget.key} className="budget">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span>{budget.label}</span>
-                  <span className="small">{available.toLocaleString()} / {max.toLocaleString()} {budget.token ?? ""} left</span>
-                </div>
-                <div className={`bar${left === 0 ? " empty" : left < 25 ? " low" : ""}`} role="img" aria-label={`${left}% of the budget left`}><span style={{ width: `${left}%` }} /></div>
-                <span className="small muted">{left === 0 ? "Spent for this period. " : ""}Refills {everyDays(budget.periodDays)}</span>
+    <Slab style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <b style={{ font: "800 17px var(--font-brand)", letterSpacing: ".1em" }}>ROLE · {role.name.toUpperCase()}</b>
+        <span style={{ fontSize: 12, fontWeight: 700, color: role.enabled ? "var(--aegean-ink)" : "var(--terra-ink)" }}>
+          ● {role.enabled ? "active" : "disabled"}{role.members.length ? ` · ${role.members.map((member) => short(member.member, 12)).join(", ")}` : ""}
+        </span>
+      </div>
+      <Kicker color="var(--gold-ink)" style={{ fontSize: 10 }}>Budgets</Kicker>
+      {role.budgets.length === 0 ? <p style={{ ...NOTE, fontSize: 13 }}>No budget: this role cannot move value.</p> : role.budgets.map((budget) => {
+        const available = Number(budget.available ?? 0);
+        const max = Number(budget.max ?? 0);
+        const left = max > 0 ? Math.max(0, Math.min(100, Math.round((available / max) * 100))) : 0;
+        return (
+          <div key={budget.key} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: "#4A5675" }}>
+              <span>{budget.label}{budget.periodDays ? ` · ${everyDays(budget.periodDays)}` : ""}</span>
+              <b className="mono" style={{ font: "600 12px var(--font-mono)", color: "#0D1730" }}>
+                {available.toLocaleString()} / {max.toLocaleString()}{budget.token ? ` ${budget.token}` : ""} left
+              </b>
+            </div>
+            <div className="groove" role="img" aria-label={`${left}% of the budget left`}><i style={{ width: `${left}%` }} /></div>
+            <span style={{ fontSize: 11.5, color: "#66718C" }}>{left === 0 ? "Spent for this period. " : ""}Refills {everyDays(budget.periodDays)}</span>
+          </div>
+        );
+      })}
+      <Kicker color="var(--gold-ink)" style={{ fontSize: 10, marginTop: 4 }}>Allowed</Kicker>
+      {details.length ? (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {details.map((detail, index) => {
+            const sub = detail.startsWith("  · ");
+            if (!sub) permission += 1;
+            const numeral = ROMAN[permission - 1] ?? String(permission);
+            return sub ? (
+              <div key={index} style={{ display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", gap: 8, fontSize: 12.5, color: "#4A5675", padding: "4px 0 4px 22px" }}>
+                <span style={{ font: "700 12px var(--font-brand)", color: "#66718C" }}>·</span>
+                <span>{detail.replace(/^ {2}· /, "")}</span>
+              </div>
+            ) : (
+              <div key={index} className="row-rule" style={{ borderTop: index === 0 ? "none" : "1px solid rgba(13,23,48,.1)", padding: "6px 0" }}>
+                <b>{numeral}</b>
+                <span style={{ fontSize: 13.5 }}>{detail}</span>
               </div>
             );
           })}
-          <h3 style={{ marginTop: 16 }}>Members</h3>
-          {role.members.length === 0 ? <p className="muted small">Nobody holds this role yet.</p> : (
-            <ul className="plain">
-              {role.members.map((member) => <li key={member.member}>{member.kind === "Agent" ? "AI agent" : "Human"} · <span className="mono small">{member.member}</span></li>)}
-            </ul>
-          )}
         </div>
-        <div>
-          <h3>Allowed</h3>
-          {role.description ? (
-            <ul className="sentences role-rules">
-              {role.description.details.map((detail, index) => (
-                <li key={index} className={detail.startsWith("  · ") ? "rule" : "permission"}>{detail.replace(/^ {2}· /, "")}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+      ) : null}
+      <div style={{ fontSize: 12.5, color: "#4A5675", borderTop: "1px solid rgba(13,23,48,.1)", paddingTop: 8 }}>
+        Members: {role.members.length === 0 ? "Nobody holds this role yet." : role.members.map((member) => `${member.kind === "Agent" ? "AI agent" : "Human"} · ${short(member.member, 10)}`).join(" · ")}
       </div>
-    </Card>
+    </Slab>
   );
 }
 
@@ -333,137 +397,178 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
             : null;
 
   return (
-    <Card title="New role" action={<button className="ghost" onClick={onClose}>Cancel</button>}>
-      {error ? <div className="alert error">{error}</div> : null}
-      <div className="stack">
-        <label><input type="checkbox" checked={guardRequired} onChange={(e) => { setGuardRequired(e.target.checked); setPreview(null); }} />Require Guard approval (needs the API)</label>
-        <label><input type="checkbox" checked={suppliersOnly} onChange={(e) => { setSuppliersOnly(e.target.checked); setPreview(null); }} />Recipient must be a supplier</label>
-        <label>
-          Role name
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Slab style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 0 0 2px rgba(201,137,12,.55), var(--shadow-slab)" }}>
+        {error ? <div style={ERROR_BOX}>{error}</div> : null}
+        <SectionHead left={<Kicker>New role</Kicker>} right={<button onClick={onClose} style={PLAIN_BUTTON}>Cancel</button>} />
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field-app" style={{ flex: "0 0 200px" }}>
+            <label style={{ marginBottom: 0 }}>Role name</label>
             <input placeholder="treasury" value={name} onChange={(event) => { setName(event.target.value.toLowerCase()); setPreview(null); }} />
-          {name && !validRoleName(name) ? <span className="small" style={{ color: "#b42318" }}>Lowercase letters, digits and dashes, 2 to 32 characters.</span> : null}
-        </label>
+            {name && !validRoleName(name) ? <span style={{ fontSize: 12, color: "#B8442B" }}>Lowercase letters, digits and dashes, 2 to 32 characters.</span> : null}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={CHECK_ROW}>
+              <input type="checkbox" checked={guardRequired} onChange={(e) => { setGuardRequired(e.target.checked); setPreview(null); }} style={CHECKBOX} />
+              Require Guard approval (needs the API)
+            </label>
+            <label style={CHECK_ROW}>
+              <input type="checkbox" checked={suppliersOnly} onChange={(e) => { setSuppliersOnly(e.target.checked); setPreview(null); }} style={CHECKBOX} />
+              Recipient must be a supplier
+            </label>
+          </div>
+        </div>
 
         {blocks.map((block, index) => (
-          <div className="block" key={index}>
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{block.kind === "payments" ? "Transfers" : block.kind === "solana-transfer" ? "Solana · transfers" : block.kind === "near-transfer" ? "NEAR · pay in tokens" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</strong>
-              <button className="ghost" onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }}>Remove</button>
+          <div style={BLOCK} key={index}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+              <b style={{ font: "800 13px var(--font-brand)", letterSpacing: ".12em" }}>{block.kind === "payments" ? "Transfers" : block.kind === "solana-transfer" ? "Solana · transfers" : block.kind === "near-transfer" ? "NEAR · pay in tokens" : block.kind === "share-revenue" ? "Share revenue with shareholders" : block.kind === "wrap" ? "DeFi · wrap ETH into WETH" : block.kind === "lending" ? `DeFi · deposit on ${PROFILE.lending?.[block.protocol]?.name ?? block.protocol}` : `DeFi · swap on ${block.protocols.map((id) => PROFILE.protocols[id]?.name ?? id).join(" / ")}`}</b>
+              <button onClick={() => { setBlocks((current) => current.filter((_, position) => position !== index)); setPreview(null); }} style={PLAIN_BUTTON}>Remove</button>
             </div>
             {block.kind === "near-transfer" ? (
               <>
-                <div className="row wrap">
-                  <label>Token
+                <div style={FIELD_ROW}>
+                  <Field label="Token">
                     <select value={block.token} onChange={(event) => update(index, { token: event.target.value })}>
                       {NEAR_TESTNET_TOKENS.map((token) => <option key={token.accountId} value={token.symbol}>{token.symbol}</option>)}
                     </select>
-                  </label>
-                  <label>Budget ({block.token})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
-                  <label>Smallest transfer<input inputMode="decimal" placeholder={`${Number(block.amount) / 100 || ""} (budget ÷ 100)`} value={block.minPerTransfer} onChange={(event) => update(index, { minPerTransfer: event.target.value })} /></label>
-                  <label>Largest transfer<input inputMode="decimal" value={block.maxPerTransfer} onChange={(event) => update(index, { maxPerTransfer: event.target.value })} /></label>
+                  </Field>
+                  <Field label={`Budget (${block.token})`}>
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
+                  <Field label="Smallest transfer">
+                    <input inputMode="decimal" placeholder={`${Number(block.amount) / 100 || ""} (budget ÷ 100)`} value={block.minPerTransfer} onChange={(event) => update(index, { minPerTransfer: event.target.value })} />
+                  </Field>
+                  <Field label="Largest transfer">
+                    <input inputMode="decimal" value={block.maxPerTransfer} onChange={(event) => update(index, { maxPerTransfer: event.target.value })} />
+                  </Field>
                 </div>
-                <span className="small muted">Accounts it may pay (NEAR)</span>
+                <span style={NOTE}>Accounts it may pay (NEAR)</span>
                 {block.receivers.map((receiver) => (
-                  <div key={receiver.accountId} className="row wrap">
-                    <span className="small">{receiver.label} <span className="mono">{receiver.accountId}</span></span>
-                    <button className="ghost" onClick={() => update(index, { receivers: block.receivers.filter((item) => item.accountId !== receiver.accountId) })}>Remove</button>
+                  <div key={receiver.accountId} style={FIELD_ROW}>
+                    <span style={{ fontSize: 12.5 }}>{receiver.label} <span className="mono" style={{ fontSize: 12 }}>{receiver.accountId}</span></span>
+                    <button style={MINI_BUTTON} onClick={() => update(index, { receivers: block.receivers.filter((item) => item.accountId !== receiver.accountId) })}>Remove</button>
                   </div>
                 ))}
-                <div className="row wrap">
+                <div style={FIELD_ROW}>
                   {(agents.data?.agents ?? []).filter((agent) => agent.active && cardOf(agent.nearAccountId)).map((agent) => {
                     const card = cardOf(agent.nearAccountId)!;
                     const listed = block.receivers.some((item) => item.accountId === card);
                     return listed ? null : (
-                      <button key={card} className="ghost" onClick={() => update(index, { receivers: [...block.receivers, { accountId: card, label: `${agent.name}'s card` }] })}>+ {agent.name}'s card</button>
+                      <button key={card} style={MINI_BUTTON} onClick={() => update(index, { receivers: [...block.receivers, { accountId: card, label: `${agent.name}'s card` }] })}>+ {agent.name}'s card</button>
                     );
                   })}
                 </div>
                 <NearReceiver onAdd={(receiver) => update(index, { receivers: [...block.receivers.filter((item) => item.accountId !== receiver.accountId), receiver] })} />
-                <span className="small muted">
+                <span style={NOTE}>
                   From the tokens the vault holds on NEAR testnet. The vault registers on the token when this role is voted;
                   each account paid must be registered on the token too, or the transfer fails and the budget comes back.
                 </span>
               </>
             ) : block.kind === "solana-transfer" ? (
               <>
-                <div className="row wrap">
-                  <label>Token
+                <div style={FIELD_ROW}>
+                  <Field label="Token">
                     <select value={block.token ?? "SOL"} onChange={(event) => update(index, { token: event.target.value === "SOL" ? null : event.target.value })}>
                       {SOLANA_DEVNET.tokens.map((token) => <option key={token.symbol} value={token.mint ? token.symbol : "SOL"}>{token.symbol}</option>)}
                     </select>
-                  </label>
-                  <label>Budget ({block.token ?? "SOL"})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                  </Field>
+                  <Field label={`Budget (${block.token ?? "SOL"})`}>
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
                 </div>
-                <span className="small muted">Allowed recipients (Solana wallets)</span>
+                <span style={NOTE}>Allowed recipients (Solana wallets)</span>
                 {block.recipients.map((recipient) => (
-                  <div key={recipient.address} className="row wrap">
-                    <span className="small">{recipient.label} <span className="mono">{recipient.address}</span></span>
-                    <button className="ghost" onClick={() => update(index, { recipients: block.recipients.filter((item) => item.address !== recipient.address) })}>Remove</button>
+                  <div key={recipient.address} style={FIELD_ROW}>
+                    <span style={{ fontSize: 12.5 }}>{recipient.label} <span className="mono" style={{ fontSize: 12 }}>{recipient.address}</span></span>
+                    <button style={MINI_BUTTON} onClick={() => update(index, { recipients: block.recipients.filter((item) => item.address !== recipient.address) })}>Remove</button>
                   </div>
                 ))}
                 <SolanaRecipient onAdd={(recipient) => update(index, { recipients: [...block.recipients.filter((item) => item.address !== recipient.address), recipient] })} />
-                <span className="small muted">From the company's Solana wallet, on {SOLANA_DEVNET.name}. Token accounts of recipients are created when needed.</span>
+                <span style={NOTE}>From the company's Solana wallet, on {SOLANA_DEVNET.name}. Token accounts of recipients are created when needed.</span>
               </>
             ) : block.kind === "wrap" ? (
               <>
-                <div className="row wrap">
-                  <label>Budget (ETH)<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                <div style={FIELD_ROW}>
+                  <Field label="Budget (ETH)">
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
                 </div>
-                <span className="small muted">
+                <span style={NOTE}>
                   ETH sent to WETH counts against the budget. Unwrapping is free: WETH always pays back the company wallet.
                 </span>
               </>
             ) : block.kind === "lending" ? (
               <>
-                <div className="row wrap">
-                  <label>Asset
+                <div style={FIELD_ROW}>
+                  <Field label="Asset">
                     <select value={block.token} onChange={(event) => update(index, { token: event.target.value })}>
                       {(PROFILE.lending?.[block.protocol]?.assets ?? []).map((asset) => <option key={asset} value={asset}>{tokenSymbol(asset)}</option>)}
                     </select>
-                  </label>
-                  <label>Deposit budget ({tokenSymbol(block.token)})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
-                  <label>Largest approval<input inputMode="decimal" value={block.maxApproval} onChange={(event) => update(index, { maxApproval: event.target.value })} /></label>
+                  </Field>
+                  <Field label={`Deposit budget (${tokenSymbol(block.token)})`}>
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
+                  <Field label="Largest approval">
+                    <input inputMode="decimal" value={block.maxApproval} onChange={(event) => update(index, { maxApproval: event.target.value })} />
+                  </Field>
                 </div>
-                <span className="small muted">
+                <span style={NOTE}>
                   Deposits are always credited to the company wallet and withdrawals always return to it. Borrowing and any other pool function stay refused.
                 </span>
               </>
             ) : block.kind === "share-revenue" ? (
               <>
-                <div className="row wrap">
-                  <label>Budget (ETH)<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                <div style={FIELD_ROW}>
+                  <Field label="Budget (ETH)">
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
                 </div>
-                <p className="small muted">
-                  ETH from the company wallet, through the Omni Bridge, to <code>{block.sharesAccountId}</code> only: the holders who vote receive it.
+                <p style={NOTE}>
+                  ETH from the company wallet, through the Omni Bridge, to <code style={{ font: "12px var(--font-mono)" }}>{block.sharesAccountId}</code> only: the holders who vote receive it.
                   The bridge fee counts against the budget.
                 </p>
               </>
             ) : block.kind === "payments" ? (
               <>
-                <div className="row wrap">
-                  <label>Token<TokenSelect value={block.token} onChange={(token) => update(index, { token })} /></label>
-                  <label>Budget<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
+                <div style={FIELD_ROW}>
+                  <Field label="Token"><TokenSelect value={block.token} onChange={(token) => update(index, { token })} /></Field>
+                  <Field label="Budget">
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
                 </div>
-                <span className="small muted">Allowed recipients</span>
-                <div className="row wrap">
+                <span style={NOTE}>Allowed recipients</span>
+                <div style={FIELD_ROW}>
                   {supplierOptions.map((option) => {
                     const checked = block.recipients.some((item) => item.address.toLowerCase() === option.address.toLowerCase());
                     return (
-                      <label key={option.address} className="check">
+                      <label key={option.address} className="check" style={CHECK_ROW}>
                         <input type="checkbox" checked={checked} onChange={() => update(index, {
                           recipients: checked ? block.recipients.filter((item) => item.address.toLowerCase() !== option.address.toLowerCase()) : [...block.recipients, option],
-                        })} />
-                        {option.label} <span className="mono small muted">{short(option.address)}</span>
+                        })} style={CHECKBOX} />
+                        {option.label} <span className="mono" style={{ fontSize: 11.5, color: "#66718C" }}>{short(option.address)}</span>
                       </label>
                     );
                   })}
-                  {supplierOptions.length === 0 ? <span className="small muted">No supplier wallet on {PROFILE.name} yet. Add suppliers first, or enter an address:</span> : null}
+                  {supplierOptions.length === 0 ? <span style={NOTE}>No supplier wallet on {PROFILE.name} yet. Add suppliers first, or enter an address:</span> : null}
                 </div>
                 <ManualRecipient onAdd={async (recipient) => {
                   // A new recipient is also a supplier request; the member who approves the role registers it.
@@ -471,53 +576,68 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
                   update(index, { recipients: [...block.recipients, recipient] });
                 }} />
                 {block.recipients.filter((item) => !supplierOptions.some((option) => option.address.toLowerCase() === item.address.toLowerCase())).map((item) => (
-                  <span key={item.address} className="small">{item.label} <span className="mono">{item.address}</span> · new supplier, registered when another member approves this role</span>
+                  <span key={item.address} style={{ fontSize: 12 }}>{item.label} <span className="mono" style={{ fontSize: 11.5 }}>{item.address}</span> · new supplier, registered when another member approves this role</span>
                 ))}
               </>
             ) : (
               <>
-                <div className="row wrap">
-                  <label>Sell<TokenSelect value={block.tokenIn} onChange={(tokenIn) => update(index, { tokenIn, tokensOut: block.tokensOut.filter((out) => out !== tokenIn) })} /></label>
-                  <label>Budget ({tokenSymbol(block.tokenIn)})<input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} /></label>
-                  <label>Every (days)<input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} /></label>
-                  <label>Largest approval<input inputMode="decimal" value={block.maxApproval} onChange={(event) => update(index, { maxApproval: event.target.value })} /></label>
+                <div style={FIELD_ROW}>
+                  <Field label="Sell">
+                    <TokenSelect value={block.tokenIn} onChange={(tokenIn) => update(index, { tokenIn, tokensOut: block.tokensOut.filter((out) => out !== tokenIn) })} />
+                  </Field>
+                  <Field label={`Budget (${tokenSymbol(block.tokenIn)})`}>
+                    <input inputMode="decimal" value={block.amount} onChange={(event) => update(index, { amount: event.target.value })} />
+                  </Field>
+                  <Field label="Every (days)">
+                    <input type="number" min={1} value={block.periodDays} onChange={(event) => update(index, { periodDays: Number(event.target.value) })} />
+                  </Field>
+                  <Field label="Largest approval">
+                    <input inputMode="decimal" value={block.maxApproval} onChange={(event) => update(index, { maxApproval: event.target.value })} />
+                  </Field>
                 </div>
-                <span className="small muted">Buy only</span>
-                <div className="row wrap">
+                <span style={NOTE}>Buy only</span>
+                <div style={FIELD_ROW}>
                   {PROFILE.tokens.filter((token) => token.address !== block.tokenIn).map((token) => {
                     const checked = block.tokensOut.includes(token.address);
                     return (
-                      <label key={token.address} className="check">
-                        <input type="checkbox" checked={checked} onChange={() => update(index, { tokensOut: checked ? block.tokensOut.filter((out) => out !== token.address) : [...block.tokensOut, token.address] })} />
+                      <label key={token.address} className="check" style={CHECK_ROW}>
+                        <input type="checkbox" checked={checked} onChange={() => update(index, { tokensOut: checked ? block.tokensOut.filter((out) => out !== token.address) : [...block.tokensOut, token.address] })} style={CHECKBOX} />
                         {token.symbol}
                       </label>
                     );
                   })}
                 </div>
-                <span className="small muted">On these exchanges</span>
-                <div className="row wrap">
+                <span style={NOTE}>On these exchanges</span>
+                <div style={FIELD_ROW}>
                   {PROTOCOLS.map(([id, protocol]) => {
                     const checked = block.protocols.includes(id);
                     return (
-                      <label key={id} className="check">
-                        <input type="checkbox" checked={checked} onChange={() => update(index, { protocols: checked ? block.protocols.filter((item) => item !== id) : [...block.protocols, id] })} />
+                      <label key={id} className="check" style={CHECK_ROW}>
+                        <input type="checkbox" checked={checked} onChange={() => update(index, { protocols: checked ? block.protocols.filter((item) => item !== id) : [...block.protocols, id] })} style={CHECKBOX} />
                         {protocol.name}
                       </label>
                     );
                   })}
                 </div>
-                <span className="small muted">Bought tokens always go back to the company wallet; approvals are capped per transaction, never unlimited.</span>
+                <span style={NOTE}>Bought tokens always go back to the company wallet; approvals are capped per transaction, never unlimited.</span>
               </>
             )}
           </div>
         ))}
 
-        <div className="row wrap">
-          <button onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
-          <button onClick={() => setCatalogOpen(true)} title="Pick a protocol from the catalog">+ DeFi…</button>
-          <button onClick={addSolana} title="Send SOL or USDC on Solana to listed wallets, within a budget">+ Solana transfers</button>
-          <button onClick={addNear} title="Send USDC held by the vault on NEAR to listed accounts, such as agents' spending cards">+ Pay in NEAR tokens</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={ADD_BUTTON} onClick={addTransfers} title="Send tokens to registered suppliers or the company wallet, within a budget">+ Transfers</button>
+          <button style={ADD_BUTTON} onClick={addSolana} title="Send SOL or USDC on Solana to listed wallets, within a budget">+ Solana transfers</button>
+          <button style={ADD_BUTTON} onClick={addNear} title="Send USDC held by the vault on NEAR to listed accounts, such as agents' spending cards">+ Pay in NEAR tokens</button>
           <button
+            style={{ ...ADD_BUTTON, borderStyle: "solid", borderColor: "#C9890C", background: catalogOpen ? "#FCF0D4" : "rgba(255,255,255,.5)" }}
+            onClick={() => setCatalogOpen(true)}
+            title="Pick a protocol from the catalog"
+          >
+            + DeFi…
+          </button>
+          <button
+            style={ADD_BUTTON}
             onClick={addShareRevenue}
             disabled={!sharesAccountId || blocks.some((block) => block.kind === "share-revenue")}
             title={sharesAccountId ? "Let the agent send ETH to the company's shareholders, within a budget" : "Issue shares first (Shares page)"}
@@ -526,62 +646,81 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
           </button>
         </div>
 
-        <div>
-          <span className="small muted">Agents holding this role</span>
-          <div className="row wrap">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={NOTE}>Agents holding this role</span>
+          <div style={FIELD_ROW}>
             {(agents.data?.agents ?? []).filter((agent) => agent.active).map((agent) => {
               const checked = members.includes(agent.nearAccountId);
               return (
-                <label key={agent.id} className="check">
-                  <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== agent.nearAccountId) : [...current, agent.nearAccountId]); setPreview(null); }} />
-                  {agent.name} <span className="mono small muted">{agent.nearAccountId}</span>
-                  {checked && name && agent.role !== name ? <span className="small warn"> · its requests use role "{agent.role}": name this role "{agent.role}" or update AGENT_ROLE</span> : null}
+                <label key={agent.id} className="check" style={CHECK_ROW}>
+                  <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== agent.nearAccountId) : [...current, agent.nearAccountId]); setPreview(null); }} style={CHECKBOX} />
+                  {agent.name} <span className="mono" style={{ fontSize: 11.5, color: "#66718C" }}>{agent.nearAccountId}</span>
+                  {checked && name && agent.role !== name ? <span style={{ fontSize: 12, color: "#B54708" }}> · its requests use role "{agent.role}": name this role "{agent.role}" or update AGENT_ROLE</span> : null}
                 </label>
               );
             })}
-            {(agents.data?.agents ?? []).length === 0 ? <span className="small muted">No agent yet: you can add members later.</span> : null}
+            {(agents.data?.agents ?? []).length === 0 ? <span style={NOTE}>No agent yet: you can add members later.</span> : null}
           </div>
         </div>
 
-        <div className="row wrap">
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button
+            className="btn-line"
             disabled={!ready || Boolean(busy)}
             onClick={() => void run("preview", async () => setPreview(await verifiedProposal(draft())))}
           >
             {busy === "preview" ? "Preparing…" : "Preview what members vote on"}
           </button>
-          {!ready && missing ? <span className="small muted">{missing}</span> : null}
+          {!ready && missing ? <span style={NOTE}>{missing}</span> : null}
         </div>
-        <p className="small muted">
+        <p style={NOTE}>
           Then: submit to the members' vote → members approve in Decisions → the role applies after the veto window and shows up below.
         </p>
 
         {catalogOpen ? <DefiCatalog onPick={addSwap} onPickLending={addLending} onPickWrap={addWrap} onClose={() => setCatalogOpen(false)} /> : null}
+      </Slab>
 
-        {preview ? (
-          <div className="decision">
-            <header><div><span className="eyebrow">Members will vote on</span><h3>{preview.title}</h3></div></header>
-            <SentenceList items={preview.summary} />
-            <p className="small muted verified">✓ Checked in your browser: the proposal prepared by Euthyna is exactly this role.</p>
-            <footer className="row wrap">
-              <span className="small muted">Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
-              <div className="spacer" />
-              <button
-                className="primary"
-                disabled={!wallets.nearAccountId || Boolean(busy)}
-                title={wallets.nearAccountId ? "Sign the proposal with your NEAR wallet" : "Connect your NEAR wallet first"}
-                onClick={() => void run("submit", async () => {
-                  await signDaoProposal(wallets.nearAccountId, preview);
-                  navigate("/governance");
-                })}
+      {preview ? (
+        <NightPanel style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <Kicker color="var(--gold)">Members will vote on</Kicker>
+          <b style={{ font: "800 18px var(--font-brand)", letterSpacing: ".06em", color: "#fff" }}>{preview.title}</b>
+          <div style={{ display: "flex", flexDirection: "column", borderTop: "1px solid var(--night-line)" }}>
+            {preview.summary.map((item, index) => (
+              <div
+                key={`${item.title}-${index}`}
+                style={{ display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", padding: "7px 0", borderBottom: "1px solid var(--night-line)", fontSize: 13.5, color: "#E7ECF6" }}
               >
-                {busy === "submit" ? "Signing…" : "Submit to the members' vote"}
-              </button>
-            </footer>
+                <b style={{ font: "700 12px var(--font-brand)", color: "var(--gold)" }}>{ROMAN[index] ?? String(index + 1)}</b>
+                <span>
+                  {item.title}
+                  {item.details.length ? (
+                    <span style={{ display: "block", marginTop: 4, color: "var(--night-text)", fontSize: 12.5 }}>
+                      {item.details.map((detail) => detail.replace(/^ {2}· /, "")).join(" · ")}
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            ))}
           </div>
-        ) : null}
-      </div>
-    </Card>
+          <span style={{ fontSize: 12.5, color: "var(--aegean-link)" }}>✓ Checked in your browser: the proposal prepared by Euthyna is exactly this role.</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--night-text)" }}>Submitting locks a 0.1 NEAR proposal bond, returned when the proposal passes.</span>
+            <button
+              className="btn-ori"
+              style={{ marginLeft: "auto", whiteSpace: "nowrap" }}
+              disabled={!wallets.nearAccountId || Boolean(busy)}
+              title={wallets.nearAccountId ? "Sign the proposal with your NEAR wallet" : "Connect your NEAR wallet first"}
+              onClick={() => void run("submit", async () => {
+                await signDaoProposal(wallets.nearAccountId, preview);
+                navigate("/governance");
+              })}
+            >
+              {busy === "submit" ? "Signing…" : "SUBMIT TO THE MEMBERS' VOTE"}
+            </button>
+          </div>
+        </NightPanel>
+      ) : null}
+    </div>
   );
 }
 
@@ -603,28 +742,38 @@ function DefiCatalog({ onPick, onPickLending, onPickWrap, onClose }: { onPick: (
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="catalog-backdrop" role="presentation" onClick={onClose}>
-      <div className="catalog" role="dialog" aria-modal="true" aria-label="DeFi catalog" onClick={(event) => event.stopPropagation()}>
-        <header className="row" style={{ justifyContent: "space-between" }}>
+    <div role="presentation" onClick={onClose} style={{ border: "1px solid rgba(13,23,48,.14)", background: "rgba(255,255,255,.5)", padding: "12px 14px" }}>
+      <div role="dialog" aria-modal="true" aria-label="DeFi catalog" onClick={(event) => event.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
-            <h3>DeFi catalog</h3>
-            <p className="small muted">What the agent may do on each protocol. Everything else stays refused by the vault.</p>
+            <b style={{ font: "800 13px var(--font-brand)", letterSpacing: ".12em" }}>DEFI CATALOG</b>
+            <p style={{ ...NOTE, marginTop: 4 }}>What the agent may do on each protocol. Everything else stays refused by the vault.</p>
           </div>
-          <button className="ghost" onClick={onClose} aria-label="Close">✕</button>
-        </header>
-        <div className="catalog-list">
-          {DEFI_CATALOG.map((item) => (
-            <button
-              key={item.id}
-              className="catalog-item"
-              disabled={!item.wrap && !item.protocol && !(item.lending && PROFILE.lending?.[item.lending])}
-              onClick={() => (item.wrap ? onPickWrap() : item.protocol ? onPick(item.protocol) : item.lending ? onPickLending(item.lending) : undefined)}
-            >
-              <span className="catalog-name">{item.name}<span className="catalog-action">{item.action}</span></span>
-              <span className="small muted">{item.note}</span>
-              {!item.wrap && !item.protocol && !(item.lending && PROFILE.lending?.[item.lending]) ? <span className="catalog-soon">Soon</span> : null}
-            </button>
-          ))}
+          <button onClick={onClose} aria-label="Close" style={PLAIN_BUTTON}>✕</button>
+        </div>
+        <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+          {DEFI_CATALOG.map((item) => {
+            const available = Boolean(item.wrap || item.protocol || (item.lending && PROFILE.lending?.[item.lending]));
+            return (
+              <button
+                key={item.id}
+                disabled={!available}
+                onClick={() => (item.wrap ? onPickWrap() : item.protocol ? onPick(item.protocol) : item.lending ? onPickLending(item.lending) : undefined)}
+                style={{
+                  display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3, textAlign: "left",
+                  padding: "10px 12px", border: "1px solid rgba(13,23,48,.14)", background: "rgba(255,255,255,.5)", color: "#0D1730",
+                  boxShadow: available ? "inset 0 0 0 2px #C9890C" : "none", cursor: available ? "pointer" : "not-allowed",
+                }}
+              >
+                <b style={{ font: "800 12px var(--font-brand)", letterSpacing: ".12em" }}>{item.name.toUpperCase()}</b>
+                <span style={{ fontWeight: 700, color: "var(--gold-ink)", fontSize: 11.5 }}>{item.action}</span>
+                <span style={{ fontSize: 11.5, color: "#4A5675", lineHeight: 1.35 }}>{item.note}</span>
+                {!available ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", border: "1px solid rgba(13,23,48,.2)", color: "#66718C" }}>Soon</span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -641,11 +790,11 @@ function NearReceiver({ onAdd }: { onAdd: (receiver: { accountId: string; label:
   const [label, setLabel] = useState("");
   const valid = validNearAccountId(accountId) && label.trim().length > 0;
   return (
-    <div className="row wrap">
-      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
-      <input className="mono" placeholder="NEAR account (bob.testnet)" value={accountId} onChange={(event) => setAccountId(event.target.value.trim().toLowerCase())} />
-      <button disabled={!valid} onClick={() => { onAdd({ accountId, label: label.trim() }); setAccountId(""); setLabel(""); }}>Add</button>
-      {accountId && !validNearAccountId(accountId) ? <span className="small" style={{ color: "#b42318" }}>Not a NEAR account id.</span> : null}
+    <div style={FIELD_ROW}>
+      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} style={{ ...SUB_INPUT, font: "12px var(--font-ui)" }} />
+      <input className="mono" placeholder="NEAR account (bob.testnet)" value={accountId} onChange={(event) => setAccountId(event.target.value.trim().toLowerCase())} style={SUB_INPUT} />
+      <button style={MINI_BUTTON} disabled={!valid} onClick={() => { onAdd({ accountId, label: label.trim() }); setAccountId(""); setLabel(""); }}>Add</button>
+      {accountId && !validNearAccountId(accountId) ? <span style={{ fontSize: 12, color: "#B8442B" }}>Not a NEAR account id.</span> : null}
     </div>
   );
 }
@@ -655,11 +804,11 @@ function SolanaRecipient({ onAdd }: { onAdd: (recipient: { address: string; labe
   const [label, setLabel] = useState("");
   const valid = isSolanaAddress(address) && label.trim().length > 0;
   return (
-    <div className="row wrap">
-      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
-      <input className="mono" placeholder="Solana address (base58)" value={address} onChange={(event) => setAddress(event.target.value.trim())} />
-      <button disabled={!valid} onClick={() => { onAdd({ address, label: label.trim() }); setAddress(""); setLabel(""); }}>Add</button>
-      {address && !isSolanaAddress(address) ? <span className="small" style={{ color: "#b42318" }}>Not a Solana address.</span> : null}
+    <div style={FIELD_ROW}>
+      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} style={{ ...SUB_INPUT, font: "12px var(--font-ui)" }} />
+      <input className="mono" placeholder="Solana address (base58)" value={address} onChange={(event) => setAddress(event.target.value.trim())} style={SUB_INPUT} />
+      <button style={MINI_BUTTON} disabled={!valid} onClick={() => { onAdd({ address, label: label.trim() }); setAddress(""); setLabel(""); }}>Add</button>
+      {address && !isSolanaAddress(address) ? <span style={{ fontSize: 12, color: "#B8442B" }}>Not a Solana address.</span> : null}
     </div>
   );
 }
@@ -679,10 +828,10 @@ function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; labe
   const [error, setError] = useState<string | null>(null);
   const valid = /^0x[0-9a-fA-F]{40}$/.test(address) && label.trim().length > 0;
   return (
-    <div className="row wrap">
-      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} />
-      <input placeholder="0x… address" value={address} onChange={(event) => setAddress(event.target.value.trim())} />
-      <button disabled={!valid || busy} onClick={() => void (async () => {
+    <div style={FIELD_ROW}>
+      <input placeholder="Name" value={label} onChange={(event) => setLabel(event.target.value)} style={{ ...SUB_INPUT, font: "12px var(--font-ui)" }} />
+      <input placeholder="0x… address" value={address} onChange={(event) => setAddress(event.target.value.trim())} style={SUB_INPUT} />
+      <button style={MINI_BUTTON} disabled={!valid || busy} onClick={() => void (async () => {
         setBusy(true);
         setError(null);
         try {
@@ -695,7 +844,7 @@ function ManualRecipient({ onAdd }: { onAdd: (recipient: { address: string; labe
           setBusy(false);
         }
       })()}>Add recipient</button>
-      {error ? <span className="small warn">{error}</span> : null}
+      {error ? <span style={{ fontSize: 12, color: "#B54708" }}>{error}</span> : null}
     </div>
   );
 }
@@ -707,4 +856,3 @@ function canonical(value: unknown): string {
       ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
       : typeof item === "bigint" ? item.toString() : item);
 }
-
