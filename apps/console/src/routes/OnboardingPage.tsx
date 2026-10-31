@@ -11,8 +11,11 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
 import { Kicker, Niche, PageTitle, Slab } from "../components/design.js";
+import { SigningInbox } from "../components/SigningInbox.js";
+import { WalletBar } from "../components/WalletBar.js";
 import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
-import { useWallets } from "../lib/wallet-context.js";
+import { useWallets, WalletProvider } from "../lib/wallet-context.js";
+import { setDemoWalletScope } from "../lib/wallet-store.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
 import { NewAgent, RunYourAgent, type AgentReady } from "./AgentSetup.js";
 import { FundWallet, TreasuryCreate, WalletSetup } from "./TreasurySetup.js";
@@ -180,38 +183,46 @@ export function OnboardingPage() {
 
   return (
     <div
+      className={`onb onb-${path}`}
       style={{
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
         gap: "clamp(18px, 2.4vw, 30px)",
         padding: "clamp(22px, 2.8vw, 34px) clamp(20px, 3.5vw, 56px) clamp(30px, 4vw, 56px)",
-        backgroundColor: "#030918",
+        backgroundColor: path === "euthyna" ? "#F3EFE7" : "#030918",
         // Atlantis path: the city. EUTHYNA path: the stele of the law, no city (the vault stays private).
         backgroundImage:
           path === "euthyna"
-            ? "linear-gradient(90deg, rgba(3,9,24,.97) 0%, rgba(3,9,24,.9) 45%, rgba(3,9,24,.5) 100%), linear-gradient(180deg, rgba(3,9,24,.3) 0%, rgba(3,9,24,0) 30%, rgba(3,9,24,.85) 100%), url(/media/renders/R1-hero-stele.jpg)"
+            ? "linear-gradient(rgba(246,242,235,.84), rgba(246,242,235,.84)), url(/media/textures/marble-white.jpg)"
             : "radial-gradient(60% 70% at 78% 40%, rgba(3,9,24,0) 0%, rgba(3,9,24,.6) 60%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.96) 0%, rgba(3,9,24,.85) 45%, rgba(3,9,24,.55) 100%), url(/media/renders/R3-atlantis-aerial.jpg)",
-        backgroundSize: path === "euthyna" ? "cover, cover, 1200px auto" : "cover, cover, 1100px auto",
-        backgroundPosition: path === "euthyna" ? "0 0, 0 0, right -260px center" : "0 0, 0 0, right -180px center",
-        // Fill the screen below the header: no strip of marble under the setup.
-        minHeight: "calc(100vh - 92px)",
+        backgroundSize: path === "euthyna" ? "cover, cover" : "cover, cover, 1100px auto",
+        backgroundPosition: path === "euthyna" ? "0 0, 0 0" : "0 0, 0 0, right -180px center",
+        // A full screen of its own, outside the console shell.
+        minHeight: "100vh",
         backgroundRepeat: "no-repeat",
-        color: "#E7ECF6",
-        // Bleed over the marble ground, without overflowing it on a narrow screen.
-        marginLeft: "calc(-1 * min(40px, 4.1vw))",
-        marginRight: "calc(-1 * min(40px, 4.1vw))",
-        marginBottom: "calc(-1 * min(60px, 20.5vw))",
+        color: "var(--onb-text)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Kicker color={path === "euthyna" ? "#F2B544" : "#4FD1E8"}>
+      <header style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <Link to={organizations.data?.length ? "/overview" : "/choose-path"} className="onb-brand" aria-label="EUTHYNA, back to the console">
+          <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true">
+            <circle cx="512" cy="512" r="307" fill="none" stroke="currentColor" strokeWidth="102" />
+            <rect x="297" y="461" width="430" height="102" fill="#C9890C" />
+            <rect x="41" y="461" width="72" height="102" fill="#C9890C" />
+            <rect x="911" y="461" width="72" height="102" fill="#C9890C" />
+          </svg>
+          EUTHYNA
+        </Link>
+        <Kicker color={path === "euthyna" ? "var(--gold-ink)" : "#4FD1E8"}>
           {path === "euthyna" ? "· Create your vault" : "· Launch on Atlantis"}
         </Kicker>
-        <span style={{ marginLeft: "auto", font: "600 11px var(--font-mono)", letterSpacing: ".08em", color: "#6F82AE" }}>
+        <span style={{ marginLeft: "auto", font: "600 11px var(--font-mono)", letterSpacing: ".08em", color: "var(--onb-mute)" }}>
           TESTNET · NOT AUDITED
         </span>
-      </div>
+        <SigningInbox />
+        <WalletBar />
+      </header>
 
       {error ? (
         <div
@@ -233,13 +244,13 @@ export function OnboardingPage() {
           <SetupProgress steps={steps} current={currentIndex} skipped={sharesSkipped && !shares.data?.deployed ? ["shares"] : []} />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 760 }}>
-            <Kicker color="#F2B544">
+            <Kicker color="var(--onb-gold)">
               {active?.name ?? "Your AI company"} · {path === "euthyna" ? "private vault" : "on Atlantis"}
             </Kicker>
-            <PageTitle style={{ color: "#F3EFE6", textShadow: "none", fontSize: 44, lineHeight: 1.05 }}>
+            <PageTitle style={{ color: "var(--onb-title)", textShadow: "var(--onb-title-shadow)", fontSize: 44, lineHeight: 1.05 }}>
               {TITLES[stage]}
             </PageTitle>
-            <p style={{ margin: 0, fontSize: 15.5, color: "#C9D3EA" }}>{waitingFor[stage]}</p>
+            <p style={{ margin: 0, fontSize: 15.5, color: "var(--onb-soft)" }}>{waitingFor[stage]}</p>
           </div>
 
           {stage === "company" ? (
@@ -270,7 +281,7 @@ export function OnboardingPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 960 }}>
               <TreasuryCreate companyName={active.name} onCreated={async () => { await status.refetch(); }} />
               <div>
-                <button className="btn-line on-dark" onClick={() => setMembersConfirmed(false)}>← CHANGE MEMBERS</button>
+                <button className={`btn-line${path === "euthyna" ? "" : " on-dark"}`} onClick={() => setMembersConfirmed(false)}>← CHANGE MEMBERS</button>
               </div>
             </div>
           ) : null}
@@ -395,7 +406,7 @@ function SetupProgress({ steps, current, skipped }: { steps: StepView[]; current
           right: "6%",
           top: 20,
           height: 2,
-          background: `linear-gradient(90deg, #C9890C 0%, #C9890C ${(progress * 100).toFixed(1)}%, #36507F ${(progress * 100).toFixed(1)}%)`,
+          background: `linear-gradient(90deg, #C9890C 0%, #C9890C ${(progress * 100).toFixed(1)}%, var(--onb-rail) ${(progress * 100).toFixed(1)}%)`,
         }}
       />
       {steps.map((step, index) => {
@@ -416,7 +427,7 @@ function SetupProgress({ steps, current, skipped }: { steps: StepView[]; current
               textAlign: "center",
               font: "700 11px var(--font-brand)",
               letterSpacing: ".16em",
-              color: active ? "#F2B544" : done ? "#C9D3EA" : "#8FA2CC",
+              color: active ? "var(--onb-gold)" : done ? "var(--onb-soft)" : "var(--onb-mute)",
             }}
           >
             {done ? (
@@ -432,10 +443,10 @@ function SetupProgress({ steps, current, skipped }: { steps: StepView[]; current
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  background: "#061433",
-                  boxShadow: active ? "0 0 0 2px #F2B544, 0 0 26px rgba(242,181,68,.55)" : "inset 0 0 0 1.5px #36507F",
+                  background: "var(--onb-disc)",
+                  boxShadow: active ? "0 0 0 2px #F2B544, 0 0 26px rgba(242,181,68,.55)" : "inset 0 0 0 1.5px var(--onb-rail)",
                   font: `${active ? 800 : 700} ${active ? 14 : 13}px var(--font-brand)`,
-                  color: active ? "#F2B544" : "#6F82AE",
+                  color: active ? "var(--onb-gold)" : "var(--onb-mute)",
                 }}
               >
                 {NUMERALS[index] ?? String(index + 1)}
@@ -673,5 +684,18 @@ function MembersStep(props: {
         <button className="btn-ori" style={{ marginLeft: "auto" }} disabled={count < 3} onClick={props.onContinue}>CONTINUE</button>
       </div>
     </Slab>
+  );
+}
+
+/** The setup screen with what the console shell used to provide: the signing wallet and its demo scope. */
+export function OnboardingScreen() {
+  const session = authClient.useSession();
+  useEffect(() => {
+    setDemoWalletScope(session.data?.user.id ?? null);
+  }, [session.data?.user.id]);
+  return (
+    <WalletProvider>
+      <OnboardingPage />
+    </WalletProvider>
   );
 }

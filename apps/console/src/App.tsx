@@ -8,7 +8,7 @@ import { queryClient } from "./lib/query.js";
 import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
 import { SharesPage } from "./routes/SharesPage.js";
-import { OnboardingPage } from "./routes/OnboardingPage.js";
+import { OnboardingScreen } from "./routes/OnboardingPage.js";
 import { ChoosePathPage } from "./routes/ChoosePathPage.js";
 import { SignIn } from "./routes/SignIn.js";
 import { WalletPage } from "./routes/WalletPage.js";
@@ -59,6 +59,8 @@ export function App() {
           <Route path="/rob" element={<RobPage />} />
           <Route element={<Gate />}>
             <Route path="/choose-path" element={<ChoosePathPage />} />
+            {/* Setup is a full screen of its own (design-handoff/app 07 and 17), outside the console shell. */}
+            <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route element={<Layout />}>
               <Route path="/overview" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />
@@ -72,7 +74,6 @@ export function App() {
               <Route path="/shares" element={<SharesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
-              <Route path="/onboarding" element={<OnboardingPage />} />
               <Route path="/decisions" element={<Navigate to="/governance" replace />} />
               <Route path="*" element={<Navigate to="/overview" replace />} />
             </Route>
