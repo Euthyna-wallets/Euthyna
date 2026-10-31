@@ -72,9 +72,9 @@ export function SignIn() {
         color: "var(--ink)",
       }}
     >
-      {/* The R8 column is not in this build: the marble column texture carries the light. */}
+      {/* R8: the marble column at night, as in design-handoff/app/screens/00-sign-in. */}
       <aside
-        className="col"
+        className="r8"
         style={{
           position: "relative",
           overflow: "hidden",
@@ -95,7 +95,7 @@ export function SignIn() {
             inset: 0,
             pointerEvents: "none",
             background:
-              "linear-gradient(180deg, rgba(3,9,24,.72) 0%, rgba(3,9,24,.45) 30%, rgba(3,9,24,.82) 72%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.15) 0%, rgba(3,9,24,0) 40%, rgba(3,9,24,.55) 100%)",
+              "linear-gradient(180deg, rgba(3,9,24,.35) 0%, rgba(3,9,24,0) 25%, rgba(3,9,24,0) 55%, rgba(3,9,24,.35) 100%)",
           }}
         />
         <div

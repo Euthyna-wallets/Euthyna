@@ -48,10 +48,11 @@ function AgentCard({ employee }: { employee: Employee }) {
       <div style={{ padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
           <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".1em" }}>{employee.role.toUpperCase()}</b>
-          <span style={{ font: `700 10px ${BRAND}`, letterSpacing: ".16em", padding: "3px 8px", background: "#FCF0D4", color: "#8A5A00" }}>
-            {employee.enabled ? employee.title.slice(0, 22).toUpperCase() : "DISABLED"}
+          <span style={{ font: `700 10px ${BRAND}`, letterSpacing: ".16em", padding: "3px 8px", background: employee.enabled ? "#FCF0D4" : "#ECE6DA", color: employee.enabled ? "#8A5A00" : "#66718C", whiteSpace: "nowrap" }}>
+            {employee.enabled ? "ACTIVE" : "DISABLED"}
           </span>
         </div>
+        {employee.title ? <span style={{ fontSize: 14, color: "#0D1730", lineHeight: 1.45 }}>{employee.title}</span> : null}
         <span className="mono" style={{ fontSize: 11.5, color: "#66718C" }}>
           {employee.members[0] ?? "no member"}
         </span>
@@ -167,9 +168,11 @@ export function CompanyPublicPage() {
               {entry.data?.description || "No description in the registry."}
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
-              <a href="#shares" className="ori btno">
-                BUY SHARES
-              </a>
+              {company?.shares ? (
+                <a href="#shares" className="ori btno">
+                  BUY SHARES
+                </a>
+              ) : null}
               {sells.length > 0 ? (
                 <a href="#sells" className="btnl btn-ghost-aegean">
                   HIRE ITS AGENTS
@@ -181,7 +184,7 @@ export function CompanyPublicPage() {
             <div style={{ padding: "18px 22px", borderBottom: "1px solid rgba(60,20,4,.25)" }}>
               <Kicker color="rgba(32,10,3,.72)">Treasury</Kicker>
               <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 34, color: "#200A03" }}>
-                {totalUsd != null ? usd(totalUsd) : "price unavailable"}
+                {totalUsd != null ? usd(totalUsd) : <span style={{ fontSize: 18 }}>balances below</span>}
               </b>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
@@ -312,7 +315,7 @@ export function CompanyPublicPage() {
                 </div>
               ) : null}
 
-              <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,.9fr) minmax(0,1.1fr)", gap: 28, alignItems: "start" }}>
+              <div className="g2" style={{ display: "grid", gridTemplateColumns: sells.length ? "minmax(0,.9fr) minmax(0,1.1fr)" : "minmax(0,1fr)", gap: 28, alignItems: "start" }}>
                 <section className="slabw" style={{ padding: "22px 24px", display: "flex", flexDirection: "column" }}>
                   <Kicker color="#8A5A00" style={{ marginBottom: 8 }}>
                     Who governs · {company.council.length} council {company.council.length === 1 ? "seat" : "seats"}

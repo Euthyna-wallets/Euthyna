@@ -171,3 +171,27 @@
   .ground h3{font-size:17px !important}
   .ground .page-title{font-size:28px}
 }
+.r8{background-color:#061433;background-image:linear-gradient(90deg,rgba(3,9,24,.15) 0%,rgba(3,9,24,0) 40%,rgba(3,9,24,.55) 100%),linear-gradient(180deg,rgba(3,9,24,.4) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,.15) 40%,rgba(3,9,24,.82) 58%,rgba(3,9,24,.97) 74%),url(/media/renders/R8-column.jpg);background-size:cover,cover,cover;background-position:0 0,0 0,center 30%}
+@media (max-width:900px){.r8{background-image:linear-gradient(180deg,rgba(3,9,24,.6) 0%,rgba(3,9,24,.82) 45%,rgba(3,9,24,.95) 100%),url(/media/renders/R8-column.jpg);background-size:cover,cover;background-position:0 0,center 30%}}
+
+/* ---------- onboarding: night and city for Atlantis, marble for EUTHYNA ---------- */
+.onb{--onb-text:#E7ECF6;--onb-title:#F3EFE6;--onb-title-shadow:none;--onb-soft:#C9D3EA;--onb-mute:#8FA2CC;--onb-gold:#F2B544;--onb-rail:#36507F;--onb-disc:#061433}
+.onb.onb-euthyna{--onb-text:var(--ink);--onb-title:var(--carved);--onb-title-shadow:var(--carved-shadow);--onb-soft:var(--ink-2);--onb-mute:var(--ink-3);--onb-gold:var(--gold-ink);--onb-rail:#CFC6B4;--onb-disc:#FBF9F4}
+.onb-brand{display:inline-flex;align-items:center;gap:10px;font:700 15px var(--font-brand);letter-spacing:.24em;color:var(--onb-title);text-decoration:none;margin-right:6px}
+.onb.onb-euthyna .onb-brand{color:var(--ink)}
+.onb .wallet-bar{display:flex;align-items:center;gap:8px}
+.onb .wallet-identity{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid rgba(13,23,48,.18);border-radius:999px;padding:5px 6px 5px 12px;color:var(--ink-2)}
+.onb .wallet-identity::before{background:#C9CFDA}
+.onb .wallet-identity.connected::before{background:var(--aegean-ink)}
+.onb .wallet-network{color:var(--gold-ink);font:700 10px var(--font-brand);letter-spacing:.14em}
+.onb .wallet-identity strong{color:var(--ink);font:500 12px var(--font-mono)}
+.onb .wallet-identity button.ghost,.onb .wallet-identity button.compact{background:var(--ink) !important;color:#fff !important;border:0 !important;border-radius:999px !important;padding:5px 12px !important;font:700 11px var(--font-ui) !important;min-height:0}
+.onb .inbox-trigger{background:var(--gold-bg) !important;color:var(--gold-ink) !important;border:1px solid rgba(201,137,12,.45) !important;border-radius:999px !important;font:700 12px var(--font-ui) !important;padding:6px 14px !important;min-height:0 !important}
+.onb .inbox-trigger span{background:var(--gold);color:var(--night)}
+.onb input:not([type=checkbox]):not([type=radio]),.onb select,.onb textarea{background:#fff;color:var(--ink);border:1px solid rgba(13,23,48,.2);border-radius:2px;font:14px var(--font-ui);padding:10px 12px}
+.onb label:not(.field-app label){color:var(--ink-3)}
+.onb .panel,.onb .card,.onb .step{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(/media/textures/marble-white.jpg);background-size:cover,900px;border:0;border-radius:2px;box-shadow:var(--shadow-slab);color:var(--ink)}
+.onb .muted{color:var(--ink-3)}
+.onb button.primary{background-color:#B4532E;background-image:url(/media/textures/orichalcum.jpg);background-size:cover;color:#2A0D04;border:0;border-radius:2px;font:800 12px var(--font-brand);letter-spacing:.18em;text-transform:uppercase;padding:12px 20px}
+.onb a:not([class]){color:var(--aegean-ink)}
+.onb.onb-atlantis a:not([class]){color:var(--aegean-link)}

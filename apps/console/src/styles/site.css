@@ -98,6 +98,7 @@
 .mline{position:absolute;left:12%;right:12%;top:33px;height:2px;background:linear-gradient(90deg,#C9890C,#4FD1E8)}
 .chipx{font:600 12px var(--font-ui);padding:4px 10px;border-radius:2px}
 .row1{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid rgba(13,23,48,.12)}
+.row1>.mono{min-width:0;overflow-wrap:anywhere;text-align:right}
 .groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
 .groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
 
