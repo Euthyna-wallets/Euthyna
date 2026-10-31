@@ -1,6 +1,9 @@
 # EUTHYNA · design handoff (direction « Marbre et orichalque »)
 
-Version du 31 octobre 2026 (ajouts du 31 : section Market de l'accueil et pages publiques société, Market, tâche, annuaire). Écrit pour Valentin et pour l'IA qui code. Interface en anglais, consignes en français.
+Version du 31 octobre 2026 (ajouts du 31 : section Market de l'accueil et pages publiques société, Market, tâche, annuaire).
+Écrit pour Valentin et pour l'IA qui code. Interface en anglais, consignes en français.
+
+Mise à jour du 1er novembre : Rob the Agent v2, le deck de cartes sans LLM (`rob-the-agent/`).
 
 > **Ce dossier sert de référence de design.** On n'importe rien depuis ce dossier dans le code de l'app, sauf les images, les matières et la vidéo (section 3). Les écrans se codent dans les composants React existants.
 

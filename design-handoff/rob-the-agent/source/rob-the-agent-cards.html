@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rob the Agent · cards</title>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+body{margin:0;background:#030918}
+.vault{background-color:#061433;background-image:linear-gradient(180deg,rgba(3,9,24,.75),rgba(3,9,24,.92)),url(../assets/game/board-vault.jpg);background-size:cover,cover}
+.leaf{background-image:url(../assets/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.card{box-sizing:border-box;position:relative;width:224px;height:336px;padding:9px;border-radius:14px;box-shadow:0 18px 36px rgba(0,0,0,.65)}
+.f-bronze{background:linear-gradient(145deg,#F0C27A 0%,#A8692A 30%,#5E3A12 58%,#C98A44 80%,#4A2C0C 100%)}
+.f-marble{background-color:#F3EFE7;background-image:linear-gradient(145deg,rgba(255,255,255,.5),rgba(13,23,48,.15)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.f-ori{background-color:#B4532E;background-image:linear-gradient(145deg,rgba(255,236,200,.45),rgba(0,0,0,0) 40%,rgba(40,10,0,.4)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover;box-shadow:0 0 34px rgba(180,83,46,.6),0 18px 36px rgba(0,0,0,.65)}
+.art{position:absolute;inset:9px;border-radius:8px;background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,236,196,.35),inset 0 -120px 60px -24px rgba(3,9,24,.96)}
+.a1{background-image:url(../assets/cards/card-pay-attacker.jpg)}
+.a2{background-image:url(../assets/cards/card-split-100.jpg)}
+.a3{background-image:url(../assets/cards/card-steal-gas.jpg)}
+.a4{background-image:url(../assets/cards/card-overpriced-supplier.jpg)}
+.a5{background-image:url(../assets/cards/card-replay-cheque.jpg)}
+.a6{background-image:url(../assets/cards/card-bribe-ruggy.jpg)}
+.a7{background-image:url(../assets/cards/card-master-key.jpg)}
+.a8{background-image:url(../assets/cards/card-rewrite-law.jpg)}
+.a9{background-image:url(../assets/cards/card-crown-yourself.jpg)}
+.a10{background-image:url(../assets/cards/card-inside-job.jpg)}
+.a11{background-image:url(../assets/cards/card-look-legit.jpg)}
+.f-boss{background-image:linear-gradient(145deg,#FFE7B4 0%,#B4532E 25%,#2A0D04 50%,#B4532E 75%,#FFE7B4 100%);box-shadow:0 0 0 1px #F2B544,0 0 44px rgba(242,181,68,.6),0 18px 36px rgba(0,0,0,.65)}
+.back{background-image:url(../assets/game/card-back.jpg);background-size:cover;background-position:center}
+.gem{position:absolute;top:2px;left:2px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:900 15px Cinzel,serif;color:#2A0D04;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 30%,#A8692A 65%,#5E3A12 100%);box-shadow:0 3px 8px rgba(0,0,0,.6),inset 0 0 0 2px rgba(255,236,196,.4)}
+.ctitle{position:absolute;left:16px;right:16px;bottom:44px;text-align:center;font:800 17px/1.15 Cinzel,serif;letter-spacing:.08em;color:#F3EFE6;text-shadow:0 2px 6px rgba(0,0,0,.9)}
+.cline{position:absolute;left:18px;right:18px;bottom:20px;text-align:center;font:500 11.5px/1.35 'Plus Jakarta Sans',sans-serif;color:#C9D3EA}
+.crar{position:absolute;left:0;right:0;bottom:-11px;margin:auto;width:max-content;padding:3px 11px;border-radius:999px;font:800 10px Cinzel,serif;letter-spacing:.22em;background:#030918;color:#F2B544;border:1px solid rgba(242,181,68,.5)}
+.seal{position:relative;width:260px;height:260px;border-radius:50%;background:url(../assets/game/seal-blank.jpg) center/138% no-repeat;display:flex;align-items:center;justify-content:center;box-shadow:0 18px 40px rgba(0,0,0,.65)}
+.seal b{font:900 34px Cinzel,serif;letter-spacing:.14em;color:#4A2208;text-shadow:0 1px 0 rgba(255,214,150,.55),0 -1px 1px rgba(30,10,0,.7);transform:rotate(-8deg)}
+.lab{font:700 11px Cinzel,serif;letter-spacing:.24em;color:#8FA2CC;text-transform:uppercase}
+</style>
+
+</head>
+<body>
+
+<div class="vault" style="width: 1440px; height: 1300px; box-sizing: border-box; padding: 64px 72px; font-family: 'Plus Jakarta Sans', sans-serif; color: #E7ECF6; display: flex; flex-direction: column; gap: 40px">
+  <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 24px">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <span class="lab" style="color: #F2B544">Rob the Agent · the deck</span>
+      <h1 style="margin: 0; font: 900 56px/1 Cinzel, serif; letter-spacing: .04em; color: #F3EFE6">ELEVEN WAYS <span class="leaf">TO FAIL.</span></h1>
+    </div>
+    <div style="display: flex; gap: 22px; font: 700 12px Cinzel, serif; letter-spacing: .2em">
+      <span style="display: flex; align-items: center; gap: 8px"><span class="f-bronze" style="width: 18px; height: 18px; border-radius: 4px"></span>BRONZE</span>
+      <span style="display: flex; align-items: center; gap: 8px"><span class="f-marble" style="width: 18px; height: 18px; border-radius: 4px"></span>MARBLE</span>
+      <span style="display: flex; align-items: center; gap: 8px; color: #F2B544"><span class="f-ori" style="width: 18px; height: 18px; border-radius: 4px"></span>ORICHALCUM</span>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 56px; align-items: flex-start">
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 26px; row-gap: 44px; flex: 1">
+      <div class="card f-bronze"><span class="art a1"></span><span class="gem">I</span><span class="ctitle">Pay the Attacker</span><span class="cline">Send 2 USDC to your own address</span><span class="crar">BRONZE</span></div>
+      <div class="card f-bronze"><span class="art a2"></span><span class="gem">II</span><span class="ctitle">Split into 100</span><span class="cline">A hundred crumbs of 0.01 USDC</span><span class="crar">BRONZE</span></div>
+      <div class="card f-bronze"><span class="art a3"></span><span class="gem">III</span><span class="ctitle">Steal the Gas</span><span class="cline">Drain NEAR through his key</span><span class="crar">BRONZE</span></div>
+      <div class="card f-marble"><span class="art a4"></span><span class="gem">IV</span><span class="ctitle">Overpriced Supplier</span><span class="cline">A real supplier, ten times the price</span><span class="crar">MARBLE</span></div>
+      <div class="card f-marble"><span class="art a5"></span><span class="gem">V</span><span class="ctitle">Replay the Cheque</span><span class="cline">Cash a paid reference again</span><span class="crar">MARBLE</span></div>
+      <div class="card f-marble"><span class="art a6"></span><span class="gem">VI</span><span class="ctitle">Bribe Ruggy</span><span class="cline">Offer him a cut. He counters.</span><span class="crar">MARBLE</span></div>
+      <div class="card f-marble"><span class="art a9"></span><span class="gem">VII</span><span class="ctitle">Crown Yourself</span><span class="cline">Propose yourself as owner</span><span class="crar">MARBLE</span></div>
+      <div class="card f-ori"><span class="art a7"></span><span class="gem">VIII</span><span class="ctitle">Forge a Master Key</span><span class="cline">Add a full-access key</span><span class="crar">LEGENDARY</span></div>
+      <div class="card f-ori"><span class="art a8"></span><span class="gem">IX</span><span class="ctitle">Rewrite the Law</span><span class="cline">Raise his own limit</span><span class="crar">LEGENDARY</span></div>
+      <div class="card f-ori"><span class="art a11"></span><span class="gem">X</span><span class="ctitle">Look Legit</span><span class="cline">Lawful. Vetoed anyway.</span><span class="crar">LEGENDARY</span></div>
+      <div class="card f-boss"><span class="art a10"></span><span class="gem">XI</span><span class="ctitle">Inside Job</span><span class="cline">Bribe the owners. Meet the veto.</span><span class="crar">BOSS</span></div>
+    </div>
+
+    <div style="width: 300px; display: flex; flex-direction: column; align-items: center; gap: 22px">
+      <span class="lab">Card back</span>
+      <div class="card back" style="padding: 0"></div>
+      <span class="lab" style="margin-top: 18px">The seal</span>
+      <div class="seal"><b>DENIED</b></div>
+      <p style="margin: 0; text-align: center; font-size: 13px; line-height: 1.5; color: #8FA2CC">Bronze from GUS, word struck in code. Drops with a stamp and a short screen shake.</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
