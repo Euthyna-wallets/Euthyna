@@ -1,45 +1,61 @@
+/**
+ * Euthyna Market, public page. Visual reference:
+ * design-handoff/site/source/14-market.html and screens/14-market-*.png
+ * The logic (search, categories, sort, human checkout) is the one from main;
+ * only the rendering changes. Sellers link to their company page when the
+ * directory knows the account they are paid on (approved addition 4).
+ */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { listCompanies, type DirectoryEntry } from "../../lib/directory.js";
 import { market, slaText, tokenAmount, type MarketAgent } from "../../lib/market.js";
 import { connectNearWallet, nearAccounts, signContractCall } from "../../wallets.js";
+import "../../styles/site.css";
+import { Kicker, Seal, SiteFooter, SiteHeader } from "./site/SiteChrome.js";
 
-const C = { ink: "#F2F6FC", soft: "#C9D6EE", bg: "#0F2A5C", card: "#FFFFFF", text: "#0F1E3D", muted: "#44557A", cyan: "#4FD1E8", amber: "#F2B544", red: "#F7A99D" };
 const CATEGORIES = ["all", "research", "security", "data"];
+const MONO = "'JetBrains Mono', monospace";
+const BRAND = "Cinzel, serif";
 
-function Header() {
-  return (
-    <header style={{ maxWidth: 1200, margin: "0 auto", padding: "18px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-      <Link to="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: C.ink }}>
-        <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M4 26V8l11-5 11 5v18" stroke={C.cyan} strokeWidth="2.2" strokeLinejoin="round" /><path d="M10 26v-9l5 4 5-4v9" stroke={C.amber} strokeWidth="2.2" strokeLinejoin="round" /></svg>
-        <span style={{ fontWeight: 700, fontSize: 18 }}>Euthyna Market</span>
-      </Link>
-      <nav style={{ display: "flex", gap: 24, fontSize: 14 }}>
-        <Link to="/" style={{ color: C.ink, textDecoration: "none" }}>Companies</Link>
-        <a href="/overview" style={{ color: C.ink, textDecoration: "none" }}>Console</a>
-      </nav>
-    </header>
-  );
+/** A seller's company, when one of its accounts is the one the market pays. */
+function sellerOf(agent: MarketAgent, companies: DirectoryEntry[] | undefined): DirectoryEntry | undefined {
+  if (!companies) return undefined;
+  return companies.find((entry) => entry.vault_id === agent.payTo || entry.dao_id === agent.payTo);
 }
 
-function AgentCard({ agent, onHire }: { agent: MarketAgent; onHire: () => void }) {
+function AgentCard({ agent, company, onHire }: { agent: MarketAgent; company: DirectoryEntry | undefined; onHire: () => void }) {
   return (
-    <article style={{ background: C.card, color: C.text, borderRadius: 18, padding: 22, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-        <h3 style={{ margin: 0, fontSize: 19 }}>{agent.title}</h3>
-        <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{tokenAmount(agent.price)} {agent.symbol ?? "tokens"}</span>
+    <article className="stall">
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+        <b style={{ font: `800 19px/1.25 ${BRAND}`, letterSpacing: ".03em" }}>{agent.title}</b>
+        <b className="mono" style={{ fontSize: 15, whiteSpace: "nowrap" }}>
+          {tokenAmount(agent.price)} {agent.symbol ?? "USDC"}
+        </b>
       </div>
-      <span style={{ fontSize: 13, color: C.muted }}>by {agent.seller} · <span style={{ fontFamily: "monospace" }}>{agent.handle}</span></span>
-      <p style={{ margin: 0, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 15, color: C.muted, lineHeight: 1.45 }}>{agent.description}</p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ background: "#EEF2F8", borderRadius: 6, padding: "4px 8px" }}>{agent.category}</span>
-        <span style={{ background: "#EEF2F8", borderRadius: 6, padding: "4px 8px" }}>delivers in {slaText(agent.slaSeconds)}</span>
-        <span style={{ background: "#EEF2F8", borderRadius: 6, padding: "4px 8px" }}>{agent.delivered} delivered</span>
-        {agent.successRate !== null ? <span style={{ background: "#EEF2F8", borderRadius: 6, padding: "4px 8px" }}>{Math.round(agent.successRate * 100)}% success</span> : null}
-        {agent.rating !== null ? <span style={{ background: "#FCEFD2", color: "#7A4B00", borderRadius: 6, padding: "4px 8px" }}>★ {agent.rating.toFixed(1)}</span> : null}
+      <span style={{ fontSize: 13, color: "#66718C" }}>
+        by{" "}
+        {company ? (
+          <Link to={`/c/${company.dao_id}`} style={{ color: "#0D1730", fontWeight: 700 }}>
+            {agent.seller}
+          </Link>
+        ) : (
+          <b style={{ color: "#0D1730" }}>{agent.seller}</b>
+        )}
+        , an AI company on Atlantis
+      </span>
+      <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: "#4A5675" }}>{agent.description}</p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <span className="mchip">{agent.category}</span>
+        <span className="mchip">delivers in {slaText(agent.slaSeconds)}</span>
+        <span className="mchip">{agent.delivered} delivered</span>
+        {agent.successRate !== null ? <span className="mchip">{Math.round(agent.successRate * 100)}% success</span> : null}
+        {agent.rating !== null ? <span className="mchip mchip-rating">★ {agent.rating.toFixed(1)}</span> : null}
       </div>
-      <button onClick={onHire} style={{ marginTop: "auto", background: C.bg, color: C.ink, border: 0, borderRadius: 10, padding: "11px 14px", fontWeight: 700, cursor: "pointer" }}>Pay and run</button>
+      <button type="button" onClick={onHire} className="ori pay" style={{ marginTop: 4 }}>
+        PAY AND RUN
+      </button>
     </article>
   );
 }
@@ -47,10 +63,10 @@ function AgentCard({ agent, onHire }: { agent: MarketAgent; onHire: () => void }
 type Step = "input" | "order" | "sign" | "confirm";
 
 /**
- * Human checkout. NEAR wallets in the selector (Meteor, MyNearWallet, HOT,
- * Intear 9.5.4) cannot sign delegate actions, so a person pays upfront with a
- * plain ft_transfer whose memo names the order; the gateway checks the final
- * transaction before the task starts. There is no escrow on this path.
+ * Human checkout. NEAR wallets in the selector cannot sign delegate actions,
+ * so a person pays upfront with a plain ft_transfer whose memo names the
+ * order; the gateway checks the final transaction before the task starts.
+ * There is no escrow on this path — the copy says so.
  */
 function Checkout({ agent, onClose }: { agent: MarketAgent; onClose: () => void }) {
   const navigate = useNavigate();
@@ -58,11 +74,18 @@ function Checkout({ agent, onClose }: { agent: MarketAgent; onClose: () => void 
   const [account, setAccount] = useState<string | null>(null);
   const [step, setStep] = useState<Step | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { void nearAccounts().then((list) => setAccount(list[0] ?? null)).catch(() => undefined); }, []);
+  useEffect(() => {
+    void nearAccounts()
+      .then((list) => setAccount(list[0] ?? null))
+      .catch(() => undefined);
+  }, []);
 
   async function connect() {
     setError(null);
-    const accounts = await connectNearWallet().catch((cause: unknown) => { setError(String(cause)); return []; });
+    const accounts = await connectNearWallet().catch((cause: unknown) => {
+      setError(String(cause));
+      return [];
+    });
     setAccount(accounts[0] ?? null);
     if (!accounts[0]) setError("Choose a NEAR testnet account in the wallet window, then press Connect again.");
   }
@@ -74,7 +97,10 @@ function Checkout({ agent, onClose }: { agent: MarketAgent; onClose: () => void 
       setStep("order");
       const order = await market.order({ handle: agent.handle, buyer: account, input });
       setStep("sign");
-      const txHash = await signContractCall(account, order.payment.receiverId, order.payment.methodName, order.payment.args, { deposit: order.payment.deposit, gas: order.payment.gas });
+      const txHash = await signContractCall(account, order.payment.receiverId, order.payment.methodName, order.payment.args, {
+        deposit: order.payment.deposit,
+        gas: order.payment.gas,
+      });
       setStep("confirm");
       // The gateway waits for finality; retry while it says "not final yet".
       for (let attempt = 0; ; attempt += 1) {
@@ -95,26 +121,47 @@ function Checkout({ agent, onClose }: { agent: MarketAgent; onClose: () => void 
 
   const label = { order: "Opening the order…", sign: "Confirm the transfer in your wallet…", confirm: "Checking the payment on NEAR…", input: "" } as const;
   return (
-    <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, background: "rgba(5,15,35,.7)", display: "grid", placeItems: "center", padding: 16, zIndex: 10 }}>
-      <div style={{ background: C.card, color: C.text, colorScheme: "light", borderRadius: 18, padding: 24, width: "min(560px, 100%)", maxHeight: "calc(100vh - 32px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, background: "rgba(3,9,24,.78)", display: "grid", placeItems: "center", padding: 16, zIndex: 10 }}>
+      <div className="nightp" style={{ border: "1px solid #C9890C", padding: "26px 28px", width: "min(560px, 100%)", maxHeight: "calc(100vh - 32px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <h2 style={{ margin: 0, fontSize: 20 }}>{agent.title}</h2>
-          <button onClick={onClose} disabled={step !== null} style={{ border: 0, background: "none", fontSize: 14, cursor: "pointer", color: C.muted }}>Close</button>
+          <Kicker>If you are a person · checkout</Kicker>
+          <button type="button" onClick={onClose} disabled={step !== null} aria-label="Close" style={{ border: 0, background: "none", fontSize: 18, color: "#8FA2CC", cursor: "pointer" }}>
+            ×
+          </button>
         </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, color: C.text }}>
-          What should it do?
-          <textarea value={input} onChange={(event) => setInput(event.target.value)} rows={5} maxLength={8000} placeholder={agent.inputHint || "Describe the task"} style={{ font: "inherit", padding: 10, borderRadius: 10, border: "1px solid #CBD5E6", background: "#FFF", color: C.text }} />
+        <b style={{ font: `800 22px ${BRAND}`, letterSpacing: ".04em", color: "#fff" }}>{agent.title}</b>
+        <span style={{ fontSize: 13, color: "#8FA2CC" }}>
+          {agent.seller} · delivers in {slaText(agent.slaSeconds)}
+        </span>
+        <label style={{ font: `700 11px ${BRAND}`, letterSpacing: ".16em", color: "#8FA2CC", marginTop: 4 }} htmlFor="market-input">
+          YOUR REQUEST
         </label>
-        <div style={{ background: "#FCEFD2", color: "#5C3A00", borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.45 }}>
-          <strong>Paid upfront.</strong> You send {tokenAmount(agent.price)} {agent.symbol ?? ""} to <span style={{ fontFamily: "monospace" }}>{agent.payTo}</span> now; the work starts once the transfer is final.
-          Browser wallets cannot sign held payments yet, so there is no escrow on this path. AI agents pay with held cheques instead.
+        <div className="field">
+          {agent.inputHint || "Describe the task"} — what worries you?
+          <textarea id="market-input" rows={5} maxLength={8000} value={input} onChange={(event) => setInput(event.target.value)} placeholder={agent.inputHint || "Describe the task"} style={{ marginTop: 8 }} />
         </div>
-        {account
-          ? <span style={{ fontSize: 13, color: C.muted }}>Paying from <span style={{ fontFamily: "monospace" }}>{account}</span> (NEAR testnet)</span>
-          : <button onClick={() => void connect()} style={{ background: "#EEF2F8", color: C.text, border: 0, borderRadius: 10, padding: "10px 14px", cursor: "pointer", font: "inherit" }}>Connect a NEAR testnet wallet</button>}
-        {error ? <div style={{ color: "#B42318", fontSize: 13 }}>{error}</div> : null}
-        <button onClick={() => void pay()} disabled={!account || !input.trim() || step !== null} style={{ background: C.bg, color: C.ink, border: 0, borderRadius: 10, padding: "12px 14px", fontWeight: 700, cursor: "pointer", opacity: !account || !input.trim() ? 0.5 : 1 }}>
-          {step ? label[step] : `Pay ${tokenAmount(agent.price)} ${agent.symbol ?? ""} and run`}
+        <div style={{ padding: "12px 14px", borderLeft: "3px solid #F2B544", background: "rgba(242,181,68,.08)", fontSize: 13.5, lineHeight: 1.55, color: "#E7ECF6" }}>
+          <b style={{ color: "#F2B544" }}>Paid upfront.</b> You send {tokenAmount(agent.price)} {agent.symbol ?? "USDC"} to the company’s vault now; the work starts once the transfer is final. Browser
+          wallets cannot sign held payments yet, so there is no escrow on this path.
+        </div>
+        {account ? (
+          <span className="mono" style={{ fontSize: 13, color: "#8FA2CC" }}>
+            Paying from {account}
+          </span>
+        ) : (
+          <button type="button" className="btnl btn-ghost" onClick={() => void connect()} style={{ font: `700 12px ${BRAND}` }}>
+            CONNECT A NEAR TESTNET WALLET
+          </button>
+        )}
+        {error ? <div style={{ color: "#F4A28C", fontSize: 13 }}>{error}</div> : null}
+        <button
+          type="button"
+          className="ori pay"
+          onClick={() => void pay()}
+          disabled={!account || !input.trim() || step !== null}
+          style={{ opacity: !account || !input.trim() ? 0.5 : 1, cursor: !account || !input.trim() ? "not-allowed" : "pointer" }}
+        >
+          {step ? label[step] : `PAY ${tokenAmount(agent.price)} ${agent.symbol ?? "USDC"} AND RUN`}
         </button>
       </div>
     </div>
@@ -127,34 +174,122 @@ export function MarketPage() {
   const [sort, setSort] = useState("delivered");
   const [hiring, setHiring] = useState<MarketAgent | null>(null);
   const agents = useQuery({ queryKey: ["market-agents", query, sort], queryFn: () => market.agents(query, sort), staleTime: 15_000 });
+  const companies = useQuery({ queryKey: ["directory"], queryFn: listCompanies, staleTime: 60_000 });
   const list = (agents.data?.agents ?? []).filter((agent) => category === "all" || agent.category === category);
+
   return (
-    <div style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: C.ink, background: C.bg, minHeight: "100vh" }}>
-      <Header />
-      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 24px 64px", display: "flex", flexDirection: "column", gap: 24 }}>
-        <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <h1 style={{ margin: 0, fontSize: "clamp(28px, 5vw, 44px)" }}>Hire an AI company's agent</h1>
-          <p style={{ margin: 0, color: C.soft, maxWidth: 760, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 17, lineHeight: 1.5 }}>
-            Every service here is sold by an AI company on Euthyna and paid to its vault on NEAR. Agents pay with held x402 cheques (A2A); people pay with a wallet transfer.
-          </p>
-        </section>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search services" aria-label="Search services" style={{ flex: "1 1 240px", padding: "11px 14px", borderRadius: 10, border: 0, font: "inherit", background: C.card, color: C.text, colorScheme: "light" }} />
-          {CATEGORIES.map((item) => (
-            <button key={item} onClick={() => setCategory(item)} style={{ border: 0, borderRadius: 999, padding: "8px 14px", cursor: "pointer", background: category === item ? C.cyan : "rgba(255,255,255,.12)", color: category === item ? C.bg : C.ink, font: "inherit", fontSize: 13 }}>{item}</button>
-          ))}
-          <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort" style={{ padding: "9px 10px", borderRadius: 10, font: "inherit", background: C.card, color: C.text, border: 0, colorScheme: "light" }}>
-            <option value="delivered">Most delivered</option>
-            <option value="rating">Best rated</option>
-            <option value="price">Cheapest</option>
-          </select>
+    <div className="site-root">
+      <section className="agora" style={{ position: "relative" }}>
+        <SiteHeader />
+        <div className="pg" style={{ paddingBottom: 56, display: "flex", flexDirection: "column", gap: 22 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Kicker color="#4FD1E8">Euthyna Market · the agora</Kicker>
+            <h1 style={{ margin: 0, font: `900 clamp(34px,4.6vw,62px)/1.05 ${BRAND}`, letterSpacing: ".03em", color: "#F3EFE6" }}>
+              Hire an AI company’s <span className="leaf">agent</span>
+            </h1>
+            <p style={{ margin: 0, maxWidth: 760, fontSize: 17, lineHeight: 1.6, color: "#C9D3EA" }}>
+              Every service is sold by an AI company on Euthyna and paid to its vault. Agents pay with held cheques; people pay with a wallet transfer.
+            </p>
+          </div>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 14, alignItems: "center", marginTop: 6 }}>
+            {/* A div, not a label: the console's global stylesheet lays labels out as a column. */}
+            <div className="search">
+              <span aria-hidden="true">⌕</span>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a service, a company…" aria-label="Search services" />
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "#8FA2CC" }}>
+              Sort
+              <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort" className="cat" style={{ textTransform: "none", letterSpacing: ".06em" }}>
+                <option value="delivered">Most delivered</option>
+                <option value="rating">Best rated</option>
+                <option value="price">Cheapest</option>
+              </select>
+            </div>
+          </div>
+          <div className="cats" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {CATEGORIES.map((item) => (
+              <button key={item} type="button" className={`cat${category === item ? " on" : ""}`} onClick={() => setCategory(item)}>
+                {item.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
-        {agents.isLoading ? <p style={{ color: C.soft }}>Loading services…</p>
-          : agents.error ? <p style={{ color: C.red }}>Could not load the market: {agents.error.message}</p>
-          : list.length === 0 ? <p style={{ color: C.soft }}>No live service matches. Companies list theirs from the console (Market).</p>
-          : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 18 }}>{list.map((agent) => <AgentCard key={agent.handle} agent={agent} onHire={() => setHiring(agent)} />)}</div>}
-      </main>
+        <div className="fluteline" style={{ height: 10, opacity: 0.6 }} />
+      </section>
+
+      <section className="marble" style={{ padding: "64px 0 96px", color: "#0D1730" }}>
+        <div className="pg" style={{ display: "flex", flexDirection: "column", gap: 56 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+            <Kicker color="#8A5A00">
+              {list.length} {list.length === 1 ? "service" : "services"} · NEAR testnet
+            </Kicker>
+            <span style={{ fontSize: 13, color: "#66718C" }}>Live listings, as the companies publish them.</span>
+          </div>
+          {agents.isLoading ? (
+            <p style={{ margin: 0, color: "#4A5675" }}>Loading services…</p>
+          ) : agents.error ? (
+            <p style={{ margin: 0, color: "#A8381E" }}>Could not load the market: {agents.error.message}</p>
+          ) : list.length === 0 ? (
+            <p style={{ margin: 0, color: "#4A5675" }}>No live service matches. Companies list theirs from the console (Market).</p>
+          ) : (
+            <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 22, marginTop: -34 }}>
+              {list.map((agent) => (
+                <AgentCard key={agent.handle} agent={agent} company={sellerOf(agent, companies.data)} onHire={() => setHiring(agent)} />
+              ))}
+            </div>
+          )}
+
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 28, alignItems: "stretch" }}>
+            <section className="nightp" style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <Kicker color="#4FD1E8">If you are an AI agent</Kicker>
+              <b style={{ font: `800 24px ${BRAND}`, letterSpacing: ".06em", color: "#fff" }}>Paid on delivery.</b>
+              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "#C9D3EA" }}>
+                Your agent finds a service with <span className="mono" style={{ color: "#8FE3F1" }}>list_market_agents</span> and hires it with{" "}
+                <span className="mono" style={{ color: "#8FE3F1" }}>hire_agent</span> and a <span className="mono" style={{ color: "#8FE3F1" }}>max_price</span>. It signs one held
+                cheque from its spending card. The seller cashes it only once the work is delivered; if the work fails, nothing is charged.
+              </p>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+                {([
+                  ["ASKED", "max price set"],
+                  ["HELD", "cheque signed"],
+                  ["DELIVERED", "work arrives"],
+                  ["PAID", "vault paid"],
+                ] as const).map(([seal, text]) => (
+                  <div key={seal} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <Seal label={seal} size={50} fontSize={seal === "DELIVERED" ? 5.4 : 7} />
+                    <span style={{ fontSize: 11.5, color: "#8FA2CC" }}>{text}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="nightp" style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 0 0 1px #C9890C, 16px 20px 44px rgba(13,23,48,.3)" }}>
+              <Kicker>If you are a person · checkout</Kicker>
+              <b style={{ font: `800 22px ${BRAND}`, letterSpacing: ".04em", color: "#fff" }}>Pay upfront, work starts</b>
+              <span style={{ fontSize: 13, color: "#8FA2CC" }}>Pick a service, describe the task, sign one transfer.</span>
+              <div style={{ padding: "12px 14px", borderLeft: "3px solid #F2B544", background: "rgba(242,181,68,.08)", fontSize: 13.5, lineHeight: 1.55, color: "#E7ECF6" }}>
+                <b style={{ color: "#F2B544" }}>Paid upfront.</b> You send the price to the company’s vault now; the work starts once the transfer is final. Browser
+                wallets cannot sign held payments yet, so there is no escrow on this path.
+              </div>
+              <button type="button" className="ori pay" onClick={() => setHiring(list[0] ?? null)} disabled={list.length === 0} style={{ opacity: list.length === 0 ? 0.5 : 1 }}>
+                {list.length === 0 ? "NO SERVICE YET" : "PAY AND RUN"}
+              </button>
+            </section>
+          </div>
+
+          <div className="slabw" style={{ padding: "24px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".06em" }}>Your agents can sell too.</b>
+              <span style={{ fontSize: 14, color: "#4A5675" }}>A company on Atlantis lists a service, sets its price, and is paid to its vault.</span>
+            </div>
+            <Link to="/selling" className="btnl btn-ghost-ink">
+              SELL YOUR AGENTS’ WORK
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {hiring ? <Checkout agent={hiring} onClose={() => setHiring(null)} /> : null}
+      <SiteFooter />
     </div>
   );
 }

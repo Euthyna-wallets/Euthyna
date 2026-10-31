@@ -1,0 +1,174 @@
+/* EUTHYNA · public site · direction « Marbre et orichalque ».
+   Ported from design-handoff/site (the reference), with the same values.
+   Source of truth for values: design-handoff/site/tokens.css and the
+   <style> block of each source/*.html. Do not invent new colours here. */
+
+:root{
+  --night:#061433; --night-2:#0A1D47; --night-3:#142E63; --night-deep:#030918;
+  --night-line:#1F3A6E; --night-mute:#8FA2CC; --night-soft:#C9D3EA; --night-text:#A9B6D6;
+  --marble:#F3EFE7; --marble-slab:#FBF9F4; --vein:#E5DFD2; --groove:#E2DBCD; --white:#FFFFFF;
+  --ink:#0D1730; --ink-2:#4A5675; --ink-3:#66718C;
+  --carved:#8E8473; --carved-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45);
+  --orichalcum:#B4532E; --orichalcum-ink:#200A03; --orichalcum-light:#FFE2A8;
+  --gold:#F2B544; --gold-deep:#C9890C; --gold-ink:#8A5A00; --gold-bg:#FCF0D4;
+  --aegean:#4FD1E8; --aegean-ink:#0B6E86; --aegean-bg:#DDF4F8; --aegean-link:#8FE3F1;
+  --terra:#D9573B; --terra-btn:#B8442B; --terra-ink:#A8381E; --terra-soft:#F4A28C;
+  --seal:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);
+  --font-brand:"Cinzel","Times New Roman",serif;
+  --font-ui:"Plus Jakarta Sans","Segoe UI",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --kicker:700 11px/1 var(--font-brand); --kicker-tracking:.26em;
+  --radius:2px; --radius-arch:999px 999px 2px 2px; --radius-card-wallet:10px;
+  --shadow-slab:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08);
+  --shadow-night:14px 18px 40px rgba(13,23,48,.30);
+  --shadow-plate:24px 30px 70px rgba(0,0,0,.55);
+  --t-engrave:400ms; --t-strike:220ms; --t-open:600ms; --t-pulse:1200ms;
+}
+
+/* ---------- page shell ---------- */
+.site-root{font-family:var(--font-ui);color:#E7ECF6;background:var(--night);overflow-x:hidden;min-height:100vh}
+.site-root a{color:inherit}
+.site-root a:hover{color:var(--gold)}
+.wrap{max-width:1280px;margin:0 auto;padding:0 48px;box-sizing:border-box}
+.pg{max-width:1280px;margin:0 auto;padding:0 48px;box-sizing:border-box}
+.kick{font:700 12px var(--font-brand);letter-spacing:.32em;text-transform:uppercase}
+.h2{margin:0;font:800 clamp(34px,3.9vw,56px)/1.04 var(--font-brand);letter-spacing:.04em;text-transform:uppercase}
+.mono{font-family:var(--font-mono)}
+
+/* ---------- materials ---------- */
+.nightm{background-color:#061433;background-image:radial-gradient(120% 90% at 70% 10%,rgba(28,58,120,.55),rgba(6,20,51,0) 60%),linear-gradient(180deg,rgba(6,20,51,.55),rgba(3,9,24,.96)),url(/media/textures/marble-night.jpg);background-size:cover,cover,900px}
+.nightflat{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.86),rgba(4,12,30,.96)),url(/media/textures/marble-night.jpg);background-size:cover,1100px}
+.marble{background-color:#F3EFE7;background-image:linear-gradient(rgba(245,241,233,.72),rgba(245,241,233,.72)),url(/media/textures/marble-white.jpg);background-size:cover,cover}
+.marblelit{background-color:#F3EFE7;background-image:linear-gradient(115deg,rgba(255,255,255,.62),rgba(255,255,255,.25) 40%,rgba(13,23,48,.10)),url(/media/textures/marble-white.jpg);background-size:cover,cover}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.18),rgba(0,0,0,0) 35%,rgba(40,10,0,.35)),url(/media/textures/orichalcum.jpg);background-size:cover,cover}
+.bronze{background-color:#78502A;background-image:radial-gradient(circle at 35% 30%,rgba(255,226,180,.35),rgba(0,0,0,0) 55%),url(/media/textures/bronze.jpg);background-size:cover,400px}
+.slabw{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.82),rgba(255,255,255,.55)),url(/media/textures/marble-white.jpg);background-size:cover,cover;box-shadow:16px 20px 44px rgba(13,23,48,.16),inset 0 0 0 1px rgba(13,23,48,.08);color:#0D1730}
+.nightp{background:#061433;color:#E7ECF6;box-shadow:16px 20px 44px rgba(13,23,48,.3)}
+
+/* ---------- type effects ---------- */
+.leaf{background-image:url(/media/textures/orichalcum.jpg);background-size:100% 240%;background-position:0 32%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.carved{color:#8E8473;text-shadow:var(--carved-shadow)}
+
+/* ---------- seals ---------- */
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--seal);box-shadow:inset 0 0 0 5px rgba(255,236,196,.28),inset 0 0 0 7px rgba(60,32,8,.35),inset 0 -6px 12px rgba(40,18,0,.45),0 12px 26px rgba(0,0,0,.5);flex:0 0 auto}
+.seal span{font:800 13px var(--font-brand);letter-spacing:.2em;text-shadow:0 1px 0 rgba(255,236,196,.45)}
+.seal-refused{transform:rotate(-7deg);filter:saturate(.85) hue-rotate(-12deg)}
+
+/* ---------- ornaments ---------- */
+.fluteline{background-image:repeating-linear-gradient(90deg,rgba(242,181,68,0) 0 13px,rgba(242,181,68,.55) 13px 14px)}
+.flutes{background-image:linear-gradient(90deg,rgba(13,23,48,.38),rgba(13,23,48,0) 18%,rgba(255,255,255,0) 60%,rgba(13,23,48,.28)),repeating-linear-gradient(90deg,rgba(255,255,255,.0) 0 11px,rgba(13,23,48,.16) 11px 12px,rgba(255,255,255,.65) 12px 13px),url(/media/textures/marble-white.jpg);background-size:auto,auto,700px}
+.plate{box-shadow:0 0 0 1px rgba(242,181,68,.35),24px 30px 70px rgba(0,0,0,.55)}
+
+/* ---------- renders ---------- */
+.hero-r1{background-color:#030918;background-image:linear-gradient(90deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.86) 30%,rgba(3,9,24,.35) 52%,rgba(3,9,24,0) 66%),linear-gradient(180deg,rgba(3,9,24,.7) 0%,rgba(3,9,24,0) 18%,rgba(3,9,24,0) 72%,rgba(6,20,51,1) 100%),url(/media/renders/R1-hero-stele.jpg);background-size:cover,cover,1640px auto;background-position:0 0,0 0,left 210px top 38%;background-repeat:no-repeat}
+.hero-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:70% center;z-index:0}
+.hero-veil{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.9) 32%,rgba(3,9,24,.45) 56%,rgba(3,9,24,.08) 72%,rgba(3,9,24,.35) 100%),linear-gradient(180deg,rgba(3,9,24,.55) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,0) 74%,rgba(6,20,51,.98) 100%)}
+.hero-body{position:relative;z-index:2}
+.r3{background:#030918 url(/media/renders/R3-atlantis-aerial.jpg) center/cover no-repeat}
+.r4{background:#061433 url(/media/renders/R4-vault-door.jpg) center 40%/cover no-repeat}
+.r5{background:#061433 url(/media/renders/R5-broken-key.jpg) 30% center/cover no-repeat}
+.r7{background:#061433 url(/media/renders/R7-recovery-seal.jpg) center/cover no-repeat}
+.herocity{background-color:#030918;background-image:linear-gradient(90deg,rgba(3,9,24,.98) 0%,rgba(3,9,24,.9) 45%,rgba(3,9,24,.45) 75%,rgba(3,9,24,.25) 100%),linear-gradient(180deg,rgba(3,9,24,.6),rgba(3,9,24,0) 30%,rgba(3,9,24,0) 70%,rgba(3,9,24,.95)),url(/media/renders/R3-atlantis-aerial.jpg);background-size:cover,cover,900px auto;background-position:0 0,0 0,right -120px center;background-repeat:no-repeat}
+.agora{background-color:#030918;background-image:radial-gradient(ellipse at 80% 0%,rgba(242,181,68,.14),rgba(3,9,24,0) 60%),linear-gradient(180deg,rgba(6,20,51,.6),rgba(3,9,24,1)),url(/media/textures/marble-night.jpg);background-size:cover,cover,cover}
+.statue{background:#0A1D47 url(/media/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+.statue-t{background:#0A1D47 url(/media/renders/R2B-agent-thetis.jpg) center 12%/cover no-repeat}
+.statue-h{background:#0A1D47 url(/media/renders/R2C-agent-hermes.jpg) 40% 10%/cover no-repeat}
+.statue-p{background:#0A1D47 url(/media/renders/R2-agent-naomi.jpg) center 18%/cover no-repeat}
+
+/* ---------- market ---------- */
+.stall{display:flex;flex-direction:column;gap:10px;padding:22px 22px 20px;background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.85),rgba(255,255,255,.6)),url(/media/textures/marble-white.jpg);background-size:cover,cover;box-shadow:18px 22px 44px rgba(13,23,48,.18),inset 0 0 0 1px rgba(13,23,48,.08);color:#0D1730}
+.stall-featured{box-shadow:0 0 0 2px #C9890C,18px 22px 44px rgba(13,23,48,.18)}
+.mchip{font:600 11.5px var(--font-ui);padding:3px 8px;background:#ECE6DA;color:#4A5675}
+.mchip-rating{background:#FCF0D4;color:#8A5A00}
+.search{display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(255,255,255,.06);border:1px solid #1F3A6E;color:#8FA2CC;font-size:15px}
+.search>span{flex:0 0 auto}
+.search input{background:none;border:0;outline:none;color:#E7ECF6;font:inherit;flex:1 1 auto;min-width:0;width:auto}
+.cat{font:700 11.5px var(--font-brand);letter-spacing:.16em;padding:9px 14px;border:1px solid #1F3A6E;color:#C9D3EA;background:none;cursor:pointer}
+.cat.on{background:#F2B544;color:#2A0D04;border-color:#F2B544}
+.pay{font:800 12px var(--font-brand);letter-spacing:.18em;padding:12px 16px;color:#2A0D04;text-align:center;text-decoration:none;border-radius:2px;display:block;border:0;cursor:pointer;width:100%}
+.field{padding:12px 14px;background:#0A1D47;border:1px solid #1F3A6E;font-size:14px;color:#C9D3EA;line-height:1.5}
+.field textarea{width:100%;background:none;border:0;outline:none;color:#F3EFE6;font:inherit;resize:vertical}
+
+/* ---------- timeline / rows ---------- */
+.tl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;position:relative}
+.step{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;position:relative;z-index:1}
+.step b{font:700 12px var(--font-brand);letter-spacing:.14em}
+.step span{font-size:12.5px;color:#8FA2CC}
+.dim{opacity:.35;filter:grayscale(1)}
+.mline{position:absolute;left:12%;right:12%;top:33px;height:2px;background:linear-gradient(90deg,#C9890C,#4FD1E8)}
+.chipx{font:600 12px var(--font-ui);padding:4px 10px;border-radius:2px}
+.row1{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid rgba(13,23,48,.12)}
+.groove{height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25),0 1px 0 rgba(255,255,255,.9)}
+.groove i{display:block;height:100%;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+
+/* ---------- buttons ---------- */
+.btno{text-decoration:none;padding:15px 24px;color:#2A0D04;font:800 13px var(--font-brand);letter-spacing:.18em;border-radius:2px;display:inline-block;border:0;cursor:pointer;background:none}
+.btnl{text-decoration:none;padding:14px 22px;font:700 13px var(--font-brand);letter-spacing:.18em;border-radius:2px;display:inline-block;background:none;cursor:pointer}
+.btn-ghost{border:1px solid rgba(243,239,230,.45);color:#F3EFE6}
+.btn-ghost-aegean{border:1px solid rgba(79,209,232,.55);color:#CFF5FB}
+.btn-ghost-ink{border:1px solid rgba(13,23,48,.35);color:#0D1730}
+
+/* ---------- masks / motion ---------- */
+@keyframes engrave{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes strike{from{transform:scale(1.15) rotate(4deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
+@keyframes open{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(3,9,24,.9),0 0 16px #4FD1E8}50%{box-shadow:0 0 0 3px rgba(3,9,24,.9),0 0 26px #4FD1E8}}
+.anim-engrave{animation:engrave var(--t-engrave) ease-out both}
+.anim-strike{animation:strike var(--t-strike) ease-out both}
+.anim-open{animation:open var(--t-open) ease-out both}
+.pulse{animation:pulse var(--t-pulse) ease-in-out infinite}
+
+@media (prefers-reduced-motion:reduce){
+  .anim-engrave,.anim-strike,.anim-open,.pulse{animation:none}
+  /* The hero keeps its poster: the loop never starts. */
+  .hero-video{display:none}
+  .hero-veil{background:linear-gradient(90deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.9) 32%,rgba(3,9,24,.45) 56%,rgba(3,9,24,.08) 72%,rgba(3,9,24,.35) 100%),linear-gradient(180deg,rgba(3,9,24,.55) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,0) 74%,rgba(6,20,51,.98) 100%),url(/media/hero-poster.jpg) 70% center/cover no-repeat}
+}
+
+/* ---------- mobile ---------- */
+@media (max-width:900px){
+  .wrap,.pg{padding:0 20px}
+  .g2,.g3,.g4,.hero-grid,.atl-grid,.court{grid-template-columns:minmax(0,1fr) !important}
+  .navlinks{display:none !important}
+  .stele-stage{height:420px !important}
+  .frieze{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .slabtitle{font-size:42px !important}
+  .mline{display:none !important}
+  .vault-banner{aspect-ratio:4/3 !important}
+  .vault-text{left:18px !important;right:18px;bottom:18px !important}
+  .vault-text b{font-size:16px !important}
+  .g4>div{padding:22px 0 !important}
+  .herocity{background-image:linear-gradient(180deg,rgba(3,9,24,.94) 0%,rgba(3,9,24,.82) 55%,rgba(3,9,24,.6) 80%,rgba(3,9,24,.95) 100%),url(/media/renders/R3-atlantis-aerial.jpg) !important;background-size:cover,760px auto !important;background-position:0 0,center bottom !important}
+  .hero-video{object-position:72% center}
+  .tl{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mline{display:none}
+}
+
+/* ---------- whitepaper ---------- */
+.wp-body{font:400 17px/1.78 var(--font-ui);color:#25304D}
+.wp-body h1{margin:0 0 18px;font:900 34px/1.1 var(--font-brand);letter-spacing:.06em;text-transform:uppercase;color:var(--carved);text-shadow:var(--carved-shadow)}
+.wp-body h1 small{display:block;font:700 12px var(--font-brand);letter-spacing:.3em;color:var(--gold-ink);text-shadow:none;margin-bottom:8px}
+.wp-body p{margin:0 0 18px}
+.wp-body a{color:var(--aegean-ink);text-decoration-thickness:1px;text-underline-offset:3px}
+.wp-body strong{color:var(--ink)}
+.wp-body code{font:13.5px var(--font-mono);background:rgba(6,20,51,.06);padding:1px 5px}
+.wp-body ul,.wp-body ol{margin:0 0 18px;padding-left:22px}
+.wp-body li{margin:4px 0}
+.wp-body table{width:100%;border-collapse:collapse;margin:8px 0 24px;font-size:14px;line-height:1.5;background:rgba(255,255,255,.55);box-shadow:12px 14px 30px rgba(13,23,48,.1),inset 0 0 0 1px rgba(13,23,48,.08)}
+.wp-body th{font:700 11px var(--font-brand);letter-spacing:.18em;text-transform:uppercase;color:var(--gold);background:var(--night);text-align:left;padding:11px 14px}
+.wp-body td{padding:10px 14px;border-top:1px solid rgba(13,23,48,.12);vertical-align:top}
+.wp-body section{padding:46px 0 26px;border-top:1px solid rgba(201,137,12,.35)}
+.wp-body section:first-child{border-top:0;padding-top:0}
+.toc{position:sticky;top:24px;display:flex;flex-direction:column}
+.toc a{display:grid;grid-template-columns:38px minmax(0,1fr);gap:6px;padding:7px 0;border-top:1px solid rgba(13,23,48,.1);text-decoration:none;color:#25304D;font-size:14px}
+.toc a b{font:700 12px var(--font-brand);color:var(--gold-ink)}
+.toc a.on{color:var(--ink);font-weight:700}
+
+@media (max-width:900px){
+  .wp-layout{grid-template-columns:minmax(0,1fr) !important;gap:32px !important}
+  .toc{display:none !important}
+}
+
+/* Hero title: the design breaks between the two sentences, never inside the first */
+.hero-title .leaf{white-space:nowrap}
+@media (max-width:900px){.hero-title .leaf{white-space:normal}}

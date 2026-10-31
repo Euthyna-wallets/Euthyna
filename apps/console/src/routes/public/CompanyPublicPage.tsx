@@ -1,41 +1,116 @@
+/**
+ * Public company page. Visual reference:
+ * design-handoff/site/source/13-company-page.html and screens/13-*.png
+ * Data: the registry entry, the vault (roles, members, budgets, shares) and
+ * the treasury, as on main. Two approved additions live here: the
+ * "Sells on Euthyna Market" block (#sells) and the HIRE ITS AGENTS button,
+ * which only appears when that block has something to show.
+ */
 import { useQuery } from "@tanstack/react-query";
-import type { CSSProperties, ReactNode } from "react";
+import { formatUnits } from "viem";
 import { Link, useParams } from "react-router-dom";
 
-import { chainView } from "../../lib/chain-view.js";
-import { formatUnits } from "viem";
+import { companyProfile, REGISTRY_ID, treasuryOf, type CompanyProfile, type Employee } from "../../lib/directory.js";
+import { market, slaText, tokenAmount, type MarketAgent } from "../../lib/market.js";
+import "../../styles/site.css";
+import { Kicker, SiteFooter, SiteHeader } from "./site/SiteChrome.js";
 
-import { companyProfile, REGISTRY_ID, treasuryOf, type DirectoryEntry } from "../../lib/directory.js";
+const BRAND = "Cinzel, serif";
+const MONO = "'JetBrains Mono', monospace";
 
-const NAVY = "#0F2A5C";
-const INK = "#0F1E3D";
-const MUTED = "#44557A";
-const mono = "'IBM Plex Mono', ui-monospace, monospace";
-const sans = "'IBM Plex Sans', sans-serif";
-const card: CSSProperties = { background: "#FFFFFF", color: INK, borderRadius: "20px", padding: "28px", display: "flex", flexDirection: "column", gap: "16px" };
-const chip = (bg: string, fg: string): CSSProperties => ({ background: bg, color: fg, borderRadius: "999px", padding: "5px 11px", fontSize: "12px", fontFamily: mono });
+const usd = (value: number) =>
+  value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value < 100 ? 2 : 0 });
+const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: value < 1 ? 6 : 2 });
 
-function Section({ title, tag, children }: { title: string; tag?: string | undefined; children: ReactNode }) {
+/** Statue by role, as the handoff assigns them. */
+function statueClass(role: string): string {
+  const name = role.toLowerCase();
+  if (name.includes("pay")) return "statue";
+  if (name.includes("treasur")) return "statue-t";
+  if (name.includes("revenu")) return "statue-h";
+  return "statue-p";
+}
+
+function AgentCard({ employee }: { employee: Employee }) {
+  const budget = employee.budgets[0];
+  const available = budget?.available ?? null;
+  const max = budget?.max ?? null;
+  const used = available !== null && max !== null ? Number(max) - Number(available) : null;
+  const width = used !== null && max ? Math.min(100, Math.max(0, (used / Number(max)) * 100)) : 0;
   return (
-    <section style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontFamily: mono, fontSize: "22px", color: NAVY }}>{title}</h2>
-        {tag ? <span style={{ fontFamily: mono, fontSize: "12px", color: MUTED }}>{tag}</span> : null}
+    <article className="slabw" style={{ display: "flex", flexDirection: "column" }}>
+      <div
+        className={statueClass(employee.role)}
+        style={{ height: 210, margin: "16px 16px 0", borderRadius: "100px 100px 2px 2px", boxShadow: "inset 0 0 0 3px rgba(243,239,230,.65), inset 0 10px 24px rgba(0,0,0,.45)" }}
+        role="img"
+        aria-label={`${employee.role}, a marble statue`}
+      />
+      <div style={{ padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+          <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".1em" }}>{employee.role.toUpperCase()}</b>
+          <span style={{ font: `700 10px ${BRAND}`, letterSpacing: ".16em", padding: "3px 8px", background: "#FCF0D4", color: "#8A5A00" }}>
+            {employee.enabled ? employee.title.slice(0, 22).toUpperCase() : "DISABLED"}
+          </span>
+        </div>
+        <span className="mono" style={{ fontSize: 11.5, color: "#66718C" }}>
+          {employee.members[0] ?? "no member"}
+        </span>
+        <div style={{ borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 6 }}>
+          {employee.details.slice(0, 2).map((line, index) => (
+            <div key={line} style={{ display: "grid", gridTemplateColumns: "26px minmax(0,1fr)", gap: 6, fontSize: 13.5, padding: "4px 0" }}>
+              <b style={{ font: `700 12px ${BRAND}`, color: "#8A5A00" }}>{["I", "II"][index]}</b>
+              <span>{line}</span>
+            </div>
+          ))}
+        </div>
+        {budget ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#4A5675" }}>
+              <span>
+                {budget.label} {budget.periodDays ? `· ${budget.periodDays} d` : ""}
+              </span>
+              <b className="mono" style={{ color: "#0D1730" }}>
+                {budget.available ?? "—"} / {budget.max ?? "—"} {budget.token ?? ""}
+              </b>
+            </div>
+            <div className="groove">
+              <i style={{ width: `${width}%` }} />
+            </div>
+          </div>
+        ) : null}
       </div>
-      {children}
+    </article>
+  );
+}
+
+function SellsBlock({ company, agents }: { company: CompanyProfile; agents: MarketAgent[] | undefined }) {
+  const mine = (agents ?? []).filter((agent) => agent.payTo === company.vault_id || agent.payTo === company.dao_id);
+  if (mine.length === 0) return null;
+  return (
+    <section id="sells" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Kicker color="#0B6E86">Sells on Euthyna Market</Kicker>
+      {mine.map((agent) => (
+        <Link key={agent.handle} to="/market" className="slabw" style={{ textDecoration: "none", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <b style={{ font: `800 17px ${BRAND}`, letterSpacing: ".03em" }}>{agent.title}</b>
+            <b className="mono" style={{ fontSize: 14, whiteSpace: "nowrap" }}>
+              {tokenAmount(agent.price)} {agent.symbol ?? "USDC"}
+            </b>
+          </div>
+          <span style={{ fontSize: 13, color: "#4A5675" }}>{agent.description}</span>
+          <span style={{ fontSize: 12, color: "#66718C" }}>
+            delivers in {slaText(agent.slaSeconds)} · {agent.delivered} delivered · <span style={{ color: "#0B6E86", fontWeight: 700 }}>Hire on the Market →</span>
+          </span>
+        </Link>
+      ))}
+      <span style={{ fontSize: 12.5, color: "#66718C" }}>Agents pay with a held cheque: {company.name} is paid only once it delivers.</span>
     </section>
   );
 }
 
-const usd = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value < 100 ? 2 : 0 });
-const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: value < 1 ? 6 : 2 });
-
 export function CompanyPublicPage() {
   const { dao = "" } = useParams();
-  const entry = useQuery({
-    queryKey: ["directory", dao],
-    queryFn: () => chainView<DirectoryEntry | null>(REGISTRY_ID, "get_company", { dao_id: dao }),
-  });
+  const entry = useQuery({ queryKey: ["directory", dao], queryFn: () => listEntry(dao) });
   const profile = useQuery({
     queryKey: ["company-profile", dao],
     queryFn: () => companyProfile(entry.data!),
@@ -48,91 +123,249 @@ export function CompanyPublicPage() {
     enabled: Boolean(company),
     refetchInterval: 60_000,
   });
+  const agents = useQuery({ queryKey: ["market-agents", "", "delivered"], queryFn: () => market.agents("", "delivered"), staleTime: 60_000 });
+  const sells = company ? (agents.data?.agents ?? []).filter((agent) => agent.payTo === company.vault_id || agent.payTo === company.dao_id) : [];
+  const holdings = treasury.data?.holdings ?? [];
+  const totalUsd = treasury.data?.totalUsd;
 
   return (
-    <div style={{ fontFamily: mono, color: "#F2F6FC", background: NAVY, minHeight: "100vh" }}>
-      <header style={{ maxWidth: "1240px", margin: "0 auto", padding: "18px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
-        <Link to="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none", color: "#F2F6FC" }}>
-          <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M4 26V8l11-5 11 5v18" stroke="#4FD1E8" strokeWidth="2.2" strokeLinejoin="round" /><path d="M10 26v-9l5 4 5-4v9" stroke="#F2B544" strokeWidth="2.2" strokeLinejoin="round" /></svg>
-          <span style={{ fontWeight: 700, fontSize: "18px" }}>Euthyna</span>
-        </Link>
-        <nav aria-label="Breadcrumb" style={{ fontSize: "14px", color: "#C9D6EE" }}><Link to="/#companies" style={{ color: "#4FD1E8" }}>AI companies</Link> / <span style={{ color: "#F2F6FC" }}>{entry.data?.name ?? dao}</span></nav>
-        <a href="/overview" style={{ background: "#4FD1E8", color: INK, textDecoration: "none", fontSize: "14px", fontWeight: 600, padding: "12px 20px", borderRadius: "10px" }}>Open App</a>
-      </header>
-
-      <main style={{ maxWidth: "1240px", margin: "0 auto", padding: "8px 24px 64px", display: "flex", flexDirection: "column", gap: "24px" }}>
-        {entry.isLoading ? <p>Reading {REGISTRY_ID}…</p> : null}
-        {entry.data === null ? <p>This company is not in the public directory.</p> : null}
-        {entry.error ? <p style={{ color: "#F7A99D" }}>{entry.error.message}</p> : null}
-        {entry.data ? (
-          <section style={{ ...card, background: "#16376F", color: "#F2F6FC", border: "1px solid rgba(201,214,238,.3)", flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", flex: "1 1 520px", minWidth: 0 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {company ? <span style={chip(company.vaultKeys === 0 ? "#DDF4F8" : "#FBE3D6", company.vaultKeys === 0 ? "#0B5E73" : "#8A2E12")}>{company.vaultKeys === 0 ? "vault: no one holds the keys" : `vault has ${company.vaultKeys} access keys`}</span> : null}
-                {company?.paused ? <span style={chip("#FBE3D6", "#8A2E12")}>paused by the council</span> : null}
-                <span style={chip("rgba(255,255,255,.12)", "#C9D6EE")}>NEAR testnet</span>
-              </div>
-              <h1 style={{ margin: 0, fontSize: "48px", lineHeight: 1.05, letterSpacing: "-0.02em" }}>{entry.data.name}</h1>
-              <p style={{ margin: 0, fontFamily: sans, fontSize: "18px", color: "#D3DEF2" }}>{entry.data.description || "No description yet."}</p>
+    <div className="site-root">
+      <section className="herocity" style={{ position: "relative" }}>
+        <SiteHeader />
+        <div className="pg g2" style={{ paddingTop: 34, paddingBottom: 70, display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,.8fr)", gap: 48, alignItems: "end" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <nav aria-label="Breadcrumb" style={{ fontSize: 13.5, color: "#8FA2CC" }}>
+              <Link to="/explore" style={{ color: "#8FE3F1" }}>
+                Atlantis
+              </Link>{" "}
+              / <span style={{ color: "#F3EFE6" }}>{entry.data?.name ?? dao}</span>
+            </nav>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {company ? (
+                <span className="chipx" style={{ background: company.vaultKeys === 0 ? "#DDF4F8" : "#FBE3D6", color: company.vaultKeys === 0 ? "#0B4E5E" : "#8A2E12" }}>
+                  {company.vaultKeys === 0 ? "✓ Vault: no one holds the keys" : `Vault: ${company.vaultKeys} access keys`}
+                </span>
+              ) : null}
+              {company?.paused ? (
+                <span className="chipx" style={{ background: "#FBE3D6", color: "#8A2E12" }}>
+                  Paused by the council
+                </span>
+              ) : null}
+              <span className="chipx" style={{ background: "rgba(255,255,255,.1)", color: "#C9D3EA" }}>
+                NEAR testnet
+              </span>
+              {company?.shares ? (
+                <span className="chipx" style={{ background: "#FCF0D4", color: "#8A5A00" }}>
+                  Selling shares
+                </span>
+              ) : null}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "12px", flex: "0 1 420px", minWidth: "260px" }}>
-              {[
-                ["TREASURY", treasury.data?.totalUsd != null ? usd(treasury.data.totalUsd) : "…", "#F2B544"],
-                ["PAID TO OWNERS", company ? (company.shares ? company.shares.distributedNear : "not yet") : "…", "#4FD1E8"],
-              ].map(([label, value, color]) => (
-                <div key={label} style={{ background: NAVY, borderRadius: "14px", padding: "14px 16px" }}>
-                  <div style={{ fontSize: "11px", color: "#A9BCE0" }}>{label}</div>
-                  <div style={{ fontSize: "20px", fontWeight: 600, marginTop: "4px", color }}>{value}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {profile.isLoading ? <p>Reading the company on NEAR…</p> : null}
-        {profile.error ? <p style={{ color: "#F7A99D" }}>{profile.error.message}</p> : null}
-        {company ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "24px", alignItems: "flex-start" }}>
-            <div style={{ flex: "1 1 520px", minWidth: 0 }}>
-              <Section title="Treasury" tag={treasury.data?.pricedAt ? "USD at market prices" : undefined}>
-                {treasury.isLoading ? <p style={{ margin: 0, fontFamily: sans, color: MUTED }}>Reading balances on NEAR, Base and Ethereum…</p> : null}
-                {treasury.data ? (
-                  <>
-                    <div style={{ fontSize: "40px", fontWeight: 700, color: NAVY }}>{treasury.data.totalUsd != null ? usd(treasury.data.totalUsd) : "price unavailable"}</div>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      {treasury.data.holdings.length === 0 ? <p style={{ margin: 0, fontFamily: sans, color: MUTED }}>Nothing yet.</p> : null}
-                      {treasury.data.holdings.map((holding) => (
-                        <div key={`${holding.symbol}-${holding.place}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <span style={{ fontSize: "16px", fontWeight: 600 }}>{amount(holding.amount)} {holding.symbol}</span>
-                            <span style={{ fontFamily: sans, fontSize: "13px", color: MUTED }}>{holding.place}</span>
-                          </div>
-                          <span style={{ fontSize: "15px", color: MUTED }}>{holding.usd != null ? usd(holding.usd) : ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p style={{ margin: 0, fontFamily: sans, fontSize: "12px", color: MUTED }}>Testnet tokens valued at mainnet prices (CoinGecko), for reference.</p>
-                  </>
-                ) : null}
-              </Section>
-            </div>
-            <div style={{ flex: "1 1 420px", minWidth: 0 }}>
-              <Section title="Revenue" tag={company.shares ? `shared every ${company.shares.epochHours} h` : undefined}>
-                {company.shares ? (
-                  <>
-                    <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", lineHeight: 1.6, color: MUTED }}>Paid so far to the owners who voted.</p>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}><span>NEAR</span><strong>{amount(Number(formatUnits(BigInt(company.shares.distributedNearRaw), 24)))}</strong></div>
-                      {company.shares.revenueToken ? <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #E4EAF4" }}><span>ETH (bridged from Base)</span><strong>{amount(Number(formatUnits(BigInt(company.shares.distributedToken), 18)))}</strong></div> : null}
-                    </div>
-                    <a href="/shares" style={{ textAlign: "center", background: NAVY, color: "#F2F6FC", textDecoration: "none", fontWeight: 600, padding: "14px", borderRadius: "999px" }}>Buy shares · {company.shares.priceNear}</a>
-                  </>
-                ) : <p style={{ margin: 0, fontFamily: sans, fontSize: "15px", lineHeight: 1.6, color: MUTED }}>This company has not issued shares yet, so it shares no revenue.</p>}
-              </Section>
+            <h1 style={{ margin: 0, font: `900 clamp(46px, 6vw, 86px)/0.95 ${BRAND}`, letterSpacing: ".04em" }}>
+              <span className="leaf">{(entry.data?.name ?? dao).toUpperCase()}</span>
+            </h1>
+            <p style={{ margin: 0, fontSize: 19, lineHeight: 1.55, color: "#C9D3EA", maxWidth: 600 }}>
+              {entry.data?.description || "No description in the registry."}
+            </p>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
+              <a href="#shares" className="ori btno">
+                BUY SHARES
+              </a>
+              {sells.length > 0 ? (
+                <a href="#sells" className="btnl btn-ghost-aegean">
+                  HIRE ITS AGENTS
+                </a>
+              ) : null}
             </div>
           </div>
-        ) : null}
-      </main>
+          <div className="ori" style={{ display: "grid", gridTemplateColumns: "1fr", boxShadow: "24px 30px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,230,190,.5)" }}>
+            <div style={{ padding: "18px 22px", borderBottom: "1px solid rgba(60,20,4,.25)" }}>
+              <Kicker color="rgba(32,10,3,.72)">Treasury</Kicker>
+              <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 34, color: "#200A03" }}>
+                {totalUsd != null ? usd(totalUsd) : "price unavailable"}
+              </b>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ padding: "16px 22px", borderRight: "1px solid rgba(60,20,4,.25)" }}>
+                <Kicker color="rgba(32,10,3,.72)">Paid to owners</Kicker>
+                <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 20, color: "#200A03" }}>
+                  {company?.shares ? `${amount(Number(formatUnits(BigInt(company.shares.distributedNearRaw), 24)))} NEAR` : "not yet"}
+                </b>
+              </div>
+              <div style={{ padding: "16px 22px" }}>
+                <Kicker color="rgba(32,10,3,.72)">Shares sold</Kicker>
+                <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 20, color: "#200A03" }}>
+                  {company?.shares ? `${company.shares.sold} / ${company.shares.total}` : "none"}
+                </b>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="fluteline" style={{ height: 10, opacity: 0.6 }} />
+      </section>
+
+      <section className="marble" style={{ padding: "72px 0 96px", color: "#0D1730" }}>
+        <div className="pg" style={{ display: "flex", flexDirection: "column", gap: 56 }}>
+          {entry.isLoading ? <p style={{ margin: 0, color: "#4A5675" }}>Reading {REGISTRY_ID}…</p> : null}
+          {entry.data === null ? <p style={{ margin: 0, color: "#4A5675" }}>This company is not in the public directory.</p> : null}
+          {entry.error ? <p style={{ margin: 0, color: "#A8381E" }}>{entry.error.message}</p> : null}
+
+          {company ? (
+            <>
+              <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.15fr) minmax(0,.85fr)", gap: 28, alignItems: "start" }}>
+                <section className="slabw" style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <Kicker color="#8A5A00">Treasury</Kicker>
+                    <span style={{ fontSize: 12, color: "#66718C" }}>USD at market prices</span>
+                  </div>
+                  <b className="mono" style={{ fontSize: 40, margin: "4px 0 6px" }}>
+                    {totalUsd != null ? usd(totalUsd) : "—"}
+                  </b>
+                  {treasury.isLoading ? <span style={{ fontSize: 14, color: "#4A5675" }}>Reading balances…</span> : null}
+                  {holdings.length === 0 && !treasury.isLoading ? <span style={{ fontSize: 14, color: "#4A5675" }}>Nothing yet.</span> : null}
+                  {holdings.map((holding) => (
+                    <div key={`${holding.symbol}-${holding.place}`} className="row1">
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <b className="mono" style={{ fontSize: 15 }}>
+                          {amount(holding.amount)} {holding.symbol}
+                        </b>
+                        <span style={{ fontSize: 12.5, color: "#66718C" }}>{holding.place}</span>
+                      </div>
+                      <span className="mono" style={{ fontSize: 14, color: "#4A5675" }}>
+                        {holding.usd != null ? usd(holding.usd) : ""}
+                      </span>
+                    </div>
+                  ))}
+                  <span style={{ fontSize: 12, color: "#66718C", marginTop: 8 }}>Testnet tokens valued at mainnet prices (CoinGecko), for reference.</span>
+                </section>
+
+                <section id="shares" className="nightp" style={{ padding: "24px 26px", display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <Kicker>Shares and revenue</Kicker>
+                    <span style={{ fontSize: 12, color: "#8FA2CC" }}>{company.shares ? `shared every ${company.shares.epochHours} h` : "no shares yet"}</span>
+                  </div>
+                  {company.shares ? (
+                    <>
+                      <b style={{ font: `800 22px ${BRAND}`, letterSpacing: ".1em", color: "#fff" }}>
+                        {company.name.toUpperCase()} SHARES · {company.shares.symbol}
+                      </b>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: "1px solid #1F3A6E" }}>
+                        <div style={{ padding: "12px 14px", borderRight: "1px solid #1F3A6E" }}>
+                          <Kicker color="#8FA2CC" style={{ fontSize: 10 }}>
+                            Price
+                          </Kicker>
+                          <b className="mono" style={{ display: "block", marginTop: 4 }}>
+                            {company.shares.priceNear} NEAR
+                          </b>
+                        </div>
+                        <div style={{ padding: "12px 14px" }}>
+                          <Kicker color="#8FA2CC" style={{ fontSize: 10 }}>
+                            Sold
+                          </Kicker>
+                          <b className="mono" style={{ display: "block", marginTop: 4 }}>
+                            {company.shares.sold} / {company.shares.total}
+                          </b>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 14, color: "#C9D3EA" }}>
+                        Paid so far to the owners who voted:{" "}
+                        <b className="mono" style={{ color: "#fff" }}>
+                          {amount(Number(formatUnits(BigInt(company.shares.distributedNearRaw), 24)))} NEAR
+                        </b>
+                        {company.shares.revenueToken ? (
+                          <>
+                            {" "}
+                            and{" "}
+                            <b className="mono" style={{ color: "#fff" }}>
+                              {amount(Number(formatUnits(BigInt(company.shares.distributedToken), 18)))}
+                            </b>
+                          </>
+                        ) : null}
+                        .
+                      </span>
+                      <span style={{ fontSize: 13, color: "#A9B6D6" }}>Locked shares vote on company calls and transfers. Each epoch, revenue goes to the holders who voted.</span>
+                      <Link to="/shares" className="ori btno" style={{ textAlign: "center" }}>
+                        BUY SHARES · {company.shares.priceNear} NEAR
+                      </Link>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 15, color: "#C9D3EA" }}>This company has not issued shares yet, so it shares no revenue.</span>
+                  )}
+                </section>
+              </div>
+
+              {company.employees.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <Kicker color="#8A5A00">Its agents, and the law they work under</Kicker>
+                    <h2 className="h2 carved">
+                      {company.employees.length} {company.employees.length === 1 ? "agent" : "agents"}. One law.
+                    </h2>
+                    <p style={{ margin: 0, fontSize: 16, color: "#4A5675", maxWidth: 760 }}>
+                      Each line is a role the owners voted, read from the vault. Anything else an agent asks for is refused before it is signed.
+                    </p>
+                  </div>
+                  <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 22 }}>
+                    {company.employees.map((employee) => (
+                      <AgentCard key={employee.role} employee={employee} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0,.9fr) minmax(0,1.1fr)", gap: 28, alignItems: "start" }}>
+                <section className="slabw" style={{ padding: "22px 24px", display: "flex", flexDirection: "column" }}>
+                  <Kicker color="#8A5A00" style={{ marginBottom: 8 }}>
+                    Who governs · {company.council.length} council {company.council.length === 1 ? "seat" : "seats"}
+                  </Kicker>
+                  {company.council.map((member) => (
+                    <div key={member} className="row1">
+                      <span className="mono" style={{ fontSize: 13 }}>
+                        {member}
+                      </span>
+                      <span style={{ fontSize: 12, color: "#66718C" }}>council</span>
+                    </div>
+                  ))}
+                  <Kicker color="#8A5A00" style={{ margin: "18px 0 8px" }}>
+                    Accounts and wallets
+                  </Kicker>
+                  {company.wallets.map((wallet) => (
+                    <div key={wallet.chainId} className="row1">
+                      <span style={{ font: `700 11px ${BRAND}`, letterSpacing: ".14em", color: "#4A5675" }}>{wallet.name.toUpperCase()}</span>
+                      <span className="mono" style={{ fontSize: 12.5 }}>
+                        {wallet.address}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="row1">
+                    <span style={{ font: `700 11px ${BRAND}`, letterSpacing: ".14em", color: "#4A5675" }}>VAULT · NEAR</span>
+                    <span className="mono" style={{ fontSize: 12.5 }}>
+                      {company.vault_id}
+                    </span>
+                  </div>
+                  <div className="row1">
+                    <span style={{ font: `700 11px ${BRAND}`, letterSpacing: ".14em", color: "#4A5675" }}>DAO · NEAR</span>
+                    <span className="mono" style={{ fontSize: 12.5 }}>
+                      {company.dao_id}
+                    </span>
+                  </div>
+                </section>
+                <SellsBlock company={company} agents={agents.data?.agents} />
+              </div>
+            </>
+          ) : null}
+
+          {profile.isLoading ? <p style={{ margin: 0, color: "#4A5675" }}>Reading the company on NEAR…</p> : null}
+          {profile.error ? <p style={{ margin: 0, color: "#A8381E" }}>{profile.error.message}</p> : null}
+        </div>
+      </section>
+      <SiteFooter />
     </div>
   );
+}
+
+/** The registry entry for one company: the directory list filter, no new call shape. */
+async function listEntry(dao: string) {
+  const { listCompanies } = await import("../../lib/directory.js");
+  const all = await listCompanies();
+  return all.find((entry) => entry.dao_id === dao) ?? null;
 }
