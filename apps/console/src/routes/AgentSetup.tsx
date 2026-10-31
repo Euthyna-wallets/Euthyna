@@ -30,8 +30,8 @@ type Pairing = {
 };
 
 const INSTALL_URL = "https://raw.githubusercontent.com/joindefi/euthyna-signer/main/install.sh";
-/** The MCP server, packed and served by this site until @euthyna/mcp is on npm (npx installs from the URL). */
-const MCP_PACKAGE = `${typeof window === "undefined" ? "https://euthyna.io" : window.location.origin}/mcp/euthyna-mcp.tgz`;
+/** Until @euthyna/mcp is on npm, the MCP server runs from a clone of the repository (pnpm install once). */
+const MCP_DIR = "~/MandateOS/packages/mcp";
 
 /** What the vault gives a new owner, in a private EUTHYNA company. */
 const HAVE_LINES = [
@@ -288,10 +288,10 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
 /** euthyna-signer holds the key and the API key: the MCP config has no secret. */
 function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDone?: () => void }) {
   const [client, setClient] = useState<"claude" | "json">("claude");
-  const claude = `claude mcp add euthyna --env EUTHYNA_AGENT=${props.agent.nearAccountId} -- npx -y ${MCP_PACKAGE}`;
+  const claude = `claude mcp add euthyna --env EUTHYNA_AGENT=${props.agent.nearAccountId} -- pnpm --silent --dir ${MCP_DIR} exec tsx src/server.ts`;
   const json = JSON.stringify({
     mcpServers: {
-      euthyna: { command: "npx", args: ["-y", MCP_PACKAGE], env: { EUTHYNA_AGENT: props.agent.nearAccountId } },
+      euthyna: { command: "pnpm", args: ["--silent", "--dir", MCP_DIR, "exec", "tsx", "src/server.ts"], env: { EUTHYNA_AGENT: props.agent.nearAccountId } },
     },
   }, null, 2);
   const shown = client === "claude" ? claude : json;
@@ -347,7 +347,7 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
               {shown}
             </pre>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderTop: "1px solid #1F3A6E", flexWrap: "wrap" }}>
-              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>@euthyna/mcp on npm · NEXT (served from this site meanwhile)</span>
+              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>From a clone of github.com/Euthyna-wallets/MandateOS (git clone, pnpm install) · @euthyna/mcp on npm: NEXT</span>
               <span style={{ fontSize: 12, color: "#A9B6D6" }}>until it is published, build the MCP server from the repository</span>
               <button
                 type="button"

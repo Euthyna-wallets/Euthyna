@@ -53,7 +53,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 
 | Claim | Status | Proof |
 | --- | --- | --- |
-| `npx -y @euthyna/mcp` | NEXT | Not on npm yet. The same package is served at `https://euthyna.io/mcp/euthyna-mcp.tgz` (`npx -y <that URL>`), built by `pnpm --filter @mandateos/mcp pack:console`; started this way against the real euthyna-signer on Oct 31, 2026 (14 tools listed). |
+| `npx -y @euthyna/mcp` | NEXT | Not on npm yet. The server runs from a clone of the repository (`pnpm --silent --dir <clone>/packages/mcp exec tsx src/server.ts`, see [docs/api.md](./docs/api.md)); started this way against the real euthyna-signer on Oct 31, 2026 (14 tools listed). |
 
 ## Use cases (site section "Use cases")
 
