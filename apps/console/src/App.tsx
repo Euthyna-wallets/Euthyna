@@ -9,7 +9,6 @@ import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
 import { SharesPage } from "./routes/SharesPage.js";
 import { OnboardingScreen } from "./routes/OnboardingPage.js";
-import { ChoosePathPage } from "./routes/ChoosePathPage.js";
 import { SignIn } from "./routes/SignIn.js";
 import { WalletPage } from "./routes/WalletPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
@@ -55,8 +54,9 @@ function Gate() {
   if (!session.data) return <SignIn />;
   if (organizations.isLoading) return <Splash />;
   if (organizations.error) return <Splash error={organizations.error.message} />;
-  if (!organizations.data?.length && location.pathname !== "/onboarding" && location.pathname !== "/choose-path") {
-    return <Navigate to="/choose-path" replace />;
+  // One setup path since 31 October: a member without a company goes straight to it.
+  if (!organizations.data?.length && location.pathname !== "/onboarding") {
+    return <Navigate to="/onboarding" replace />;
   }
   return <Outlet />;
 }
@@ -77,7 +77,7 @@ export function App() {
           {/* Signed in, but not a member yet: the new account of a founder. */}
           <Route path="/recover" element={<RecoverPage />} />
           <Route element={<Gate />}>
-            <Route path="/choose-path" element={<ChoosePathPage />} />
+            <Route path="/choose-path" element={<Navigate to="/onboarding" replace />} />
             {/* Setup is a full screen of its own (design-handoff/app 07 and 17), outside the console shell. */}
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route element={<Layout />}>
