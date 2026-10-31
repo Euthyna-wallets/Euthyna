@@ -8,4 +8,4 @@ if [ -z "${MARKET_DELIVERY_TOKEN:-}" ]; then
   echo '{"event":"worker.idle","reason":"MARKET_DELIVERY_TOKEN is not set"}'
   exec sleep infinity
 fi
-exec node --import tsx src/main.ts
+exec node dist/main.js
