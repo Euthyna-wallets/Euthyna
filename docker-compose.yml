@@ -85,10 +85,10 @@ services:
       timeout: 3s
       retries: 20
 
-  # Euthyna Market worker for one listing (optional): `docker compose --profile market up market-worker`.
+  # Euthyna Market worker for one listing. Started with the stack like the rest:
+  # without MARKET_DELIVERY_TOKEN it stays idle instead of crash-looping.
   # No NEAR key, no database. Read-only except /work; limited CPU, memory and processes.
   market-worker:
-    profiles: ["market"]
     build:
       context: .
       dockerfile: apps/market-worker/Dockerfile
@@ -104,6 +104,8 @@ services:
       # Point these at an egress proxy that only allows DeFiLlama, explorers, GitHub, search and fetch.
       HTTPS_PROXY: ${MARKET_WORKER_EGRESS_PROXY:-}
       HTTP_PROXY: ${MARKET_WORKER_EGRESS_PROXY:-}
+    # No delivery token yet: idle peacefully (see docker-entrypoint.sh).
+    command: ["sh", "/app/apps/market-worker/docker-entrypoint.sh"]
     read_only: true
     tmpfs:
       - /work:size=256m,mode=1777
