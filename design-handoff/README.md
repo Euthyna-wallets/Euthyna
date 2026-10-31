@@ -1,8 +1,8 @@
 # EUTHYNA · design handoff (direction « Marbre et orichalque »)
 
-Version du 30 octobre 2026. Écrit pour Valentin et pour l'IA qui code. Interface en anglais, consignes en français.
+Version du 31 octobre 2026 (ajouts du 31 : section Market de l'accueil et pages publiques société, Market, tâche, annuaire). Écrit pour Valentin et pour l'IA qui code. Interface en anglais, consignes en français.
 
-> **Cette branche (`design/handoff`) ne se fusionne jamais.** Elle sert de référence de design. On copie dans `main` uniquement ce qui est utile (images, matières, vidéo) et on code les écrans dans une branche de travail habituelle.
+> **Ce dossier sert de référence de design.** On n'importe rien depuis ce dossier dans le code de l'app, sauf les images, les matières et la vidéo (section 3). Les écrans se codent dans les composants React existants.
 
 ## 1. Par où commencer
 
@@ -26,9 +26,9 @@ Tous les dossiers ont la même forme :
 
 Le canevas de design complet (toutes les planches côte à côte) : https://claude.ai/artifact/F8D8pMuUBrbkmpCvZNnJze
 
-**Une seule source de vérité : cette branche.**
+**Une seule source de vérité : ce dossier.**
 - Chaque `source/*.html` est l'export exact d'une planche du canevas Claude Design. Chaque `screens/*.png` est la capture de ce même HTML. Il n'y a donc pas deux versions qui pourraient diverger.
-- Si une planche change dans le canevas, cette branche est mise à jour par un nouveau commit. On ne code jamais directement depuis le canevas.
+- Si une planche change dans le canevas, ce dossier est mis à jour par une pull request. On ne code jamais directement depuis le canevas.
 - **Les fichiers HTML ne sont pas du code de production.** Ce sont des maquettes figées : largeur fixe (1440 px pour l'app), styles en ligne, données d'exemple, aucun appel API.
 - On les lit pour reproduire le rendu dans les composants React existants de la console, branchés sur les vraies données. On ne les copie pas dans l'app.
 
@@ -49,7 +49,7 @@ Le backend est le même. **Seul l'onboarding diffère** :
 
 ## 3. Ce qu'on copie dans `main`, et où
 
-| Depuis cette branche | Vers (proposition) | Usage |
+| Depuis ce dossier | Vers (proposition) | Usage |
 | --- | --- | --- |
 | `site/assets/video/hero-loop.mp4` et `hero-poster.jpg` | `apps/console/public/media/` | Fond du héros du site, muet et en boucle. Avec `prefers-reduced-motion`, afficher le poster. |
 | `brand/assets/renders/*.jpg` | `apps/console/public/media/renders/` | Les rendus photo : stèle, statues des agents, Atlantis, coffre, clé, sceau, colonne, Plutus. |
@@ -79,7 +79,16 @@ Les sources HTML ne se copient pas telles quelles. Elles servent de référence 
 | 15 suppliers | `/suppliers` | `routes/SuppliersPage.tsx` |
 | 12 hq-mobile · 13 activity-mobile | toutes, en 390 px | — |
 
-Pour le site public, voir `site/00-consignes-site.md`. Le React actuel est sur la branche `design/atlantis-site` (`apps/console/src/routes/public/atlantis/`) : la structure et les textes sont bons, il faut lui appliquer le nouveau style.
+Pour le site public, voir `site/00-consignes-site.md`. Le React est sur main, dans `apps/console/src/routes/public/`. La structure et les textes sont bons ; au 31 octobre, il a encore l'ancien style.
+
+| Écran (`site/screens/`) | Route | Fichier sur main |
+| --- | --- | --- |
+| 00 à 11 accueil (dont 09 Market) | `/` | `public/atlantis/AtlantisLanding.tsx` |
+| 12 whitepaper | `/whitepaper` | `public/atlantis/WhitepaperPage.tsx` |
+| 13 company-page | `/c/:dao` | `public/CompanyPublicPage.tsx` |
+| 14 market | `/market` | `public/MarketPage.tsx` |
+| 15 market-task | `/market/task/:id` | `public/MarketTaskPage.tsx` |
+| 16 atlantis-directory | `/explore` | `public/ExplorePage.tsx` |
 
 ## 5. Règles à ne pas casser
 
