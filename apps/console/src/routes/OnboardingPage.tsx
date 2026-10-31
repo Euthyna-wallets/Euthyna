@@ -187,10 +187,15 @@ export function OnboardingPage() {
         gap: "clamp(18px, 2.4vw, 30px)",
         padding: "clamp(22px, 2.8vw, 34px) clamp(20px, 3.5vw, 56px) clamp(30px, 4vw, 56px)",
         backgroundColor: "#030918",
+        // Atlantis path: the city. EUTHYNA path: the stele of the law, no city (the vault stays private).
         backgroundImage:
-          "radial-gradient(60% 70% at 78% 40%, rgba(3,9,24,0) 0%, rgba(3,9,24,.6) 60%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.96) 0%, rgba(3,9,24,.85) 45%, rgba(3,9,24,.55) 100%), url(/media/renders/R3-atlantis-aerial.jpg)",
-        backgroundSize: "cover, cover, 1100px auto",
-        backgroundPosition: "0 0, 0 0, right -180px center",
+          path === "euthyna"
+            ? "linear-gradient(90deg, rgba(3,9,24,.97) 0%, rgba(3,9,24,.9) 45%, rgba(3,9,24,.5) 100%), linear-gradient(180deg, rgba(3,9,24,.3) 0%, rgba(3,9,24,0) 30%, rgba(3,9,24,.85) 100%), url(/media/renders/R1-hero-stele.jpg)"
+            : "radial-gradient(60% 70% at 78% 40%, rgba(3,9,24,0) 0%, rgba(3,9,24,.6) 60%, rgba(3,9,24,.96) 100%), linear-gradient(90deg, rgba(3,9,24,.96) 0%, rgba(3,9,24,.85) 45%, rgba(3,9,24,.55) 100%), url(/media/renders/R3-atlantis-aerial.jpg)",
+        backgroundSize: path === "euthyna" ? "cover, cover, 1200px auto" : "cover, cover, 1100px auto",
+        backgroundPosition: path === "euthyna" ? "0 0, 0 0, right -260px center" : "0 0, 0 0, right -180px center",
+        // Fill the screen below the header: no strip of marble under the setup.
+        minHeight: "calc(100vh - 92px)",
         backgroundRepeat: "no-repeat",
         color: "#E7ECF6",
         // Bleed over the marble ground, without overflowing it on a narrow screen.
