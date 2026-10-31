@@ -5,8 +5,8 @@
  * remembered, and the last step is Plug in instead of City. Data, queries and handlers are main's.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
@@ -160,6 +160,14 @@ export function OnboardingPage() {
             ? "role"
             : "done";
   const loading = organizations.isLoading || (Boolean(active) && !creating && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
+  // A member whose company is already set up has nothing to do here (OPEN APP, a site button, a bookmark):
+  // the first stage read decides. Reaching "done" during this visit still shows the closing screen.
+  // On Atlantis, a company that already works (agents with a role) but never issued shares counts as set up too.
+  const firstStage = useRef<Stage | null>(null);
+  if (!loading && firstStage.current === null) {
+    const working = activeAgents.length > 0 && (roles.data?.roles.length ?? 0) > 0;
+    firstStage.current = stage === "shares" && working ? "done" : stage;
+  }
   const firstAgent = activeAgents[0];
   const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
 
@@ -180,6 +188,8 @@ export function OnboardingPage() {
     role: "Write its role",
     done: "Your AI company is live",
   };
+
+  if (firstStage.current === "done" && !creating) return <Navigate to="/overview" replace />;
 
   return (
     <div

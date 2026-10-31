@@ -195,3 +195,10 @@
 .onb button.primary{background-color:#B4532E;background-image:url(/media/textures/orichalcum.jpg);background-size:cover;color:#2A0D04;border:0;border-radius:2px;font:800 12px var(--font-brand);letter-spacing:.18em;text-transform:uppercase;padding:12px 20px}
 .onb a:not([class]){color:var(--aegean-ink)}
 .onb.onb-atlantis a:not([class]){color:var(--aegean-link)}
+
+/* ---------- splash while the session loads ---------- */
+.splash{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background-color:#061433;background-image:radial-gradient(60% 50% at 50% 45%,rgba(242,181,68,.10),rgba(3,9,24,0) 70%),linear-gradient(180deg,rgba(6,20,51,.8),rgba(3,9,24,.96)),url(/media/textures/marble-night.jpg);background-size:cover,cover,700px;color:#C9D3EA;font-family:var(--font-ui)}
+.splash svg{animation:pulse-soft 1.6s ease-in-out infinite}
+.splash b{font:700 18px var(--font-brand);letter-spacing:.3em;color:#F3EFE6}
+.splash span{font-size:13px;color:#8FA2CC;max-width:420px;text-align:center}
+.splash[role=alert] span{color:#F4A28C}

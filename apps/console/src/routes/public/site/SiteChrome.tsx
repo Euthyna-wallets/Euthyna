@@ -49,7 +49,7 @@ export function SiteHeader() {
         <Link to="/whitepaper" style={{ textDecoration: "none" }}>Whitepaper</Link>
       </nav>
       <Link
-        to="/onboarding"
+        to="/overview"
         style={{ marginLeft: 18, textDecoration: "none", padding: "11px 20px", border: "1px solid rgba(242,181,68,.6)", color: "#F2B544", font: "700 13px Cinzel, serif", letterSpacing: ".18em", borderRadius: 2 }}
       >
         OPEN APP

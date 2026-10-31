@@ -53,7 +53,8 @@ export function SignIn() {
       const signed = await signNearMessage(challenge);
       if (signed.accountId !== accountId) throw new Error(`The wallet signed as ${signed.accountId}, not ${accountId}`);
       await authPost("/sign-in/near", { accountId, publicKey: signed.publicKey, signature: signed.signature, nonceBase64: challenge.nonceBase64 });
-      window.location.assign(window.location.pathname === "/" ? "/onboarding" : window.location.pathname);
+      // Back to where the person was going; the console sends a member with no company to the choice of path.
+      window.location.assign(window.location.pathname === "/" ? "/overview" : window.location.pathname + window.location.search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
