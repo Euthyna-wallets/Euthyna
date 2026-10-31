@@ -111,3 +111,63 @@
   .app-topbar .company-name{font-size:26px}
   .g2,.g3,.g4{grid-template-columns:minmax(0,1fr) !important}
 }
+
+/* ---------- shell fixes: the legacy navy theme (styles.css) must not reach the new console ----------
+   styles.css is still loaded for components not yet redrawn; these rules win over it inside the shell. */
+#root .app-shell{display:flex;grid-template-columns:none}
+.ground > main{max-width:none;padding:0;margin:0;width:100%}
+.ground .app-topbar{background:none;border:0;margin:0;padding:0;justify-content:flex-start;align-items:center;row-gap:10px}
+.ground .app-topbar .tesnet-pill{margin-left:auto}
+.ground a:not([class]){color:var(--aegean-ink)}
+.ground a.btn-ori,.ground a.btn-line,.ground .section-link{text-decoration:none}
+
+/* wallet bar and signing inbox, in the header */
+.ground .wallet-bar{display:flex;align-items:center;gap:8px}
+.ground .wallet-identity{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid rgba(13,23,48,.18);border-radius:999px;padding:5px 6px 5px 12px;color:var(--ink-2);min-height:0}
+.ground .wallet-identity::before{background:#C9CFDA}
+.ground .wallet-identity.connected::before{background:var(--aegean-ink);box-shadow:0 0 0 3px rgba(79,209,232,.2)}
+.ground .wallet-network{color:var(--gold-ink);font:700 10px var(--font-brand);letter-spacing:.14em}
+.ground .wallet-identity strong{color:var(--ink);font:500 12px var(--font-mono)}
+.ground .wallet-identity button.ghost,.ground .wallet-identity button.compact{background:var(--ink) !important;color:#fff !important;border:0 !important;border-radius:999px !important;padding:5px 12px !important;font:700 11px var(--font-ui) !important;min-height:0}
+.ground .inbox-trigger{background:var(--gold-bg) !important;color:var(--gold-ink) !important;border:1px solid rgba(201,137,12,.45) !important;border-radius:999px !important;font:700 12px var(--font-ui) !important;padding:6px 14px !important;min-height:0 !important}
+.ground .inbox-trigger span{background:var(--gold);color:var(--night)}
+
+/* ---------- components not yet redrawn: same materials as the rest ---------- */
+.ground .panel,.ground .card,.ground .metric,.ground .step{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.75),rgba(255,255,255,.45)),url(/media/textures/marble-white.jpg);background-size:cover,900px;border:0;border-radius:2px;box-shadow:var(--shadow-slab);color:var(--ink);padding:22px 24px;margin:0}
+.ground .panel h2,.ground .card h2,.ground .panel h3,.ground .card h3,.ground .decision h3{font:700 11px var(--font-brand);letter-spacing:.26em;text-transform:uppercase;color:var(--gold-ink);margin:0 0 12px}
+.ground .panel-head{margin-bottom:12px}
+.ground .muted{color:var(--ink-3)}
+.ground .eyebrow{font:700 11px var(--font-brand);letter-spacing:.26em;text-transform:uppercase;color:var(--gold-ink)}
+.ground .pill,.ground .chip{border:1px solid rgba(13,23,48,.18);color:var(--ink-2);background:#fff;border-radius:999px}
+.ground .notice,.ground .alert.warning{background:var(--gold-bg);border:1px solid rgba(201,137,12,.4);color:var(--gold-ink);border-radius:2px}
+.ground .alert.error,.ground .state.error{background:#FBE3D6;border:1px solid rgba(217,87,59,.5);color:var(--terra-ink);border-radius:2px}
+.ground .alert.success{background:var(--aegean-bg);border:1px solid rgba(11,110,134,.35);color:var(--aegean-ink);border-radius:2px}
+.ground .state{background:rgba(255,255,255,.6);border:1px dashed rgba(13,23,48,.2);color:var(--ink-2);border-radius:2px}
+.ground .status{background:#ECE6DA;color:var(--ink-2);border-radius:2px;font:600 11.5px var(--font-ui)}
+.ground .status-active,.ground .status-confirmed,.ground .status-approved{background:var(--aegean-bg);color:var(--aegean-ink)}
+.ground .status-escalated,.ground .status-pending{background:var(--gold-bg);color:var(--gold-ink)}
+.ground .status-rejected,.ground .status-reverted,.ground .status-cancelled{background:#FBE3D6;color:var(--terra-ink)}
+.ground table td,.ground table th{border-bottom:1px solid rgba(13,23,48,.12);color:var(--ink);font-size:14px}
+.ground table th{font:700 10.5px var(--font-brand);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.ground pre,.ground code.block{background:var(--night);color:#E7ECF6;border:0;border-radius:2px}
+.ground label:not(.field-app label){color:var(--ink-3);font:700 10.5px var(--font-brand);letter-spacing:.14em;text-transform:uppercase}
+.ground input:not([type=checkbox]):not([type=radio]),.ground select,.ground textarea{background:#fff;color:var(--ink);border:1px solid rgba(13,23,48,.2);border-radius:2px;font:14px var(--font-ui);min-height:0;padding:10px 12px;text-transform:none;letter-spacing:0}
+.ground input::placeholder,.ground textarea::placeholder{color:#9AA3B5}
+.ground button.primary,.ground a.button.primary{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.2),rgba(0,0,0,0) 40%),url(/media/textures/orichalcum.jpg);background-size:cover,cover;color:#2A0D04;border:0;border-radius:2px;font:800 12px var(--font-brand);letter-spacing:.18em;text-transform:uppercase;padding:12px 20px;min-height:0}
+.ground button.primary:hover:not(:disabled){filter:brightness(1.06);background-color:#B4532E}
+.ground button.secondary,.ground button.ghost:not(.compact),.ground a.button:not(.primary){background:none !important;border:1px solid rgba(13,23,48,.35);color:var(--ink);border-radius:2px;font:700 11.5px var(--font-brand);letter-spacing:.16em;text-transform:uppercase;padding:10px 16px;min-height:0}
+.ground button:disabled{opacity:.45}
+.ground details summary{cursor:pointer;font:600 13px var(--font-ui);color:var(--ink-2)}
+.ground .mono,.ground code{font-family:var(--font-mono)}
+.ground .break,.ground code,.ground .mono{overflow-wrap:anywhere}
+.ground .decision{background:rgba(255,255,255,.55);border:0;border-left:3px solid var(--gold);border-radius:2px;padding:14px 16px;box-shadow:none;display:flex;flex-direction:column;gap:8px}
+.ground .decision h3{font:700 16px/1.35 var(--font-brand);letter-spacing:.04em;text-transform:none;color:var(--ink);margin:4px 0 0}
+.ground ul.plain{list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:6px}
+.ground .stack{display:flex;flex-direction:column;gap:12px}
+.ground li,.ground p{overflow-wrap:anywhere}
+@media (max-width:900px){
+  .mline{display:none !important}
+  .side .nav a.active{background:#F3EFE6;color:#0D1730}
+  .ground h3{font-size:17px !important}
+  .ground .page-title{font-size:28px}
+}

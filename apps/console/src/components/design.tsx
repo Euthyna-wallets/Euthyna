@@ -19,7 +19,9 @@ const SIZES = { 32: 8, 38: 7.5, 44: 7.5, 52: 7, 80: 11 } as const;
 export function Seal({ word, size = 44, tone }: { word: SealWord | string; size?: keyof typeof SIZES | number; tone?: "refused" | "expired" | undefined }) {
   const pixels = typeof size === "number" ? size : Number(size);
   const refused = tone === "refused" || word === "REFUSED" || word === "VETOED" || word === "FAILED";
-  const fontSize = SIZES[(pixels as keyof typeof SIZES)] ?? Math.max(6, pixels / 7);
+  // The word must sit inside the disc: Cinzel capitals take about .8em each, and the disc leaves ~70% of its width.
+  const preferred = SIZES[(pixels as keyof typeof SIZES)] ?? Math.max(6, pixels / 7);
+  const fontSize = Math.max(4.5, Math.min(preferred, (pixels * 0.7) / (0.8 * Math.max(1, String(word).length))));
   return (
     <div className={`app-seal${refused ? " refused" : ""}${tone === "expired" ? " expired" : ""}${pixels >= 72 ? " big" : ""}`} style={{ width: pixels, height: pixels }} role="img" aria-label={word}>
       <span style={{ fontSize }}>{word}</span>
@@ -80,6 +82,11 @@ export function Niche({ role, state = "working", height = 132, width }: { role: 
 }
 
 /** A fluted column filled to `value / max`. */
+/** "Base Sepolia" → "BASE", "Solana devnet" → "SOLANA": the label under a treasury column. */
+export function chainLabel(chain: string): string {
+  return (chain.split(/\s+/)[0] ?? chain).toUpperCase();
+}
+
 export function ColumnGauge({ value, max, label, amount, height = 104 }: { value: number; max: number; label: string; amount: string; height?: number }) {
   const filled = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   return (

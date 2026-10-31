@@ -210,7 +210,7 @@ export function GovernancePage() {
             <section style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 14 }}>
               <Kicker>How a proposal becomes law</Kicker>
               <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 0, position: "relative" }}>
-                <div style={{ position: "absolute", left: "12%", right: "12%", top: 27, height: 2, background: "linear-gradient(90deg, #C9890C, #B4532E)" }} />
+                <div className="mline" aria-hidden="true" style={{ position: "absolute", left: "12%", right: "12%", top: 27, height: 2, background: "linear-gradient(90deg, #C9890C, #B4532E)" }} />
                 {[
                   { numeral: "I", title: "PROPOSED", text: "A member writes the exact change, or turns a refused request into a vote" },
                   { numeral: "II", title: "VOTED", text: "Members approve, each checking the content in their own browser" },
