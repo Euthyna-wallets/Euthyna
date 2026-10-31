@@ -1,8 +1,9 @@
 //! Public directory of MandateOS companies.
 //!
 //! A company lists itself: its DAO calls `register` (so a vote of its members
-//! decides it). The registry accepts only DAOs created by the MandateOS factory
-//! and checks on chain that the vault is owned by that DAO, and that the shares
+//! decides it). The registry accepts only DAOs created by one DAO factory and,
+//! when a vault factory is set, only vaults that factory created (Nomos vaults
+//! have no access key). It checks on chain that the vault is owned by that DAO, and that the shares
 //! contract (if any) belongs to it. Nobody can list a company for someone else
 //! or point at another company's vault. The account is deployed without access
 //! keys, so nobody can change the list but the companies themselves.
@@ -63,15 +64,17 @@ enum Key {
 #[derive(PanicOnDefault)]
 pub struct Registry {
     factory_id: AccountId,
+    vault_factory_id: Option<AccountId>,
     companies: IterableMap<AccountId, Company>,
 }
 
 #[near]
 impl Registry {
     #[init]
-    pub fn new(factory_id: AccountId) -> Self {
+    pub fn new(factory_id: AccountId, vault_factory_id: Option<AccountId>) -> Self {
         Self {
             factory_id,
+            vault_factory_id,
             companies: IterableMap::new(Key::Companies),
         }
     }
@@ -87,6 +90,12 @@ impl Registry {
     ) -> Promise {
         let dao_id = env::predecessor_account_id();
         require!(self.is_factory_dao(&dao_id), "ERR_NOT_A_MANDATEOS_DAO");
+        if let Some(vault_factory) = &self.vault_factory_id {
+            require!(
+                is_direct_subaccount(&vault_id, vault_factory),
+                "ERR_NOT_A_FACTORY_VAULT"
+            );
+        }
         let name = name.trim().to_owned();
         require!(
             !name.is_empty() && name.chars().count() <= MAX_NAME,
@@ -187,6 +196,10 @@ impl Registry {
         self.factory_id.clone()
     }
 
+    pub fn vault_factory_id(&self) -> Option<AccountId> {
+        self.vault_factory_id.clone()
+    }
+
     pub fn company_count(&self) -> u32 {
         self.companies.len()
     }
@@ -208,12 +221,16 @@ impl Registry {
 impl Registry {
     /// `<name>.<factory>` with a single extra label, as the factory creates them.
     fn is_factory_dao(&self, account: &AccountId) -> bool {
-        let suffix = format!(".{}", self.factory_id);
-        account
-            .as_str()
-            .strip_suffix(&suffix)
-            .is_some_and(|label| !label.is_empty() && !label.contains('.'))
+        is_direct_subaccount(account, &self.factory_id)
     }
+}
+
+/// `<label>.<parent>` with a single extra label.
+fn is_direct_subaccount(account: &AccountId, parent: &AccountId) -> bool {
+    account
+        .as_str()
+        .strip_suffix(&format!(".{parent}"))
+        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
 }
 
 fn promise_json<T: serde::de::DeserializeOwned>(index: u64) -> Result<T, PromiseError> {

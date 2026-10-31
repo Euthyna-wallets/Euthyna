@@ -8,7 +8,7 @@ import { baseSepolia, sepolia } from "viem/chains";
 
 import { chainView } from "./chain-view.js";
 
-export const REGISTRY_ID = import.meta.env.VITE_MANDATEOS_REGISTRY_ID ?? "registry.mandateos.testnet";
+export const REGISTRY_ID = import.meta.env.VITE_MANDATEOS_REGISTRY_ID ?? "euthyna-registry.testnet";
 const PROFILE = BASE_SEPOLIA;
 
 export type DirectoryEntry = {

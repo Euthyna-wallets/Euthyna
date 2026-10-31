@@ -71,7 +71,7 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   sharesEpochSeconds: env.OMNIROLES_SHARES_EPOCH_SECONDS ?? (env.NEAR_NETWORK_ID === "testnet" ? 3600 : 7 * 24 * 3600),
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,
   omniBridgeApi: env.OMNI_BRIDGE_API_URL,
-  registryId: env.OMNIROLES_REGISTRY_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "registry.mandateos.testnet" : undefined),
+  registryId: env.OMNIROLES_REGISTRY_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "euthyna-registry.testnet" : undefined),
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
   extraRpcUrls: { 11155111: env.ETHEREUM_SEPOLIA_RPC_URL },
   ruleDelayNs: env.OMNIROLES_RULE_DELAY_SECONDS * 1_000_000_000,
