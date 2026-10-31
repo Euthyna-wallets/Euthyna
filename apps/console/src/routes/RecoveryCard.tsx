@@ -19,19 +19,27 @@ const recoveryApi = {
   evidence: (id: string) => api<{ recoveryEvidence: EmailEvidence; enrollmentEvidence: EmailEvidence | null }>(`/v1/console/recovery/${id}/evidence`),
 };
 
-/** How to make the email, and the drop zone that proves it in the browser. */
-export function EmailProofStep({ subject, busy, onFile }: { subject: string; busy: boolean; onFile: (file: File) => void }) {
+/** How to make the email, and where to give it: its source pasted, or the .eml file. Proved in the browser. */
+export function EmailProofStep({ subject, busy, onFile }: { subject: string; busy: boolean; onFile: (email: File | string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [source, setSource] = useState("");
   return (
     <ol className="stack small">
       <li>
         From the mailbox you will recover with (Gmail, Outlook, iCloud…), send an email to yourself with exactly this subject:{" "}
         <code className="mono">{subject}</code>{" "}
-        <button className="ghost compact" onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
+        <button className="btn-line" style={{ padding: "6px 12px" }} onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
       </li>
-      <li>Open it in your Sent folder and download it as a file (Gmail: ⋮ → Download message, a <span className="mono">.eml</span>).</li>
       <li>
-        Drop it here. Your browser proves your provider signed it; the email itself is not uploaded.{" "}
+        Open it and copy its source. Gmail: ⋮ → <b>Show original</b> → <b>Copy to clipboard</b>. Outlook: … → View → <b>View message source</b>.
+        Apple Mail: View → Message → <b>Raw Source</b>.
+      </li>
+      <li>
+        Paste it here. Your browser proves your provider signed it; the email itself is never uploaded.
+        <textarea aria-label="Original message" rows={4} value={source} disabled={busy} onChange={(event) => setSource(event.target.value)}
+          placeholder="Delivered-To: …&#10;Received: …&#10;DKIM-Signature: …" style={{ width: "100%", font: "12px var(--font-mono, monospace)" }} />
+        <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy || !source.trim()} onClick={() => onFile(source)}>Prove</button>{" "}
+        <span className="small">or a downloaded <span className="mono">.eml</span> file:</span>{" "}
         <input type="file" accept=".eml,message/rfc822" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} />
       </li>
     </ol>
@@ -89,7 +97,7 @@ function RecoveryRow({ recovery, me, busy, run }: { recovery: Recovery; me: stri
         <span className="small"> {recovery.state === "waiting" ? (ready ? "Waiting period over: the members can vote." : `Cancelable until ${new Date(recovery.notBefore).toLocaleString()}.`) : null}</span>
       </div>
       <div className="row">
-        <button className="ghost compact" disabled={busy} onClick={() => run(async () => {
+        <button className="btn-line" style={{ padding: "6px 12px" }} disabled={busy} onClick={() => run(async () => {
           const { recoveryEvidence, enrollmentEvidence } = await recoveryApi.evidence(recovery.id);
           const asked = await checkEmailProof(recoveryEvidence);
           const enrolledProof = enrollmentEvidence ? await checkEmailProof(enrollmentEvidence) : null;
@@ -97,10 +105,10 @@ function RecoveryRow({ recovery, me, busy, run }: { recovery: Recovery; me: stri
           return `Checked in your browser: proof ${asked.valid ? "valid" : "INVALID"}, email from ${asked.domain}, subject "${asked.subject}", ${same ? "same mailbox as the enrolled one" : "NOT the enrolled mailbox"}.`;
         })}>Check the proofs in my browser</button>
         {me === recovery.lostAccountId && (recovery.state === "waiting" || recovery.state === "proposed") ? (
-          <button className="ghost compact" disabled={busy} onClick={() => run(async () => { await recoveryApi.cancel(recovery.id); return "Recovery cancelled: your seat stays yours."; })}>This is not me: cancel</button>
+          <button className="btn-line" style={{ padding: "6px 12px" }} disabled={busy} onClick={() => run(async () => { await recoveryApi.cancel(recovery.id); return "Recovery cancelled: your seat stays yours."; })}>This is not me: cancel</button>
         ) : null}
         {ready && recovery.state === "waiting" && me ? (
-          <button className="primary compact" disabled={busy} onClick={() => run(async () => {
+          <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy} onClick={() => run(async () => {
             const { proposals } = await recoveryApi.proposals(recovery.id);
             const ids: number[] = [];
             for (const draft of proposals) ids.push((await signDaoProposal(me, draft)).proposalId);

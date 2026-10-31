@@ -18,10 +18,20 @@ const loadCircuit = () => (circuit ??= fetch("/circuits/email_recovery.json").th
 
 const threads = () => (globalThis.crossOriginIsolated ? Math.min(navigator.hardwareConcurrency || 1, 8) : 1);
 
+/** The email from a downloaded .eml file, or from its source pasted as text ("Show original" → copy). */
+export async function emailSource(input: File | string): Promise<string> {
+  if (typeof input === "string") {
+    if (input.length > 2_000_000) throw new Error("This is too long for an email");
+    if (!/^dkim-signature:/im.test(input)) throw new Error("Paste the whole original message, headers included (it starts with lines like \"Delivered-To:\" or \"Received:\")");
+    return input;
+  }
+  if (input.size > 2_000_000) throw new Error("This file is too large for an email");
+  return emlFromBytes(new Uint8Array(await input.arrayBuffer()));
+}
+
 /** Prove that the mailbox sent this email. Takes about a minute; `onStep` reports progress. */
-export async function proveEmailFile(file: File, onStep: (step: string) => void): Promise<{ evidence: EmailEvidence; domain: string; subject: string }> {
-  if (file.size > 2_000_000) throw new Error("This file is too large for an email");
-  const eml = emlFromBytes(new Uint8Array(await file.arrayBuffer()));
+export async function proveEmailFile(input: File | string, onStep: (step: string) => void): Promise<{ evidence: EmailEvidence; domain: string; subject: string }> {
+  const eml = await emailSource(input);
   const dkim = senderDkim(eml);
   onStep(`Fetching ${dkim.domain}'s DKIM key…`);
   const response = await fetch(`${API_BASE}/v1/recovery/dkim-key?${new URLSearchParams({ domain: dkim.domain, selector: dkim.selector })}`, { credentials: "include" });
