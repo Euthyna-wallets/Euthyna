@@ -1,6 +1,7 @@
 import { hexToBytes, type Hex } from "viem";
 import { keyStores, KeyPair, Near, transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
+import { RpcLimiter } from "./rpc-limiter.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
 interface RpcResponse<T> {
@@ -56,11 +57,12 @@ export function extractMpcSignatures(status: NearTransactionStatus): MpcSignatur
 
 export class NearClient {
   private readonly accountPromise: Promise<Account>;
-  private rpcQueue: Promise<void> = Promise.resolve();
-  private nextRpcAt = 0;
+  private readonly limiter: RpcLimiter;
 
-  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY">) {
+  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY"> & Partial<Pick<Env, "NEAR_RPC_CONCURRENCY" | "NEAR_RPC_MIN_INTERVAL_MS">>) {
     this.accountPromise = this.createRelayerAccount();
+    // Several calls at once, paced, and screens before the background job (it used to be one call per 500 ms for everything).
+    this.limiter = new RpcLimiter(env.NEAR_RPC_CONCURRENCY ?? 3, env.NEAR_RPC_MIN_INTERVAL_MS ?? 150);
   }
 
   private async createRelayerAccount(): Promise<Account> {
@@ -114,20 +116,7 @@ export class NearClient {
   }
 
   private async rpc<T>(method: string, params: unknown): Promise<T> {
-    const previous = this.rpcQueue;
-    let release!: () => void;
-    this.rpcQueue = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      const pacingDelay = Math.max(0, this.nextRpcAt - Date.now());
-      if (pacingDelay > 0) await new Promise((resolve) => setTimeout(resolve, pacingDelay));
-      return await this.requestRpc<T>(method, params);
-    } finally {
-      this.nextRpcAt = Date.now() + 500;
-      release();
-    }
+    return this.limiter.run(() => this.requestRpc<T>(method, params));
   }
 
   async proxyRpc<T>(method: string, params: unknown): Promise<T> {

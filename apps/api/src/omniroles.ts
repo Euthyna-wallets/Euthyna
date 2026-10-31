@@ -63,6 +63,7 @@ import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, par
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
+import { inBackground } from "./rpc-limiter.js";
 import { NEAR_ACCOUNT_ID, NEAR_PROVIDER_ID, nearUserEmail } from "./near-auth.js";
 
 export class OmniRolesError extends Error {
@@ -140,6 +141,15 @@ export interface OmniRolesChain {
 const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
 const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
 const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
+/** The activation job: how often an idle vault is read, how long after a veto window ends, and backoffs. */
+const IDLE_RECHECK_MS = 60_000;
+const DUE_MARGIN_MS = 3_000;
+const ERROR_RECHECK_MS = 30_000;
+const BROKEN_RECHECK_MS = 15 * 60_000;
+const STORAGE_CHECK_EVERY_MS = 10 * 60_000;
+const BUSY_RECHECK_NS = 20_000_000_000n;
+/** Vaults checked at once by the job. */
+const ACTIVATION_LANES = 3;
 
 /** Lowest max fee a voted transaction gets, per chain (wei). */
 const FEE_FLOOR_WEI: Record<number, bigint> = { 1: 20_000_000_000n, 11155111: 5_000_000_000n, 8453: 50_000_000n, 84532: 50_000_000n };
@@ -378,6 +388,11 @@ function nowNs(): bigint {
 }
 
 export class OmniRolesService {
+  private activationRunning = false;
+  /** vault -> when the activation job reads it next (ms). Empty after a restart: every vault is read once. */
+  private readonly nextActivationCheck = new Map<string, number>();
+  private readonly storageCheckedAt = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly near: NearClient,
@@ -1449,23 +1464,44 @@ export class OmniRolesService {
 
   /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
+    return (await this.activateDue(organizationId)).hashes;
+  }
+
+  /**
+   * One vault's due work, and when it next has something due: the earliest
+   * veto window still running, or null when nothing is queued.
+   */
+  private async activateDue(organizationId: string): Promise<{ hashes: string[]; nextDueMs: number | null }> {
     const treasury = await this.requireTreasury(organizationId);
-    await this.keepStorageFunded(treasury.vaultAccountId);
-    const rules = await this.view<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    // Fresh from the chain, never the screens' cache: a stale list would miss a rule or run one twice.
+    const rules = await this.near.viewFunction<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
     const now = nowNs();
-    const ready = rules
-      .filter((rule) => rule.state === "Queued" && BigInt(rule.execute_after_ns) <= now && now <= BigInt(rule.expires_at_ns))
+    const queued = rules.filter((rule) => rule.state === "Queued" && now <= BigInt(rule.expires_at_ns));
+    const ready = queued
+      .filter((rule) => BigInt(rule.execute_after_ns) <= now)
       // Oldest first: a role must exist before its memberships.
       .reverse();
+    // Storage pays for agent operations too: checked every 10 minutes, and before any write here.
+    const lastStorageCheck = this.storageCheckedAt.get(treasury.vaultAccountId) ?? 0;
+    if (ready.length || Date.now() - lastStorageCheck > STORAGE_CHECK_EVERY_MS) {
+      await this.keepStorageFunded(treasury.vaultAccountId);
+      this.storageCheckedAt.set(treasury.vaultAccountId, Date.now());
+    }
     const hashes: string[] = [];
     for (const rule of ready) {
       // An upgrade fetches and deploys ~800 KB of code: give it the full 300 Tgas.
       const gas = rule.change && typeof rule.change === "object" && "Upgrade" in rule.change ? "300000000000000" : "100000000000000";
       hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
     }
-    hashes.push(...await this.startDaoTransactions(organizationId, treasury));
+    const dao = await this.startDaoTransactions(organizationId, treasury);
+    hashes.push(...dao.hashes);
     if (hashes.length) this.forget(treasury.vaultAccountId);
-    return hashes;
+    const waitingNs = [
+      ...queued.filter((rule) => BigInt(rule.execute_after_ns) > now).map((rule) => BigInt(rule.execute_after_ns)),
+      ...dao.nextDueNs,
+    ];
+    const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
+    return { hashes, nextDueMs };
   }
 
   /**
@@ -1488,9 +1524,9 @@ export class OmniRolesService {
    * passed and the wallet is free (permissionless on chain), then hand every
    * started one to the worker, which broadcasts it like an agent operation.
    */
-  private async startDaoTransactions(organizationId: string, treasury: { vaultAccountId: string }): Promise<string[]> {
+  private async startDaoTransactions(organizationId: string, treasury: { vaultAccountId: string }): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
     const transactions = await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 }).catch(() => null);
-    if (!transactions) return []; // vault deployed before DAO transactions
+    if (!transactions) return { hashes: [], nextDueNs: [] }; // vault deployed before DAO transactions
     const hashes: string[] = [];
     // The start transaction carries the MPC response: the worker recovers the
     // signature from it if the vault could not store it.
@@ -1511,6 +1547,10 @@ export class OmniRolesService {
     const started = hashes.length
       ? await this.near.viewFunction<DaoOperation[]>(treasury.vaultAccountId, "list_dao_transactions", { limit: 50 })
       : transactions;
+    // Voted transactions still in their veto window, or waiting for the chain's wallet to be free.
+    const nextDueNs = transactions
+      .filter((item) => item.state === "Scheduled" && item.execute_after_ns !== null && now <= BigInt(item.expires_at_ns))
+      .map((item) => (BigInt(item.execute_after_ns!) > now ? BigInt(item.execute_after_ns!) : now + BUSY_RECHECK_NS));
     for (const item of started.filter((entry) => entry.state !== "Scheduled")) {
       const opId = hexOf(item.op_id);
       const existing = await this.prisma.operation.findUnique({ where: { organizationId_opId: { organizationId, opId } } });
@@ -1531,15 +1571,45 @@ export class OmniRolesService {
         },
       });
     }
-    return hashes;
+    return { hashes, nextDueNs };
   }
 
-  async activateAllReadyRules(): Promise<void> {
-    const treasuries = await this.prisma.treasury.findMany();
-    for (const treasury of treasuries) {
-      await this.activateReadyRules(treasury.organizationId).catch((error: unknown) => {
-        console.error(`rule activation failed for ${treasury.vaultAccountId}:`, error);
+  /**
+   * The background job (every few seconds). One pass at a time, in the RPC
+   * background lane so screens go first, and only the vaults that are due:
+   * a vault with a veto window running is checked when it ends; an idle
+   * vault every minute (a new rule waits a whole veto window, at least
+   * minutes, before it can run); a vault that errors, later.
+   */
+  async activateAllReadyRules(): Promise<{ checked: number; skipped: boolean }> {
+    if (this.activationRunning) return { checked: 0, skipped: true };
+    this.activationRunning = true;
+    try {
+      return await inBackground(async () => {
+        const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true } });
+        const now = Date.now();
+        const due = treasuries.filter((treasury) => (this.nextActivationCheck.get(treasury.vaultAccountId) ?? 0) <= now);
+        let index = 0;
+        const lane = async () => {
+          while (index < due.length) {
+            const treasury = due[index++]!;
+            try {
+              const { nextDueMs } = await this.activateDue(treasury.organizationId);
+              // A little after the window ends: the chain's clock decides, not ours.
+              const next = nextDueMs === null ? Date.now() + IDLE_RECHECK_MS : Math.min(nextDueMs + DUE_MARGIN_MS, Date.now() + IDLE_RECHECK_MS);
+              this.nextActivationCheck.set(treasury.vaultAccountId, Math.max(next, Date.now() + 1_000));
+            } catch (error) {
+              const missing = /CodeDoesNotExist|MethodNotFound|does not exist|Cannot find contract code/i.test(String(error));
+              this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + (missing ? BROKEN_RECHECK_MS : ERROR_RECHECK_MS));
+              console.error(`rule activation failed for ${treasury.vaultAccountId}:`, error);
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(ACTIVATION_LANES, due.length) }, lane));
+        return { checked: due.length, skipped: false };
       });
+    } finally {
+      this.activationRunning = false;
     }
   }
 
