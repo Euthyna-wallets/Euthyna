@@ -1,12 +1,13 @@
 /**
- * Company setup. Visual reference: design-handoff/app/source/07-atlantis-found-a-company.html
- * (Launch on Atlantis, steps I to VIII) and 17-euthyna-path-plug-in.html (Use EUTHYNA, steps I to VII).
- * The path is read from ?path=euthyna|atlantis; a EUTHYNA vault is private, so Shares is skipped and
- * remembered, and the last step is Plug in instead of City. Data, queries and handlers are main's.
+ * Company setup: one path for everyone (decided on 31 October with Alex and Koplo; two doors confused
+ * people since both ended in the same place). Company, founders, DAO and vault, wallet, first hire and
+ * its role; the vault is private. The last step offers Atlantis: issue shares and list the company in
+ * the directory, by the council's votes, or stay private. Visual reference: design-handoff/app 17.
+ * Data, queries and handlers are main's.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
@@ -37,15 +38,8 @@ const STEPS: Array<{ id: Exclude<Stage, "done">; label: string }> = [
 
 const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
-const ATLANTIS_STEPS: StepView[] = [...STEPS, { id: "city", label: "City" }];
-
-/** A EUTHYNA vault is private: no Shares step; the last step is Plug in. */
-const EUTHYNA_STEPS: StepView[] = [
-  ...STEPS
-    .filter((step) => step.id !== "shares")
-    .map((step): StepView => ({ id: step.id, label: step.id === "company" ? "Team" : step.id === "members" ? "Members" : step.label })),
-  { id: "plug", label: "Plug in" },
-];
+/** Shares are not a setup step any more: they come with Atlantis, offered at the end. */
+const SETUP_STEPS: StepView[] = [...STEPS.filter((step) => step.id !== "shares"), { id: "atlantis", label: "Atlantis" }];
 
 const TITLES: Record<Stage, string> = {
   company: "Name your AI company",
@@ -62,7 +56,6 @@ const JOB_ORDER = ["payments", "treasury", "revenue"];
 
 const confirmedKey = (organizationId: string) => `mandateos.members-confirmed.${organizationId}`;
 const sharesSkippedKey = (organizationId: string) => `mandateos.shares-skipped.${organizationId}`;
-const PATH_KEY = "mandateos.path";
 const readFlag = (key: string) => {
   try {
     return localStorage.getItem(key) === "1";
@@ -97,25 +90,8 @@ export function OnboardingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const creating = searchParams.has("new");
 
-  // The chosen path: the two doors of /choose-path write it in the query; it is remembered.
-  const explicitPath = searchParams.get("path");
-  const [path, setPath] = useState<Path>(() => {
-    if (explicitPath === "euthyna" || explicitPath === "atlantis") return explicitPath;
-    try {
-      return localStorage.getItem(PATH_KEY) === "euthyna" ? "euthyna" : "atlantis";
-    } catch {
-      return "atlantis";
-    }
-  });
-  useEffect(() => {
-    if (explicitPath !== "euthyna" && explicitPath !== "atlantis") return;
-    setPath(explicitPath);
-    try {
-      localStorage.setItem(PATH_KEY, explicitPath);
-    } catch {
-      // A convenience only.
-    }
-  }, [explicitPath]);
+  // One path: the vault is private during setup; Atlantis is offered at the end.
+  const path: Path = "euthyna";
 
   useEffect(() => {
     if (!active) return;
@@ -160,15 +136,22 @@ export function OnboardingPage() {
             ? "role"
             : "done";
   const loading = organizations.isLoading || (Boolean(active) && !creating && (!ready || status.isLoading || members.isLoading || (Boolean(status.data?.wallet) && shares.isLoading)));
+  // A member whose company is already set up has nothing to do here (OPEN APP, a site button, a bookmark):
+  // the first stage read decides. Reaching "done" during this visit still shows the closing screen.
+  // On Atlantis, a company that already works (agents with a role) but never issued shares counts as set up too.
+  const firstStage = useRef<Stage | null>(null);
+  if (!loading && firstStage.current === null) {
+    const working = activeAgents.length > 0 && (roles.data?.roles.length ?? 0) > 0;
+    firstStage.current = stage === "shares" && working ? "done" : stage;
+  }
   const firstAgent = activeAgents[0];
   const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
 
-  const steps = path === "euthyna" ? EUTHYNA_STEPS : ATLANTIS_STEPS;
-  const plugging = path === "euthyna" && stage === "agent" && newAgent?.keyMode === "signer";
+  const steps = SETUP_STEPS;
   // On Atlantis the last step is the city: listing is a members' vote, still to come once the company is live.
   const currentIndex = stage === "done"
-    ? (path === "atlantis" ? steps.findIndex((step) => step.id === "city") : steps.length)
-    : steps.findIndex((step) => step.id === (plugging ? "plug" : stage));
+    ? (shares.data?.deployed ? steps.length : steps.findIndex((step) => step.id === "atlantis"))
+    : steps.findIndex((step) => step.id === stage);
 
   const waitingFor: Record<Stage, string> = {
     company: "Name your AI company",
@@ -178,8 +161,10 @@ export function OnboardingPage() {
     shares: "Open the company to shareholders, or skip",
     agent: "Hire the first agent",
     role: "Write its role",
-    done: "Your AI company is live",
+    done: "Set up. One step left, only if you want it: Atlantis",
   };
+
+  if (firstStage.current === "done" && !creating) return <Navigate to="/overview" replace />;
 
   return (
     <div
@@ -205,7 +190,7 @@ export function OnboardingPage() {
       }}
     >
       <header style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <Link to={organizations.data?.length ? "/overview" : "/choose-path"} className="onb-brand" aria-label="EUTHYNA, back to the console">
+        <Link to={organizations.data?.length ? "/overview" : "/"} className="onb-brand" aria-label="EUTHYNA, back to the console">
           <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true">
             <circle cx="512" cy="512" r="307" fill="none" stroke="currentColor" strokeWidth="102" />
             <rect x="297" y="461" width="430" height="102" fill="#C9890C" />
@@ -215,7 +200,7 @@ export function OnboardingPage() {
           EUTHYNA
         </Link>
         <Kicker color={path === "euthyna" ? "var(--gold-ink)" : "#4FD1E8"}>
-          {path === "euthyna" ? "· Create your vault" : "· Launch on Atlantis"}
+          · Set up your company
         </Kicker>
         <span style={{ marginLeft: "auto", font: "600 11px var(--font-mono)", letterSpacing: ".08em", color: "var(--onb-mute)" }}>
           TESTNET · NOT AUDITED
@@ -245,7 +230,7 @@ export function OnboardingPage() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 760 }}>
             <Kicker color="var(--onb-gold)">
-              {active?.name ?? "Your AI company"} · {path === "euthyna" ? "private vault" : "on Atlantis"}
+              {active?.name ?? "Your AI company"} · private vault
             </Kicker>
             <PageTitle style={{ color: "var(--onb-title)", textShadow: "var(--onb-title-shadow)", fontSize: 44, lineHeight: 1.05 }}>
               {TITLES[stage]}
@@ -258,7 +243,7 @@ export function OnboardingPage() {
               organizations={organizations.data ?? []}
               onCreated={async (organization) => {
                 setActiveId(organization.id);
-                setSearchParams(path === "euthyna" ? { path: "euthyna" } : {});
+                setSearchParams({});
                 await organizations.refetch();
               }}
               onError={setError}
@@ -372,20 +357,42 @@ export function OnboardingPage() {
           {(stage === "agent" || stage === "role") && status.data ? <FundWallet status={status.data} showNext={false} /> : null}
 
           {stage === "done" ? (
-            <Slab style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <Kicker>Live</Kicker>
-                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--ink-2)" }}>
+            <div className="g2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: 22, maxWidth: 1100, alignItems: "stretch" }}>
+              <Slab style={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 16 }}>
+                <Kicker>Live · private vault</Kicker>
+                <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
                   Founders and {shares.data?.deployed ? "shareholders" : "members"} set the rules, {activeAgents.length} agent{activeAgents.length > 1 ? "s" : ""} work
                   inside them, and every operation is checked by the vault on NEAR before the company wallet signs.
                 </p>
-              </div>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/overview">OVERVIEW</Link>
-                <Link className="btn-line" style={{ textDecoration: "none", display: "inline-block" }} to="/activity">WHAT THE AGENTS DID</Link>
-                {shares.data?.deployed ? <Link className="btn-line" style={{ textDecoration: "none", display: "inline-block" }} to="/shares">SHARES</Link> : null}
-              </div>
-            </Slab>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: "auto" }}>
+                  <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/overview">GO TO HQ</Link>
+                  <Link className="btn-line" style={{ textDecoration: "none", display: "inline-block" }} to="/activity">WHAT THE AGENTS DID</Link>
+                </div>
+              </Slab>
+              <section
+                className="night-panel"
+                style={{
+                  padding: "26px 28px", display: "flex", flexDirection: "column", gap: 14,
+                  backgroundImage: "linear-gradient(90deg, rgba(3,9,24,.97) 0%, rgba(3,9,24,.88) 55%, rgba(3,9,24,.55) 100%), url(/media/renders/R3-atlantis-aerial.jpg)",
+                  backgroundSize: "cover, 760px auto", backgroundPosition: "0 0, right -160px center", backgroundRepeat: "no-repeat",
+                }}
+              >
+                <Kicker color="#4FD1E8">Optional · Atlantis</Kicker>
+                <b style={{ font: "800 24px/1.2 var(--font-brand)", letterSpacing: ".04em", color: "#F3EFE6" }}>Open the company to the city?</b>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#C9D3EA" }}>
+                  Issue shares: anyone can buy them, and the holders who vote share the revenue. Then list the company in the Atlantis directory.
+                  Each is a vote of your council. Until then the vault stays private.
+                </p>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: "auto" }}>
+                  {shares.data?.deployed ? (
+                    <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/settings">LIST IN THE DIRECTORY</Link>
+                  ) : (
+                    <Link className="btn-ori" style={{ textDecoration: "none", display: "inline-block" }} to="/shares">ISSUE SHARES</Link>
+                  )}
+                  <Link className="btn-line on-dark" style={{ textDecoration: "none", display: "inline-block" }} to="/overview">STAY PRIVATE</Link>
+                </div>
+              </section>
+            </div>
           ) : null}
         </>
       )}

@@ -32,20 +32,17 @@ Le canevas de design complet (toutes les planches côte à côte) : https://clau
 - **Les fichiers HTML ne sont pas du code de production.** Ce sont des maquettes figées : largeur fixe (1440 px pour l'app), styles en ligne, données d'exemple, aucun appel API.
 - On les lit pour reproduire le rendu dans les composants React existants de la console, branchés sur les vraies données. On ne les copie pas dans l'app.
 
-## 2. La décision produit : deux portes, un même moteur
+## 2. La décision produit : ce qu'on vend, et un seul parcours
 
 - **EUTHYNA, c'est ce qu'on vend : l'infrastructure.** Un agent IA reçoit un wallet avec un budget et des règles votées, jamais une clé. Le coffre vérifie chaque transaction avant de signer.
 - **ATLANTIS est un produit construit avec EUTHYNA : le launchpad.** On y crée une société dont les employés sont des agents, avec des parts, des revenus et le Market. C'est aussi notre meilleure démo.
 
-Le backend est le même. **Seul l'onboarding diffère** :
+**Un seul parcours d'inscription** (décision du 31 octobre, avec Koplo : deux portes qui finissent au même endroit, c'était confus) :
 
-| Parcours | Bouton | Étapes | Sauté |
-| --- | --- | --- | --- |
-| Use EUTHYNA | PLUG IN YOUR AGENT / CREATE YOUR VAULT | Team, Members, Incorporate, Wallet, First hire, Role, Plug in | Shares et inscription dans l'annuaire : le coffre reste privé |
-| Launch on Atlantis | START A COMPANY ON ATLANTIS / FOUND A COMPANY | Company, Founders, Incorporate, Wallet, Shares, First hire, Role, City | Rien |
-
-- **Le choix** se fait sur l'écran `app/screens/16-choose-your-path-desktop.png`, juste après la connexion. Il peut aussi passer en paramètre : `/onboarding?path=euthyna` ou `?path=atlantis`, depuis les boutons du site.
-- **Un coffre EUTHYNA peut rejoindre Atlantis plus tard** par des votes du conseil : émettre des parts (`/shares`, deux propositions) et s'inscrire dans l'annuaire (`DirectoryCard`, une proposition). Aucune migration n'est nécessaire.
+- Étapes : Company, Founders, Incorporate, Wallet, First hire, Role, puis **Atlantis, optionnel**. Le coffre est privé pendant toute l'inscription.
+- La dernière étape propose d'ouvrir la société à la cité : émettre des parts (`/shares`, deux propositions du conseil), puis s'inscrire dans l'annuaire (`DirectoryCard` dans `/settings`, une proposition). Ou « Stay private ».
+- L'écran « Choose your path » (`app/screens/16`) n'est plus utilisé : `/choose-path` renvoie vers `/onboarding`. Les deux boutons du site mènent au même parcours.
+- Une société déjà en place qui arrive sur `/onboarding` est renvoyée vers `/overview`.
 
 ## 3. Ce qu'on copie dans `main`, et où
 

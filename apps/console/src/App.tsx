@@ -9,7 +9,6 @@ import { AgentsPage } from "./routes/AgentsPage.js";
 import { GovernancePage } from "./routes/GovernancePage.js";
 import { SharesPage } from "./routes/SharesPage.js";
 import { OnboardingScreen } from "./routes/OnboardingPage.js";
-import { ChoosePathPage } from "./routes/ChoosePathPage.js";
 import { SignIn } from "./routes/SignIn.js";
 import { WalletPage } from "./routes/WalletPage.js";
 import { OverviewPage } from "./routes/OverviewPage.js";
@@ -27,6 +26,22 @@ import { RobPage } from "./routes/public/RobPage.js";
 import { MarketConsolePage } from "./routes/MarketConsolePage.js";
 import { RecoverPage } from "./routes/public/RecoverPage.js";
 
+/** While the session loads: the night with the mark, never a blank or legacy screen. */
+function Splash({ error }: { error?: string }) {
+  return (
+    <div className="splash" role={error ? "alert" : "status"} aria-busy={!error}>
+      <svg width="44" height="44" viewBox="0 0 1024 1024" aria-hidden="true">
+        <circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" strokeWidth="102" />
+        <rect x="297" y="461" width="430" height="102" fill="#C9890C" />
+        <rect x="41" y="461" width="72" height="102" fill="#C9890C" />
+        <rect x="911" y="461" width="72" height="102" fill="#C9890C" />
+      </svg>
+      <b>EUTHYNA</b>
+      <span>{error ? `Could not reach the console: ${error}` : "Opening the assembly…"}</span>
+    </div>
+  );
+}
+
 function Gate() {
   const session = authClient.useSession();
   const location = useLocation();
@@ -35,12 +50,13 @@ function Gate() {
     queryFn: async () => (await authClient.organization.list()).data as Array<{ id: string }> | null,
     enabled: Boolean(session.data),
   });
-  if (session.isPending) return <div className="state">Loading session…</div>;
+  if (session.isPending) return <Splash />;
   if (!session.data) return <SignIn />;
-  if (organizations.isLoading) return <div className="state">Loading organization…</div>;
-  if (organizations.error) return <div className="state error">Error: {organizations.error.message}</div>;
-  if (!organizations.data?.length && location.pathname !== "/onboarding" && location.pathname !== "/choose-path") {
-    return <Navigate to="/choose-path" replace />;
+  if (organizations.isLoading) return <Splash />;
+  if (organizations.error) return <Splash error={organizations.error.message} />;
+  // One setup path since 31 October: a member without a company goes straight to it.
+  if (!organizations.data?.length && location.pathname !== "/onboarding") {
+    return <Navigate to="/onboarding" replace />;
   }
   return <Outlet />;
 }
@@ -61,7 +77,7 @@ export function App() {
           {/* Signed in, but not a member yet: the new account of a founder. */}
           <Route path="/recover" element={<RecoverPage />} />
           <Route element={<Gate />}>
-            <Route path="/choose-path" element={<ChoosePathPage />} />
+            <Route path="/choose-path" element={<Navigate to="/onboarding" replace />} />
             {/* Setup is a full screen of its own (design-handoff/app 07 and 17), outside the console shell. */}
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route element={<Layout />}>
