@@ -9,7 +9,7 @@ import type { ProposalDraft } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 
 type Recovery = { id: string; lostAccountId: string; newAccountId: string; state: "waiting" | "cancelled" | "proposed" | "done"; notBefore: string; method: string; createdAt: string };
-type RecoveryView = { enrollments: Array<{ nearAccountId: string; method: string; enrolledAt: string }>; recoveries: Recovery[] };
+type RecoveryView = { cancelWindowSeconds: number; enrollments: Array<{ nearAccountId: string; method: string; enrolledAt: string }>; recoveries: Recovery[] };
 
 const recoveryApi = {
   list: () => api<RecoveryView>("/v1/console/recovery"),
@@ -18,6 +18,12 @@ const recoveryApi = {
   proposals: (id: string) => api<{ proposals: ProposalDraft[] }>(`/v1/console/recovery/${id}/proposals`, { method: "POST", body: "{}" }),
   evidence: (id: string) => api<{ recoveryEvidence: EmailEvidence; enrollmentEvidence: EmailEvidence | null }>(`/v1/console/recovery/${id}/evidence`),
 };
+
+/** "48 hours", "5 minutes". */
+function windowText(seconds: number): string {
+  if (seconds >= 7200) return `${Math.round(seconds / 3600)} hours`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
 
 /** How to make the email, and where to give it: its source pasted, or the .eml file. Proved in the browser. */
 export function EmailProofStep({ subject, busy, onFile }: { subject: string; busy: boolean; onFile: (email: File | string) => void }) {
@@ -67,7 +73,7 @@ export function RecoveryCard() {
     <Card title="Seat recovery" action={<Status value={enrolled ? "active" : "pending"} />}>
       <p className="muted">
         Lost your NEAR account? Enroll your mailbox once, with a zero-knowledge proof of an email you send yourself
-        (ZK Email). A new account that proves the same mailbox can ask for your seat: you can cancel for 48 hours,
+        (ZK Email). A new account that proves the same mailbox can ask for your seat: you can cancel for {windowText(view.data?.cancelWindowSeconds ?? 172_800)},
         then the other founders vote. Only a hash of your address is kept, never the address.
       </p>
       {enrolled ? <p className="small">Enrolled with a mailbox at <strong>{enrolled.method.replace(/^email:/, "")}</strong>. Enroll again to change it.</p> : null}
