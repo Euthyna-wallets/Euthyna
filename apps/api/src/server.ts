@@ -81,7 +81,8 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   proposalBondYocto: env.OMNIROLES_PROPOSAL_BOND_YOCTO,
 });
 // Rule changes activate by themselves once their veto window has passed.
-setInterval(() => void omniroles.activateAllReadyRules(), 30_000).unref();
+// The job reads each vault only when it is due (see activateAllReadyRules); a pass never overlaps the last one.
+setInterval(() => void omniroles.activateAllReadyRules().catch((error: unknown) => console.error("rule activation pass failed:", error)), 5_000).unref();
 
 // Euthyna Market: only with its own relayer account.
 const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY && env.MARKET_WEBHOOK_SECRET
