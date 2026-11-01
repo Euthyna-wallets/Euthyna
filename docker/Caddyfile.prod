@@ -39,7 +39,7 @@ euthyna.io {
   # To reveal: delete this block and the two "handle" blocks below it marked "teaser", reload.
   handle /enter/{$PREVIEW_KEY} {
     header Set-Cookie "euthyna_preview={$PREVIEW_KEY}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax"
-    redir / 302
+    redir * / 302
   }
 
   @team header_regexp Cookie `(^|;\s*)euthyna_preview={$PREVIEW_KEY}(;|$)`
