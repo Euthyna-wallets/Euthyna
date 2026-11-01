@@ -275,7 +275,9 @@ async fn with_a_vault_factory_only_its_vaults_are_listed() -> Result<()> {
     assert!(
         format!("{:?}", outcome.into_result().unwrap_err()).contains("ERR_NOT_A_FACTORY_VAULT")
     );
-    println!("BLOCKED | company lists a vault outside the vault factory | vault factory check | ERR_NOT_A_FACTORY_VAULT");
+    println!(
+        "BLOCKED | company lists a vault outside the vault factory | vault factory check | ERR_NOT_A_FACTORY_VAULT"
+    );
 
     // Its vault from the vault factory: listed.
     let account = nomos
