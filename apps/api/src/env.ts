@@ -25,15 +25,20 @@ const schema = z.object({
   UAT_DEMO_WALLETS_ENABLED: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   NEAR_AGENT_GAS_RESERVE_YOCTO: z.string().regex(/^\d+$/).default("300000000000000000000000"),
   NEAR_AGENT_GAS_LOW_YOCTO: z.string().regex(/^\d+$/).default("50000000000000000000000"),
-  /** Sputnik DAO factory (official): sputnikv2.testnet on testnet. */
-  DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
+  /**
+   * Where company DAOs are created. factory-v2.mandateos.testnet: keyless, installs the official
+   * Sputnik code by immutable hash, and it is the only factory the Atlantis registry
+   * (registry.mandateos.testnet) accepts. A DAO from sputnikv2.testnet can never be listed.
+   */
+  DAO_FACTORY_ID: z.string().min(1).default("factory-v2.mandateos.testnet"),
   /** Nomos factory: creates company vaults from published versions. */
   NOMOS_ID: z.string().min(1).default("nomos.euthyna.testnet"),
   /** Solana RPC for the company's Solana wallet (devnet on testnet). */
   SOLANA_RPC_URL: z.string().url().default("https://api.devnet.solana.com"),
   /** NEAR transaction index used to read the vault's own logs (FastNEAR tx API). Empty disables it. */
   NEAR_TX_INDEXER_URL: z.string().optional(),
-  DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("6000000000000000000000000"),
+  /** NEAR the relayer gives each new DAO. factory-v2 DAOs use global code (~18 KB of state), so 1 NEAR leaves room; sputnikv2.testnet needs 6. */
+  DAO_CREATE_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("1000000000000000000000000"),
   DAO_GLOBAL_CODE_HASH: z.string().min(32).default("Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD"),
   DAO_FACTORY_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2000000000000000000000000"),
   MPC_CONTRACT_ID: z.string().min(1).default("v1.signer-prod.testnet"),
