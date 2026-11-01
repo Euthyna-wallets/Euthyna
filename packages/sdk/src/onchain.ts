@@ -33,7 +33,7 @@ export function publicRpc(url: string): Rpc {
 }
 /** Direct NEAR authorization, public RPC broadcast and MPC settlement. No API credentials. */
 export class OnchainAgentClient {
-  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
+  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
     const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions, nearPermissions] = await Promise.all([
@@ -84,6 +84,8 @@ export class OnchainAgentClient {
     const tip = intent.max_priority_fee_per_gas ?? BigInt(await this.rpc<Hex>("eth_maxPriorityFeePerGas", [])).toString();
     const request = omniRolesPaymentRequest({ ...intent, gas_limit: gas, max_fee_per_gas: fee, max_priority_fee_per_gas: tip }, chain_id);
     await this.advisory?.preflightInvoice(request, _invoice);
+    const refused = await this.refusal(request);
+    if (refused) return refused;
     const prepared = await this.vault.prepareRequest(request);
     const nearTransactionHash = await this.vault.authorize(prepared.op_id, null);
     const opId = operationIdHex(prepared.op_id);
@@ -96,7 +98,24 @@ export class OnchainAgentClient {
     const request = "token" in input ? omniRolesPaymentRequest({ ...input, gas_limit: "0", max_fee_per_gas: "0", max_priority_fee_per_gas: "0" }, chainId)
       : { chain_id: input.chainId, target: Array.from(hexToBytes(input.to)), value: input.value ?? "0", calldata: Array.from(hexToBytes(input.data ?? "0x")), allowance_amount: input.allowanceAmount ?? "0", reference: input.reference, gas_limit: "0", max_fee_per_gas: "0", max_priority_fee_per_gas: "0" };
     const result = await this.vault.view<OperationCheckResult>("check_operation", { role, member, request });
+    if (!result.allowed) await this.reportRefusal(request);
     return { ...result, refusedBy: result.allowed ? null : "vault" };
+  }
+  /**
+   * The vault refuses on chain without telling the API. When this agent has an
+   * API key, the API's own check runs the same vault check and logs the refusal,
+   * so the members see it in Activity. Best effort: a refusal stays a refusal.
+   */
+  private async reportRefusal(request: import("./index.js").OmniRolesOperationRequest): Promise<void> {
+    try { await this.advisory?.check?.(request); } catch { /* the API is optional here */ }
+  }
+  /** Refused before anything is reserved: the vault's verdict, reported to the API. */
+  private async refusal(request: import("./index.js").OmniRolesOperationRequest) {
+    const { role, member } = this.vault.identity();
+    const result = await this.vault.view<OperationCheckResult>("check_operation", { role, member, request });
+    if (result.allowed) return null;
+    await this.reportRefusal(request);
+    return { outcome: "refused" as const, reason: result.reason, refusedBy: "vault" as const };
   }
   async status(id: Hex): Promise<Record<string, unknown>> {
     const op_id = operationIdBytes(id);
@@ -149,6 +168,8 @@ export class OnchainAgentClient {
   }
   async call(request: import("./index.js").OmniRolesOperationRequest) {
     if (request.chain_id !== this.vault.identity().chain_id || Number(BigInt(await this.rpc<Hex>("eth_chainId", []))) !== request.chain_id) throw new Error("RPC chain does not match the vault wallet");
+    const refused = await this.refusal(request);
+    if (refused) return refused;
     const prepared = await this.vault.prepareRequest(request);
     const nearTransactionHash = await this.vault.authorize(prepared.op_id, null);
     const opId = operationIdHex(prepared.op_id);
