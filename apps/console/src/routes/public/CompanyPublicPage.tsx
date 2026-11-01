@@ -13,6 +13,7 @@ import { Link, useParams } from "react-router-dom";
 import { companyProfile, REGISTRY_ID, treasuryOf, type CompanyProfile, type Employee } from "../../lib/directory.js";
 import { market, slaText, tokenAmount, type MarketAgent } from "../../lib/market.js";
 import "../../styles/site.css";
+import { displayAccount } from "../../components/ui.js";
 import { Kicker, SiteFooter, SiteHeader } from "./site/SiteChrome.js";
 
 const BRAND = "Cinzel, serif";
@@ -197,7 +198,7 @@ export function CompanyPublicPage() {
               <div style={{ padding: "16px 22px" }}>
                 <Kicker color="rgba(32,10,3,.72)">Shares sold</Kicker>
                 <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 20, color: "#200A03" }}>
-                  {company?.shares ? `${company.shares.sold} / ${company.shares.total}` : "none"}
+                  {company?.shares ? `${count(company.shares.sold)} / ${count(company.shares.total)}` : "none"}
                 </b>
               </div>
             </div>
@@ -256,7 +257,7 @@ export function CompanyPublicPage() {
                             Price
                           </Kicker>
                           <b className="mono" style={{ display: "block", marginTop: 4 }}>
-                            {company.shares.priceNear} NEAR
+                            {company.shares.priceNear}
                           </b>
                         </div>
                         <div style={{ padding: "12px 14px" }}>
@@ -264,7 +265,7 @@ export function CompanyPublicPage() {
                             Sold
                           </Kicker>
                           <b className="mono" style={{ display: "block", marginTop: 4 }}>
-                            {company.shares.sold} / {company.shares.total}
+                            {count(company.shares.sold)} / {count(company.shares.total)}
                           </b>
                         </div>
                       </div>
@@ -278,7 +279,7 @@ export function CompanyPublicPage() {
                             {" "}
                             and{" "}
                             <b className="mono" style={{ color: "#fff" }}>
-                              {amount(Number(formatUnits(BigInt(company.shares.distributedToken), 18)))}
+                              {amount(Number(formatUnits(BigInt(company.shares.distributedToken), 18)))} ETH
                             </b>
                           </>
                         ) : null}
@@ -286,7 +287,7 @@ export function CompanyPublicPage() {
                       </span>
                       <span style={{ fontSize: 13, color: "#A9B6D6" }}>Locked shares vote on company calls and transfers. Each epoch, revenue goes to the holders who voted.</span>
                       <Link to="/shares" className="ori btno" style={{ textAlign: "center" }}>
-                        BUY SHARES · {company.shares.priceNear} NEAR
+                        BUY SHARES · {company.shares.priceNear}
                       </Link>
                     </>
                   ) : (
@@ -321,8 +322,8 @@ export function CompanyPublicPage() {
                   </Kicker>
                   {company.council.map((member) => (
                     <div key={member} className="row1">
-                      <span className="mono" style={{ fontSize: 13 }}>
-                        {member}
+                      <span className="mono" style={{ fontSize: 13 }} title={member}>
+                        {displayAccount(member)}
                       </span>
                       <span style={{ fontSize: 12, color: "#66718C" }}>council</span>
                     </div>
@@ -370,4 +371,9 @@ async function listEntry(dao: string) {
   const { listCompanies } = await import("../../lib/directory.js");
   const all = await listCompanies();
   return all.find((entry) => entry.dao_id === dao) ?? null;
+}
+
+/** 100000 → "100,000". */
+function count(value: string): string {
+  return /^\d+$/.test(value) ? Number(value).toLocaleString("en-US") : value;
 }
