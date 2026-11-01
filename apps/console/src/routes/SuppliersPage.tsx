@@ -150,7 +150,7 @@ export function SuppliersPage() {
               {pending.map((rule) => (
                 <div key={rule.queueId} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderTop: "1px solid rgba(13,23,48,.1)", fontSize: 13.5 }}>
                   <Seal word="QUEUED" size={32} />
-                  <span>{rule.title}: activates {rule.activatesAt}</span>
+                  <span>{rule.title}: applies at {new Date(rule.activatesAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} unless a council member vetoes it</span>
                 </div>
               ))}
               {!pending.length && !proposals.length ? <span style={{ fontSize: 13.5, color: "#4A5675" }}>No pending changes.</span> : null}
