@@ -47,6 +47,16 @@ export function sentence(summary: string | null, fallback: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** A refused request moved nothing: "Sent 5 USDC to …" becomes "Tried to send 5 USDC to …". */
+export function attempted(text: string): string {
+  return text
+    .replace(/^Sent /, "Tried to send ")
+    .replace(/^Swapped /, "Tried to swap ")
+    .replace(/^Deposited /, "Tried to deposit ")
+    .replace(/^Withdrew /, "Tried to withdraw ")
+    .replace(/^Allowed /, "Tried to allow ");
+}
+
 export type Outcome = "done" | "pending" | "failed" | "refused" | "cancelled";
 
 export const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -131,7 +141,7 @@ export function entriesOf(activity: Activity | undefined): Entry[] {
     at: request.at,
     actor: request.agent,
     role: null,
-    text: sentence(request.summary, request.reference),
+    text: attempted(sentence(request.summary, request.reference)),
     outcome: "refused",
     chain: null,
     reason: request.reason,
