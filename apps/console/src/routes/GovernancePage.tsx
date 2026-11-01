@@ -5,7 +5,7 @@ import { singleRoleTitle } from "../lib/role-summary.js";
 import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeRegistryProposal, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
 
 import { api } from "../api.js";
-import { PageState } from "../components/ui.js";
+import { displayAccount, PageState } from "../components/ui.js";
 import { Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab, VetoRing, VoteTokens } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { approvalsNeeded, omni, thresholdText, type GovernanceProposal, type GovernanceRule, type Sentence } from "../omniroles-api.js";
@@ -160,7 +160,7 @@ export function GovernancePage() {
       {error ? <div className="alert error">{error}</div> : null}
       {notice ? <div className="alert success">{notice}</div> : null}
       {!me ? <div className="notice">Connect your NEAR wallet (top right) to vote or veto.</div> : null}
-      {me && data && !isMember ? <div className="notice">{me} is not a member of this company's DAO: you can read decisions but not vote.</div> : null}
+      {me && data && !isMember ? <div className="notice">{displayAccount(me)} is not a member of this company's DAO: you can read decisions but not vote.</div> : null}
 
       {data?.paused ? (
         <div style={{ border: "1px solid rgba(217,87,59,.5)", background: "rgba(217,87,59,.07)", padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
@@ -313,7 +313,7 @@ export function GovernancePage() {
                       {rule.state === "Executed" ? <Seal word="APPLIED" size={36} /> : rule.state === "Vetoed" ? <Seal word="VETOED" size={36} tone="refused" /> : rule.state === "Expired" ? <Seal word="EXPIRED" size={36} tone="expired" /> : <Seal word={rule.state.toUpperCase()} size={36} />}
                       <div style={{ fontSize: 13, minWidth: 0 }}>
                         <b>{rule.title}</b>
-                        <br /><small style={{ color: "var(--ink-3)" }}>{rule.state}{rule.vetoedBy ? ` by ${rule.vetoedBy}` : ""} · {new Date(rule.queuedAt).toLocaleString()}</small>
+                        <br /><small style={{ color: "var(--ink-3)" }}>{rule.state}{rule.vetoedBy ? ` by ${displayAccount(rule.vetoedBy)}` : ""} · {new Date(rule.queuedAt).toLocaleString()}</small>
                       </div>
                     </div>
                   ))}
@@ -406,7 +406,7 @@ function ProposalCard(props: {
     <Slab as="article" style={{ padding: "16px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
       <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-          <Kicker>Proposal #{proposal.id} · by {proposal.proposer}</Kicker>
+          <Kicker>Proposal #{proposal.id} · by {displayAccount(proposal.proposer)}</Kicker>
           <h3 style={{ margin: 0, font: "800 21px/1.25 var(--font-brand)", letterSpacing: ".04em" }}>{singleRoleTitle(proposal.changes) ?? proposal.title}</h3>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flex: "0 0 auto" }}>
@@ -435,7 +435,7 @@ function ProposalCard(props: {
       <footer style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Expires {relativeTime(proposal.expiresAt, props.now)}</span>
         <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
-          {Object.entries(proposal.votes).map(([voter, vote]) => `${voter}: ${vote}`).join(" · ") || "No vote yet"}
+          {Object.entries(proposal.votes).map(([voter, vote]) => `${displayAccount(voter)}: ${vote}`).join(" · ") || "No vote yet"}
         </span>
         <div className="spacer" />
         {proposal.votes[props.me] ? <span style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 700 }}>You voted {proposal.votes[props.me]}</span> : null}
@@ -552,7 +552,7 @@ function MembersCard(props: { members: string[]; me: string; canPropose: boolean
               {member.slice(0, 1).toUpperCase()}
             </span>
             <span className="mono" style={{ fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {member}
+              <span title={member}>{displayAccount(member)}</span>
               {member === props.me ? <span style={{ color: "var(--ink-3)", fontFamily: "var(--font-ui)" }}> (you)</span> : null}
               {!props.members.includes(member) ? <span style={{ color: "var(--terra-ink)", fontFamily: "var(--font-ui)" }}> · to add</span> : null}
             </span>
@@ -567,7 +567,7 @@ function MembersCard(props: { members: string[]; me: string; canPropose: boolean
         ))}
         {props.members.filter((member) => !list.includes(member)).map((member) => (
           <div key={member} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid rgba(13,23,48,.1)", fontSize: 12.5, color: "var(--ink-3)" }}>
-            <span className="mono"><s>{member}</s> · to remove</span>
+            <span className="mono"><s title={member}>{displayAccount(member)}</s> · to remove</span>
           </div>
         ))}
       </div>

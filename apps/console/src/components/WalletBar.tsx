@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { short } from "./ui.js";
+import { displayAccount, short } from "./ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni } from "../omniroles-api.js";
 import { switchNearWallet } from "../wallets.js";
@@ -13,7 +13,7 @@ export function WalletBar() {
   const mismatch = Boolean(me && wallets.nearAccountId && wallets.nearAccountId !== me);
   return (
     <div className="wallet-bar" aria-label="Signing wallet">
-      {mismatch ? <span className="small warn">Wallet is {wallets.nearAccountId}, you signed in as {me}</span> : null}
+      {mismatch ? <span className="small warn">Wallet is {displayAccount(wallets.nearAccountId)}, you signed in as {displayAccount(me)}</span> : null}
       <div className={`wallet-identity ${wallets.nearConnected && !mismatch ? "connected" : ""}`}>
         <span className="wallet-network">NEAR</span>
         <strong className="mono">{wallets.nearAccountId ? short(wallets.nearAccountId, 14) : me ? short(me, 14) : "Not connected"}</strong>
