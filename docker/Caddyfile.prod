@@ -31,7 +31,19 @@ euthyna.io {
     reverse_proxy api:3000
   }
 
-  handle {
+  # ---- Until the reveal on 13 November 2026 ----------------------------------------------
+  # The public sees only /teaser.html and the images it uses. The team opens
+  # https://euthyna.io/enter/<PREVIEW_KEY> once: it sets a cookie and the whole site and app work
+  # as usual. The API routes above stay open (agents, MCP, Market, sign-in).
+  # PREVIEW_KEY comes from the server's .env (see docker-compose.server.yml).
+  # To reveal: delete this block and the two "handle" blocks below it marked "teaser", reload.
+  handle /enter/{$PREVIEW_KEY} {
+    header Set-Cookie "euthyna_preview={$PREVIEW_KEY}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax"
+    redir / 302
+  }
+
+  @team header_regexp Cookie `(^|;\s*)euthyna_preview={$PREVIEW_KEY}(;|$)`
+  handle @team {
     root * /srv
     # Built files carry a hash in their name: cache them for good. Everything else,
     # index.html first, is revalidated on every visit so a returning visitor never
@@ -43,6 +55,22 @@ euthyna.io {
     try_files {path} /index.html
     file_server
   }
+
+  # teaser: the images the teaser page uses
+  handle /media/* {
+    root * /srv
+    header Cache-Control "no-cache"
+    file_server
+  }
+
+  # teaser: every other path, for everyone without the team cookie
+  handle {
+    root * /srv
+    header Cache-Control "no-cache"
+    rewrite * /teaser.html
+    file_server
+  }
+  # ---- end of the reveal block -------------------------------------------------------------
 }
 
 www.euthyna.io {

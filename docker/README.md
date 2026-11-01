@@ -42,3 +42,22 @@ docker compose exec console caddy reload  --config /etc/caddy/Caddyfile
 `caddy reload` re-reads the bind-mounted file; no image rebuild is needed. This is only true for
 production — the local image keeps the Caddyfile baked at build time, so a local edit requires
 `docker compose build console`.
+
+## Until the reveal on 13 November 2026
+
+`docker/Caddyfile.prod` shows the public only `teaser.html` (and `/media/*` for its images); the API
+routes stay open. The team opens `https://euthyna.io/enter/<PREVIEW_KEY>` once: Caddy sets a cookie
+and the full site and app work as usual for 30 days on that browser.
+
+Set it up once on the server:
+
+```sh
+echo "PREVIEW_KEY=$(openssl rand -hex 24)" >> .env   # share the link with the team only
+git pull && docker compose build console              # teaser.html ships in the console image
+docker compose up -d console                          # recreate: the key is an environment variable
+docker compose exec console caddy validate --config /etc/caddy/Caddyfile
+```
+
+To reveal, merge the branch `ops/reveal-13` (it removes the block marked "reveal" from
+`docker/Caddyfile.prod` and the key from `docker-compose.server.yml`), then on the server:
+`git pull && docker compose build console && docker compose up -d console`.
