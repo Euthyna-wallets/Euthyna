@@ -27,7 +27,7 @@ const schema = z.object({
   NEAR_AGENT_GAS_LOW_YOCTO: z.string().regex(/^\d+$/).default("50000000000000000000000"),
   /**
    * Where company DAOs are created: the official Sputnik factory, sputnikv2.testnet on testnet.
-   * The Atlantis directory (euthyna-registry.testnet) lists DAOs from this factory with a Nomos vault.
+   * The Atlantis directory (atlantis-registry.testnet) lists DAOs from this factory with a Nomos vault.
    * factory-v2.mandateos.testnet DAOs belong to the first directory (registry.mandateos.testnet) only.
    */
   DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
