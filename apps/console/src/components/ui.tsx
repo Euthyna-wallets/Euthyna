@@ -29,6 +29,13 @@ export function Status({ value }: { value: string }) {
   return <span className={`status status-${value.toLowerCase().replaceAll("_", "-")}`}>{value}</span>;
 }
 
+/** A NEAR account for display: a 64-hex implicit account reads 4eeb9c…b89620, a long name is cut in the middle, others stay whole. */
+export function displayAccount(id: string | null | undefined): string {
+  if (!id) return "—";
+  if (/^[0-9a-f]{64}$/.test(id)) return `${id.slice(0, 6)}…${id.slice(-6)}`;
+  return id.length > 40 ? `${id.slice(0, 20)}…${id.slice(-14)}` : id;
+}
+
 export function short(value: string | null | undefined, size = 8): string {
   if (!value) return "—";
   return value.length > size * 2 ? `${value.slice(0, size)}…${value.slice(-6)}` : value;

@@ -19,6 +19,7 @@ import { Kicker, NightPanel } from "./design.js";
 import { WalletProvider } from "../lib/wallet-context.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
 import { disconnectNearWallet } from "../wallets.js";
+import { displayAccount } from "./ui.js";
 
 type Organization = { id: string; name: string };
 
@@ -210,7 +211,7 @@ export function Layout() {
             <WalletBar />
             <span className="who">
               <span className="avatar">{initials(session.data?.user.name ?? "?")}</span>
-              {myAccount || session.data?.user.name || "member"}
+              {myAccount ? displayAccount(myAccount) : session.data?.user.name || "member"}
             </span>
           </header>
           <main style={{ display: "flex", flexDirection: "column", gap: 22, minWidth: 0 }}>

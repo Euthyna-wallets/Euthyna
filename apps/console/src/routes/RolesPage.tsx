@@ -7,7 +7,7 @@ import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls
 
 import { api, type AgentRow } from "../api.js";
 import { Kicker, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";
-import { PageState, everyDays, short } from "../components/ui.js";
+import { displayAccount, PageState, everyDays, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -661,7 +661,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
               return (
                 <label key={agent.id} className="check" style={CHECK_ROW}>
                   <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== agent.nearAccountId) : [...current, agent.nearAccountId]); setPreview(null); }} style={CHECKBOX} />
-                  {agent.name} <span className="mono" style={{ fontSize: 11.5, color: "#66718C" }}>{agent.nearAccountId}</span>
+                  {agent.name} <span className="mono" title={agent.nearAccountId} style={{ fontSize: 11.5, color: "#66718C" }}>{displayAccount(agent.nearAccountId)}</span>
                   {checked && name && agent.role !== name ? <span style={{ fontSize: 12, color: "#B54708" }}> · its requests use role "{agent.role}": name this role "{agent.role}" or update AGENT_ROLE</span> : null}
                 </label>
               );
