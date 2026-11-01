@@ -107,7 +107,7 @@ async fn companies_list_themselves_and_only_themselves() -> Result<()> {
     let registry = worker.dev_deploy(REGISTRY_WASM).await?;
     registry
         .call("new")
-        .args_json(json!({"factory_id": factory.id()}))
+        .args_json(json!({"factory_id": factory.id(), "vault_factory_id": null}))
         .transact()
         .await?
         .into_result()?;
@@ -233,5 +233,74 @@ async fn companies_list_themselves_and_only_themselves() -> Result<()> {
         .transact()
         .await?;
     assert!(outcome.into_result().is_err());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn with_a_vault_factory_only_its_vaults_are_listed() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let root = worker.root_account()?;
+    let factory = root
+        .create_subaccount("sputnik")
+        .initial_balance(NearToken::from_near(20))
+        .transact()
+        .await?
+        .into_result()?;
+    let nomos = root
+        .create_subaccount("nomos")
+        .initial_balance(NearToken::from_near(30))
+        .transact()
+        .await?
+        .into_result()?;
+    let acme = factory
+        .create_subaccount("acme")
+        .initial_balance(NearToken::from_near(5))
+        .transact()
+        .await?
+        .into_result()?;
+    let registry = worker.dev_deploy(REGISTRY_WASM).await?;
+    registry
+        .call("new")
+        .args_json(json!({"factory_id": factory.id(), "vault_factory_id": nomos.id()}))
+        .transact()
+        .await?
+        .into_result()?;
+    let vault_factory: Option<String> = registry.view("vault_factory_id").await?.json()?;
+    assert_eq!(vault_factory.as_deref(), Some(nomos.id().as_str()));
+
+    // A vault the DAO owns but that the vault factory did not create: refused.
+    let outside_vault = vault_of(&worker, &acme).await?;
+    let outcome = register(&registry, &acme, &outside_vault, None, "Acme", DEPOSIT).await?;
+    assert!(
+        format!("{:?}", outcome.into_result().unwrap_err()).contains("ERR_NOT_A_FACTORY_VAULT")
+    );
+    println!("BLOCKED | company lists a vault outside the vault factory | vault factory check | ERR_NOT_A_FACTORY_VAULT");
+
+    // Its vault from the vault factory: listed.
+    let account = nomos
+        .create_subaccount("acme")
+        .initial_balance(NearToken::from_near(12))
+        .transact()
+        .await?
+        .into_result()?;
+    let vault = account.deploy(VAULT_WASM).await?.into_result()?;
+    vault
+        .call("new")
+        .args_json(json!({
+            "client_id": "test", "owner_id": acme.id(), "mpc_contract_id": "mpc.test.near",
+            "visa_public_key": STANDARD.encode([0u8; 32]), "status_public_key": STANDARD.encode([1u8; 32]),
+            "policy_version": 1, "registry_version": 1, "operation_ttl_ns": 120_000_000_000u64,
+            "rule_delay_ns": 1_000_000_000u64, "rule_expiration_ns": 60_000_000_000u64, "council": [acme.id()]
+        }))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(callback_result(
+        &register(&registry, &acme, &vault, None, "Acme", DEPOSIT).await?
+    ));
+    let count: u32 = registry.view("company_count").await?.json()?;
+    assert_eq!(count, 1);
     Ok(())
 }
