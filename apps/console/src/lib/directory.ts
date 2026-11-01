@@ -62,11 +62,23 @@ export async function listCompanies(): Promise<DirectoryEntry[]> {
 
 type QueuedRule = { change: RuleChange; state: string };
 
+/** Names the owners voted for supplier addresses, replayed from the vault's executed rules. */
+function supplierLabels(executed: RuleChange[]): Record<string, string> {
+  const labels: Record<string, string> = {};
+  const hex = (bytes: number[]) => `0x${bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  for (const change of executed) {
+    if ("AddListAddress" in change) labels[hex(change.AddListAddress.address)] = change.AddListAddress.label;
+    if ("AddListAddresses" in change) for (const entry of change.AddListAddresses.entries) labels[hex(entry.address)] = entry.label;
+    if ("RemoveListAddress" in change) delete labels[hex(change.RemoveListAddress.address)];
+  }
+  return labels;
+}
+
 async function employeesOf(vaultId: string): Promise<Employee[]> {
   const rules = await chainView<QueuedRule[]>(vaultId, "list_rule_changes", { before: null, limit: 50 }).catch(() => [] as QueuedRule[]);
   const executed = rules.filter((rule) => rule.state === "Executed").reverse().map((rule) => rule.change);
   const budgets = budgetsOf(executed, PROFILE);
-  const context = { profile: PROFILE, budgets };
+  const context = { profile: PROFILE, budgets, labels: supplierLabels(executed) };
   const names = new Set<string>();
   const members = new Map<string, Set<string>>();
   for (const change of executed) {
