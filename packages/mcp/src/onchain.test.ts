@@ -5,7 +5,7 @@ type Hex = `0x${string}`;
 
 const id = Array<number>(32).fill(1);
 const block = `0x${"09".repeat(32)}` as Hex;
-function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean } = {}) {
+function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean; vaultRefuses?: boolean; api?: boolean } = {}) {
   const calls: Array<{ method: string; args?: Record<string, unknown> }> = [];
   let state = "Prepared";
   const vault = {
@@ -14,6 +14,7 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
     authorize: async (_id: number[], approval: unknown) => { expect(approval).toBeNull(); calls.push({ method: "authorize" }); state = "PossiblySigned"; return "near-hash"; },
     cancelNonce: async () => { calls.push({ method: "cancel_nonce" }); return "near-cancel"; },
     view: async <T>(method: string): Promise<T> => {
+      if (method === "check_operation") return (options.vaultRefuses ? { allowed: false, reason: "ERR_PERMISSION_DENIED" } : { allowed: true, reason: null }) as T;
       if (method === "get_wallet") return { address: Array(20).fill(3) } as T;
       if (method === "get_settlement_config") return { cancel_after_ns: "3600000000000", unconfirmed_after_ns: "21600000000000" } as T;
       return { state, signed_transaction: [2, 4, 6], cancellation: options.cancellation ? { signed_transaction: [8, 9] } : null, possibly_signed_at_ns: options.timeout ? "0" : (BigInt(Date.now()) * 1_000_000n).toString(),  } as T;
@@ -34,7 +35,11 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
     if (method === "eth_getBlockByHash") return { number: "0x10" } as T;
     return "0x1" as T;
   };
-  return { tools: new MandateMcpTools(new OnchainAgentClient(vault, rpc, options.refused ? { preflightInvoice: async () => { throw new Error("Invoice refused"); } } : undefined)), calls };
+  const reported: unknown[] = [];
+  const advisory = options.refused ? { preflightInvoice: async () => { throw new Error("Invoice refused"); } }
+    : options.api ? { preflightInvoice: async () => {}, check: async (request: unknown) => { reported.push(request); return { allowed: false } as never; } }
+    : undefined;
+  return { tools: new MandateMcpTools(new OnchainAgentClient(vault, rpc, advisory)), calls, reported };
 }
 describe("direct MCP without an API", () => {
   it("prepares and authorizes without a visa, then verifies finalized receipt", async () => {
@@ -87,4 +92,27 @@ it("does not broadcast a competing cancellation while original settlement is pen
   const result=await tools.pay({token:`0x${"01".repeat(20)}`,recipient:`0x${"02".repeat(20)}`,amount:"10",reference:"original-landed",gasLimit:"21000",maxFeePerGas:"2",maxPriorityFeePerGas:"1"});
   expect(result).toMatchObject({state:"PossiblySigned"});
   expect(calls.some((c)=>c.method==="eth_sendRawTransaction")).toBe(false);
+});
+
+describe("refusals reach the API", () => {
+  const payment = { token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" };
+  it("returns a refusal without reserving anything, and reports it so the members see it", async () => {
+    const { tools, calls, reported } = fixture({ vaultRefuses: true, api: true });
+    const result = await tools.pay(payment);
+    expect(result).toEqual({ outcome: "refused", reason: "ERR_PERMISSION_DENIED", refusedBy: "vault" });
+    expect(calls.some((c) => c.method === "prepare")).toBe(false);
+    expect(reported).toHaveLength(1);
+  });
+  it("reports a refused dry run, and nothing when the vault allows it", async () => {
+    const refused = fixture({ vaultRefuses: true, api: true });
+    expect((await refused.tools.check({ token: payment.token, recipient: payment.recipient, amount: "10", reference: "dry" })).allowed).toBe(false);
+    expect(refused.reported).toHaveLength(1);
+    const allowed = fixture({ api: true });
+    expect((await allowed.tools.check({ token: payment.token, recipient: payment.recipient, amount: "10", reference: "dry" })).allowed).toBe(true);
+    expect(allowed.reported).toHaveLength(0);
+  });
+  it("still refuses when there is no API", async () => {
+    const { tools } = fixture({ vaultRefuses: true });
+    expect((await tools.pay(payment)).outcome).toBe("refused");
+  });
 });
