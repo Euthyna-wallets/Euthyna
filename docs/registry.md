@@ -42,7 +42,29 @@ then the wallet signs. Members approve it in **Decisions**. The API needs
 
 ## On testnet
 
-### Current: `euthyna-registry.testnet` (2026-10-31)
+### Current: `atlantis-registry.testnet` (2026-11-01)
+
+Same code and settings as `euthyna-registry.testnet` below (DAO factory
+`sputnikv2.testnet`, vault factory `nomos.euthyna.testnet`), redeployed from the
+CI build. `euthyna-registry.testnet` runs a `registry.wasm` built outside the CI
+container: it embeds `/root/.cargo/...` paths where the CI build embeds
+`/home/near/.cargo/...`, so its code hash (`7Eu99o...`) is not what the
+repository builds, and the account has no key to replace it. The checked-in
+`contracts/res/registry.wasm` is now the CI build, and that is what runs here.
+
+| Step | Result | Transaction |
+| --- | --- | --- |
+| Create the account (temporary key) through the testnet registrar | | `GTaunR2AeUcKRppmWhNQAsEJQUZ38A38C41NNoXBhx77` |
+| Deploy + `new(sputnikv2.testnet, nomos.euthyna.testnet)` + delete the key, in one transaction | 0 access keys; code hash `GKmygErEviqFHAjsELMrJeJbsseopZp3hNT7wtDN73hk` = base58(sha256 of `contracts/res/registry.wasm`) | `HVyxiJ9wkNGfoU83wDZEMS4QSnPSzcgWpE7pfCiFWLKn` |
+
+Companies listed on the previous registry list themselves again here, by a
+vote of their members.
+
+The API and the console use `atlantis-registry.testnet` on testnet unless
+`OMNIROLES_REGISTRY_ID` (API, and `VITE_MANDATEOS_REGISTRY_ID` at console build)
+says otherwise.
+
+### Previous: `euthyna-registry.testnet` (2026-10-31)
 
 DAO factory `sputnikv2.testnet` (the official Sputnik factory), vault factory
 `nomos.euthyna.testnet`. The testnet registrar creates a top-level account only
@@ -53,13 +75,9 @@ the account has no access key.
 | Step | Result | Transaction |
 | --- | --- | --- |
 | Create the account (temporary key) | | `AhLVgaLxckQtbhHaCX4P9uuN7H4AHGNb3v2Lark3c5UW` |
-| Deploy + `new` + delete the key, in one transaction | 0 access keys; code hash `7Eu99o8d92yJb3AH7X4aQJEGPzfvEJp5Cr2J7SDNG4gG` = base58(sha256 of `contracts/res/registry.wasm`) | `4FYnowncAjwwZNivydq22X5Mtoen4SzaaGJnrmyCa5AF` |
+| Deploy + `new` + delete the key, in one transaction | 0 access keys; code hash `7Eu99o8d92yJb3AH7X4aQJEGPzfvEJp5Cr2J7SDNG4gG` (a build outside the CI container, see above) | `4FYnowncAjwwZNivydq22X5Mtoen4SzaaGJnrmyCa5AF` |
 | An account that is not a DAO lists E2E Buyer AI | refused, `ERR_NOT_A_MANDATEOS_DAO` | |
 | E2E Buyer AI members vote the listing with its vault and shares (proposal #7) | listed, `company_count` 1 | `7BbsJXyJmdXoYauLfAKCPQHeeaoXeeYxuTGYvsLudwqV` |
-
-The API and the console use `euthyna-registry.testnet` on testnet unless
-`OMNIROLES_REGISTRY_ID` (API, and `VITE_MANDATEOS_REGISTRY_ID` at console build)
-says otherwise.
 
 ### First deployment: `registry.mandateos.testnet` (2026-10-25)
 

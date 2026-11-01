@@ -72,7 +72,7 @@ services:
         VITE_BASE_SEPOLIA_RPC_URL: ${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
         VITE_ETHEREUM_SEPOLIA_RPC_URL: ${ETHEREUM_SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}
         VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
-        VITE_MANDATEOS_REGISTRY_ID: ${OMNIROLES_REGISTRY_ID:-euthyna-registry.testnet}
+        VITE_MANDATEOS_REGISTRY_ID: ${OMNIROLES_REGISTRY_ID:-atlantis-registry.testnet}
     depends_on:
       api:
         condition: service_healthy
