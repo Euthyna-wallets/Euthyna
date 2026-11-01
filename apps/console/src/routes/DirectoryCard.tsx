@@ -25,9 +25,22 @@ async function verifyListing(draft: ProposalDraft, view: DirectoryView, name: st
   }
 }
 
+/** The registry only lists DAOs created by its factory (`<name>.<factory>`): read which one, on chain. */
+function acceptsDao(factoryId: string, daoAccountId: string): boolean {
+  const label = daoAccountId.endsWith(`.${factoryId}`) ? daoAccountId.slice(0, -factoryId.length - 1) : "";
+  return label.length > 0 && !label.includes(".");
+}
+
 export function DirectoryCard() {
   const wallets = useWallets();
   const query = useQuery({ queryKey: ["omni-directory"], queryFn: omni.directory });
+  const registryId = query.data?.registryId;
+  const factory = useQuery({
+    queryKey: ["registry-factory", registryId],
+    queryFn: () => chainView<string>(registryId!, "factory_id"),
+    enabled: Boolean(registryId),
+    staleTime: Infinity,
+  });
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,7 +68,12 @@ export function DirectoryCard() {
 
   return (
     <Card title="Public directory">
-      {!view.registryId ? <p className="muted">No public directory is configured on this server.</p> : (
+      {!view.registryId ? <p className="muted">No public directory is configured on this server.</p> : factory.data && !acceptsDao(factory.data, view.daoAccountId) ? (
+        <p className="muted">
+          This company cannot be listed: the directory <code>{view.registryId}</code> only accepts DAOs created by{" "}
+          <code>{factory.data}</code>, and this one is <code>{view.daoAccountId}</code>. A listing vote would fail on chain.
+        </p>
+      ) : (
         <>
           <p className="muted">
             {listing
@@ -65,7 +83,7 @@ export function DirectoryCard() {
           <div className="stack">
             <label>Name<input maxLength={REGISTRY_NAME_MAX} value={name} placeholder={listing?.name ?? "Acme AI"} onChange={(event) => setName(event.target.value)} /></label>
             <label>One line on what the company does<input maxLength={REGISTRY_DESCRIPTION_MAX} value={description} placeholder={listing?.description ?? "Pentest and SOC on demand"} onChange={(event) => setDescription(event.target.value)} /></label>
-            <button className="secondary" disabled={!me || busy || !name.trim()} onClick={() => void propose()}>{listing ? "Propose the update" : "Propose the listing"}</button>
+            <button className="secondary" disabled={!me || busy || !name.trim() || !factory.data} onClick={() => void propose()}>{listing ? "Propose the update" : "Propose the listing"}</button>
           </div>
           {!me ? <p className="small muted">Connect your NEAR wallet to propose.</p> : null}
           {message ? <p className="small">{message}</p> : null}

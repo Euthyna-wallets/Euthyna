@@ -165,7 +165,7 @@ export function CompanyPublicPage() {
               <span className="leaf">{(entry.data?.name ?? dao).toUpperCase()}</span>
             </h1>
             <p style={{ margin: 0, fontSize: 19, lineHeight: 1.55, color: "#C9D3EA", maxWidth: 600 }}>
-              {entry.data?.description || "No description in the registry."}
+              {entry.data === null ? "Not in the public directory." : entry.data?.description || "No description in the registry."}
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
               {company?.shares ? (
@@ -184,7 +184,7 @@ export function CompanyPublicPage() {
             <div style={{ padding: "18px 22px", borderBottom: "1px solid rgba(60,20,4,.25)" }}>
               <Kicker color="rgba(32,10,3,.72)">Treasury</Kicker>
               <b className="mono" style={{ display: "block", marginTop: 6, fontSize: 34, color: "#200A03" }}>
-                {totalUsd != null ? usd(totalUsd) : <span style={{ fontSize: 18 }}>balances below</span>}
+                {totalUsd != null ? usd(totalUsd) : <span style={{ fontSize: 18 }}>{company ? "balances below" : "—"}</span>}
               </b>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
@@ -209,7 +209,6 @@ export function CompanyPublicPage() {
       <section className="marble" style={{ padding: "72px 0 96px", color: "#0D1730" }}>
         <div className="pg" style={{ display: "flex", flexDirection: "column", gap: 56 }}>
           {entry.isLoading ? <p style={{ margin: 0, color: "#4A5675" }}>Reading {REGISTRY_ID}…</p> : null}
-          {entry.data === null ? <p style={{ margin: 0, color: "#4A5675" }}>This company is not in the public directory.</p> : null}
           {entry.error ? <p style={{ margin: 0, color: "#A8381E" }}>{entry.error.message}</p> : null}
 
           {company ? (
