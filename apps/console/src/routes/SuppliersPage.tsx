@@ -150,7 +150,7 @@ export function SuppliersPage() {
               {pending.map((rule) => (
                 <div key={rule.queueId} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderTop: "1px solid rgba(13,23,48,.1)", fontSize: 13.5 }}>
                   <Seal word="QUEUED" size={32} />
-                  <span>{rule.title}: activates {rule.activatesAt}</span>
+                  <span>{rule.title}: applies at {new Date(rule.activatesAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} unless a council member vetoes it</span>
                 </div>
               ))}
               {!pending.length && !proposals.length ? <span style={{ fontSize: 13.5, color: "#4A5675" }}>No pending changes.</span> : null}
@@ -159,15 +159,8 @@ export function SuppliersPage() {
             <NightPanel style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
               <Kicker color="#F2B544">Why the list matters</Kicker>
               <span style={{ fontSize: 14, color: "#C9D3EA", lineHeight: 1.55 }}>
-                Naomi’s role says: <i>transfer USDC only to a supplier on the vault’s list</i>. When she was asked to pay an address that is not on it, the vault refused before anything was signed.
+                A role can say: <i>transfer USDC only to a supplier on the vault’s list</i>. When an agent asks to pay any other address, the vault refuses before anything is signed, and the refusal shows in Activity.
               </span>
-              <div style={{ display: "grid", gridTemplateColumns: "56px minmax(0, 1fr)", gap: 14, alignItems: "center", paddingTop: 12, borderTop: "1px solid #1F3A6E" }}>
-                <Seal word="REFUSED" size={52} />
-                <div style={{ minWidth: 0 }}>
-                  <b style={{ color: "#fff", fontSize: 14 }}>Pay 1,800 USDC to 0x9f3…e21</b>
-                  <code style={{ display: "block", marginTop: 4, font: "12px var(--font-mono)", color: "#F4A28C", overflowWrap: "anywhere" }}>ERR_PERMISSION_DENIED:parameterNotAllowed</code>
-                </div>
-              </div>
               <span style={{ fontSize: 12.5, color: "#A9B6D6" }}>To pay it anyway, members vote on that exact transaction once, or add the address here for good.</span>
             </NightPanel>
           </div>
