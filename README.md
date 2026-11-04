@@ -20,6 +20,31 @@ An agent never holds a key that moves funds. What its role allows is signed;
 everything else is refused, and there is no escalation. Only the owners change
 a role, by vote, and every change waits out a veto window.
 
+## Security model
+
+We assume the agent will be compromised: a prompt injection, a poisoned memory
+or a replaced MCP tool lets the attacker make it sign anything its key can
+sign. So no lock depends on the agent behaving, and no server holds a key that
+moves funds.
+
+| Threat | Defence | Proof |
+| --- | --- | --- |
+| A hijacked agent pays the attacker | The vault checks the role on chain before anything is signed: chain, contract, function, calldata conditions (recipient, amount measured from the calldata), refilling budgets, velocity limit, fee caps, single-use references | `contracts/tests/tests/attacks.rs`, [docs/attacks.md](./docs/attacks.md) |
+| A large payment | A human co-signs above the role's threshold; the agent cannot co-sign its own | `ERR_COSIGN_REQUIRED`, `ERR_SELF_COSIGN` in the attack suite |
+| A stolen Guard key | The role conditions run before any visa: the Guard can only refuse, never widen a role | attack suite |
+| A stolen server, database or deployer key | The vault, the registry and Nomos have no access key. The company wallet has no private key: NEAR MPC signs only what the vault asks, and the vault settles from an MPC attestation of the finalized transaction, not from a server | `view_access_key_list` on the vault, `contracts/tests/tests/settlement.rs` |
+| A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window. **Security council**: one council member can veto a queued change, and the council can pause every agent; only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
+| A malicious code upgrade | **Nomos** (`nomos.euthyna.near`) publishes each vault version by its SHA-256 hash and creates keyless vaults as sub-accounts; it has no power over a vault once created. A vault upgrades only on a DAO `Upgrade { code_hash }` vote after the veto window, checks the hash and keeps its state | `contracts/tests/tests/nomos.rs` (`nomos_creates_keyless_vaults_and_only_the_dao_upgrades_them`) |
+| A founder loses their NEAR account | **ZK Email recovery**: a proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed), a 48 hour window in which the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `circuits/email-recovery`; testnet run of 2026-10-31 on `e2e-buyer-73429.sputnikv2.testnet` (proposals #3 and #4) |
+| An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
+
+```bash
+pnpm attack:all       # 48 attacks on a sandbox vault and the Guard: 48 refused
+pnpm attack:testnet   # the same checks against the live testnet vault, view calls only
+```
+
+Every claim and its status (testnet, code, next): [CLAIMS.md](./CLAIMS.md).
+
 ## Product architecture
 
 ![Product architecture: investors and the security council outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
