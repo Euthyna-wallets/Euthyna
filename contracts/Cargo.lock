@@ -19,6 +19,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "ahash"
+version = "0.8.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
+dependencies = [
+ "cfg-if 1.0.5",
+ "once_cell",
+ "version_check",
+ "zerocopy",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -55,7 +67,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.5",
  "const-hex",
- "derive_more",
+ "derive_more 2.1.1",
  "foldhash 0.1.5",
  "hashbrown 0.15.5",
  "indexmap 2.14.2",
@@ -175,6 +187,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
 dependencies = [
  "derive_arbitrary",
+]
+
+[[package]]
+name = "ark-bn254"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d69eab57e8d2663efa5c63135b2af4f396d66424f88954c21104125ab6b3e6bc"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+]
+
+[[package]]
+name = "ark-bn254-ext"
+version = "0.6.0"
+source = "git+https://github.com/zkVerify/accelerated-bn-cryptography.git?tag=v0.6.0#6249e3a8e5f7d679af483339dfbcb391ac78450a"
+dependencies = [
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-models-ext",
+ "ark-scale",
+ "ark-std 0.5.0",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce"
+dependencies = [
+ "ahash",
+ "ark-ff 0.5.0",
+ "ark-poly",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.5",
+ "itertools 0.13.0",
+ "num-bigint 0.4.8",
+ "num-integer",
+ "num-traits",
+ "zeroize",
 ]
 
 [[package]]
@@ -344,6 +401,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-models-ext"
+version = "0.6.0"
+source = "git+https://github.com/zkVerify/accelerated-bn-cryptography.git?tag=v0.6.0#6249e3a8e5f7d679af483339dfbcb391ac78450a"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "educe",
+]
+
+[[package]]
+name = "ark-poly"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "579305839da207f02b89cd1679e50e67b4331e2f9294a57693e5051b7703fe27"
+dependencies = [
+ "ahash",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "ark-scale"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "985c81a9c7b23a72f62b7b20686d5326d2a9956806f37de9ee35cb1238faf0c0"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
 name = "ark-serialize"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -370,6 +468,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
 dependencies = [
+ "ark-serialize-derive 0.5.0",
  "ark-std 0.5.0",
  "arrayvec",
  "digest 0.10.7",
@@ -382,11 +481,22 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a74dd304fd536fb95d0a328e72be759209cc496a9da094c5bc56e5fea4f9e86b"
 dependencies = [
- "ark-serialize-derive",
+ "ark-serialize-derive 0.6.0",
  "ark-std 0.6.0",
  "digest 0.10.7",
  "num-bigint 0.4.8",
  "serde_with",
+]
+
+[[package]]
+name = "ark-serialize-derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1198,11 +1308,31 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
+dependencies = [
+ "derive_more-impl 1.0.0",
+]
+
+[[package]]
+name = "derive_more"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
 dependencies = [
- "derive_more-impl",
+ "derive_more-impl 2.1.1",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1372,6 +1502,23 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "email-recovery"
+version = "0.1.0"
+dependencies = [
+ "ark-bn254",
+ "ark-bn254-ext",
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "hex",
+ "near-sdk",
+ "num-bigint 0.4.8",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "ultrahonk-no-std",
 ]
 
 [[package]]
@@ -1733,6 +1880,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
  "foldhash 0.1.5",
  "serde",
 ]
@@ -1780,6 +1928,12 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "hex-literal"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "hmac"
@@ -2583,7 +2737,7 @@ dependencies = [
  "anyhow",
  "bytesize",
  "chrono",
- "derive_more",
+ "derive_more 2.1.1",
  "near-config-utils",
  "near-crypto",
  "near-parameters",
@@ -2631,7 +2785,7 @@ dependencies = [
  "borsh",
  "bs58 0.4.0",
  "curve25519-dalek",
- "derive_more",
+ "derive_more 2.1.1",
  "ed25519-dalek",
  "hex",
  "near-account-id 2.6.0",
@@ -2763,7 +2917,7 @@ dependencies = [
  "bytesize",
  "chrono",
  "derive_builder",
- "derive_more",
+ "derive_more 2.1.1",
  "easy-ext",
  "enum-map",
  "hex",
@@ -2802,7 +2956,7 @@ dependencies = [
  "base64 0.21.7",
  "borsh",
  "bs58 0.4.0",
- "derive_more",
+ "derive_more 2.1.1",
  "enum-map",
  "near-account-id 2.6.0",
  "near-gas",
@@ -4108,6 +4262,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scale-info"
+version = "2.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346a3b32eba2640d17a9cb5927056b08f3de90f65b72fe09402c2ad07d684d0b"
+dependencies = [
+ "cfg-if 1.0.5",
+ "derive_more 1.0.0",
+ "parity-scale-codec",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4560,6 +4725,27 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0eb01866308440fc64d6c44d9e86c5cc17adfe33c4d6eed55da9145044d0ffc1"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "snafu"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e84b3f4eacbf3a1ce05eac6763b4d629d60cbc94d632e4092c54ade71f1e1a2"
+dependencies = [
+ "snafu-derive",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
+dependencies = [
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5089,6 +5275,22 @@ dependencies = [
  "crunchy",
  "hex",
  "static_assertions",
+]
+
+[[package]]
+name = "ultrahonk-no-std"
+version = "0.4.0"
+dependencies = [
+ "ark-bn254",
+ "ark-bn254-ext",
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-models-ext",
+ "ark-std 0.5.0",
+ "hex-literal",
+ "near-sdk",
+ "sha3 0.10.9",
+ "snafu",
 ]
 
 [[package]]

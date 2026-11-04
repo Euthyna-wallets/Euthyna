@@ -1,5 +1,6 @@
 [workspace]
-members = ["vault", "nomos", "omniroles-conditions", "dao-factory", "mock-mpc", "test-ft", "shares", "registry", "tests"]
+members = ["vault", "nomos", "omniroles-conditions", "dao-factory", "mock-mpc", "test-ft", "shares", "registry", "email-recovery", "tests"]
+exclude = ["vendor"]
 resolver = "2"
 
 [workspace.package]
@@ -27,3 +28,14 @@ sha3 = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "sync"] }
 
+
+# email-recovery's verifier is large: optimise it for size, or NEAR refuses a function as too
+# large. Only packages no other contract uses, so their WASM does not change.
+[profile.release.package.email-recovery]
+opt-level = "z"
+[profile.release.package.ultrahonk-no-std]
+opt-level = "z"
+[profile.release.package.ark-bn254-ext]
+opt-level = "z"
+[profile.release.package.ark-models-ext]
+opt-level = "z"
