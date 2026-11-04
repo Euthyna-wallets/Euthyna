@@ -45,6 +45,48 @@ pnpm attack:testnet   # the same checks against the live testnet vault, view cal
 
 Every claim and its status (testnet, code, next): [CLAIMS.md](./CLAIMS.md).
 
+## Try the seat recovery (judges)
+
+The ZK Email proof is verified by a NEAR contract, `euthyna-recovery.testnet`. On testnet the lost account can
+cancel for **10 minutes** (48 hours is meant for mainnet), so the whole flow fits in one sitting.
+
+**1. Check the contract, read-only (1 minute, no wallet).** [near CLI](https://github.com/near/near-cli-rs):
+
+```bash
+near account list-keys euthyna-recovery.testnet network-config testnet now
+#   → no access key: nobody can change or upgrade it
+near contract call-function as-read-only euthyna-recovery.testnet dkim_keys json-args '{"domain":"gmail.com"}' network-config testnet now
+#   → the DKIM keys it accepts for Gmail (sha256 of the key as the circuit takes it)
+near contract call-function as-read-only euthyna-recovery.testnet recoveries_of json-args '{"dao_id":"eut-rec-11526.sputnikv2.testnet"}' network-config testnet now
+#   → the demo DAO's history: one recovery cancelled by the founder, then one left to run past its delay
+#     (ready: true), after which the founders voted the seat to the new account
+near contract call-function as-read-only eut-rec-11526.sputnikv2.testnet get_policy json-args '{}' network-config testnet now
+#   → council: dave, carol, bob (bob replaced alice, the founder who "lost" her account)
+```
+
+The account's code hash is `Eg1Ht4oYrNVjDVaqgsGrwPgsev1ZsbfzMr4HPd5uRhPa`, base58 of the sha256 of
+`contracts/res/email_recovery.wasm` (built in the pinned image the CI checks). Every transaction of the run is in
+[docs/recovery.md](./docs/recovery.md#on-testnet).
+
+**2. Re-run the proofs (5 minutes).** Real emails, real proofs, a NEAR sandbox:
+
+```bash
+cd contracts && cargo test -p tests --test email_recovery
+#   → 4 passed: an unknown DKIM key, another account's email, a flipped public input, another mailbox,
+#     another salt are refused; a real iCloud email verifies on chain; ready only after the delay
+ZK_EMAIL_PROVE=1 pnpm --filter @mandateos/api exec vitest run src/recovery/email.prove
+#   → the circuit in Node: a zero-knowledge proof verifies, a forged one does not
+```
+
+**3. In the console (about 15 minutes).** As a founder of a company: **Settings → Seat recovery**. Send yourself an
+email with the subject shown (`Euthyna enroll near:<your account>`) from Gmail, Outlook, iCloud, Yahoo or Proton
+(on testnet also a [YOPmail](https://yopmail.com) inbox, which has no password: testnet only), paste its source,
+**Prove**, sign. → *Enrolled on chain: a mailbox at … can recover your seat.* Then, signed in with another NEAR
+account, open **/recover**, give the DAO and the founder's account, send `Euthyna recovery near:<new account>` from
+the same mailbox, prove and sign. → *Request recorded on chain … can cancel it until …* The founder sees it in
+Settings and can **cancel**; after 10 minutes any member gets **Submit the vote**. The email never leaves the
+browser; only the zero-knowledge proof and a salted hash of the address go on chain.
+
 ## Product architecture
 
 ![Product architecture: investors and the security council outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
@@ -111,11 +153,12 @@ How the cheque is checked, what the worker's agent may do, and what was tested: 
 
 | What | Where |
 | --- | --- |
-| 45 attacks refused (hacked agent, stolen Guard key, stolen server, one rogue member) | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
+| 48 attacks refused (hacked agent, stolen Guard key, stolen server, one rogue member) | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
 | The same attacks against a live testnet vault, read-only | `pnpm attack:testnet` |
 | Shares: sale, votes, revenue only for voters, over three epochs | [docs/shares.md](./docs/shares.md) (testnet hashes) |
 | An agent sends ETH from Base to the investors through Omni Bridge; the same call to another account is refused | [docs/shares.md](./docs/shares.md) (testnet hashes) |
 | Keyless registry deployed; companies listed by DAO vote | [docs/registry.md](./docs/registry.md) (testnet hashes) |
+| Founder seat recovery verified on chain: enroll, a request from another mailbox refused, cancel, ready after the delay, then the founders' vote | [docs/recovery.md](./docs/recovery.md) (testnet hashes), `contracts/tests/tests/email_recovery.rs` |
 | Market end to end: an agent hires another company's agent, its card pays on delivery, the seller's vault receives exactly the price | `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox, PostgreSQL, the real euthyna-signer) |
 
 ## Run it
