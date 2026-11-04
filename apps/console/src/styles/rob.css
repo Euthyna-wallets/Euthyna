@@ -1,0 +1,67 @@
+/* Rob the Agent: design-handoff/rob-the-agent/source/rob-the-agent.html, scoped under .rob. */
+.rob{font-family:var(--font-ui);color:#E7ECF6;background:#030918;overflow-x:hidden}
+.rob a{color:inherit}
+.rob a:hover{color:#F2B544}
+.rob .vault{background-color:#061433;background-image:linear-gradient(180deg,rgba(3,9,24,.35),rgba(3,9,24,.6) 55%,rgba(3,9,24,.98)),url(/media/rob/board-vault.jpg);background-size:cover,cover;background-position:center,center 40%}
+.rob .nightm{background-color:#061433;background-image:radial-gradient(90% 70% at 72% 20%,rgba(180,83,46,.22),rgba(6,20,51,0) 60%),linear-gradient(180deg,rgba(6,20,51,.55),rgba(3,9,24,.97)),url(/media/textures/marble-night.jpg);background-size:cover,cover,900px}
+.rob .ruggy{background:#0A1D47 url(/media/renders/R6-plutus.jpg) center 30%/cover no-repeat}
+.rob .kick{font:700 12px var(--font-brand);letter-spacing:.3em;text-transform:uppercase}
+
+/* cards */
+.rob .hand{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;padding:30px 0 10px;margin:0;list-style:none}
+.rob .card{all:unset;box-sizing:border-box;position:relative;width:150px;height:225px;padding:7px;border-radius:12px;cursor:pointer;transition:transform .25s ease,box-shadow .25s ease;box-shadow:0 14px 30px rgba(0,0,0,.6);display:block;flex:0 0 auto}
+.rob .card:hover:not(:disabled){transform:translateY(-10px) rotate(-1deg)}
+.rob .card:focus-visible{outline:3px solid #4FD1E8;outline-offset:4px}
+.rob .card.sel{transform:translateY(-22px) scale(1.04);box-shadow:0 0 0 2px #F2B544,0 0 40px rgba(242,181,68,.55),0 24px 40px rgba(0,0,0,.7)}
+.rob .card:disabled{cursor:default}
+.rob .card.locked .art{filter:grayscale(.85) brightness(.45)}
+.rob .card.busy{animation:robpulse 1s ease-in-out infinite}
+@keyframes robpulse{0%,100%{box-shadow:0 0 0 2px #F2B544,0 0 18px rgba(242,181,68,.35)}50%{box-shadow:0 0 0 2px #F2B544,0 0 46px rgba(242,181,68,.75)}}
+.rob .f-bronze{background:linear-gradient(145deg,#F0C27A 0%,#A8692A 30%,#5E3A12 58%,#C98A44 80%,#4A2C0C 100%)}
+.rob .f-marble{background-color:#F3EFE7;background-image:linear-gradient(145deg,rgba(255,255,255,.5),rgba(13,23,48,.15)),url(/media/textures/marble-white.jpg);background-size:cover,cover}
+.rob .f-ori{background-color:#B4532E;background-image:linear-gradient(145deg,rgba(255,236,200,.45),rgba(0,0,0,0) 40%,rgba(40,10,0,.4)),url(/media/textures/orichalcum.jpg);background-size:cover,cover;box-shadow:0 0 26px rgba(180,83,46,.55),0 14px 30px rgba(0,0,0,.6)}
+.rob .f-boss{background-color:#061433;background-image:linear-gradient(145deg,#FFE7B4 0%,#B4532E 25%,#2A0D04 50%,#B4532E 75%,#FFE7B4 100%);box-shadow:0 0 0 1px #F2B544,0 0 40px rgba(242,181,68,.6),0 14px 30px rgba(0,0,0,.6)}
+.rob .art{position:absolute;inset:7px;border-radius:7px;background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,236,196,.35),inset 0 -90px 50px -20px rgba(3,9,24,.95)}
+.rob .gem{position:absolute;top:2px;left:2px;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:900 13px var(--font-brand);color:#2A0D04;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 30%,#A8692A 65%,#5E3A12 100%);box-shadow:0 3px 8px rgba(0,0,0,.6),inset 0 0 0 2px rgba(255,236,196,.4)}
+.rob .ctitle{position:absolute;left:12px;right:12px;bottom:14px;text-align:center;font:800 12.5px/1.15 var(--font-brand);letter-spacing:.08em;color:#F3EFE6;text-shadow:0 2px 6px rgba(0,0,0,.9)}
+.rob .crar{position:absolute;left:0;right:0;bottom:-9px;margin:auto;width:max-content;padding:2px 9px;border-radius:999px;font:800 8.5px var(--font-brand);letter-spacing:.2em;background:#030918;color:#F2B544;border:1px solid rgba(242,181,68,.5)}
+.rob .soon{position:absolute;top:44%;left:0;right:0;text-align:center;font:800 11px var(--font-brand);letter-spacing:.24em;color:#F2B544;text-shadow:0 2px 6px rgba(0,0,0,.9)}
+
+/* seal */
+.rob .rseal{position:relative;width:230px;height:230px;border-radius:50%;background:url(/media/rob/seal-blank.jpg) center/138% no-repeat;display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-shadow:0 18px 40px rgba(0,0,0,.65)}
+.rob .rseal b{font:900 30px var(--font-brand);letter-spacing:.14em;color:#4A2208;text-shadow:0 1px 0 rgba(255,214,150,.55),0 -1px 1px rgba(30,10,0,.7);transform:rotate(-8deg)}
+.rob .rseal.counter b{font-size:22px;color:#063B48;text-shadow:0 1px 0 rgba(200,245,250,.5),0 -1px 1px rgba(0,20,30,.7)}
+.rob .rseal.paid b{font-size:24px;color:#063B48}
+.rob .rseal.wait{opacity:.55;filter:grayscale(.4)}
+.rob .rseal.wait b{font-size:18px}
+.rob .stamp{animation:robstamp .55s cubic-bezier(.2,1.6,.4,1) both}
+.rob .shake{animation:robshake .4s .32s both}
+@keyframes robstamp{0%{transform:scale(2.6) rotate(-30deg);opacity:0}60%{transform:scale(.94) rotate(4deg);opacity:1}100%{transform:scale(1) rotate(0)}}
+@keyframes robshake{0%,100%{transform:translate(0,0)}20%{transform:translate(-6px,3px)}40%{transform:translate(5px,-4px)}60%{transform:translate(-3px,2px)}80%{transform:translate(2px,-1px)}}
+.rob .fadein{animation:robfade .5s .45s both}
+@keyframes robfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+.rob .law{display:grid;grid-template-columns:40px minmax(0,1fr);padding:9px 0;border-top:1px solid rgba(13,23,48,.14);font-size:14.5px;align-items:baseline;transition:background .3s ease,color .3s ease}
+.rob .law b{font:700 14px var(--font-brand);color:#8A5A00}
+.rob .law.hit{background:linear-gradient(90deg,rgba(217,87,59,.18),rgba(217,87,59,0));color:#A8381E;font-weight:700}
+.rob .rbtn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 30px;font:800 14px var(--font-brand);letter-spacing:.22em;text-decoration:none;color:#200A03;border:0;cursor:pointer}
+.rob .rbtn:disabled{opacity:.6;cursor:default}
+.rob .ghost{display:inline-flex;align-items:center;min-height:52px;padding:0 26px;font:800 13px var(--font-brand);letter-spacing:.2em;text-decoration:none;color:#F3EFE6;border:1px solid rgba(243,239,230,.45)}
+
+@media (prefers-reduced-motion:reduce){
+  .rob .stamp,.rob .shake,.rob .fadein,.rob .card.busy{animation:none}
+}
+@media (max-width:900px){
+  .rob .wrap{padding:0 16px}
+  .rob .g2,.rob .arena,.rob .g4{grid-template-columns:minmax(0,1fr) !important}
+  .rob .navlinks{display:none !important}
+  .rob .hand{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;padding:30px 16px 18px;margin:0 -16px;scroll-snap-type:x mandatory}
+  .rob .card{width:128px;height:192px;scroll-snap-align:center}
+  .rob .ctitle{font-size:11px}
+  .rob .rseal{width:180px;height:180px}
+  .rob .rseal b{font-size:24px}
+  .rob .hero-statue{height:360px !important}
+  .rob .vhead{grid-template-columns:minmax(0,1fr) !important;justify-items:center;text-align:center}
+  .rob .rseal.counter b{font-size:18px}
+  .rob .stat{border-right:0 !important;border-bottom:1px solid rgba(13,23,48,.14);padding:22px 24px !important}
+}

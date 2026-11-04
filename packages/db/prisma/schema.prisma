@@ -82,52 +82,52 @@ model Verification {
 }
 
 model Organization {
-  id                      String                           @id
-  name                    String
-  slug                    String
-  logo                    String?
-  createdAt               DateTime
-  metadata                String?
-  members                 Member[]
-  invitations             Invitation[]
-  agents                  Agent[]
-  suppliers               Supplier[]
-  consumedReferences      ConsumedReference[]
-  registryChanges         RegistryChange[]
-  visas                   PaymentVisa[]
-  registry                RegistryVersion?
-  operations              Operation[]
-  auditLogs               AuditLog[]
-  treasuries              Treasury[]
-  nearSponsorships        NearWalletSponsorship[]
-  agentProvisionings      AgentProvisioning[]
-  agentPairings           AgentPairing[]
-  marketListings          MarketListing[]
-  recoveryEnrollments     RecoveryEnrollment[]
-  seatRecoveries          SeatRecovery[]
+  id                  String                  @id
+  name                String
+  slug                String
+  logo                String?
+  createdAt           DateTime
+  metadata            String?
+  members             Member[]
+  invitations         Invitation[]
+  agents              Agent[]
+  suppliers           Supplier[]
+  consumedReferences  ConsumedReference[]
+  registryChanges     RegistryChange[]
+  visas               PaymentVisa[]
+  registry            RegistryVersion?
+  operations          Operation[]
+  auditLogs           AuditLog[]
+  treasuries          Treasury[]
+  nearSponsorships    NearWalletSponsorship[]
+  agentProvisionings  AgentProvisioning[]
+  agentPairings       AgentPairing[]
+  marketListings      MarketListing[]
+  recoveryEnrollments RecoveryEnrollment[]
+  seatRecoveries      SeatRecovery[]
 
   @@unique([slug])
   @@map("organization")
 }
 
 model Member {
-  id                      String                           @id
-  organizationId          String
-  organization            Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId                  String
-  user                    User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role                    String                           @default("member")
-  nearAccountId           String?
-  evmAddress              String?
-  walletProofClaimable    Boolean                          @default(false)
-  walletProofVerifiedAt   DateTime?
-  walletProofApprovedAt   DateTime?
-  walletProofApprovedBy   String?
-  walletProofMessage      String?
-  nearProofPublicKey      String?
-  nearProofSignature      String?
-  evmProofSignature       String?
-  createdAt               DateTime
+  id                    String       @id
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                  String       @default("member")
+  nearAccountId         String?
+  evmAddress            String?
+  walletProofClaimable  Boolean      @default(false)
+  walletProofVerifiedAt DateTime?
+  walletProofApprovedAt DateTime?
+  walletProofApprovedBy String?
+  walletProofMessage    String?
+  nearProofPublicKey    String?
+  nearProofSignature    String?
+  evmProofSignature     String?
+  createdAt             DateTime
 
   @@index([organizationId])
   @@index([userId])
@@ -186,25 +186,25 @@ model Apikey {
 // ---------------------------------------------------------------------------
 
 model Agent {
-  id             String             @id
-  organizationId String
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  authUserId     String             @unique
-  user           User               @relation("AgentIdentity", fields: [authUserId], references: [id], onDelete: Restrict)
-  name           String
-  role           String
-  nearAccountId  String
-  nearPublicKey  String
-  vaultAccountId String
-  mpcPath        String
-  evmAddress     String?
-  active         Boolean            @default(true)
+  id              String             @id
+  organizationId  String
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  authUserId      String             @unique
+  user            User               @relation("AgentIdentity", fields: [authUserId], references: [id], onDelete: Restrict)
+  name            String
+  role            String
+  nearAccountId   String
+  nearPublicKey   String
+  vaultAccountId  String
+  mpcPath         String
+  evmAddress      String?
+  active          Boolean            @default(true)
   /// The console user who hired it: members may hire, and manage only their own hires.
   createdByUserId String?
-  operations     Operation[]
-  provisioning   AgentProvisioning?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  operations      Operation[]
+  provisioning    AgentProvisioning?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@unique([organizationId, nearAccountId])
   @@index([organizationId])
@@ -365,18 +365,18 @@ model Operation {
 }
 
 model Treasury {
-  id                   String                @id @default(uuid())
-  organizationId       String
-  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environment          String                @default("uat")
-  nearNetwork          String
-  baseChainId          Int
-  daoAccountId         String
-  vaultAccountId       String
-  vaultWasmSha256      String
-  status               String                @default("active")
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
+  id              String       @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environment     String       @default("uat")
+  nearNetwork     String
+  baseChainId     Int
+  daoAccountId    String
+  vaultAccountId  String
+  vaultWasmSha256 String
+  status          String       @default("active")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@unique([organizationId, environment])
   @@index([organizationId])
@@ -446,31 +446,31 @@ model AuditLog {
 
 /// A service an AI company sells. Paid to its vault; the handle never changes.
 model MarketListing {
-  id                String         @id @default(uuid())
+  id                String       @id @default(uuid())
   organizationId    String
-  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agentId           String?
-  handle            String         @unique
+  handle            String       @unique
   title             String
   description       String
-  category          String         @default("research")
+  category          String       @default("research")
   /// Price in the asset's base units (1 USDC = 1000000).
   priceAtomic       String
   /// NEP-141 token account.
   asset             String
   /// The seller's vault account: the cheque pays it directly.
   payTo             String
-  slaSeconds        Int            @default(1800)
-  inputHint         String         @default("")
-  outputHint        String         @default("")
-  status            String         @default("draft") // draft | live | paused
+  slaSeconds        Int          @default(1800)
+  inputHint         String       @default("")
+  outputHint        String       @default("")
+  status            String       @default("draft") // draft | live | paused
   /// sha256 of the worker's delivery token (mdt_...), never the token itself.
-  deliveryTokenHash String?        @unique
+  deliveryTokenHash String?      @unique
   /// Optional push to the worker (https only, public hosts only).
   webhookUrl        String?
   tasks             MarketTask[]
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   @@index([organizationId])
   @@index([status])
@@ -478,20 +478,20 @@ model MarketListing {
 }
 
 model MarketTask {
-  id             String         @id @default(uuid())
+  id             String        @id @default(uuid())
   listingId      String
-  listing        MarketListing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listing        MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   buyerAccountId String
   input          String
   /// submitted | working | completed | completed_unpaid | failed | expired
-  state          String         @default("submitted")
+  state          String        @default("submitted")
   resultMarkdown String?
   resultJson     Json?
   files          Json?
   failureReason  String?
   hold           PaymentHold?
   rating         MarketRating?
-  createdAt      DateTime       @default(now())
+  createdAt      DateTime      @default(now())
   startedAt      DateTime?
   completedAt    DateTime?
   /// Past this, an undelivered task expires and its cheque is never relayed.
@@ -580,4 +580,37 @@ model SeatRecovery {
 
   @@index([organizationId, state])
   @@map("seat_recovery")
+}
+
+/// Rob the Agent: a function-call key a player's browser made, added on Ruggy's account for 24 hours.
+model RobKey {
+  publicKey  String    @id
+  /// "player" (made in a browser) or "shared" (the server's, for plays without a key of their own).
+  kind       String    @default("player")
+  /// sha256 of the client's address with a server salt: counts players, never stores the address.
+  clientHash String
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime?
+
+  @@index([deletedAt, createdAt])
+  @@map("rob_key")
+}
+
+/// Rob the Agent: one card played, and what the chain answered.
+model RobPlay {
+  id         String   @id @default(uuid())
+  card       String
+  /// denied | counter | vetoed | paid (a lawful payment to a listed supplier, forged in expert mode)
+  verdict    String
+  /// vault | near | dao | ruggy | council
+  refusedBy  String
+  error      String?
+  /// NEAR transaction hash; none when NEAR refused before the chain.
+  tx         String?
+  publicKey  String?
+  clientHash String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("rob_play")
 }
