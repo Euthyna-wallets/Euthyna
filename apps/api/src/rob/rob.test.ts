@@ -192,9 +192,14 @@ describe("RobService", () => {
     const { service, sent } = fakes((signed) => {
       const { method } = callOf(signed);
       if (method === "prepare") return { kind: "succeeded", tx: "PREP", value: JSON.stringify({ op_id: [7, 7], execute_after_ns: "1" }) };
+      if (method === "authorize") return { kind: "succeeded", tx: "AUTH", value: null, logs: ["OMNIROLES_OPERATION_QUEUED:0707"] };
       return { kind: "succeeded", tx: method.toUpperCase(), value: null };
     });
     await service.start();
+    // The shared keys can afford prepare then authorize: NEAR holds each call's prepaid gas against the allowance.
+    const sharedKey = sent[0]!.transaction.actions[0]!.addKey!.accessKey.permission.functionCall!;
+    expect(BigInt(sharedKey.allowance!.toString())).toBe(10n ** 24n);
+    expect(sharedKey.methodNames).toEqual(["execute_near", "queue_rule_change", "prepare", "authorize"]);
     const result = await service.play({ card: "look-legit", clientHash: "c" });
     const calls = sent.slice(1).map(callOf);
     expect(calls.map((call) => call.method)).toEqual(["prepare", "authorize", "veto_operation"]);
@@ -238,5 +243,28 @@ describe("RobService", () => {
       'owner3.testnet:veto_rule_change:{"queue_id":[1]}',
       'owner3.testnet:veto_operation:{"op_id":[9]}',
     ]);
+  });
+
+  it("a rule another council member already vetoed counts as vetoed, and the sweep leaves a running Inside Job alone", async () => {
+    let sweep: Promise<unknown> | null = null;
+    const { service, sent, views } = fakes((signed) => {
+      const { method, signer } = callOf(signed);
+      if (method === "add_proposal") return { kind: "succeeded", tx: "PROPOSE", value: "6" };
+      if (method === "act_proposal") {
+        // Another sweep of this process runs between the vote and the veto: it must not veto this rule.
+        if (signer === "owner2.testnet") sweep = service.sweep();
+        return { kind: "succeeded", tx: `VOTE-${signer}`, value: null, logs: [`OMNIROLES_RULE_QUEUED:${QUEUE}`] };
+      }
+      // Meanwhile another instance vetoed it.
+      if (method === "veto_rule_change") return { kind: "failed", tx: "LATE", error: "ERR_RULE_NOT_QUEUED" };
+      return { kind: "succeeded", tx: method.toUpperCase(), value: null };
+    });
+    views.list_rule_changes = [{ queue_id: Array.from(Buffer.from(QUEUE, "hex")), state: "Vetoed", vetoed_by: "owner3.testnet" }];
+    await service.start();
+    const result = await service.play({ card: "inside-job", clientHash: "d" });
+    await sweep;
+    expect(sent.map(callOf).filter((call) => call.method === "veto_rule_change")).toHaveLength(1);
+    expect(result).toMatchObject({ verdict: "vetoed", tx: null, nearblocks: null });
+    expect(result.steps!.at(-1)).toEqual({ label: "VETOED", detail: "already, by owner3.testnet", tx: null });
   });
 });

@@ -142,10 +142,7 @@ if (rob) {
   void rob.start().then(() => console.log("Rob the Agent: shared keys on Ruggy's account")).catch((error: unknown) => console.error("Rob the Agent could not start:", error));
   setInterval(() => void rob.maintain().catch((error: unknown) => console.warn(`rob maintenance: ${String(error)}`)), 10 * 60_000).unref();
   // The council bot: nothing the game queues may outlive its veto window.
-  setInterval(() => void rob.sweep().then(
-    (swept) => { if (swept.rules || swept.operations) console.warn(`rob council sweep vetoed ${swept.rules} rule(s), ${swept.operations} operation(s)`); },
-    (error: unknown) => console.warn(`rob council sweep: ${String(error)}`),
-  ), 20_000).unref();
+  setInterval(() => void rob.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`)), 20_000).unref();
 }
 
 // Founder seat recovery: ZK Email proofs, verified by the recovery contract on NEAR; the

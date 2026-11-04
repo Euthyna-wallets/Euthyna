@@ -86,6 +86,11 @@ export type RobServiceOptions = {
   keyLifetimeMs?: number;
   /** Gas a player's key may spend: a cap, the real cost of a refused play is far lower. */
   keyAllowanceYocto?: string;
+  /**
+   * Same for the shared keys. NEAR holds a call's whole prepaid gas, at a pessimistic price, against the
+   * allowance until the call ends: Look Legit's two calls in a row need more than a player's cap.
+   */
+  sharedKeyAllowanceYocto?: string;
   sharedKeys?: number;
   /** Keep the vault above this much test token (base units), minting more when it falls below. */
   vaultFloor?: bigint;
@@ -107,6 +112,8 @@ export class RobService {
   private statsCache: { at: number; value: Awaited<ReturnType<RobService["computeStats"]>> } | null = null;
   /** Look Legit holds the Base wallet's single slot: one at a time. */
   private baseTurn: Promise<unknown> = Promise.resolve();
+  /** Inside Jobs between their vote and their veto: the sweep leaves their rules to them. */
+  private insideJobsRunning = 0;
   private bondCache: string | null = null;
   private readonly now: () => number;
 
@@ -148,20 +155,20 @@ export class RobService {
   async start(): Promise<void> {
     const count = this.options.sharedKeys ?? 3;
     const fresh = Array.from({ length: count }, () => KeyPair.fromRandom("ed25519"));
-    await this.sendAsRuggy(this.config.ruggyAccountId, fresh.map((pair) => this.playerKeyAction(pair.getPublicKey().toString(), SHARED_METHODS)));
+    await this.sendAsRuggy(this.config.ruggyAccountId, fresh.map((pair) => this.playerKeyAction(pair.getPublicKey().toString(), SHARED_METHODS, this.options.sharedKeyAllowanceYocto ?? "1000000000000000000000000")));
     for (const pair of fresh) {
       this.shared.push({ publicKey: pair.getPublicKey().toString(), secretKey: pair.toString() });
       await this.options.store.robKey.create({ data: { publicKey: pair.getPublicKey().toString(), kind: "shared", clientHash: "server" } });
     }
   }
 
-  private playerKeyAction(publicKey: string, methodNames: string[] = PLAYER_METHODS): RobAction {
+  private playerKeyAction(publicKey: string, methodNames: string[] = PLAYER_METHODS, allowanceYocto?: string): RobAction {
     return {
       type: "AddFunctionCallKey",
       publicKey,
       receiverId: this.config.vaultAccountId,
       methodNames,
-      allowanceYocto: this.options.keyAllowanceYocto ?? "250000000000000000000000",
+      allowanceYocto: allowanceYocto ?? this.options.keyAllowanceYocto ?? "250000000000000000000000",
     };
   }
 
@@ -432,7 +439,26 @@ export class RobService {
   /** The council bot: the third owner signs a veto on the vault. */
   private veto(method: "veto_operation" | "veto_rule_change", args: Record<string, unknown>): Promise<Outcome> {
     const council = this.owner(2);
-    return this.sendWithKey(council.key, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: method, args, gasTgas: 50 }], council.accountId);
+    return this.sendWithKey(council.key, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: method, args, gasTgas: 30 }], council.accountId);
+  }
+
+  /**
+   * Veto, and if the vault says it is no longer pending, read why: another council member (or
+   * another instance's sweep) may have vetoed it first. Only a Vetoed state counts as vetoed.
+   */
+  private async vetoAndConfirm(kind: "operation" | "rule", id: number[]): Promise<{ vetoed: boolean; tx: string | null; by: string | null; outcome: Outcome }> {
+    const outcome = await this.veto(kind === "operation" ? "veto_operation" : "veto_rule_change", kind === "operation" ? { op_id: id } : { queue_id: id });
+    if (outcome.kind === "succeeded") return { vetoed: true, tx: outcome.tx, by: this.owner(2).accountId, outcome };
+    if (!/ERR_RULE_NOT_QUEUED|ERR_OPERATION_NOT_VETOABLE/.test(outcome.error)) return { vetoed: false, tx: null, by: null, outcome };
+    if (kind === "rule") {
+      const rules = await this.options.rpc.view<Array<{ queue_id: number[]; state: string; vetoed_by: string | null }>>(this.config.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+      const rule = rules.find((item) => Buffer.from(item.queue_id).equals(Buffer.from(id)));
+      if (rule?.state === "Vetoed") return { vetoed: true, tx: null, by: rule.vetoed_by, outcome };
+    } else {
+      const operation = await this.options.rpc.view<{ state: string } | null>(this.config.vaultAccountId, "get_operation", { op_id: id });
+      if (operation?.state === "Vetoed") return { vetoed: true, tx: null, by: "the council", outcome };
+    }
+    return { vetoed: false, tx: null, by: null, outcome };
   }
 
   /**
@@ -464,16 +490,18 @@ export class RobService {
       max_priority_fee_per_gas: "1000000000",
     };
     const signedBy = `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}, then the council bot (${this.owner(2).accountId})`;
-    const prepared = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "prepare", args: { role: base.role, request }, gasTgas: 150 }]);
+    const prepared = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "prepare", args: { role: base.role, request }, gasTgas: 50 }]);
     if (prepared.kind !== "succeeded") return this.finish(card, prepared, signedBy, shared.publicKey, clientHash, started);
     const operation = JSON.parse(prepared.value ?? "{}") as { op_id?: number[]; execute_after_ns?: string | null };
     if (!operation.op_id) throw new RobError(503, "unexpected", "the vault did not return the operation");
     const steps: Step[] = [{ label: "LAWFUL", detail: "every rule passes: prepared", tx: prepared.tx }];
-    const authorized = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "authorize", args: { op_id: operation.op_id, approval: null }, gasTgas: 100 }]);
-    steps.push(authorized.kind === "succeeded"
-      ? { label: "SCHEDULED", detail: "over 1 USDC: it waits 10 minutes", tx: authorized.tx }
-      : { label: "SCHEDULED", detail: `authorize refused: ${authorized.error}`, tx: authorized.kind === "failed" ? authorized.tx : null });
-    const vetoed = await this.veto("veto_operation", { op_id: operation.op_id });
+    // Queued, not signed: the operation is over the delay threshold (prepare set its wait).
+    const authorized = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "authorize", args: { op_id: operation.op_id, approval: null }, gasTgas: 30 }]);
+    const queued = authorized.kind === "succeeded" && (authorized.logs ?? []).some((log) => log.startsWith("OMNIROLES_OPERATION_QUEUED:"));
+    steps.push(queued
+      ? { label: "SCHEDULED", detail: "over 1 USDC: it waits 10 minutes", tx: authorized.kind === "succeeded" ? authorized.tx : null }
+      : { label: "NOT QUEUED", detail: `authorize: ${authorized.kind === "succeeded" ? "no wait logged" : authorized.error}`, tx: authorized.kind === "rejected" ? null : authorized.tx });
+    const vetoed = await this.vetoAndConfirm("operation", operation.op_id);
     steps.push({ label: "UNSIGNED", detail: "MPC signs nothing during the wait", tx: null });
     return this.finishVeto(card, vetoed, steps, signedBy, shared.publicKey, clientHash, started, `prepare + authorize: 2 USDC on Base to ${base.suppliers[0].slice(0, 8)}…, reference ${reference}`);
   }
@@ -501,6 +529,21 @@ export class RobService {
     const args = proposalArgs(this.config.vaultAccountId, `Rob the Agent · Inside Job: add ${attacker} to Ruggy's suppliers`, [{ method: "queue_rule_change", change: change as never }]);
     const signedBy = `${bribed.accountId} and ${accomplice.accountId} (bribed owners), then the council bot (${this.owner(2).accountId})`;
     const steps: Step[] = [];
+    this.insideJobsRunning += 1;
+    try {
+      return await this.insideJobSteps(card, clientHash, started, { bribed, accomplice, attacker, args, signedBy, steps });
+    } finally {
+      this.insideJobsRunning -= 1;
+    }
+  }
+
+  private async insideJobSteps(
+    card: CardInfo,
+    clientHash: string,
+    started: number,
+    input: { bribed: ReturnType<RobService["owner"]>; accomplice: ReturnType<RobService["owner"]>; attacker: string; args: ReturnType<typeof proposalArgs>; signedBy: string; steps: Step[] },
+  ): Promise<PlayResult> {
+    const { bribed, accomplice, attacker, args, signedBy, steps } = input;
     const proposed = await this.sendWithKey(bribed.key, this.config.daoAccountId, [{ type: "FunctionCall", methodName: "add_proposal", args, gasTgas: 150, depositYocto: await this.bond() }], bribed.accountId);
     if (proposed.kind !== "succeeded") return this.finish(card, proposed, signedBy, null, clientHash, started);
     const id = Number(proposed.value);
@@ -515,7 +558,7 @@ export class RobService {
     steps.push({ label: "VOTED", detail: "proposal passed", tx: voted?.kind === "succeeded" ? voted.tx : null });
     if (!queued) throw new RobError(503, "unexpected", "the vote passed but the vault queued nothing");
     steps.push({ label: "QUEUED", detail: "veto window open", tx: null });
-    const vetoed = await this.veto("veto_rule_change", { queue_id: Array.from(Buffer.from(queued, "hex")) });
+    const vetoed = await this.vetoAndConfirm("rule", Array.from(Buffer.from(queued, "hex")));
     return this.finishVeto(card, vetoed, steps, signedBy, null, clientHash, started, `2 of 3 owners vote: add ${attacker} to Ruggy's suppliers`);
   }
 
@@ -524,16 +567,25 @@ export class RobService {
     return this.bondCache;
   }
 
-  private async finishVeto(card: CardInfo, vetoed: Outcome, steps: Step[], signedBy: string, publicKey: string | null, clientHash: string, started: number, call: string): Promise<PlayResult> {
-    if (vetoed.kind !== "succeeded") {
-      // The sweep retries; the play reports what happened.
-      void this.sweep().catch(() => undefined);
-      return this.finish(card, vetoed, signedBy, publicKey, clientHash, started);
+  private async finishVeto(
+    card: CardInfo,
+    vetoed: { vetoed: boolean; tx: string | null; by: string | null; outcome: Outcome },
+    steps: Step[],
+    signedBy: string,
+    publicKey: string | null,
+    clientHash: string,
+    started: number,
+    call: string,
+  ): Promise<PlayResult> {
+    if (!vetoed.vetoed) {
+      // The sweep retries at once; the play reports what the chain answered.
+      void this.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`));
+      return this.finish(card, vetoed.outcome, signedBy, publicKey, clientHash, started);
     }
-    steps.push({ label: "VETOED", detail: "by the council", tx: vetoed.tx });
+    steps.push({ label: "VETOED", detail: vetoed.tx ? "by the council" : `already, by ${vetoed.by ?? "the council"}`, tx: vetoed.tx });
     const result: PlayResult = {
       card: card.id, verdict: "vetoed", refusedBy: "council", line: card.line, error: card.id === "look-legit" ? "VETOED · veto_operation" : "VETOED · veto_rule_change",
-      tx: vetoed.tx, nearblocks: `https://testnet.nearblocks.io/txns/${vetoed.tx}`, call, signedBy, steps, ms: this.now() - started,
+      tx: vetoed.tx, nearblocks: vetoed.tx ? `https://testnet.nearblocks.io/txns/${vetoed.tx}` : null, call, signedBy, steps, ms: this.now() - started,
     };
     await this.record(result, publicKey, clientHash);
     this.statsCache = null;
@@ -549,8 +601,11 @@ export class RobService {
     let rules = 0;
     let operations = 0;
     const queued = await this.options.rpc.view<Array<{ queue_id: number[]; state: string }>>(this.config.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
-    for (const rule of queued.filter((item) => item.state === "Queued")) {
-      if ((await this.veto("veto_rule_change", { queue_id: rule.queue_id })).kind === "succeeded") rules += 1;
+    // An Inside Job in progress vetoes its own rule; the next sweep catches it if that fails.
+    if (this.insideJobsRunning === 0) {
+      for (const rule of queued.filter((item) => item.state === "Queued")) {
+        if ((await this.veto("veto_rule_change", { queue_id: rule.queue_id })).kind === "succeeded") rules += 1;
+      }
     }
     if (this.config.base) {
       const wallet = await this.options.rpc.view<{ active_operation: number[] | null } | null>(this.config.vaultAccountId, "get_wallet", { chain_id: this.config.base.chainId });
@@ -564,6 +619,7 @@ export class RobService {
         }
       }
     }
+    if (rules || operations) console.warn(`rob council sweep vetoed ${rules} rule(s), ${operations} operation(s)`);
     return { rules, operations };
   }
 
