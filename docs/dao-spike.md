@@ -2,7 +2,7 @@
 
 ## Conclusion
 
-The spike proves in a NEAR sandbox that a three-member Sputnik DAO can be the sole owner and funder of a MandateOS contract:
+The spike proves in a NEAR sandbox that a three-member Sputnik DAO can be the sole owner and funder of a Euthyna contract:
 
 - two council approvals execute `Vault.set_role`;
 - one approval does not execute it;
@@ -52,7 +52,7 @@ SPUTNIK_DAO_WASM=\"$PWD/res/sputnikdao2-testnet-3.31-AA4nA45v.wasm\" \
   cargo test -p tests -- --nocapture
 ```
 
-Result with the real Vault: **9 passed, 0 failed**. The behaviors relevant to MandateOS did not differ. The triggering `VoteApprove` used 9.139 Tgas on the live factory WASM versus 8.788 Tgas on the pinned local build.
+Result with the real Vault: **9 passed, 0 failed**. The behaviors relevant to Euthyna did not differ. The triggering `VoteApprove` used 9.139 Tgas on the live factory WASM versus 8.788 Tgas on the pinned local build.
 
 ## Final policy
 
@@ -97,7 +97,7 @@ Properties:
 - `proposal_period` is 30 seconds for sandbox tests. Production must use a longer reviewed value.
 - The default policy applies explicit weight `2` to the three-member `RoleWeight` group.
 
-Sputnik matches every applicable role and ORs their permissions ([`policy.rs:L322-L358`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/policy.rs#L322-L358)). A permissive second role would therefore weaken the council threshold. The default policy is unsafe for MandateOS because it grants `*:AddProposal` to `Everyone` ([`policy.rs:L179-L215`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/policy.rs#L179-L215)).
+Sputnik matches every applicable role and ORs their permissions ([`policy.rs:L322-L358`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/policy.rs#L322-L358)). A permissive second role would therefore weaken the council threshold. The default policy is unsafe for Euthyna because it grants `*:AddProposal` to `Everyone` ([`policy.rs:L179-L215`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/policy.rs#L179-L215)).
 
 ### Why the final threshold is `"2"`, not `[2, 3]`
 
@@ -105,7 +105,7 @@ The requested ratio `[2, 3]` does **not** implement two-of-three in Sputnik DAO 
 
 The final policy uses explicit `Weight("2")`, serialized as `"2"`, to obtain the required two approvals. Sputnik compares each role's approval count against that computed threshold and accepts as soon as one role reaches it ([`policy.rs:L378-L433`](https://github.com/near-daos/sputnik-dao-contract/blob/5434a59dec23ee0c49df8c8c4350c208a7e75b0b/sputnikdao2/src/policy.rs#L378-L433)).
 
-`"2"` is an absolute weight, not a ratio. Every council membership change must therefore use a full `ChangePolicy` proposal that updates the `Group` and recalculates the threshold together. For a desired two-thirds threshold, MandateOS computes `ceil(2 × member_count / 3)`. `AddMemberToRole` and `RemoveMemberFromRole` are not used for council membership because they leave the absolute threshold unchanged.
+`"2"` is an absolute weight, not a ratio. Every council membership change must therefore use a full `ChangePolicy` proposal that updates the `Group` and recalculates the threshold together. For a desired two-thirds threshold, Euthyna computes `ceil(2 × member_count / 3)`. `AddMemberToRole` and `RemoveMemberFromRole` are not used for council membership because they leave the absolute threshold unchanged.
 
 ## Test results
 
@@ -193,8 +193,8 @@ export DAO_INIT_ARGS="$(jq -cn \
   --arg m3 "$MEMBER_3" \
   '{
     config: {
-      name: "ACME MandateOS DAO",
-      purpose: "Govern MandateOS contracts",
+      name: "ACME Euthyna DAO",
+      purpose: "Govern Euthyna contracts",
       metadata: ""
     },
     policy: {
@@ -251,16 +251,16 @@ near contract call-function as-read-only "$DAO_ID" get_factory_info \
   json-args '{}' network-config testnet now
 ```
 
-The current official NEAR DAO primitive uses a 6 NEAR deposit for `sputnikv2.testnet` ([NEAR DAO documentation](https://docs.near.org/primitives/dao#create-a-dao)). The observed three-member MandateOS DAO uses 540,372 bytes, or 5.40372 NEAR at the live `10^19` yoctoNEAR/byte storage price, leaving 0.59628 NEAR for state growth and gas. Recheck the factory's default code hash and protocol storage price immediately before a real deployment.
+The current official NEAR DAO primitive uses a 6 NEAR deposit for `sputnikv2.testnet` ([NEAR DAO documentation](https://docs.near.org/primitives/dao#create-a-dao)). The observed three-member Euthyna DAO uses 540,372 bytes, or 5.40372 NEAR at the live `10^19` yoctoNEAR/byte storage price, leaving 0.59628 NEAR for state growth and gas. Recheck the factory's default code hash and protocol storage price immediately before a real deployment.
 
-### MandateOS permissionless global factory
+### Euthyna permissionless global factory
 
 For the hackathon multi-Company flow, `factory-v2.mandateos.testnet` reuses the
 official immutable Sputnik global hash
 `Ea8tHXFSQVszVwGASyzAfLq65DjcRDhkfab4FcPaRpgD` instead of duplicating the DAO
 WASM. `create(name, args)` is permissionless: the predecessor supplies the
 attached 0.25 NEAR, becomes the on-chain caller and receives a refund if the
-promise fails. MandateOS sponsors this by pre-funding the browser-generated
+promise fails. Euthyna sponsors this by pre-funding the browser-generated
 founder wallet; the server neither signs the call nor chooses the serialized
 policy.
 

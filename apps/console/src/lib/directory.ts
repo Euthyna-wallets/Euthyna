@@ -1,6 +1,6 @@
 /**
  * Public directory: everything here is read from NEAR by the browser. The
- * MandateOS API is not involved, so what a visitor sees is what the chain says.
+ * Euthyna API is not involved, so what a visitor sees is what the chain says.
  */
 import { BASE_SEPOLIA, budgetsOf, describeVaultCall, formatNear, type RuleChange } from "@mandateos/sdk/roles";
 import { createPublicClient, erc20Abi, formatUnits, getAddress, hexToBytes, http, toHex, type Hex } from "viem";

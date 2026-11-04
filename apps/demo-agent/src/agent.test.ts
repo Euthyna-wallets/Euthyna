@@ -14,7 +14,7 @@ const approvedRecipient = "0x1111111111111111111111111111111111111111";
 const attacker = "0x9999999999999999999999999999999999999999";
 const tools: ToolDefinition[] = [{
   name: "pay",
-  description: "MandateOS bounded payment",
+  description: "Euthyna bounded payment",
   inputSchema: { type: "object" },
 }];
 
@@ -65,7 +65,7 @@ function paymentDecision(overrides: Record<string, unknown> = {}): AgentDecision
   };
 }
 
-describe("MandateOS LLM demo scenarios", () => {
+describe("Euthyna LLM demo scenarios", () => {
   it("payment OK reaches the authorized/confirmed path", async () => {
     const gateway = new PolicyGateway();
     const agent = new MandateDemoAgent(new ScriptedModel(paymentDecision()), gateway);

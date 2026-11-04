@@ -1462,7 +1462,7 @@ export class OmniRolesService {
     };
   }
 
-  /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
+  /** Activate rule changes whose delay has passed (permissionless on chain; Euthyna pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
     return (await this.activateDue(organizationId)).hashes;
   }
@@ -1817,7 +1817,7 @@ export class OmniRolesService {
    * NEAR (who, which role, what, its state) and are confirmed on the EVM chain
    * (mined, success or reverted). The database only says which operations to
    * look up and gives names. Refusals and dry runs never reach a chain: they are
-   * listed apart, as MandateOS's own record.
+   * listed apart, as Euthyna's own record.
    */
   async activity(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);

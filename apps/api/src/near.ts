@@ -309,7 +309,7 @@ export class NearClient {
     return this.functionCall(vaultAccountId, "cancel_nonce", { op_id: opId }, "120000000000000");
   }
 
-  /** Function call signed by the relayer (MandateOS pays gas and deposits). */
+  /** Function call signed by the relayer (Euthyna pays gas and deposits). */
   async callFunction(
     contractId: string,
     methodName: string,

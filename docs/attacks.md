@@ -1,6 +1,6 @@
 # Attack suite
 
-MandateOS assumes the agent will be compromised. A prompt injection, a
+Euthyna assumes the agent will be compromised. A prompt injection, a
 poisoned memory or a replaced MCP tool all end the same way: the attacker can
 make the agent sign anything its NEAR key can sign. The suite plays that
 attacker, and a few others, and shows which lock refuses each attack.

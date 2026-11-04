@@ -21,7 +21,7 @@ export function nearUserEmail(accountId: string): string {
 }
 
 export function nearSignInMessage(accountId: string, nonceBase64: string): string {
-  return ["Sign in to MandateOS", `account_id: ${accountId}`, `nonce: ${nonceBase64}`].join("\n");
+  return ["Sign in to Euthyna", `account_id: ${accountId}`, `nonce: ${nonceBase64}`].join("\n");
 }
 
 export interface NearSignInOptions {

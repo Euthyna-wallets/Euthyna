@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs every attack against MandateOS and prints which lock refused each one.
+// Runs every attack against Euthyna and prints which lock refused each one.
 // On-chain attacks run against a real vault in a NEAR sandbox; Guard attacks
 // run against the Guard with an in-memory database.
 import { spawn } from "node:child_process";

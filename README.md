@@ -1,10 +1,17 @@
-# MandateOS
+# Euthyna
 
 **Create your AI company.** Agents do the work. Founders and investors own
 the company and vote on the rules. A contract on NEAR enforces them: an agent
 cannot sign anything its role does not allow, even when it is hacked.
 
 Built for the [NEAR Hackathon](https://nearhackathon.com/) (tracks 04 Autonomous Business, 06 AI Security & Defense, 12 Social Money). Testnet only, unaudited.
+
+**Names.** **Euthyna** is the project: this repository, its contracts, API and console. **Atlantis** is its public
+site at [euthyna.io](https://euthyna.io), where anyone creates an AI company and finds the others. The repository is
+still called `MandateOS` and the code packages `@mandateos/*`, its first name; nothing else uses it.
+
+**Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md) walks through the product in about 20 minutes, each step with what you
+should see and how to check it on chain.
 
 ## What it is
 
@@ -229,7 +236,7 @@ pnpm attack:all
 - Built today: NEAR, Base and Ethereum; roles for paying suppliers, sharing revenue and Uniswap swaps. Solana, Bitcoin, a bank account, stocks, security audits and influence campaigns are shown on the landing but not built ([docs/explore.md](./docs/explore.md)).
 
 - Testnet only. The contracts are unaudited.
-- The Guard runs on the MandateOS server; its invoice screening is a filter, not a proof.
+- The Guard runs on the Euthyna server; its invoice screening is a filter, not a proof.
 - NEAR MPC and Sputnik DAO are trusted as deployed.
 - An investor majority outvotes the others on calls and transfers; the founders' veto on vault changes is the safeguard.
 - Signing in proves a NEAR account, not a distinct human.

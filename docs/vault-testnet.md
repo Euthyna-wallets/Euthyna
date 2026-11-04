@@ -1,4 +1,4 @@
-# MandateOS Vault — NEAR testnet spike
+# Euthyna Vault — NEAR testnet spike
 
 ## Status
 
@@ -180,7 +180,7 @@ The local test computes the same address independently and compares it with both
 
 ## NEAR gas sponsorship
 
-MandateOS will pay agent-side NEAR gas through a NEP-366 relayer. Agents sign `DelegateAction` objects with their restricted function-call keys; the funded MandateOS relayer submits them after validating sender, client, Vault receiver, method allowlist, zero deposit and per-client gas quota.
+Euthyna will pay agent-side NEAR gas through a NEP-366 relayer. Agents sign `DelegateAction` objects with their restricted function-call keys; the funded Euthyna relayer submits them after validating sender, client, Vault receiver, method allowlist, zero deposit and per-client gas quota.
 
 That relayer is architectural scope, not implemented in this Vault spike. The testnet smoke used faucet-funded development accounts. The Vault itself pays the 1 yoctoNEAR MPC deposit and its outgoing receipt gas from its operational balance.
 

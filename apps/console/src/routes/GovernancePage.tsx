@@ -353,7 +353,7 @@ type Registry = {
  * What a member approves is decoded here, in the browser, from the proposal
  * stored in the DAO. Sputnik only accepts a vote that repeats that exact
  * proposal, so a server that showed something else could not collect votes for it.
- * Supplier names come from MandateOS: the full address is printed next to each one.
+ * Supplier names come from Euthyna: the full address is printed next to each one.
  */
 function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string): Sentence[] | null {
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry"), staleTime: 60_000 });

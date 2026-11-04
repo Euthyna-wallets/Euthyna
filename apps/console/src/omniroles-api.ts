@@ -121,7 +121,7 @@ export type WalletIntegrity = {
   status: "ok" | "pending" | "alert" | "unknown";
 };
 
-/** Refusals and dry runs: MandateOS's own record, they never reach a chain. */
+/** Refusals and dry runs: Euthyna's own record, they never reach a chain. */
 export type ActivityItem = {
   kind: "refusal" | "allowed";
   at: string;
