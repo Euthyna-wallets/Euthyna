@@ -35,7 +35,7 @@ moves funds.
 | A stolen server, database or deployer key | The vault, the registry and Nomos have no access key. The company wallet has no private key: NEAR MPC signs only what the vault asks, and the vault settles from an MPC attestation of the finalized transaction, not from a server | `view_access_key_list` on the vault, `contracts/tests/tests/settlement.rs` |
 | A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window. **Security council**: one council member can veto a queued change, and the council can pause every agent; only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
 | A malicious code upgrade | **Nomos** (`nomos.euthyna.testnet`) publishes each vault version by its SHA-256 hash and creates keyless vaults as sub-accounts; it has no power over a vault once created. A vault upgrades only on a DAO `Upgrade { code_hash }` vote after the veto window, checks the hash and keeps its state | `contracts/tests/tests/nomos.rs` (`nomos_creates_keyless_vaults_and_only_the_dao_upgrades_them`) |
-| A founder loses their NEAR account | **ZK Email recovery**: a proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed), a 48 hour window in which the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `circuits/email-recovery`; testnet run of 2026-10-31 on `e2e-buyer-73429.sputnikv2.testnet` (proposals #3 and #4) |
+| A founder loses their NEAR account | **ZK Email recovery, verified on chain**: a zero-knowledge proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed, only a salted hash), **verified by a NEAR contract** with no access key (`euthyna-recovery.testnet`, about 85 Tgas), a waiting period the contract enforces and the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `contracts/email-recovery`, `circuits/email-recovery`; `contracts/tests/tests/email_recovery.rs` (real proofs, including a real iCloud email); testnet run of 2026-11-04 on `eut-rec-11526.sputnikv2.testnet` |
 | An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
 
 ```bash
@@ -173,6 +173,8 @@ pnpm attack:all
 | `contracts/shares` | shares: token, sale, Sputnik votes, revenue by epoch for voters |
 | `contracts/dao-factory` | creates the company DAOs |
 | `contracts/registry` | the public directory of companies |
+| `contracts/email-recovery` | founder seat recovery: verifies ZK Email proofs on chain (UltraHonk on NEAR's BN254 host functions) |
+| `circuits/email-recovery` | the ZK Email circuit (Noir); `circuits/vendor` and `contracts/vendor` hold the patched libraries |
 | `contracts/tests` | sandbox tests and the on-chain attack suite |
 | `apps/api` | sign-in, Guard, supplier registry, proposals, worker |
 | `apps/console` | the console and the public pages (`/`, `/c/<dao>`) |
