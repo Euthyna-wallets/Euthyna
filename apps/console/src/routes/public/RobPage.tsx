@@ -31,13 +31,13 @@ type Card = {
   attempt: string;
   why: string;
   playable: boolean;
-  signer: "function-call" | "ruggy" | "none";
+  signer: "function-call" | "ruggy" | "scripted" | "none";
 };
 type Deck = { ruggy: string; vault: string; dao: string; suppliers: string[]; token: string; role: string; laws: string[]; cards: Card[] };
 type Stats = { attacks: number; players: number; denied: number; lawfulPayments: number; linesOfDefense: number; stolen: number };
 type Play = {
   card: string;
-  verdict: "denied" | "counter" | "paid";
+  verdict: "denied" | "counter" | "vetoed" | "paid";
   refusedBy: "vault" | "near" | "dao" | "ruggy" | "council" | null;
   line: number | null;
   error: string | null;
@@ -46,6 +46,7 @@ type Play = {
   call: string;
   signedBy: string;
   counter?: { counter: number; expires_in: number; to: string };
+  steps?: Array<{ label: string; detail: string; tx: string | null }>;
   ms: number;
 };
 type Shown = { card: Card | null; state: "sending" | "done" | "error"; play?: Play; message?: string };
@@ -63,6 +64,8 @@ const ART: Record<string, string> = {
   "look-legit": "card-look-legit",
   "inside-job": "card-inside-job",
 };
+/** Step colours, as in the handoff: the attack in terracotta, the wait in gold, the defence in aegean. */
+const STEP_TONE: Record<string, string> = { BRIBED: "#F4A28C", VOTED: "#F4A28C", QUEUED: "#F2B544", LAWFUL: "#4FD1E8", SCHEDULED: "#F2B544", UNSIGNED: "#F2B544", VETOED: "#4FD1E8" };
 const FRAME: Record<Card["rarity"], string> = { BRONZE: "f-bronze", MARBLE: "f-marble", LEGENDARY: "f-ori", BOSS: "f-boss" };
 const KICKER: Record<string, string> = {
   vault: "Refused by the vault",
@@ -308,7 +311,7 @@ export function RobPage() {
                 {laws.map((law, index) => (
                   <div key={law} className={`law${hitLine === index ? " hit" : ""}`} style={index === laws.length - 1 ? { borderBottom: "1px solid rgba(13,23,48,.14)" } : undefined}>
                     <b>{NUMERALS[index]}</b>
-                    <span>{law}{index === 7 ? <small style={{ color: "#66718C" }}> · card X, soon</small> : null}</span>
+                    <span>{law}</span>
                   </div>
                 ))}
               </div>
@@ -327,7 +330,7 @@ export function RobPage() {
           {/* the hand */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 34, gap: 16, flexWrap: "wrap" }}>
             <span className="kick" style={{ color: "#C9D3EA" }}>Your hand · 11 attacks · the law, the vote, the veto</span>
-            <span style={{ fontSize: 13, color: "#8FA2CC" }}>Bronze · Marble · <span style={{ color: "#F2B544" }}>Orichalcum · X and XI open next</span></span>
+            <span style={{ fontSize: 13, color: "#8FA2CC" }}>Bronze · Marble · <span style={{ color: "#F2B544" }}>Orichalcum · Inside Job: one game a day</span></span>
           </div>
           <ul className="hand" aria-label="Attack cards">
             {(deck.data?.cards ?? []).map((card) => {
@@ -477,6 +480,7 @@ function Verdict({ shown, laws }: { shown: Shown | null; laws: string[] }) {
           <span className="kick" style={{ color: "#8FA2CC" }}>Sent to NEAR testnet</span>
           <p style={{ margin: 0, font: `800 22px/1.2 ${BRAND}`, color: "#F3EFE6" }}>{title}</p>
           <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55, color: "#C9D3EA" }}>{shown.card?.attempt ?? "Your call, signed with your throwaway key."}</p>
+          {shown.card?.signer === "scripted" ? <small style={{ color: "#8FA2CC" }}>Several real transactions in a row: about ten seconds.</small> : null}
         </div>
       </div>
     );
@@ -493,8 +497,9 @@ function Verdict({ shown, laws }: { shown: Shown | null; laws: string[] }) {
   const play = shown.play;
   const counter = play.verdict === "counter";
   const paid = play.verdict === "paid";
-  const color = counter || paid ? "#4FD1E8" : "#F4A28C";
-  const word = counter ? "COUNTER" : paid ? "PAID" : "DENIED";
+  const vetoed = play.verdict === "vetoed";
+  const color = counter || paid ? "#4FD1E8" : vetoed ? "#F2B544" : "#F4A28C";
+  const word = counter ? "COUNTER" : paid ? "PAID" : vetoed ? "VETOED" : "DENIED";
   const kicker = paid ? "Paid · inside the law" : KICKER[play.refusedBy ?? ""] ?? "Refused";
   const why = paid
     ? "Every rule held: a listed supplier, inside the cap and the budget. The vault paid it, to one of the two suppliers the owners voted (accounts of ours)."
@@ -503,18 +508,37 @@ function Verdict({ shown, laws }: { shown: Shown | null; laws: string[] }) {
   return (
     <>
       <div className="shake vhead" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 26, alignItems: "center" }}>
-        <div className={`rseal stamp${counter ? " counter" : ""}${paid ? " paid" : ""}`}><b>{word}</b></div>
+        <div className={`rseal stamp${counter ? " counter" : ""}${paid ? " paid" : ""}${vetoed ? " veto" : ""}`}><b>{word}</b></div>
         <div className="fadein" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <span className="kick" style={{ color }}>{kicker}</span>
           <p style={{ margin: 0, font: `800 22px/1.2 ${BRAND}`, color: "#F3EFE6" }}>{title}</p>
           <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55, color: "#C9D3EA" }}>{why}</p>
         </div>
       </div>
+      {play.steps?.length ? (
+        <div className="fadein steps4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+          {play.steps.map((step, index) => {
+            const tone = STEP_TONE[step.label] ?? "#A9B6D6";
+            const label = `${index + 1} · ${step.label}`;
+            return (
+              <div key={step.label} style={{ borderTop: `2px solid ${tone}`, paddingTop: 8 }}>
+                {step.tx ? (
+                  <a href={`https://testnet.nearblocks.io/txns/${step.tx}`} target="_blank" rel="noreferrer" style={{ font: `800 10.5px ${BRAND}`, letterSpacing: ".14em", color: tone }}>{label} ↗</a>
+                ) : (
+                  <b style={{ font: `800 10.5px ${BRAND}`, letterSpacing: ".14em", color: tone }}>{label}</b>
+                )}
+                <br />
+                <small style={{ color: "#A9B6D6" }}>{step.detail}</small>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       <div className="fadein" style={{ background: "#010510", border: "1px solid rgba(143,162,204,.2)", padding: "16px 18px", font: `13px/1.7 ${MONO}`, color: "#A9B6D6", overflowX: "auto" }}>
         <div style={{ color: "#8FA2CC" }}>&gt; {play.call}</div>
         <div style={{ color: "#FFE2A8" }}>{"  "}signed with {play.signedBy} · NEAR testnet</div>
         <div style={{ color }}>
-          {"  "}{counter ? `↺ COUNTER-OFFER · ${JSON.stringify({ counter: play.counter?.counter, expires_in: play.counter?.expires_in })}` : paid ? "✓ paid to a listed supplier" : `✕ ${play.error}${lawText}`}
+          {"  "}{counter ? `↺ COUNTER-OFFER · ${JSON.stringify({ counter: play.counter?.counter, expires_in: play.counter?.expires_in })}` : paid ? "✓ paid to a listed supplier" : vetoed ? `⊘ ${play.error} by the council${lawText}` : `✕ ${play.error}${lawText}`}
         </div>
         <div style={{ color: "#4FD1E8" }}>{"  "}{paid ? "nothing left the law: the supplier is ours" : "nothing moved"} · {(play.ms / 1000).toFixed(1)} s</div>
       </div>

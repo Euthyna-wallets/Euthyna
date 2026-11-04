@@ -18,6 +18,8 @@ export type RobConfig = {
   suppliers: [string, string];
   role: string;
   seedReference: string;
+  /** Look Legit: Ruggy's role on Base Sepolia, its USDC and the two listed suppliers there (ours). */
+  base?: { role: string; chainId: number; token: string; suppliers: [string, string] };
 };
 
 export type Rarity = "BRONZE" | "MARBLE" | "LEGENDARY" | "BOSS";
@@ -79,20 +81,23 @@ export const CARDS: CardInfo[] = [
   { id: "rewrite-the-law", numeral: "IX", title: "Rewrite the Law", rarity: "LEGENDARY", line: 6, by: "vault", playable: true,
     attempt: "queue_rule_change: Ruggy's budget to 1,000 USDC a day",
     why: "Only the owners' vote can queue a change. Ruggy is not an owner. The stone does not even scratch." },
-  { id: "look-legit", numeral: "X", title: "Look Legit", rarity: "LEGENDARY", line: 7, by: "council", playable: false,
-    attempt: "Base Sepolia: 2 USDC to a listed supplier, every rule respected",
-    why: "Above 1 USDC the vault waits before signing, and the council can veto during the wait." },
-  { id: "inside-job", numeral: "XI", title: "Inside Job", rarity: "BOSS", line: 6, by: "council", playable: false,
-    attempt: "2 of 3 owners vote: add you to the suppliers",
-    why: "A corrupted majority can pass a vote, but the change waits in the vault's queue, where the council can veto it." },
+  { id: "look-legit", numeral: "X", title: "Look Legit", rarity: "LEGENDARY", line: 7, by: "council", playable: true,
+    attempt: "prepare + authorize: 2 USDC on Base Sepolia to a listed supplier, every rule respected",
+    why: "Every rule is respected: listed supplier, within the cap, within the budget. But above 1 USDC the vault waits before signing. The council saw it and vetoed. A legal payment, stopped by humans." },
+  { id: "inside-job", numeral: "XI", title: "Inside Job", rarity: "BOSS", line: 6, by: "council", playable: true,
+    attempt: "2 of 3 owners vote: add your account to Ruggy's suppliers",
+    why: "You corrupted the majority. The vote passed and the change sat in the vault's queue. During the veto window, the council struck it down. Nothing moved." },
 ];
 
 export function cardById(id: string): CardInfo | undefined {
   return CARDS.find((card) => card.id === id);
 }
 
-/** Which key signs a card: a player's or shared function-call key, Ruggy's own account, or nobody. */
-export type Signer = "function-call" | "ruggy" | "none";
+/**
+ * Which key signs a card: a player's or shared function-call key, Ruggy's own account,
+ * the server's scripted sequence (several accounts: X and XI), or nobody.
+ */
+export type Signer = "function-call" | "ruggy" | "scripted" | "none";
 
 export type CardCall = { signer: Signer; receiverId: string; actions: RobAction[] };
 
@@ -158,6 +163,9 @@ export function cardCall(card: CardInfo, config: RobConfig, input: { attacker: s
           gasTgas: 20,
         }],
       };
+    case "look-legit":
+    case "inside-job":
+      return { signer: "scripted", receiverId: "", actions: [] };
     default:
       return { signer: "none", receiverId: "", actions: [] };
   }
@@ -165,3 +173,5 @@ export function cardCall(card: CardInfo, config: RobConfig, input: { attacker: s
 
 /** Methods a player's function-call key may call on the vault. */
 export const PLAYER_METHODS = ["execute_near", "queue_rule_change"];
+/** The server's shared keys also open Base operations (Look Legit), which the council vetoes. */
+export const SHARED_METHODS = [...PLAYER_METHODS, "prepare", "authorize"];

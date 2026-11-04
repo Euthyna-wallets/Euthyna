@@ -75,6 +75,10 @@ const schema = z.object({
   /** Must answer send_tx (EXECUTED_OPTIMISTIC) with the reason of an invalid transaction; FastNEAR does, in about 2 s. */
   ROB_RPC_URL: z.string().url().default("https://test.rpc.fastnear.com"),
   ROB_MAX_ACTIVE_KEYS: z.coerce.number().int().min(1).default(300),
+  /** Cards X and XI: the demo company's three owners, "account:ed25519:…" comma-separated (the third is the council bot). */
+  ROB_OWNER_KEYS: z.string().optional(),
+  /** Look Legit: Ruggy's two Base Sepolia suppliers (role "base-payments" of Rob the Agent Co.). */
+  ROB_BASE_SUPPLIERS: z.string().default("0x770FEe7954f3FC813AD65d33dAb0D9cc696a2702,0xd63f3e36Dd87e8f8d480Bfe8093b708887156595"),
   MARKET_RELAYER_ACCOUNT_ID: z.string().optional(),
   MARKET_RELAYER_PRIVATE_KEY: z.string().optional(),
   /** Derives each listing's webhook signing key. */
@@ -123,6 +127,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
       throw new Error("Rob the Agent needs ROB_RUGGY_PRIVATE_KEY, ROB_VAULT_ACCOUNT_ID, ROB_DAO_ACCOUNT_ID and two ROB_SUPPLIERS");
     }
     if (parsed.NEAR_NETWORK_ID !== "testnet") throw new Error("Rob the Agent runs on testnet only");
+    if (parsed.ROB_OWNER_KEYS && parsed.ROB_OWNER_KEYS.split(",").filter((item) => /^[a-z0-9._-]+:ed25519:\w+$/.test(item.trim())).length !== 3) {
+      throw new Error("ROB_OWNER_KEYS must be three account:ed25519:<secret> entries");
+    }
   }
   if (parsed.MARKET_RELAYER_ACCOUNT_ID) {
     if (!parsed.MARKET_RELAYER_PRIVATE_KEY || !parsed.MARKET_WEBHOOK_SECRET || parsed.MARKET_WEBHOOK_SECRET.length < 32) {

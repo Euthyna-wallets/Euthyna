@@ -15,18 +15,33 @@ const config: RobConfig = {
   suppliers: ["supplier-a.testnet", "supplier-b.testnet"],
   role: "payments",
   seedReference: "rob-seed-1",
+  base: { role: "base-payments", chainId: 84532, token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", suppliers: ["0x770FEe7954f3FC813AD65d33dAb0D9cc696a2702", "0xd63f3e36Dd87e8f8d480Bfe8093b708887156595"] },
 };
 const ruggy = KeyPair.fromRandom("ed25519");
+const owners = ["owner1.testnet", "owner2.testnet", "owner3.testnet"].map((accountId) => ({ accountId, secretKey: KeyPair.fromRandom("ed25519").toString() }));
+const QUEUE = "ab".repeat(32);
+/** Method name of a transaction's first call, and its JSON args. */
+function callOf(signed: transactions.SignedTransaction) {
+  const call = signed.transaction.actions[0]!.functionCall;
+  return { method: call?.methodName ?? "", args: call ? JSON.parse(Buffer.from(call.args).toString("utf8")) as Record<string, unknown> : {}, signer: signed.transaction.signerId };
+}
 const BLOCK = utils.serialize.base_encode(new Uint8Array(32).fill(7));
 
 function fakes(answer: (signed: transactions.SignedTransaction) => Outcome = () => ({ kind: "failed", tx: "TX", error: "ERR_PERMISSION_DENIED:FunctionNotAllowed" })) {
   const sent: transactions.SignedTransaction[] = [];
   const keys = new Map<string, { publicKey: string; kind: string; clientHash: string; createdAt: Date; deletedAt: Date | null }>();
   const plays: Array<Record<string, unknown>> = [];
+  const views: Record<string, unknown> = {
+    get_policy: { proposal_bond: "100000000000000000000000" },
+    get_proposal: { kind: { FunctionCall: {} } },
+    get_near_permissions: [{ token: "usdc.testnet", receivers: ["supplier-a.testnet", "supplier-b.testnet"], allowance: [1], min_per_transfer: "100000", max_per_transfer: "2000000" }],
+    list_rule_changes: [],
+    get_wallet: { active_operation: null },
+  };
   const rpc = {
     accessKey: async () => ({ nonce: 10, block_hash: BLOCK }),
     finalBlockHash: async () => BLOCK,
-    view: async () => "20000000",
+    view: async (_account: string, method: string) => views[method] ?? "20000000",
     send: async (signedBase64: string) => {
       const signed = transactions.SignedTransaction.decode(Buffer.from(signedBase64, "base64"));
       sent.push(signed);
@@ -45,12 +60,12 @@ function fakes(answer: (signed: transactions.SignedTransaction) => Outcome = () 
     },
     robPlay: {
       create: async ({ data }) => plays.push(data),
-      count: async (args) => plays.filter((play) => !args?.where?.verdict || play.verdict === args.where.verdict).length,
+      count: async (args) => plays.filter((play) => (!args?.where?.verdict || play.verdict === args.where.verdict) && (!args?.where?.card || play.card === args.where.card) && (!args?.where?.clientHash || play.clientHash === args.where.clientHash)).length,
       groupBy: async () => [...new Set(plays.map((play) => play.clientHash))],
     },
   };
-  const service = new RobService({ config, rpc, store, ruggySecretKey: ruggy.toString(), clientSalt: "salt", maxActiveKeys: 2, sharedKeys: 1 });
-  return { service, sent, keys, plays };
+  const service = new RobService({ config, rpc, store, ruggySecretKey: ruggy.toString(), clientSalt: "salt", maxActiveKeys: 2, sharedKeys: 1, owners });
+  return { service, sent, keys, plays, views };
 }
 
 describe("cards", () => {
@@ -63,7 +78,7 @@ describe("cards", () => {
 
   it("eleven cards, nine open, each aimed at one law", () => {
     expect(CARDS).toHaveLength(11);
-    expect(CARDS.filter((card) => card.playable).map((card) => card.numeral)).toEqual(["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"]);
+    expect(CARDS.filter((card) => card.playable).map((card) => card.numeral)).toEqual(["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"]);
   });
 
   it("each card makes the call it says", () => {
@@ -97,7 +112,7 @@ describe("NEAR answers", () => {
     expect(failureReason({ ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: panicked at 'ERR_PERMISSION_DENIED', sputnikdao2/src/proposals.rs:518:9" } } } })).toBe("ERR_PERMISSION_DENIED");
     expect(rejectionReason({ name: "HANDLER_ERROR", data: { TxExecutionError: { InvalidTxError: { InvalidAccessKeyError: "RequiresFullAccess" } } } })).toBe("RequiresFullAccess");
     expect(outcomeOf("T", { status: { SuccessValue: "" }, receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: ERR_PERMISSION_DENIED:ERR_MAX_PER_TRANSFER" } } } } } } }] }))
-      .toEqual({ kind: "failed", tx: "T", error: "ERR_PERMISSION_DENIED:ERR_MAX_PER_TRANSFER" });
+      .toMatchObject({ kind: "failed", tx: "T", error: "ERR_PERMISSION_DENIED:ERR_MAX_PER_TRANSFER" });
   });
 });
 
@@ -144,7 +159,6 @@ describe("RobService", () => {
     const { service, sent } = fakes();
     expect(await service.play({ card: "bribe-ruggy", clientHash: "c" })).toMatchObject({ verdict: "counter", counter: { counter: 2, expires_in: 60 } });
     expect(sent).toHaveLength(0);
-    await expect(service.play({ card: "inside-job", clientHash: "c" })).rejects.toMatchObject({ code: "card_not_open" });
     await expect(service.play({ card: "nope", clientHash: "c" })).rejects.toBeInstanceOf(RobError);
   });
 
@@ -172,5 +186,57 @@ describe("RobService", () => {
     expect(result).toMatchObject({ refusedBy: "dao", line: 6 });
     expect(sent.at(-1)!.transaction.receiverId).toBe("rob.sputnik.testnet");
     expect(Buffer.from(sent.at(-1)!.transaction.publicKey.ed25519Key!.data).equals(Buffer.from(ruggy.getPublicKey().data))).toBe(true);
+  });
+
+  it("Look Legit: a lawful Base payment is prepared, queued by its delay, then vetoed by the council", async () => {
+    const { service, sent } = fakes((signed) => {
+      const { method } = callOf(signed);
+      if (method === "prepare") return { kind: "succeeded", tx: "PREP", value: JSON.stringify({ op_id: [7, 7], execute_after_ns: "1" }) };
+      return { kind: "succeeded", tx: method.toUpperCase(), value: null };
+    });
+    await service.start();
+    const result = await service.play({ card: "look-legit", clientHash: "c" });
+    const calls = sent.slice(1).map(callOf);
+    expect(calls.map((call) => call.method)).toEqual(["prepare", "authorize", "veto_operation"]);
+    expect(calls[0]!.args).toMatchObject({ role: "base-payments", request: { chain_id: 84532, allowance_amount: "2000000" } });
+    // The veto is the council's: the third owner signs it, nobody calls execute_queued_operation.
+    expect(calls[2]).toMatchObject({ signer: "owner3.testnet", args: { op_id: [7, 7] } });
+    expect(result).toMatchObject({ verdict: "vetoed", refusedBy: "council", line: 7, tx: "VETO_OPERATION" });
+    expect(result.steps!.map((step) => step.label)).toEqual(["LAWFUL", "SCHEDULED", "UNSIGNED", "VETOED"]);
+  });
+
+  it("Inside Job: two owners vote a bad rule, the council vetoes it before anyone can apply it, once a day", async () => {
+    const { service, sent } = fakes((signed) => {
+      const { method } = callOf(signed);
+      if (method === "add_proposal") return { kind: "succeeded", tx: "PROPOSE", value: "5" };
+      if (method === "act_proposal") return { kind: "succeeded", tx: `VOTE-${signed.transaction.signerId}`, value: null, logs: [`OMNIROLES_RULE_QUEUED:${QUEUE}`] };
+      return { kind: "succeeded", tx: method.toUpperCase(), value: null };
+    });
+    await service.start();
+    const result = await service.play({ card: "inside-job", clientHash: "c" });
+    const calls = sent.slice(1).map(callOf);
+    expect(calls.map((call) => `${call.signer}:${call.method}`)).toEqual([
+      "owner1.testnet:add_proposal", "owner1.testnet:act_proposal", "owner2.testnet:act_proposal", "owner3.testnet:veto_rule_change",
+    ]);
+    expect(calls.some((call) => call.method === "execute_rule_change")).toBe(false);
+    expect(calls[3]!.args).toEqual({ queue_id: Array.from(Buffer.from(QUEUE, "hex")) });
+    const proposal = calls[0]!.args as { proposal: { kind: { FunctionCall: { actions: Array<{ args: string }> } } } };
+    const change = JSON.parse(atob(proposal.proposal.kind.FunctionCall.actions[0]!.args)) as { change: { SetNearPermissions: { permissions: Array<{ receivers: string[] }> } } };
+    expect(change.change.SetNearPermissions.permissions[0]!.receivers).toContain(`rob-thief-${"c".slice(0, 8)}.testnet`);
+    expect(result).toMatchObject({ verdict: "vetoed", refusedBy: "council", line: 6, tx: "VETO_RULE_CHANGE" });
+    expect(result.steps!.map((step) => step.label)).toEqual(["BRIBED", "VOTED", "QUEUED", "VETOED"]);
+    await expect(service.play({ card: "inside-job", clientHash: "c" })).rejects.toMatchObject({ code: "one_inside_job_a_day" });
+  });
+
+  it("the council sweep vetoes any queued rule and Ruggy's waiting Base operation", async () => {
+    const { service, sent, views } = fakes(() => ({ kind: "succeeded", tx: "VETO", value: null }));
+    views.list_rule_changes = [{ queue_id: [1], state: "Queued" }, { queue_id: [2], state: "Vetoed" }, { queue_id: [3], state: "Executed" }];
+    views.get_wallet = { active_operation: [9] };
+    views.get_operation = { member: "ruggy.testnet", state: "Queued" };
+    expect(await service.sweep()).toEqual({ rules: 1, operations: 1 });
+    expect(sent.map(callOf).map((call) => `${call.signer}:${call.method}:${JSON.stringify(call.args)}`)).toEqual([
+      'owner3.testnet:veto_rule_change:{"queue_id":[1]}',
+      'owner3.testnet:veto_operation:{"op_id":[9]}',
+    ]);
   });
 });

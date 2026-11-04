@@ -120,7 +120,17 @@ const rob = env.ROB_RUGGY_ACCOUNT_ID && env.ROB_RUGGY_PRIVATE_KEY && env.ROB_VAU
       suppliers: env.ROB_SUPPLIERS.split(",").map((item) => item.trim()) as [string, string],
       role: "payments",
       seedReference: "rob-seed-1",
+      base: {
+        role: "base-payments",
+        chainId: 84532,
+        token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        suppliers: env.ROB_BASE_SUPPLIERS.split(",").map((item) => item.trim()) as [string, string],
+      },
     },
+    owners: env.ROB_OWNER_KEYS?.split(",").map((item) => {
+      const [accountId, ...key] = item.trim().split(":");
+      return { accountId: accountId!, secretKey: key.join(":") };
+    }),
     rpc: new NearRpc(env.ROB_RPC_URL),
     store: prisma,
     ruggySecretKey: env.ROB_RUGGY_PRIVATE_KEY,
@@ -131,6 +141,11 @@ const rob = env.ROB_RUGGY_ACCOUNT_ID && env.ROB_RUGGY_PRIVATE_KEY && env.ROB_VAU
 if (rob) {
   void rob.start().then(() => console.log("Rob the Agent: shared keys on Ruggy's account")).catch((error: unknown) => console.error("Rob the Agent could not start:", error));
   setInterval(() => void rob.maintain().catch((error: unknown) => console.warn(`rob maintenance: ${String(error)}`)), 10 * 60_000).unref();
+  // The council bot: nothing the game queues may outlive its veto window.
+  setInterval(() => void rob.sweep().then(
+    (swept) => { if (swept.rules || swept.operations) console.warn(`rob council sweep vetoed ${swept.rules} rule(s), ${swept.operations} operation(s)`); },
+    (error: unknown) => console.warn(`rob council sweep: ${String(error)}`),
+  ), 20_000).unref();
 }
 
 // Founder seat recovery: ZK Email proofs, verified by the recovery contract on NEAR; the

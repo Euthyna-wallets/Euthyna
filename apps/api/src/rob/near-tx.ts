@@ -18,8 +18,8 @@ export type RobAction =
 export type Outcome =
   /** NEAR refused the transaction before the chain: no hash. */
   | { kind: "rejected"; error: string }
-  | { kind: "failed"; tx: string; error: string }
-  | { kind: "succeeded"; tx: string; value: string | null };
+  | { kind: "failed"; tx: string; error: string; logs?: string[] }
+  | { kind: "succeeded"; tx: string; value: string | null; logs?: string[] };
 
 export class RpcError extends Error {
   constructor(readonly body: unknown) {
@@ -108,7 +108,7 @@ export class NearRpc {
 
 type FinalOutcome = {
   status: { SuccessValue?: string; Failure?: unknown };
-  receipts_outcome: Array<{ outcome: { status: { Failure?: unknown; SuccessValue?: string } } }>;
+  receipts_outcome: Array<{ outcome: { status: { Failure?: unknown; SuccessValue?: string }; logs?: string[] } }>;
 };
 
 export function hashOfSigned(signedBase64: string): string {
@@ -119,11 +119,12 @@ export function hashOfSigned(signedBase64: string): string {
 /** The panic message of the first failed receipt, e.g. "ERR_OWNER_ONLY". */
 export function outcomeOf(tx: string, result: FinalOutcome): Outcome {
   const failures = [result.status.Failure, ...result.receipts_outcome.map((receipt) => receipt.outcome.status.Failure)].filter(Boolean);
+  const logs = result.receipts_outcome.flatMap((receipt) => receipt.outcome.logs ?? []);
   if (failures.length === 0) {
     const value = result.status.SuccessValue ? Buffer.from(result.status.SuccessValue, "base64").toString("utf8") : null;
-    return { kind: "succeeded", tx, value };
+    return { kind: "succeeded", tx, value, logs };
   }
-  return { kind: "failed", tx, error: failureReason(failures[0]) };
+  return { kind: "failed", tx, error: failureReason(failures[0]), logs };
 }
 
 export function failureReason(failure: unknown): string {
