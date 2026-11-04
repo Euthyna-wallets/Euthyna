@@ -25,7 +25,7 @@ only reaches one of them.
 | --- | --- | --- |
 | Full access | the API (`ROB_RUGGY_PRIVATE_KEY`) | add and delete the players' keys, sign card VII (a DAO call no function-call key can make), mint test tokens |
 | One per player | the player's browser (made there, never sent) | call `execute_near` and `queue_rule_change` on the vault, 0.25 NEAR of gas at most, deleted after 24 h |
-| Three shared keys | the API, made at each start | the same plus `prepare` and `authorize` (Look Legit), for plays without a key of their own |
+| Three shared keys | the API, made at each start | the same plus `prepare` and `authorize` (Look Legit), 1 NEAR of gas at most, for plays without a key of their own |
 
 The three owners' keys are in the API too (`ROB_OWNER_KEYS`): the game plays the two bribed owners of Inside Job,
 and the third owner is the **council bot**, announced as a bot on the page. It vetoes Look Legit's payment and
@@ -33,7 +33,12 @@ Inside Job's rule right after they are queued, and every 20 seconds it sweeps th
 queued, and Ruggy's Base operation still waiting, is vetoed. A queued rule waits 60 s before anyone can apply it;
 the veto lands in about 2 s. The service never calls `execute_rule_change` or `execute_queued_operation`
 (`rob.test.ts`). The sweep also vetoes rule changes the owners queue by hand: stop the API before changing
-Ruggy's law.
+Ruggy's law. Run one API with these keys: a second one (a developer's machine) sweeps the same vault. A veto that
+finds the rule or operation already vetoed reports it as vetoed, with who did it.
+
+NEAR holds a call's whole prepaid gas, at a pessimistic price, against a function-call key's allowance until the
+call ends. Look Legit prepays 50 and 30 Tgas (it burns about 4 and 3) on a shared key with 1 NEAR of allowance;
+with 150 and 100 Tgas on 0.25 NEAR, `authorize` was refused with `NotEnoughAllowance` (fixed 4 November).
 
 Limits: 5 new keys an hour per address, 300 player keys alive at once (`ROB_MAX_ACTIVE_KEYS`), 30 plays a minute per
 address, 40 plays in flight. A refused play costs Ruggy about 0.001 NEAR of gas.
