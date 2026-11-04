@@ -89,7 +89,8 @@ if (step === "enroll") {
     const out = await proposer.functionCall({ contractId: DAO, methodName: "add_proposal", args: { proposal: { description: `Seat recovery: ${LOST} → ${open.new_account_id}, proved on ${CONTRACT}`, kind } }, gas: 150_000_000_000_000n, attachedDeposit: BigInt(policy.proposal_bond) }) as unknown as Outcome;
     const id = Number(Buffer.from(out.status.SuccessValue ?? "", "base64").toString());
     console.log(`proposal #${id} (${Object.keys(kind)[0]}): tx ${out.transaction.hash}`);
-    for (const voter of VOTERS) {
+    // Once added, the new account is a member too: removing the lost seat needs its vote with 4 members.
+    for (const voter of "RemoveMemberFromRole" in kind ? [...VOTERS, open.new_account_id] : VOTERS) {
       const vote = await (await account(voter)).functionCall({ contractId: DAO, methodName: "act_proposal", args: { id, action: "VoteApprove", proposal: kind }, gas: 200_000_000_000_000n }) as unknown as Outcome;
       console.log(`  approved by ${voter}: tx ${vote.transaction.hash}`);
     }

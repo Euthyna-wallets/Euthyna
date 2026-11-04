@@ -29,8 +29,9 @@ a seat by itself: the DAO's vote does.
 3. **Wait.** Until the waiting period ends, the lost account can call `cancel(dao_id)`. This is the answer to a mailbox
    takeover: the real founder still has their key. The contract enforces the delay, not a server.
 4. **Vote.** Once the contract says the recovery is `ready`, any member submits the two usual votes: the DAO policy
-   (members) and the vault council (`SetCouncil`, with its veto window). The console drafts them through the API;
-   the founders approve them in their DAO as any other proposal.
+   (members) and the vault council (`SetCouncil`, with its veto window). The console drafts them through the API,
+   which refuses before the contract says `ready`; the founders approve them in their DAO as any other proposal.
+   (The testnet run below votes on a plain Sputnik DAO, without a vault, with `AddMemberToRole` and `RemoveMemberFromRole`.)
 
 ## What is public
 
@@ -82,7 +83,8 @@ no upgrade (the contract has no upgrade method and no access key).
 | Bob asks with another mailbox | refused, `ERR_DIFFERENT_MAILBOX` | |
 | Bob asks with Alice's mailbox | waiting, 85.4 Tgas | `3AGASXfh7gZjagzppF5xEqG9YZgvtw24ED7A2mjZVoFd` |
 | Alice cancels | cancelled | `AzTYMheLPMcmLA5nCVUS2XqQfSDRrSiJh1ZS5NupFNri` |
-| Bob asks again; nobody cancels for 10 minutes | waiting, then `ready` | `4T4dcaZkUBpRifivsuYRGRMGah7h6ACrsTTjGm7Ugp4b` |
+| Bob asks again; nobody cancels for 10 minutes | waiting, then `ready` (a vote drafted before that is refused: `too_early`) | `4T4dcaZkUBpRifivsuYRGRMGah7h6ACrsTTjGm7Ugp4b` |
+| The contract says `ready`; the founders vote: proposal #0 adds Bob to the council (carol, dave approve), proposal #1 removes Alice (carol, dave, then Bob) | council: dave, carol, bob | #0 approved by dave `HTiBKYnUpeFc9akZUwdzsjJaS4zUHSy4DL4AP4cYYpPi`; #1 `94yEsKwZYNQYZ2djCLXbfnLFMzVdudd5Wv1uT7DaysNW`, approvals `EKumk9CZsmca2Byanmc7kXYemFaCKDx8ZuDkWuoHPiY`, `Avvrp1hnGb7hSMEp6br8h1CiBKjXhKPzPHNFyTciZuWz`, `Ge8XWpzTGL6gTru9MiEyyxfFHA6KJDiC8GSJSXvTnfmr` |
 | A proof made in Chromium by the console's own code (`proveEmailFile`) | `verify_proof` → `true` on `euthyna-recovery.testnet` | view call |
 
 The testnet contract waits **10 minutes** so the whole flow can be tried in one sitting; the mainnet contract is meant to wait 48 hours.
