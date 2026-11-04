@@ -2035,12 +2035,20 @@ export class OmniRolesService {
     return this.memo<unknown>(`${kind}:${accountId}`, 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
   }
 
-  /** Drop cached reads of this organization's DAO and vault (after a member's transaction). */
+  /**
+   * Drop cached reads of this organization's DAO and vault (after a member's transaction). Reads
+   * use "final" blocks, a few seconds behind the transaction: forget again once they caught up, or
+   * the console keeps the pre-vote state cached for another round.
+   */
   async refresh(organizationId: string): Promise<void> {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return;
-    this.forget(treasury.vaultAccountId);
-    this.forget(treasury.daoAccountId);
+    const forget = () => {
+      this.forget(treasury.vaultAccountId);
+      this.forget(treasury.daoAccountId);
+    };
+    forget();
+    for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
   }
 
   private forget(accountId: string): void {
