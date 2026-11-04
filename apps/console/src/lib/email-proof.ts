@@ -13,6 +13,12 @@ import { viewContract } from "../wallets.js";
 
 export { newSalt, recoverySubject } from "@mandateos/sdk/email-proof";
 
+/**
+ * Public or disposable inboxes: anyone who knows the address can open them. Accepted on testnet so the
+ * flow can be tried with a throwaway inbox; never registered on mainnet (docs/recovery.md).
+ */
+export const PUBLIC_INBOX_DOMAINS = ["yopmail.com"];
+
 /** The recovery contract: it verifies the proofs, keeps the enrollments, runs the waiting period. */
 export const RECOVERY_CONTRACT_ID: string = import.meta.env.VITE_EUTHYNA_RECOVERY_ID ?? "euthyna-recovery.testnet";
 

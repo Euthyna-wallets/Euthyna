@@ -69,6 +69,15 @@ no upgrade (the contract has no upgrade method and no access key).
   (`20251104`, `20260707`), Outlook (`selector1`, `selector2`), Hotmail and Live (`selector1`), iCloud and me.com
   (`1a1hai`), Yahoo (`s2048`), Proton (`protonmail`, `protonmail2`, `protonmail3`), and the test domain
   `mail.euthyna-test.dev` used by the end-to-end run.
+- **Testnet only: `yopmail.com` (selector `dkim`, key hash `ad8e8df3…5a1d`, tx `EcNyQ8ZmSu2NstziSSbD3AwTYSerDgeUoz8crhA2vfe8`)**,
+  so judges can try the flow with a throwaway inbox. A YOPmail inbox has no password: anyone who knows the address can
+  open it and send from it, so it proves nothing about who holds it. **It must never be registered on mainnet**, nor
+  any other public or disposable inbox (Mailinator, temp-mail…). The console warns when a founder enrolls with one.
+
+### Before mainnet
+
+- Deploy a new contract with a 48 hour delay and a DAO as keeper.
+- Register only providers where a mailbox needs a password; no `yopmail.com`, no test domain.
 - Providers rotate keys: when an email is signed with a key the contract does not know, the console says so before
   proving.
 
@@ -77,7 +86,7 @@ no upgrade (the contract has no upgrade method and no access key).
 | Step | Result | Transaction |
 | --- | --- | --- |
 | Create `euthyna-recovery.testnet` (temporary key, testnet faucet), then deploy + `new(keeper, 600 s)` + delete the key in one transaction | 0 access keys; code hash `Eg1Ht4oYrNVjDVaqgsGrwPgsev1ZsbfzMr4HPd5uRhPa` = base58(sha256 of `contracts/res/email_recovery.wasm`, the pinned-image build) | `9TQFJBzjXRJ1iEsqGmNJzBcw2UeqCcH6E1h1dmLN7x3g` |
-| The keeper registers the providers' DKIM keys | 16 keys, 2.7 Tgas each | e.g. Gmail `20251104`, test domain `6Dofwp7ib57XkodvMAwe9ieSt5AS5rMYGYqmo2y8J8go` |
+| The keeper registers the providers' DKIM keys | 16 keys, then `yopmail.com` (testnet only), 2.7 Tgas each | e.g. Gmail `20251104`, test domain `6Dofwp7ib57XkodvMAwe9ieSt5AS5rMYGYqmo2y8J8go` |
 | A DAO with three founders | `eut-rec-11526.sputnikv2.testnet`: alice, carol, dave | `4bVFtqLTzG43EvtoHVs7VdgM35nRE5S89bcBqeZa6WJz` |
 | Alice enrolls (proof verified in the call) | 85.3 Tgas | `6Cgo1kQcuqfSShZz5ohYHGhfpzLvu98WajdinoxEoFBP` |
 | Bob asks with another mailbox | refused, `ERR_DIFFERENT_MAILBOX` | |
@@ -105,5 +114,5 @@ Re-run: `KEYS=<dir> DAO=<dao> pnpm --filter @mandateos/api exec tsx scripts/reco
   factor should come later.
 - **The provider must sign with its own domain** (`d=` equal to the `From` domain). Gmail, Outlook and iCloud do
   this; relays that rewrite headers break the signature. Only 2048-bit RSA keys.
-- **The keeper is a single testnet account** (see DKIM keys).
+- **The keeper is a single testnet account** (see DKIM keys), and the testnet registry accepts `yopmail.com`, a public inbox: testnet only.
 - The vendored zkemail.nr patch and the NEAR pairing patch are not audited.

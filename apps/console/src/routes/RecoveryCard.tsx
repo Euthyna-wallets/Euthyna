@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { Card, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { newSalt, proveEmailFile, RECOVERY_CONTRACT_ID, recoverySubject } from "../lib/email-proof.js";
+import { newSalt, proveEmailFile, PUBLIC_INBOX_DOMAINS, RECOVERY_CONTRACT_ID, recoverySubject } from "../lib/email-proof.js";
 import type { ProposalDraft } from "../omniroles-api.js";
 import { signContractCall, signDaoProposal } from "../wallets.js";
 
@@ -90,7 +90,10 @@ export function RecoveryCard() {
           const { proof, domain } = await proveEmailFile(file, newSalt(), setMessage);
           setMessage("Sign the enrollment in your wallet: the contract checks the proof…");
           const tx = await signContractCall(me, RECOVERY_CONTRACT_ID, "enroll", { dao_id: dao, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
-          return `Enrolled on chain (${tx.slice(0, 8)}…): a mailbox at ${domain} can recover your seat.`;
+          const warning = PUBLIC_INBOX_DOMAINS.includes(domain)
+            ? ` Testnet only: anyone who knows a ${domain} address can open its inbox, so it does not protect your seat. Use a mailbox with a password for real.`
+            : "";
+          return `Enrolled on chain (${tx.slice(0, 8)}…): a mailbox at ${domain} can recover your seat.${warning}`;
         })} />
       ) : <p className="small">Connect your NEAR wallet to enroll.</p>}
       {view.data?.enrollments.length ? <p className="small">Founders enrolled: {view.data.enrollments.map((item) => item.nearAccountId).join(", ")}</p> : null}
