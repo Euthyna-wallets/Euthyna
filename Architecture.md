@@ -1,4 +1,4 @@
-# MandateOS — OmniRoles architecture
+# Euthyna — OmniRoles architecture
 
 ## Authority
 

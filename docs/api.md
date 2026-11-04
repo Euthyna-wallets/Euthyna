@@ -1,4 +1,4 @@
-# MandateOS API
+# Euthyna API
 
 The API never holds a key that moves company funds. Funds sit at one EVM
 address derived by NEAR MPC from the company's OmniRoles vault (path
@@ -118,7 +118,7 @@ With euthyna-signer, the config is one line and holds no secret: the socket is
 found by itself, and the vault, role and network are read from the signer.
 
 ```bash
-# once: git clone https://github.com/Euthyna-wallets/MandateOS && cd MandateOS && pnpm install
+# once: git clone https://github.com/Euthyna-wallets/MandateOS && cd Euthyna && pnpm install
 claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- pnpm --silent --dir $PWD/packages/mcp exec tsx src/server.ts
 ```
 
@@ -244,8 +244,8 @@ API is not involved.
   - `integrity`: per chain, the wallet's nonce on the EVM chain against the
     vault's `next_nonce`. Only the vault hands out nonces, so the chain can
     never count more transactions than the vault signed. If it does, a
-    transaction left the wallet outside MandateOS (`alert`).
-  - `requests`: refusals and dry runs, MandateOS's own record. They never
+    transaction left the wallet outside Euthyna (`alert`).
+  - `requests`: refusals and dry runs, Euthyna's own record. They never
     reach a chain.
 - `POST /v1/console/omniroles/refresh`: clears the API's cached reads.
 

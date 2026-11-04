@@ -1462,7 +1462,7 @@ export class OmniRolesService {
     };
   }
 
-  /** Activate rule changes whose delay has passed (permissionless on chain; MandateOS pays the gas). */
+  /** Activate rule changes whose delay has passed (permissionless on chain; Euthyna pays the gas). */
   async activateReadyRules(organizationId: string): Promise<string[]> {
     return (await this.activateDue(organizationId)).hashes;
   }
@@ -1817,7 +1817,7 @@ export class OmniRolesService {
    * NEAR (who, which role, what, its state) and are confirmed on the EVM chain
    * (mined, success or reverted). The database only says which operations to
    * look up and gives names. Refusals and dry runs never reach a chain: they are
-   * listed apart, as MandateOS's own record.
+   * listed apart, as Euthyna's own record.
    */
   async activity(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
@@ -2035,12 +2035,20 @@ export class OmniRolesService {
     return this.memo<unknown>(`${kind}:${accountId}`, 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
   }
 
-  /** Drop cached reads of this organization's DAO and vault (after a member's transaction). */
+  /**
+   * Drop cached reads of this organization's DAO and vault (after a member's transaction). Reads
+   * use "final" blocks, a few seconds behind the transaction: forget again once they caught up, or
+   * the console keeps the pre-vote state cached for another round.
+   */
   async refresh(organizationId: string): Promise<void> {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return;
-    this.forget(treasury.vaultAccountId);
-    this.forget(treasury.daoAccountId);
+    const forget = () => {
+      this.forget(treasury.vaultAccountId);
+      this.forget(treasury.daoAccountId);
+    };
+    forget();
+    for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
   }
 
   private forget(accountId: string): void {

@@ -1,4 +1,4 @@
-"""MandateOS architecture diagrams, blueprint style (site palette)."""
+"""Euthyna architecture diagrams, blueprint style (site palette)."""
 import sys, re, pathlib
 
 CHAINS = pathlib.Path(__file__).resolve().parents[2] / 'apps/console/public/chains'

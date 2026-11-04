@@ -146,7 +146,7 @@ function result(value: unknown) {
 export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   const server = new McpServer({ name: "mandateos", version: "0.2.0" }, {
     instructions: [
-      "You act inside a role on a company wallet governed by MandateOS.",
+      "You act inside a role on a company wallet governed by Euthyna.",
       "Call `mandate` first to learn what your role allows, your remaining budgets and the recipients you may pay.",
       "Call `check` before `pay`: it answers allowed or refused, and why, without reserving anything.",
       "If your role has a revenue-sharing budget, `share_revenue` sends ETH to the company's shareholders; nothing else can receive it.",
@@ -185,7 +185,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async (input) => result(await tools.check(input)));
   server.registerTool("pay", {
-    title: "Pay through MandateOS",
+    title: "Pay through Euthyna",
     description: "Prepare a bounded Vault payment, request a Guard visa, authorize it on NEAR, and register the authorization for the worker.",
     inputSchema: {
       token: address,
@@ -267,7 +267,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async (input) => result(await tools.marketTaskStatus(input)));
   server.registerTool("status", {
-    title: "Read MandateOS operation status",
+    title: "Read Euthyna operation status",
     description: "Read the merged Vault, worker, receipt and visa status.",
     inputSchema: { opId },
     annotations: { readOnlyHint: true, idempotentHint: true },

@@ -149,7 +149,7 @@ export const BASE_SEPOLIA: ChainProfile = {
   chainId: 84532,
   name: "Base Sepolia",
   // First token = the default in the console. USDC is Circle's testnet USDC (faucet.circle.com);
-  // TestUSDC is MandateOS's own test token, kept for companies that already use it.
+  // TestUSDC is Euthyna's own test token, kept for companies that already use it.
   tokens: [
     { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", decimals: 6 },
     { address: "0x418A2b47911dE05e21688F7490195F5324B49474", symbol: "TestUSDC", decimals: 6 },
@@ -1099,7 +1099,7 @@ export function describeSharesProposal(kind: unknown, sharesAccountId: string | 
   return null;
 }
 
-/** The only policy MandateOS creates: one council group, two-thirds threshold, and shareholders once shares exist. */
+/** The only policy Euthyna creates: one council group, two-thirds threshold, and shareholders once shares exist. */
 export function councilPolicy(
   members: string[],
   settings: { proposalBond: string; proposalPeriodNs: string },

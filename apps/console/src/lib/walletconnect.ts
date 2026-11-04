@@ -20,7 +20,7 @@ function kit() {
     // Library types disagree under exactOptionalPropertyTypes; the instance is the documented one.
     core: new Core({ projectId: PROJECT_ID }) as unknown as WalletKitTypes.Options["core"],
     metadata: {
-      name: "MandateOS company wallet",
+      name: "Euthyna company wallet",
       description: "Transactions are voted by the company's members before they are signed.",
       url: window.location.origin,
       icons: [],
@@ -75,7 +75,7 @@ export function useWalletConnect(input: { address: string | null; chains: number
         // Off-chain signatures (permits, logins) are not covered by votes yet.
         await walletKit.respondSessionRequest({
           topic: event.topic,
-          response: { id: event.id, jsonrpc: "2.0", error: { code: 4200, message: "MandateOS: the company wallet only sends transactions voted by its members; signatures are not supported." } },
+          response: { id: event.id, jsonrpc: "2.0", error: { code: 4200, message: "Euthyna: the company wallet only sends transactions voted by its members; signatures are not supported." } },
         });
         if (active) setNotice(`${app.name} asked for a signature (${method}); refused: only transactions can be voted.`);
         return;

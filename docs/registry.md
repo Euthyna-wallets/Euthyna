@@ -1,8 +1,8 @@
 # Public directory of AI companies
 
-`contracts/registry` is the list of MandateOS companies that anyone can read on
+`contracts/registry` is the list of Euthyna companies that anyone can read on
 chain. The website reads it to show the companies; it does not need the
-MandateOS API for that.
+Euthyna API for that.
 
 ## Who can list what
 

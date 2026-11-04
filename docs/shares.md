@@ -1,13 +1,13 @@
 # Shares
 
-A MandateOS company can sell shares. Holders vote with them in the company's
+A Euthyna company can sell shares. Holders vote with them in the company's
 Sputnik DAO. Revenue goes to the holders who vote.
 
 ## What it is
 
 `contracts/shares` is one contract per company, deployed next to the vault
 (`<company>-shares.<parent>`). Its account has no access key, so nobody can
-change it, MandateOS included. It does four things:
+change it, Euthyna included. It does four things:
 
 | | |
 | --- | --- |
@@ -104,7 +104,7 @@ On NEAR, only a trusted relayer can ask NEAR MPC to sign a transfer
 (`sign_transfer`). On testnet the relayer had not signed a NEAR-origin
 transfer since 2026-10-12 (last one: nonce 20238). An unrelated transfer,
 nonce 20239, was still waiting at the time of this run. The relayer finalizes
-on Base on its own: MandateOS has nothing to do once the transfer is stored.
+on Base on its own: Euthyna has nothing to do once the transfer is stored.
 
 ## Who decides what
 

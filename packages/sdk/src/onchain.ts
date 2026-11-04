@@ -77,6 +77,10 @@ export class OnchainAgentClient {
     if (Number(BigInt(network)) !== chain_id) throw new Error("RPC chain does not match the vault wallet");
     const wallet = await this.vault.view<{ address: number[] | null }>("get_wallet", { chain_id });
     if (!wallet.address) throw new Error("Wallet not derived");
+    // The vault's rules first (the same check prepare runs): a forbidden payment is refused for that
+    // reason, before any fee is estimated from the company wallet (which may hold nothing yet).
+    const early = await this.refusal(omniRolesPaymentRequest({ ...intent, gas_limit: "0", max_fee_per_gas: "0", max_priority_fee_per_gas: "0" }, chain_id));
+    if (early) return early;
     const to = bytesToHex(Uint8Array.from(intent.token));
     const data = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [bytesToHex(Uint8Array.from(intent.recipient)), BigInt(intent.amount)] });
     const gas = intent.gas_limit ?? BigInt(await this.rpc<Hex>("eth_estimateGas", [{ from: bytesToHex(Uint8Array.from(wallet.address)), to, data }])).toString();

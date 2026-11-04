@@ -10,7 +10,7 @@ import { nearSignIn, type NearSignInOptions } from "./near-auth.js";
 export const AGENT_API_KEY_CONFIG_ID = "agent";
 
 /**
- * The subset of the Better Auth server API MandateOS relies on. Named here so
+ * The subset of the Better Auth server API Euthyna relies on. Named here so
  * the HTTP layer and tests do not depend on inferred plugin generics.
  */
 export interface MandateAuth {

@@ -30,7 +30,12 @@ export function RecoverPage() {
       const { proof } = await proveEmailFile(file, `0x${enrollment.salt}`, setMessage);
       setMessage("Sign the request in your wallet: the contract checks the proof…");
       await signContractCall(me, RECOVERY_CONTRACT_ID, "request", { dao_id: daoId, lost_account_id: lostId, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
-      const open = await viewContract<{ not_before_ns: string } | null>(RECOVERY_CONTRACT_ID, "recovery", { dao_id: daoId, lost_account_id: lostId });
+      // Views read final blocks: the request shows up a few seconds after the transaction.
+      let open: { not_before_ns: string } | null = null;
+      for (let attempt = 0; attempt < 6 && !open; attempt += 1) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, 1500));
+        open = await viewContract<{ not_before_ns: string } | null>(RECOVERY_CONTRACT_ID, "recovery", { dao_id: daoId, lost_account_id: lostId }).catch(() => null);
+      }
       const until = open ? new Date(Number(BigInt(open.not_before_ns) / 1_000_000n)).toLocaleString() : "the end of the waiting period";
       setMessage(`Request recorded on chain. ${lostId} can cancel it until ${until}; after that, the other founders vote to give you the seat.`);
     } catch (cause) {
