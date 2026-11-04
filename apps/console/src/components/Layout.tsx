@@ -18,7 +18,7 @@ import { WalletBar } from "./WalletBar.js";
 import { Kicker, NightPanel } from "./design.js";
 import { WalletProvider } from "../lib/wallet-context.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
-import { disconnectNearWallet } from "../wallets.js";
+import { disconnectNearWallet, signVaultCall } from "../wallets.js";
 import { displayAccount } from "./ui.js";
 
 type Organization = { id: string; name: string };
@@ -97,7 +97,11 @@ export function Layout() {
     setHaltError(null);
     setHalting(true);
     try {
-      await omni.pauseProposal(true);
+      // A council member pauses the vault directly (no vote): prepare refuses every operation
+      // until the members vote to resume.
+      const vault = status.data?.treasury?.vaultAccountId;
+      if (!vault || !myAccount) throw new Error("Connect a council member's NEAR wallet to halt the agents.");
+      await signVaultCall(myAccount, vault, "pause", {});
       await queryClient.invalidateQueries();
       navigate("/governance");
     } catch (cause) {
@@ -168,8 +172,8 @@ export function Layout() {
           <NightPanel className="council" style={{ marginTop: "auto", boxShadow: "none" }}>
             <Kicker color="#F4A28C">Security council</Kicker>
             <p>{paused ? "Agents are halted. Only an owners' vote resumes them." : "One click stops every agent. Only an owners' vote resumes them."}</p>
-            <button type="button" onClick={() => void haltAll()} disabled={halting || paused} title={paused ? "Already paused" : "Propose pausing every agent"}>
-              {paused ? "AGENTS HALTED" : halting ? "PROPOSING…" : "HALT ALL AGENTS"}
+            <button type="button" onClick={() => void haltAll()} disabled={halting || paused} title={paused ? "Already paused" : "Pause the vault now: every agent operation is refused until the members vote to resume"}>
+              {paused ? "AGENTS HALTED" : halting ? "HALTING…" : "HALT ALL AGENTS"}
             </button>
             {haltError ? <span style={{ fontSize: 12, color: "#F4C9BC" }}>{haltError}</span> : null}
           </NightPanel>
