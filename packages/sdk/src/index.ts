@@ -205,6 +205,12 @@ export class MandateAgentClient {
 
 
   async pay(intent: PaymentRequest, invoice?: InvoiceContext): Promise<PayResult> {
+    // The vault's verdict first (a dry run of the same on-chain rules): a payment the role forbids
+    // is refused for that reason, before any network fee is quoted from the company wallet.
+    if (this.api.check) {
+      const verdict = await this.check(intent).catch(() => null);
+      if (verdict && !verdict.allowed && verdict.refusedBy === "vault") throw new Error(`Refused by the vault: ${verdict.reason}`);
+    }
     let completeIntent: PaymentIntent;
     if (intent.gas_limit && intent.max_fee_per_gas && intent.max_priority_fee_per_gas) {
       completeIntent = {
