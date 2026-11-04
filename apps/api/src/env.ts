@@ -65,6 +65,16 @@ const schema = z.object({
   OMNI_BRIDGE_API_URL: z.string().url().default("https://testnet.api.bridge.nearone.org"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
   /** Euthyna Market. Enabled when the market relayer is set: a dedicated account, never the company relayer. */
+  // Rob the Agent (/v1/rob): Ruggy's account and its full-access key, the demo company, the two suppliers (ours).
+  ROB_RUGGY_ACCOUNT_ID: z.string().optional(),
+  ROB_RUGGY_PRIVATE_KEY: z.string().optional(),
+  ROB_VAULT_ACCOUNT_ID: z.string().optional(),
+  ROB_DAO_ACCOUNT_ID: z.string().optional(),
+  ROB_TOKEN_ACCOUNT_ID: z.string().default("test-ft-v4.mandateos-root-20261021.testnet"),
+  ROB_SUPPLIERS: z.string().optional(),
+  /** Must answer send_tx (EXECUTED_OPTIMISTIC) with the reason of an invalid transaction; FastNEAR does, in about 2 s. */
+  ROB_RPC_URL: z.string().url().default("https://test.rpc.fastnear.com"),
+  ROB_MAX_ACTIVE_KEYS: z.coerce.number().int().min(1).default(300),
   MARKET_RELAYER_ACCOUNT_ID: z.string().optional(),
   MARKET_RELAYER_PRIVATE_KEY: z.string().optional(),
   /** Derives each listing's webhook signing key. */
@@ -107,6 +117,12 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
       `NEAR_ACCOUNT_PARENT (${parent}) must be the relayer account (${parsed.NEAR_RELAYER_ACCOUNT_ID}): ` +
       "only an account can create its own sub-accounts. Leave it empty to use the relayer.",
     );
+  }
+  if (parsed.ROB_RUGGY_ACCOUNT_ID) {
+    if (!parsed.ROB_RUGGY_PRIVATE_KEY || !parsed.ROB_VAULT_ACCOUNT_ID || !parsed.ROB_DAO_ACCOUNT_ID || (parsed.ROB_SUPPLIERS ?? "").split(",").filter(Boolean).length !== 2) {
+      throw new Error("Rob the Agent needs ROB_RUGGY_PRIVATE_KEY, ROB_VAULT_ACCOUNT_ID, ROB_DAO_ACCOUNT_ID and two ROB_SUPPLIERS");
+    }
+    if (parsed.NEAR_NETWORK_ID !== "testnet") throw new Error("Rob the Agent runs on testnet only");
   }
   if (parsed.MARKET_RELAYER_ACCOUNT_ID) {
     if (!parsed.MARKET_RELAYER_PRIVATE_KEY || !parsed.MARKET_WEBHOOK_SECRET || parsed.MARKET_WEBHOOK_SECRET.length < 32) {

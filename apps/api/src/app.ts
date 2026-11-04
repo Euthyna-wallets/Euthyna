@@ -2,6 +2,8 @@ import { checkInvoice } from "./payments.js";
 import type { RoleDraft } from "@mandateos/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
+import { registerRobRoutes } from "./rob/routes.js";
+import { RobError, type RobService } from "./rob/service.js";
 import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
@@ -115,6 +117,8 @@ export interface AppDependencies {
   omniroles?: OmniRolesService;
   /** Euthyna Market gateway; absent when not configured. */
   market?: MarketService | undefined;
+  /** Rob the Agent, the public game (only when its accounts are configured). */
+  rob?: RobService | undefined;
   /** Public base URL of this API, used in A2A agent cards. */
   publicBaseUrl?: string;
   /** Trust the reverse proxy's X-Forwarded-For for market rate limits. */
@@ -224,6 +228,7 @@ export function createApp({
   pairings,
   omniroles,
   market,
+  rob,
   publicBaseUrl,
   marketTrustProxy,
   recovery,
@@ -945,6 +950,13 @@ export function createApp({
     });
   }
 
+  if (rob) {
+    registerRobRoutes(app, rob, {
+      limiters: { session: new MemoryRateLimiter(5, 3_600_000), play: new MemoryRateLimiter(30, 60_000), read: new MemoryRateLimiter(120, 60_000) },
+      trustProxy: marketTrustProxy ?? false,
+    });
+  }
+
   if (market) {
     const marketLimiter = new MemoryRateLimiter(120, 60_000);
     registerMarketPublicRoutes(app, market, { baseUrl: publicBaseUrl ?? "http://localhost:3000", limiter: marketLimiter, trustProxy: marketTrustProxy ?? false });
@@ -1023,6 +1035,9 @@ export function createApp({
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof MarketError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof RobError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof OmniRolesError) {

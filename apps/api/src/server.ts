@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { prisma } from "@mandateos/db";
 import { AgentProvisioningService } from "./agent-provisioning.js";
@@ -16,6 +17,8 @@ import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
+import { NearRpc } from "./rob/near-tx.js";
+import { RobService } from "./rob/service.js";
 import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
 
@@ -106,6 +109,30 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
   : undefined;
 if (market) setInterval(() => void market.expire().catch((error: unknown) => console.warn(`market expiry: ${String(error)}`)), 60_000).unref();
 
+// Rob the Agent: a public game against a demo company on testnet (only when configured).
+const rob = env.ROB_RUGGY_ACCOUNT_ID && env.ROB_RUGGY_PRIVATE_KEY && env.ROB_VAULT_ACCOUNT_ID && env.ROB_DAO_ACCOUNT_ID && env.ROB_SUPPLIERS
+  ? new RobService({
+    config: {
+      ruggyAccountId: env.ROB_RUGGY_ACCOUNT_ID,
+      vaultAccountId: env.ROB_VAULT_ACCOUNT_ID,
+      daoAccountId: env.ROB_DAO_ACCOUNT_ID,
+      token: env.ROB_TOKEN_ACCOUNT_ID,
+      suppliers: env.ROB_SUPPLIERS.split(",").map((item) => item.trim()) as [string, string],
+      role: "payments",
+      seedReference: "rob-seed-1",
+    },
+    rpc: new NearRpc(env.ROB_RPC_URL),
+    store: prisma,
+    ruggySecretKey: env.ROB_RUGGY_PRIVATE_KEY,
+    clientSalt: createHash("sha256").update(`rob:${env.ROB_RUGGY_PRIVATE_KEY}`).digest("hex"),
+    maxActiveKeys: env.ROB_MAX_ACTIVE_KEYS,
+  })
+  : undefined;
+if (rob) {
+  void rob.start().then(() => console.log("Rob the Agent: shared keys on Ruggy's account")).catch((error: unknown) => console.error("Rob the Agent could not start:", error));
+  setInterval(() => void rob.maintain().catch((error: unknown) => console.warn(`rob maintenance: ${String(error)}`)), 10 * 60_000).unref();
+}
+
 // Founder seat recovery: ZK Email proofs, verified by the recovery contract on NEAR; the
 // members' vote changes the seat. Here only the reads, the DKIM records and the vote drafts.
 const testDkimKeys = env.NEAR_NETWORK_ID === "testnet" && env.RECOVERY_TEST_DKIM_KEYS
@@ -134,6 +161,7 @@ const app = createApp({
   pairings: new PrismaPairingStore(prisma),
   omniroles,
   market,
+  rob,
   publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
   marketTrustProxy: env.MARKET_TRUST_PROXY,
   recovery,

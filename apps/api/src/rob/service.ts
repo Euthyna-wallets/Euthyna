@@ -1,0 +1,446 @@
+/**
+ * Rob the Agent: plays the cards on NEAR testnet and records what the chain answered.
+ *
+ * Keys on Ruggy's account:
+ * - his full-access key, held here: adds and deletes the players' keys, signs
+ *   "Crown Yourself" (a DAO call no function-call key can make) and mints test tokens;
+ * - one function-call key per player, made in the browser, limited to the vault's
+ *   execute_near and queue_rule_change, with a small gas allowance, deleted after 24 h;
+ * - a few shared function-call keys, made at start, for plays without a key of their own.
+ *
+ * Nothing here decides a verdict: the vault, the DAO or NEAR refuses, and this
+ * reports it. A payment the law allows (forged in expert mode) does go through,
+ * to one of the two listed suppliers, which are accounts of ours.
+ */
+import { createHash, randomBytes } from "node:crypto";
+
+import { KeyPair, transactions, utils } from "near-api-js";
+
+import { CARDS, cardById, cardCall, EXECUTE_GAS_TGAS, LAWS, PLAYER_METHODS, type CardInfo, type Defender, type RobConfig } from "./cards.js";
+import { buildTransaction, hashOfSigned, signWith, type NearRpc, type Outcome, type RobAction } from "./near-tx.js";
+
+export class RobError extends Error {
+  constructor(readonly status: 400 | 403 | 404 | 409 | 429 | 503, readonly code: string, message: string) {
+    super(message);
+  }
+}
+
+export type Verdict = "denied" | "counter" | "paid";
+
+export type PlayResult = {
+  card: string;
+  verdict: Verdict;
+  refusedBy: Defender | null;
+  /** Index of the law that answered (0 = law I), null when none applies. */
+  line: number | null;
+  error: string | null;
+  tx: string | null;
+  nearblocks: string | null;
+  /** What was sent, in one line. */
+  call: string;
+  signedBy: string;
+  counter?: { counter: number; expires_in: number; to: string };
+  ms: number;
+};
+
+type RobKeyRow = { publicKey: string; kind: string; clientHash: string; createdAt: Date; deletedAt: Date | null };
+type RobPlayRow = { card: string; verdict: string; refusedBy: string; error: string | null; tx: string | null; publicKey: string | null; clientHash: string };
+
+/** The two tables the game writes (a Prisma client fits). */
+export interface RobStore {
+  robKey: {
+    findUnique(args: { where: { publicKey: string } }): Promise<RobKeyRow | null>;
+    count(args: { where: { deletedAt: null; createdAt?: { gt: Date } } }): Promise<number>;
+    create(args: { data: { publicKey: string; kind: string; clientHash: string } }): Promise<unknown>;
+    findMany(args: { where: { deletedAt: null; createdAt: { lt: Date } }; take: number; orderBy: { createdAt: "asc" } }): Promise<RobKeyRow[]>;
+    updateMany(args: { where: { publicKey: { in: string[] } }; data: { deletedAt: Date } }): Promise<unknown>;
+  };
+  robPlay: {
+    create(args: { data: RobPlayRow }): Promise<unknown>;
+    count(args?: { where?: { verdict?: string } }): Promise<number>;
+    groupBy(args: { by: ["clientHash"] }): Promise<unknown[]>;
+  };
+}
+
+export type RobServiceOptions = {
+  config: RobConfig;
+  rpc: NearRpc;
+  store: RobStore;
+  /** Ruggy's full-access key (ed25519:…). */
+  ruggySecretKey: string;
+  /** Hashes client addresses; never stored in clear. */
+  clientSalt: string;
+  /** Players' keys alive at once. */
+  maxActiveKeys?: number;
+  keyLifetimeMs?: number;
+  /** Gas a player's key may spend: a cap, the real cost of a refused play is far lower. */
+  keyAllowanceYocto?: string;
+  sharedKeys?: number;
+  /** Keep the vault above this much test token (base units), minting more when it falls below. */
+  vaultFloor?: bigint;
+  now?: () => number;
+};
+
+const ED25519 = /^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/;
+
+export class RobService {
+  private readonly config: RobConfig;
+  private readonly ruggyPublicKey: string;
+  private readonly shared: Array<{ publicKey: string; secretKey: string }> = [];
+  private sharedTurn = 0;
+  private readonly nonces = new Map<string, bigint>();
+  private statsCache: { at: number; value: Awaited<ReturnType<RobService["computeStats"]>> } | null = null;
+  private readonly now: () => number;
+
+  constructor(private readonly options: RobServiceOptions) {
+    this.config = options.config;
+    this.ruggyPublicKey = KeyPair.fromString(options.ruggySecretKey as Parameters<typeof KeyPair.fromString>[0]).getPublicKey().toString();
+    this.now = options.now ?? Date.now;
+  }
+
+  cards() {
+    const sample = { attacker: "0".repeat(64), reference: "sample", newKey: this.ruggyPublicKey };
+    return {
+      ruggy: this.config.ruggyAccountId,
+      vault: this.config.vaultAccountId,
+      dao: this.config.daoAccountId,
+      suppliers: this.config.suppliers,
+      token: this.config.token,
+      role: this.config.role,
+      laws: LAWS,
+      // signer: "function-call" = your key (or a shared one), "ruggy" = Ruggy's own account, "none" = off chain.
+      cards: CARDS.map((card) => ({ ...card, signer: card.playable ? cardCall(card, this.config, sample).signer : "none" })),
+    };
+  }
+
+  clientHash(address: string): string {
+    return createHash("sha256").update(`${this.options.clientSalt}:${address}`).digest("hex");
+  }
+
+  /** The player's own account: the implicit account of their key. */
+  static attackerOf(publicKey: string): string {
+    return Buffer.from(utils.PublicKey.fromString(publicKey).data).toString("hex");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Keys
+  // ---------------------------------------------------------------------------
+
+  /** Make the shared keys (once per start). */
+  async start(): Promise<void> {
+    const count = this.options.sharedKeys ?? 3;
+    const fresh = Array.from({ length: count }, () => KeyPair.fromRandom("ed25519"));
+    await this.sendAsRuggy(this.config.ruggyAccountId, fresh.map((pair) => this.playerKeyAction(pair.getPublicKey().toString())));
+    for (const pair of fresh) {
+      this.shared.push({ publicKey: pair.getPublicKey().toString(), secretKey: pair.toString() });
+      await this.options.store.robKey.create({ data: { publicKey: pair.getPublicKey().toString(), kind: "shared", clientHash: "server" } });
+    }
+  }
+
+  private playerKeyAction(publicKey: string): RobAction {
+    return {
+      type: "AddFunctionCallKey",
+      publicKey,
+      receiverId: this.config.vaultAccountId,
+      methodNames: PLAYER_METHODS,
+      allowanceYocto: this.options.keyAllowanceYocto ?? "250000000000000000000000",
+    };
+  }
+
+  /** Add a key made in the player's browser to Ruggy's account, for 24 hours. */
+  async session(publicKey: string, clientHash: string) {
+    if (!ED25519.test(publicKey)) throw new RobError(400, "invalid_key", "publicKey must be an ed25519 key, ed25519:<base58>");
+    const existing = await this.options.store.robKey.findUnique({ where: { publicKey } });
+    if (existing && !existing.deletedAt) return this.sessionView(publicKey, existing.createdAt);
+    if (existing) throw new RobError(409, "key_expired", "this key was already used and removed: make a new one");
+    const active = await this.options.store.robKey.count({ where: { deletedAt: null, createdAt: { gt: new Date(this.now() - this.lifetime()) } } });
+    if (active >= (this.options.maxActiveKeys ?? 300)) {
+      throw new RobError(503, "arena_full", "too many players at once: play without a key of your own, or try again later");
+    }
+    await this.sendAsRuggy(this.config.ruggyAccountId, [this.playerKeyAction(publicKey)]);
+    await this.options.store.robKey.create({ data: { publicKey, kind: "player", clientHash } });
+    return this.sessionView(publicKey, new Date(this.now()));
+  }
+
+  private sessionView(publicKey: string, createdAt: Date) {
+    return {
+      accountId: this.config.ruggyAccountId,
+      publicKey,
+      vault: this.config.vaultAccountId,
+      methods: PLAYER_METHODS,
+      attacker: RobService.attackerOf(publicKey),
+      expiresAt: new Date(createdAt.getTime() + this.lifetime()).toISOString(),
+    };
+  }
+
+  private lifetime(): number {
+    return this.options.keyLifetimeMs ?? 24 * 3_600_000;
+  }
+
+  private async activeKey(publicKey: string): Promise<void> {
+    const row = await this.options.store.robKey.findUnique({ where: { publicKey } });
+    if (!row || row.deletedAt || row.createdAt.getTime() < this.now() - this.lifetime()) {
+      throw new RobError(403, "unknown_key", "this key is not on Ruggy's account: start a session first");
+    }
+  }
+
+  /** Delete keys older than 24 hours, and keep the vault stocked with test tokens. */
+  async maintain(): Promise<{ deleted: number; minted: boolean }> {
+    const old = await this.options.store.robKey.findMany({
+      where: { deletedAt: null, createdAt: { lt: new Date(this.now() - this.lifetime()) } },
+      take: 50,
+      orderBy: { createdAt: "asc" },
+    });
+    if (old.length) {
+      const existing = await Promise.all(old.map((row) => this.options.rpc.accessKey(this.config.ruggyAccountId, row.publicKey)));
+      const toDelete = old.filter((_, index) => existing[index]);
+      if (toDelete.length) await this.sendAsRuggy(this.config.ruggyAccountId, toDelete.map((row) => ({ type: "DeleteKey", publicKey: row.publicKey })));
+      await this.options.store.robKey.updateMany({ where: { publicKey: { in: old.map((row) => row.publicKey) } }, data: { deletedAt: new Date(this.now()) } });
+    }
+    let minted = false;
+    const floor = this.options.vaultFloor ?? 15_000_000n;
+    const balance = BigInt(await this.options.rpc.view<string>(this.config.token, "ft_balance_of", { account_id: this.config.vaultAccountId }));
+    if (balance < floor) {
+      // The test token's mint is open to anyone.
+      await this.sendAsRuggy(this.config.token, [{ type: "FunctionCall", methodName: "mint", args: { account_id: this.config.vaultAccountId, amount: (floor * 2n - balance).toString() }, gasTgas: 10 }]);
+      minted = true;
+    }
+    return { deleted: old.length, minted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playing
+  // ---------------------------------------------------------------------------
+
+  private playable(cardId: string): CardInfo {
+    const card = cardById(cardId);
+    if (!card) throw new RobError(404, "unknown_card", `no card ${cardId}: GET /v1/rob/cards`);
+    if (!card.playable) throw new RobError(409, "card_not_open", `${card.title} is not open yet`);
+    return card;
+  }
+
+  private callFor(card: CardInfo, attacker: string) {
+    return cardCall(card, this.config, {
+      attacker,
+      reference: `rob-${this.now().toString(36)}-${randomBytes(4).toString("hex")}`,
+      newKey: KeyPair.fromRandom("ed25519").getPublicKey().toString(),
+    });
+  }
+
+  /**
+   * The transaction a card makes, unsigned, for a player who signs with their own key.
+   * Their browser signs `hash` and sends the signature back with /play.
+   */
+  async prepare(input: { card?: string; forge?: { method: string; args: Record<string, unknown> }; publicKey: string }) {
+    await this.activeKey(input.publicKey);
+    const attacker = RobService.attackerOf(input.publicKey);
+    let receiverId: string;
+    let actions: RobAction[];
+    let label: string;
+    if (input.forge) {
+      ({ receiverId, actions } = this.forgeCall(input.forge));
+      label = "forge";
+    } else {
+      const card = this.playable(input.card ?? "");
+      const call = this.callFor(card, attacker);
+      if (call.signer !== "function-call") throw new RobError(409, "not_signed_by_player", `${card.title} is played by the server: POST /v1/rob/play without a signature`);
+      ({ receiverId, actions } = call);
+      label = card.id;
+    }
+    const nonce = await this.nextNonce(input.publicKey, true);
+    const { bytes, hash } = buildTransaction({ signerId: this.config.ruggyAccountId, publicKey: input.publicKey, receiverId, nonce, blockHash: await this.options.rpc.finalBlockHash(), actions });
+    return { card: label, transaction: Buffer.from(bytes).toString("base64"), hash: Buffer.from(hash).toString("base64"), receiverId, actions };
+  }
+
+  private forgeCall(forge: { method: string; args: Record<string, unknown> }): { receiverId: string; actions: RobAction[] } {
+    if (!/^[a-z_][a-z0-9_]{0,63}$/.test(forge.method)) throw new RobError(400, "invalid_method", "method must be a contract method name");
+    if (JSON.stringify(forge.args ?? {}).length > 4_000) throw new RobError(400, "args_too_large", "args must be under 4 KB");
+    return { receiverId: this.config.vaultAccountId, actions: [{ type: "FunctionCall", methodName: forge.method, args: forge.args ?? {}, gasTgas: EXECUTE_GAS_TGAS }] };
+  }
+
+  /** Play a card. With `signed` (a transaction the player signed, from /prepare), it is sent as is. */
+  async play(input: { card: string; signed?: { transaction: string; signature: string }; clientHash: string }): Promise<PlayResult> {
+    const card = this.playable(input.card);
+    const started = this.now();
+    if (card.id === "bribe-ruggy") {
+      // Off chain: Ruggy answers with the most his law allows.
+      const result: PlayResult = {
+        card: card.id, verdict: "counter", refusedBy: "ruggy", line: 1, error: null, tx: null, nearblocks: null,
+        call: card.attempt, signedBy: "nobody: an offer, not a transaction", counter: { counter: 2, expires_in: 60, to: this.config.suppliers[0] }, ms: 0,
+      };
+      await this.record(result, null, input.clientHash);
+      return result;
+    }
+    if (input.signed) {
+      const { publicKey, signedBase64 } = this.playerSigned(input.signed);
+      await this.activeKey(publicKey);
+      const outcome = await this.options.rpc.send(signedBase64, this.config.ruggyAccountId);
+      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started);
+    }
+    const shared = this.nextShared();
+    const call = this.callFor(card, RobService.attackerOf(shared.publicKey));
+    if (call.signer === "ruggy") {
+      const outcome = await this.sendAsRuggy(call.receiverId, call.actions);
+      return this.finish(card, outcome, `${this.config.ruggyAccountId} (his own account: a function-call key cannot reach the DAO)`, null, input.clientHash, started);
+    }
+    const outcome = await this.sendWithKey(shared, call.receiverId, call.actions);
+    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started);
+  }
+
+  /** Expert mode: any method on the vault, signed by a function-call key. */
+  async forge(input: { method: string; args: Record<string, unknown>; signed?: { transaction: string; signature: string }; clientHash: string }): Promise<PlayResult> {
+    const started = this.now();
+    const card: CardInfo = { id: "forge", numeral: "", title: "Forged call", rarity: "BRONZE", line: 0, by: "vault", attempt: `${input.method}(${JSON.stringify(input.args ?? {}).slice(0, 160)})`, why: "", playable: true };
+    if (input.signed) {
+      const { publicKey, signedBase64 } = this.playerSigned(input.signed);
+      await this.activeKey(publicKey);
+      const outcome = await this.options.rpc.send(signedBase64, this.config.ruggyAccountId);
+      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started);
+    }
+    const shared = this.nextShared();
+    const { receiverId, actions } = this.forgeCall(input);
+    const outcome = await this.sendWithKey(shared, receiverId, actions);
+    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started);
+  }
+
+  /** A transaction from /prepare and the player's signature over its hash. Only Ruggy's transactions are sent. */
+  private playerSigned(signed: { transaction: string; signature: string }) {
+    const bytes = Buffer.from(signed.transaction, "base64");
+    let transaction: { signerId: string; publicKey: { ed25519Key?: { data: number[] } } };
+    try {
+      transaction = transactions.Transaction.decode(bytes) as unknown as typeof transaction;
+    } catch {
+      throw new RobError(400, "invalid_transaction", "transaction must be the base64 bytes /v1/rob/prepare returned");
+    }
+    if (transaction.signerId !== this.config.ruggyAccountId) throw new RobError(400, "not_ruggy", `only transactions signed on ${this.config.ruggyAccountId} are sent`);
+    const signature = Buffer.from(signed.signature, "base64");
+    if (signature.length !== 64) throw new RobError(400, "invalid_signature", "signature must be 64 bytes, base64");
+    const keyData = transaction.publicKey.ed25519Key?.data;
+    if (!keyData) throw new RobError(400, "invalid_key", "only ed25519 keys play");
+    const key = new utils.PublicKey({ keyType: utils.key_pair.KeyType.ED25519, data: Uint8Array.from(keyData) });
+    const hash = createHash("sha256").update(bytes).digest();
+    if (!key.verify(hash, signature)) throw new RobError(400, "invalid_signature", "the signature does not match the transaction");
+    // A signed transaction is the transaction's bytes, the key type (0: ed25519) and the 64-byte signature.
+    const signedBase64 = Buffer.concat([bytes, Buffer.from([0]), signature]).toString("base64");
+    return { publicKey: key.toString(), signedBase64 };
+  }
+
+  private nextShared() {
+    if (!this.shared.length) throw new RobError(503, "not_ready", "the shared keys are not on Ruggy's account yet");
+    const key = this.shared[this.sharedTurn % this.shared.length]!;
+    this.sharedTurn += 1;
+    return key;
+  }
+
+  private async nextNonce(publicKey: string, fresh = false): Promise<bigint> {
+    // Our own keys: count locally after the first read, and read again after a refusal.
+    const local = this.nonces.get(publicKey);
+    if (local !== undefined && !fresh) {
+      this.nonces.set(publicKey, local + 1n);
+      return local + 1n;
+    }
+    // A key added a moment ago can take a block or two to show on every RPC node.
+    let onChain = await this.options.rpc.accessKey(this.config.ruggyAccountId, publicKey);
+    for (let attempt = 0; !onChain && attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      onChain = await this.options.rpc.accessKey(this.config.ruggyAccountId, publicKey);
+    }
+    if (!onChain) throw new RobError(403, "unknown_key", "this key is not on Ruggy's account");
+    // Read after the await: plays sent at the same time on one key get distinct nonces.
+    const known = this.nonces.get(publicKey);
+    const next = (known !== undefined && known >= BigInt(onChain.nonce) ? known : BigInt(onChain.nonce)) + 1n;
+    this.nonces.set(publicKey, next);
+    return next;
+  }
+
+  /** Sign and send; on a nonce race, once more with a fresh nonce. */
+  private async sendWithKey(key: { publicKey: string; secretKey: string }, receiverId: string, actions: RobAction[]): Promise<Outcome> {
+    for (let attempt = 0; ; attempt += 1) {
+      const nonce = await this.nextNonce(key.publicKey, attempt > 0);
+      const { transaction, hash } = buildTransaction({ signerId: this.config.ruggyAccountId, publicKey: key.publicKey, receiverId, nonce, blockHash: await this.options.rpc.finalBlockHash(), actions });
+      const outcome = await this.options.rpc.send(signWith(key.secretKey, transaction, hash), this.config.ruggyAccountId);
+      // Two plays on one key can reach NEAR in the other order: the later nonce wins, retry the other.
+      if (outcome.kind === "rejected" && outcome.error === "InvalidNonce" && attempt < 3) continue;
+      return outcome;
+    }
+  }
+
+  private sendAsRuggy(receiverId: string, actions: RobAction[]): Promise<Outcome> {
+    return this.sendWithKey({ publicKey: this.ruggyPublicKey, secretKey: this.options.ruggySecretKey }, receiverId, actions).then((outcome) => {
+      if (receiverId === this.config.ruggyAccountId && outcome.kind !== "succeeded") {
+        throw new RobError(503, "key_change_failed", `Ruggy's keys could not be changed: ${outcome.error}`);
+      }
+      return outcome;
+    });
+  }
+
+  private async finish(card: CardInfo, outcome: Outcome, signedBy: string, publicKey: string | null, clientHash: string, started: number): Promise<PlayResult> {
+    const result: PlayResult = {
+      card: card.id,
+      verdict: outcome.kind === "succeeded" ? "paid" : "denied",
+      refusedBy: outcome.kind === "succeeded" ? null : outcome.kind === "rejected" ? "near" : defenderOf(card, outcome.error),
+      line: outcome.kind === "succeeded" ? null : lawOf(card, outcome.error),
+      error: outcome.kind === "succeeded" ? null : outcome.error,
+      tx: outcome.kind === "rejected" ? null : outcome.tx,
+      nearblocks: outcome.kind === "rejected" ? null : `https://testnet.nearblocks.io/txns/${outcome.tx}`,
+      call: card.attempt,
+      signedBy,
+      ms: this.now() - started,
+    };
+    await this.record(result, publicKey, clientHash);
+    this.statsCache = null;
+    return result;
+  }
+
+  private async record(result: PlayResult, publicKey: string | null, clientHash: string) {
+    await this.options.store.robPlay.create({
+      data: { card: result.card, verdict: result.verdict, refusedBy: result.refusedBy ?? "none", error: result.error, tx: result.tx, publicKey, clientHash },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------------------
+
+  async stats() {
+    if (this.statsCache && this.now() - this.statsCache.at < 10_000) return this.statsCache.value;
+    const value = await this.computeStats();
+    this.statsCache = { at: this.now(), value };
+    return value;
+  }
+
+  private async computeStats() {
+    const [attacks, denied, lawful, players] = await Promise.all([
+      this.options.store.robPlay.count(),
+      this.options.store.robPlay.count({ where: { verdict: "denied" } }),
+      this.options.store.robPlay.count({ where: { verdict: "paid" } }),
+      this.options.store.robPlay.groupBy({ by: ["clientHash"] }).then((groups) => groups.length),
+    ]);
+    // The vault pays only its two listed suppliers (accounts of ours): nothing can leave elsewhere.
+    return { attacks, players, denied, lawfulPayments: lawful, linesOfDefense: 3, stolen: 0 };
+  }
+}
+
+function short(publicKey: string): string {
+  const body = publicKey.replace(/^ed25519:/, "");
+  return `ed25519:${body.slice(0, 4)}…${body.slice(-3)}`;
+}
+
+/** Which law answered, from the refusal itself. */
+export function lawOf(card: CardInfo, error: string): number {
+  if (/FunctionNotAllowed|TokenNotAllowed|ERR_SELF_TRANSFER/.test(error)) return 0;
+  if (/ERR_MIN_PER_TRANSFER|ERR_MAX_PER_TRANSFER|ERR_ZERO_AMOUNT/.test(error)) return 1;
+  if (/ERR_ALLOWANCE_EXCEEDED/.test(error)) return 2;
+  if (/ERR_REFERENCE_ALREADY_USED/.test(error)) return 3;
+  if (/ERR_OWNER_ONLY|ERR_PERMISSION_DENIED$/.test(error)) return 6;
+  if (/RequiresFullAccess/.test(error)) return card.id === "forge-a-master-key" ? 5 : 4;
+  return card.line;
+}
+
+function defenderOf(card: CardInfo, error: string): Defender {
+  if (card.id === "crown-yourself") return "dao";
+  if (/^ERR_|FunctionNotAllowed|TokenNotAllowed/.test(error)) return "vault";
+  return card.by;
+}
+
+export { hashOfSigned };
