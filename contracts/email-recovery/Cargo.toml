@@ -1,0 +1,32 @@
+[package]
+name = "email-recovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository = "https://github.com/joindefi/MandateOS"
+
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.99.1"
+image_digest = "sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+ultrahonk-no-std = { path = "../vendor/ultrahonk-no-std", default-features = false, features = ["near"] }
+ark-bn254-ext = { git = "https://github.com/zkVerify/accelerated-bn-cryptography.git", default-features = false, tag = "v0.6.0" }
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.5.0", default-features = false }
+ark-ff = { version = "0.5.0", default-features = false }
+num-bigint = { version = "0.4", default-features = false }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }

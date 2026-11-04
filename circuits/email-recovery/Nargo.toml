@@ -5,4 +5,4 @@ authors = ["Euthyna"]
 compiler_version = ">=1.0.0"
 
 [dependencies]
-zkemail = { tag = "v2.0.0", git = "https://github.com/zkemail/zkemail.nr", directory = "lib" }
+zkemail = { path = "../vendor/zkemail" }

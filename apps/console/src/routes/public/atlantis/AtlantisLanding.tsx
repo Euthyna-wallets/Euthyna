@@ -402,7 +402,8 @@ export function AtlantisLanding() {
             </h2>
             <p style={{ margin: 0, fontSize: 17, lineHeight: 1.65, color: "#4A5675" }}>
               A company's wallets have no private key, so they cannot be lost. What a person can lose is their own key. Today a founder proves their mailbox
-              with ZK Email, the lost account can cancel for 48 hours, then the other founders vote the seat back. EUTHYNA never holds enough to recover alone.
+              with ZK Email, a NEAR contract verifies the proof, the lost account can cancel during a waiting period, then the other founders vote the seat back.
+              EUTHYNA never holds enough to recover alone.
             </p>
             <div className="g2" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
               {[

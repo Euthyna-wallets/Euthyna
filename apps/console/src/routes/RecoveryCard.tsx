@@ -4,20 +4,26 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { Card, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { checkEmailProof, proveEmailFile, recoverySubject, type EmailEvidence } from "../lib/email-proof.js";
+import { newSalt, proveEmailFile, PUBLIC_INBOX_DOMAINS, RECOVERY_CONTRACT_ID, recoverySubject } from "../lib/email-proof.js";
 import type { ProposalDraft } from "../omniroles-api.js";
-import { signDaoProposal } from "../wallets.js";
+import { signContractCall, signDaoProposal } from "../wallets.js";
 
-type Recovery = { id: string; lostAccountId: string; newAccountId: string; state: "waiting" | "cancelled" | "proposed" | "done"; notBefore: string; method: string; createdAt: string };
-type RecoveryView = { cancelWindowSeconds: number; enrollments: Array<{ nearAccountId: string; method: string; enrolledAt: string }>; recoveries: Recovery[] };
+type Recovery = { lostAccountId: string; newAccountId: string; domain: string; state: "waiting" | "cancelled" | "done"; ready: boolean; notBefore: string; requestedAt: string };
+type RecoveryView = {
+  contractId: string; daoAccountId: string; cancelWindowSeconds: number;
+  enrollments: Array<{ nearAccountId: string; domain: string; enrolledAt: string }>; recoveries: Recovery[];
+};
 
+/** The recovery contract reads what it holds through the API; every change is the person's own transaction. */
 const recoveryApi = {
   list: () => api<RecoveryView>("/v1/console/recovery"),
-  enroll: (evidence: EmailEvidence) => api<{ enrolled: string; method: string }>("/v1/console/recovery/enroll", { method: "POST", body: JSON.stringify({ evidence }) }),
-  cancel: (id: string) => api<Recovery>(`/v1/console/recovery/${id}/cancel`, { method: "POST", body: "{}" }),
-  proposals: (id: string) => api<{ proposals: ProposalDraft[] }>(`/v1/console/recovery/${id}/proposals`, { method: "POST", body: "{}" }),
-  evidence: (id: string) => api<{ recoveryEvidence: EmailEvidence; enrollmentEvidence: EmailEvidence | null }>(`/v1/console/recovery/${id}/evidence`),
+  proposals: (lostAccountId: string) => api<{ proposals: ProposalDraft[] }>("/v1/console/recovery/proposals", { method: "POST", body: JSON.stringify({ lostAccountId }) }),
 };
+
+/** Storage for an enrollment or a request (the contract refunds what it does not use), and gas for the proof. */
+export const RECOVERY_DEPOSIT = "50000000000000000000000";
+export const RECOVERY_GAS = "300000000000000";
+const EXPLORER = "https://testnet.nearblocks.io";
 
 /** "48 hours", "5 minutes". */
 function windowText(seconds: number): string {
@@ -60,6 +66,7 @@ export function RecoveryCard() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const me = wallets.nearAccountId;
+  const dao = view.data?.daoAccountId;
   const enrolled = view.data?.enrollments.find((item) => item.nearAccountId === me);
 
   const run = (action: () => Promise<string | void>) => {
@@ -73,49 +80,51 @@ export function RecoveryCard() {
     <Card title="Seat recovery" action={<Status value={enrolled ? "active" : "pending"} />}>
       <p className="muted">
         Lost your NEAR account? Enroll your mailbox once, with a zero-knowledge proof of an email you send yourself
-        (ZK Email). A new account that proves the same mailbox can ask for your seat: you can cancel for {windowText(view.data?.cancelWindowSeconds ?? 172_800)},
-        then the other founders vote. Only a hash of your address is kept, never the address.
+        (ZK Email). The recovery contract <a className="mono" href={`${EXPLORER}/address/${RECOVERY_CONTRACT_ID}`} target="_blank" rel="noreferrer">{RECOVERY_CONTRACT_ID}</a> verifies
+        the proof on NEAR and keeps only a salted hash of your address. A new account that proves the same mailbox can ask for your seat:
+        you can cancel for {windowText(view.data?.cancelWindowSeconds ?? 172_800)}, then the other founders vote.
       </p>
-      {enrolled ? <p className="small">Enrolled with a mailbox at <strong>{enrolled.method.replace(/^email:/, "")}</strong>. Enroll again to change it.</p> : null}
-      {me ? (
+      {enrolled ? <p className="small">Enrolled with a mailbox at <strong>{enrolled.domain}</strong>. Enroll again to change it.</p> : null}
+      {me && dao ? (
         <EmailProofStep subject={recoverySubject("enroll", me)} busy={busy} onFile={(file) => run(async () => {
-          const { evidence, domain } = await proveEmailFile(file, setMessage);
-          setMessage("Checking the proof…");
-          await recoveryApi.enroll(evidence);
-          return `Enrolled: a mailbox at ${domain} can recover your seat.`;
+          const { proof, domain } = await proveEmailFile(file, newSalt(), setMessage);
+          setMessage("Sign the enrollment in your wallet: the contract checks the proof…");
+          const tx = await signContractCall(me, RECOVERY_CONTRACT_ID, "enroll", { dao_id: dao, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
+          const warning = PUBLIC_INBOX_DOMAINS.includes(domain)
+            ? ` Testnet only: anyone who knows a ${domain} address can open its inbox, so it does not protect your seat. Use a mailbox with a password for real.`
+            : "";
+          return `Enrolled on chain (${tx.slice(0, 8)}…): a mailbox at ${domain} can recover your seat.${warning}`;
         })} />
       ) : <p className="small">Connect your NEAR wallet to enroll.</p>}
       {view.data?.enrollments.length ? <p className="small">Founders enrolled: {view.data.enrollments.map((item) => item.nearAccountId).join(", ")}</p> : null}
-      {(view.data?.recoveries ?? []).map((recovery) => <RecoveryRow key={recovery.id} recovery={recovery} me={me} busy={busy} run={run} />)}
+      {(view.data?.recoveries ?? []).map((recovery) => <RecoveryRow key={`${recovery.lostAccountId}-${recovery.requestedAt}`} recovery={recovery} dao={dao} me={me} busy={busy} run={run} />)}
       {message ? <p className="small" role="status">{message}</p> : null}
       <p className="small">A founder who lost their account asks from <a href="/recover">/recover</a>, signed in with the new account.</p>
     </Card>
   );
 }
 
-function RecoveryRow({ recovery, me, busy, run }: { recovery: Recovery; me: string; busy: boolean; run: (action: () => Promise<string | void>) => void }) {
-  const ready = new Date(recovery.notBefore).getTime() <= Date.now();
+function RecoveryRow({ recovery, dao, me, busy, run }: { recovery: Recovery; dao: string | undefined; me: string; busy: boolean; run: (action: () => Promise<string | void>) => void }) {
   return (
     <div className="explain">
       <div>
         <span className="eyebrow">Recovery · {recovery.state}</span>
         <strong className="small">{recovery.lostAccountId} → {recovery.newAccountId}</strong>
-        <span className="small"> {recovery.state === "waiting" ? (ready ? "Waiting period over: the members can vote." : `Cancelable until ${new Date(recovery.notBefore).toLocaleString()}.`) : null}</span>
+        <span className="small">
+          {" "}Proved on chain with a mailbox at {recovery.domain}.{" "}
+          {recovery.state === "waiting" ? (recovery.ready ? "Waiting period over: the members can vote." : `Cancelable until ${new Date(recovery.notBefore).toLocaleString()}.`) : null}
+        </span>
       </div>
       <div className="row">
-        <button className="btn-line" style={{ padding: "6px 12px" }} disabled={busy} onClick={() => run(async () => {
-          const { recoveryEvidence, enrollmentEvidence } = await recoveryApi.evidence(recovery.id);
-          const asked = await checkEmailProof(recoveryEvidence);
-          const enrolledProof = enrollmentEvidence ? await checkEmailProof(enrollmentEvidence) : null;
-          const same = Boolean(enrolledProof?.valid) && enrolledProof!.addressHash === asked.addressHash;
-          return `Checked in your browser: proof ${asked.valid ? "valid" : "INVALID"}, email from ${asked.domain}, subject "${asked.subject}", ${same ? "same mailbox as the enrolled one" : "NOT the enrolled mailbox"}.`;
-        })}>Check the proofs in my browser</button>
-        {me === recovery.lostAccountId && (recovery.state === "waiting" || recovery.state === "proposed") ? (
-          <button className="btn-line" style={{ padding: "6px 12px" }} disabled={busy} onClick={() => run(async () => { await recoveryApi.cancel(recovery.id); return "Recovery cancelled: your seat stays yours."; })}>This is not me: cancel</button>
+        {me === recovery.lostAccountId && recovery.state === "waiting" && dao ? (
+          <button className="btn-line" style={{ padding: "6px 12px" }} disabled={busy} onClick={() => run(async () => {
+            await signContractCall(me, RECOVERY_CONTRACT_ID, "cancel", { dao_id: dao });
+            return "Recovery cancelled on chain: your seat stays yours.";
+          })}>This is not me: cancel</button>
         ) : null}
-        {ready && recovery.state === "waiting" && me ? (
+        {recovery.ready && recovery.state === "waiting" && me ? (
           <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy} onClick={() => run(async () => {
-            const { proposals } = await recoveryApi.proposals(recovery.id);
+            const { proposals } = await recoveryApi.proposals(recovery.lostAccountId);
             const ids: number[] = [];
             for (const draft of proposals) ids.push((await signDaoProposal(me, draft)).proposalId);
             return `Votes #${ids.join(", #")} submitted: approve them in Votes.`;

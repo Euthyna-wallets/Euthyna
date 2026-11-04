@@ -40,7 +40,7 @@ jobs:
           "$NEAR_SANDBOX_BIN_PATH" --version
       - name: Record checked-in contract hashes
         run: |
-          sha256sum contracts/res/vault.wasm contracts/res/nomos.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/shares.wasm contracts/res/registry.wasm > /tmp/checked-in-contracts.sha256
+          sha256sum contracts/res/vault.wasm contracts/res/nomos.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/shares.wasm contracts/res/registry.wasm contracts/res/email_recovery.wasm > /tmp/checked-in-contracts.sha256
       - name: Build all contracts with cargo near
         id: build
         working-directory: contracts
@@ -58,6 +58,7 @@ jobs:
             contracts/res/test_ft.wasm
             contracts/res/shares.wasm
             contracts/res/registry.wasm
+            contracts/res/email_recovery.wasm
       - name: Require checked-in WASM to match the build
         run: |
           sha256sum --check /tmp/checked-in-contracts.sha256

@@ -13,8 +13,9 @@ global MAX_DOMAIN_LENGTH: u32 = 64;
  * Euthyna seat recovery: "the owner of this mailbox sent an email with this subject".
  *
  * Proves that the header is signed by the 2048-bit DKIM key given as a public input (the
- * verifier checks it is the key the sender's domain publishes in DNS), and reveals only:
- *   0. a hash of the sender's address (lowercased): the same mailbox gives the same hash,
+ * recovery contract checks that key is in its DKIM registry for the domain), and reveals only:
+ *   0. a salted hash of the sender's address (lowercased): the same mailbox and salt give the
+ *      same hash; the salt is public and chosen at enrollment,
  *   1. the sender's domain, so the verifier knows which DNS key to expect,
  *   2. the subject, which carries the action and the NEAR account it is bound to.
  * The address itself, the other headers and the body stay private.
@@ -26,6 +27,7 @@ fn main(
     from_header_sequence: Sequence,
     from_address_sequence: Sequence,
     subject_sequence: Sequence,
+    salt: pub Field,
 ) -> pub (Field, BoundedVec<u8, MAX_DOMAIN_LENGTH>, BoundedVec<u8, MAX_SUBJECT_LENGTH>) {
     assert(header.len() <= MAX_EMAIL_HEADER_LENGTH);
     pubkey.verify_dkim_signature(header, signature);
@@ -49,8 +51,10 @@ fn main(
         }
     }
     assert(found & (at > 0) & (at + 1 < address.len()), "The sender address has no domain");
-    // Hash the lowercased address packed 31 bytes per field (cheap), plus its length.
-    let mut packed: [Field; 12] = [0; 12];
+    // Hash the lowercased address packed 31 bytes per field (cheap), its length and the
+    // enrollment's salt, so a published hash cannot be checked against a list of addresses
+    // without redoing the work for each enrollment.
+    let mut packed: [Field; 13] = [0; 13];
     for i in 0..MAX_EMAIL_ADDRESS_LENGTH {
         if i < address.len() {
             let slot = i / 31;
@@ -58,6 +62,7 @@ fn main(
         }
     }
     packed[11] = address.len() as Field;
+    packed[12] = salt;
     let address_hash = pedersen_hash(packed);
 
     let mut domain: BoundedVec<u8, MAX_DOMAIN_LENGTH> = BoundedVec::new();

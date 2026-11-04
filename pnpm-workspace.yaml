@@ -9,3 +9,4 @@ allowBuilds:
   prisma: true
   esbuild: true
   secp256k1: true
+  msgpackr-extract: false

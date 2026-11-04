@@ -13,12 +13,12 @@
     "test:build": "vitest run src/prod-build.test.ts"
   },
   "dependencies": {
-    "@aztec/bb.js": "0.84.0",
+    "@aztec/bb.js": "5.3.0",
     "@mandateos/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",
     "@near-wallet-selector/meteor-wallet": "^9.5.4",
     "@near-wallet-selector/modal-ui": "^9.1.0",
-    "@noir-lang/noir_js": "1.0.0-beta.5",
+    "@noir-lang/noir_js": "1.0.0-beta.26",
     "@reown/walletkit": "1.6.0",
     "@safe-global/safe-deployments": "1.37.64",
     "@simplewebauthn/browser": "^13.1.0",

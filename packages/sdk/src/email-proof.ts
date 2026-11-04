@@ -5,16 +5,19 @@
  *
  * The person sends themself an email whose subject names the action and their NEAR
  * account, downloads it (.eml) and proves in the browser that the mailbox's provider
- * signed it (DKIM). The proof reveals a hash of the sender address, the sender domain
- * and the subject; never the address or the rest of the email.
+ * signed it (DKIM). The proof is zero-knowledge: it reveals a salted hash of the sender
+ * address, the sender domain and the subject; never the address or the rest of the email.
+ * The recovery contract on NEAR verifies it (contracts/email-recovery).
  */
 
 export const MAX_EMAIL_HEADER_LENGTH = 1024;
 export const MAX_DOMAIN_LENGTH = 64;
 export const MAX_SUBJECT_LENGTH = 96;
 export const KEY_LIMBS = 18;
-/** modulus (18) + redc (18) + address hash + domain (64 + len) + subject (96 + len). */
-export const PUBLIC_INPUT_COUNT = KEY_LIMBS * 2 + 1 + MAX_DOMAIN_LENGTH + 1 + MAX_SUBJECT_LENGTH + 1;
+/** modulus (18) + redc (18) + salt + address hash + domain (64 + len) + subject (96 + len). */
+export const PUBLIC_INPUT_COUNT = KEY_LIMBS * 2 + 1 + 1 + MAX_DOMAIN_LENGTH + 1 + MAX_SUBJECT_LENGTH + 1;
+/** Proofs are zero-knowledge with a Keccak transcript (bb's "evm" target): what the contract verifies. */
+export const PROOF_TARGET = "evm" as const;
 
 export type RecoveryAction = "enroll" | "recovery";
 export type EmailEvidence = { proof: string; publicInputs: string[]; selector: string };
@@ -140,7 +143,35 @@ export function limbs(value: bigint, count = KEY_LIMBS): string[] {
 
 /** noir-bignum's Barrett parameter for a 2048-bit modulus. */
 export function redc(modulus: bigint): bigint {
-  return (1n << (2n * 2048n + 4n)) / modulus;
+  // noir-bignum v0.11: 2^(2 * MOD_BITS + BARRET_REDUCTION_OVERFLOW_BITS) / modulus, overflow bits = 6.
+  return (1n << (2n * 2048n + 6n)) / modulus;
+}
+
+/** A fresh enrollment salt: 31 random bytes (always below the BN254 field modulus), as a field. */
+export function newSalt(): string {
+  const bytes = new Uint8Array(31);
+  globalThis.crypto.getRandomValues(bytes);
+  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * The DKIM key as the recovery contract knows it: sha256 of its 36 public inputs (modulus
+ * and redc, 18 limbs each, 32 bytes big-endian). Same as the contract's `add_dkim_key`.
+ */
+export async function dkimKeyHash(modulus: bigint): Promise<string> {
+  const fields = [...limbs(modulus), ...limbs(redc(modulus))];
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", publicInputBytes(fields));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** The public inputs as the contract takes them: 32 bytes each, big-endian, concatenated. */
+export function publicInputBytes(publicInputs: string[]): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(publicInputs.length * 32);
+  publicInputs.forEach((field, index) => {
+    const hex = BigInt(field).toString(16).padStart(64, "0");
+    for (let i = 0; i < 32; i += 1) out[index * 32 + i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  });
+  return out;
 }
 
 /** SHA-256 padding up to the circuit's maximum (as zk-email's sha256Pad). */
@@ -169,7 +200,7 @@ export function emlFromBytes(bytes: Uint8Array): string {
 }
 
 /** The circuit's inputs for this email (read with emlFromBytes) and this DKIM public key modulus. */
-export function circuitInputs(eml: string, modulus: bigint) {
+export function circuitInputs(eml: string, modulus: bigint, salt: string) {
   const { header, dkim } = signedHeaderBytes(eml);
   const bytes = Uint8Array.from(header, (char) => char.charCodeAt(0) & 0xff);
   const from = sequence(header, /(^|\r\n)(from:[^\r\n]*)/, "From");
@@ -188,6 +219,7 @@ export function circuitInputs(eml: string, modulus: bigint) {
       from_header_sequence: from.field,
       from_address_sequence: { index: String(addressStart), length: String(addressEnd - addressStart) },
       subject_sequence: subject.field,
+      salt,
     },
   };
 }
@@ -209,11 +241,12 @@ export function readPublicInputs(publicInputs: string[]) {
   const take = (count: number) => publicInputs.slice(at, (at += count));
   const modulusLimbs = take(KEY_LIMBS).map((field) => BigInt(field));
   const redcLimbs = take(KEY_LIMBS).map((field) => BigInt(field));
+  const salt = `0x${BigInt(take(1)[0]!).toString(16).padStart(64, "0")}`;
   const addressHash = BigInt(take(1)[0]!).toString(16).padStart(64, "0");
   const domain = text(take(MAX_DOMAIN_LENGTH), MAX_DOMAIN_LENGTH, take(1)[0]!);
   const subject = text(take(MAX_SUBJECT_LENGTH), MAX_SUBJECT_LENGTH, take(1)[0]!);
   const modulus = modulusLimbs.reduceRight((acc, limb) => (acc << 120n) | limb, 0n);
-  return { modulus, redcLimbs, addressHash, domain, subject };
+  return { modulus, redcLimbs, salt, addressHash, domain, subject };
 }
 
 /** The RSA modulus in a DKIM TXT record ("v=DKIM1; k=rsa; p=…"), via a DER reader for SPKI or PKCS#1. */

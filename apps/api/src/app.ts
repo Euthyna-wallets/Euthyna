@@ -993,53 +993,24 @@ export function createApp({
 
   if (recovery) {
     const recoveryLimiter = new MemoryRateLimiter(10, 60 * 60_000);
-    const evidenceSchema = z.object({
-      proof: z.string().max(40_000),
-      publicInputs: z.array(z.string().max(66)).max(400),
-      selector: z.string().max(63),
-    });
-    const recoveryId = (context: AppContext) => z.string().uuid().parse(context.req.param("id"));
     const limited = (key: string) => {
       if (!recoveryLimiter.allow(key)) throw new HTTPException(429, { message: "rate limit exceeded" });
     };
+    // Enrollments, recoveries and cancellations are transactions on the recovery contract, signed
+    // in the browser. Here: what the contract holds, for the console, and the members' vote.
     app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await recovery.list(context.get("console").organizationId)));
-    app.post("/v1/console/recovery/enroll", requireConsole(auth, consoleLimiter), async (context) => {
-      const identity = context.get("console");
-      limited(`recovery-enroll:${identity.userId}`);
-      const input = await parseJson(context, z.object({ evidence: evidenceSchema }));
-      const result = await recovery.enroll(identity.organizationId, identity.nearAccountId, input.evidence);
-      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.enrolled", targetType: "near_account", targetId: result.enrolled, metadata: { method: result.method } });
-      return context.json(result);
+    app.post("/v1/console/recovery/proposals", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ lostAccountId: z.string().min(2).max(64) }));
+      return context.json(await recovery.proposals(context.get("console").organizationId, input.lostAccountId));
     });
-    app.get("/v1/console/recovery/:id/evidence", requireConsole(auth, consoleLimiter), async (context) =>
-      context.json(await recovery.evidence(context.get("console").organizationId, recoveryId(context))));
-    app.post("/v1/console/recovery/:id/cancel", requireConsole(auth, consoleLimiter), async (context) => {
-      const identity = context.get("console");
-      const result = await recovery.cancel(identity.organizationId, recoveryId(context), identity.nearAccountId);
-      await auth.recordAudit({ organizationId: identity.organizationId, actorType: "console", actorId: identity.userId, action: "recovery.cancelled", targetType: "seat_recovery", targetId: result.id, metadata: {} });
-      return context.json(result);
-    });
-    app.post("/v1/console/recovery/:id/proposals", requireConsole(auth, consoleLimiter), async (context) =>
-      context.json(await recovery.proposals(context.get("console").organizationId, recoveryId(context))));
-    // The new account is not a member yet: any signed-in NEAR account may ask, with the right proof.
-    // The browser builds the proof's inputs with the same DKIM key the API will accept.
+    // The browser needs the domain's DKIM key to build a proof (it cannot query DNS); the
+    // contract only accepts keys in its own registry.
     app.get("/v1/recovery/dkim-key", async (context) => {
       const domain = (context.req.query("domain") ?? "").toLowerCase();
       const selector = context.req.query("selector") ?? "";
       limited(`recovery-dkim:${domain}`);
       return context.json({ records: await recovery.dkimRecords(domain, selector) });
-    });
-    app.post("/v1/recovery/requests", async (context) => {
-      const account = await auth.identifyNearAccount(context.req.raw.headers);
-      if (!account) throw new HTTPException(401, { message: "sign in with the new NEAR account" });
-      limited(`recovery-request:${account}`);
-      const input = await parseJson(context, z.object({
-        daoAccountId: z.string().min(2).max(64),
-        lostAccountId: z.string().min(2).max(64),
-        evidence: evidenceSchema,
-      }));
-      return context.json(await recovery.request({ ...input, newAccount: account }), 201);
     });
   }
 
