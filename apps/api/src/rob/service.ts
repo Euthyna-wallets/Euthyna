@@ -6,7 +6,12 @@
  *   "Crown Yourself" (a DAO call no function-call key can make) and mints test tokens;
  * - one function-call key per player, made in the browser, limited to the vault's
  *   execute_near and queue_rule_change, with a small gas allowance, deleted after 24 h;
- * - a few shared function-call keys, made at start, for plays without a key of their own.
+ * - a few shared function-call keys, made at start, for plays without a key of their own
+ *   (they also open Base operations, for Look Legit).
+ *
+ * The three owners' keys (a demo company) play Inside Job: two of them vote a bad rule,
+ * the third, as the council, vetoes it. The same council bot vetoes Look Legit's payment
+ * during its wait, and sweeps: any rule change or Ruggy operation left pending is vetoed.
  *
  * Nothing here decides a verdict: the vault, the DAO or NEAR refuses, and this
  * reports it. A payment the law allows (forged in expert mode) does go through,
@@ -16,7 +21,10 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { KeyPair, transactions, utils } from "near-api-js";
 
-import { CARDS, cardById, cardCall, EXECUTE_GAS_TGAS, LAWS, PLAYER_METHODS, type CardInfo, type Defender, type RobConfig } from "./cards.js";
+import { proposalArgs } from "@mandateos/sdk/roles";
+import { encodeFunctionData, erc20Abi, getAddress, hexToBytes, type Hex } from "viem";
+
+import { CARDS, cardById, cardCall, EXECUTE_GAS_TGAS, LAWS, PLAYER_METHODS, SHARED_METHODS, type CardInfo, type Defender, type RobConfig } from "./cards.js";
 import { buildTransaction, hashOfSigned, signWith, type NearRpc, type Outcome, type RobAction } from "./near-tx.js";
 
 export class RobError extends Error {
@@ -25,7 +33,8 @@ export class RobError extends Error {
   }
 }
 
-export type Verdict = "denied" | "counter" | "paid";
+export type Verdict = "denied" | "counter" | "vetoed" | "paid";
+export type Step = { label: string; detail: string; tx: string | null };
 
 export type PlayResult = {
   card: string;
@@ -40,6 +49,8 @@ export type PlayResult = {
   call: string;
   signedBy: string;
   counter?: { counter: number; expires_in: number; to: string };
+  /** Look Legit and Inside Job: each transaction of the sequence. */
+  steps?: Step[];
   ms: number;
 };
 
@@ -57,7 +68,7 @@ export interface RobStore {
   };
   robPlay: {
     create(args: { data: RobPlayRow }): Promise<unknown>;
-    count(args?: { where?: { verdict?: string } }): Promise<number>;
+    count(args?: { where?: { verdict?: string; card?: string; clientHash?: string; createdAt?: { gt: Date } } }): Promise<number>;
     groupBy(args: { by: ["clientHash"] }): Promise<unknown[]>;
   };
 }
@@ -78,6 +89,10 @@ export type RobServiceOptions = {
   sharedKeys?: number;
   /** Keep the vault above this much test token (base units), minting more when it falls below. */
   vaultFloor?: bigint;
+  /** The demo company's three owners: two vote in Inside Job, the third is the council bot. */
+  owners?: Array<{ accountId: string; secretKey: string }> | undefined;
+  /** Inside Job games a day, for everyone (each costs four transactions). */
+  insideJobsPerDay?: number;
   now?: () => number;
 };
 
@@ -90,6 +105,9 @@ export class RobService {
   private sharedTurn = 0;
   private readonly nonces = new Map<string, bigint>();
   private statsCache: { at: number; value: Awaited<ReturnType<RobService["computeStats"]>> } | null = null;
+  /** Look Legit holds the Base wallet's single slot: one at a time. */
+  private baseTurn: Promise<unknown> = Promise.resolve();
+  private bondCache: string | null = null;
   private readonly now: () => number;
 
   constructor(private readonly options: RobServiceOptions) {
@@ -130,19 +148,19 @@ export class RobService {
   async start(): Promise<void> {
     const count = this.options.sharedKeys ?? 3;
     const fresh = Array.from({ length: count }, () => KeyPair.fromRandom("ed25519"));
-    await this.sendAsRuggy(this.config.ruggyAccountId, fresh.map((pair) => this.playerKeyAction(pair.getPublicKey().toString())));
+    await this.sendAsRuggy(this.config.ruggyAccountId, fresh.map((pair) => this.playerKeyAction(pair.getPublicKey().toString(), SHARED_METHODS)));
     for (const pair of fresh) {
       this.shared.push({ publicKey: pair.getPublicKey().toString(), secretKey: pair.toString() });
       await this.options.store.robKey.create({ data: { publicKey: pair.getPublicKey().toString(), kind: "shared", clientHash: "server" } });
     }
   }
 
-  private playerKeyAction(publicKey: string): RobAction {
+  private playerKeyAction(publicKey: string, methodNames: string[] = PLAYER_METHODS): RobAction {
     return {
       type: "AddFunctionCallKey",
       publicKey,
       receiverId: this.config.vaultAccountId,
-      methodNames: PLAYER_METHODS,
+      methodNames,
       allowanceYocto: this.options.keyAllowanceYocto ?? "250000000000000000000000",
     };
   }
@@ -262,6 +280,8 @@ export class RobService {
   async play(input: { card: string; signed?: { transaction: string; signature: string }; clientHash: string }): Promise<PlayResult> {
     const card = this.playable(input.card);
     const started = this.now();
+    if (card.id === "look-legit") return this.lookLegit(card, input.clientHash, started);
+    if (card.id === "inside-job") return this.insideJob(card, input.clientHash, started);
     if (card.id === "bribe-ruggy") {
       // Off chain: Ruggy answers with the most his law allows.
       const result: PlayResult = {
@@ -332,7 +352,7 @@ export class RobService {
     return key;
   }
 
-  private async nextNonce(publicKey: string, fresh = false): Promise<bigint> {
+  private async nextNonce(publicKey: string, fresh = false, accountId = this.config.ruggyAccountId): Promise<bigint> {
     // Our own keys: count locally after the first read, and read again after a refusal.
     const local = this.nonces.get(publicKey);
     if (local !== undefined && !fresh) {
@@ -340,10 +360,10 @@ export class RobService {
       return local + 1n;
     }
     // A key added a moment ago can take a block or two to show on every RPC node.
-    let onChain = await this.options.rpc.accessKey(this.config.ruggyAccountId, publicKey);
+    let onChain = await this.options.rpc.accessKey(accountId, publicKey);
     for (let attempt = 0; !onChain && attempt < 8; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 500));
-      onChain = await this.options.rpc.accessKey(this.config.ruggyAccountId, publicKey);
+      onChain = await this.options.rpc.accessKey(accountId, publicKey);
     }
     if (!onChain) throw new RobError(403, "unknown_key", "this key is not on Ruggy's account");
     // Read after the await: plays sent at the same time on one key get distinct nonces.
@@ -354,11 +374,11 @@ export class RobService {
   }
 
   /** Sign and send; on a nonce race, once more with a fresh nonce. */
-  private async sendWithKey(key: { publicKey: string; secretKey: string }, receiverId: string, actions: RobAction[]): Promise<Outcome> {
+  private async sendWithKey(key: { publicKey: string; secretKey: string }, receiverId: string, actions: RobAction[], signerId = this.config.ruggyAccountId): Promise<Outcome> {
     for (let attempt = 0; ; attempt += 1) {
-      const nonce = await this.nextNonce(key.publicKey, attempt > 0);
-      const { transaction, hash } = buildTransaction({ signerId: this.config.ruggyAccountId, publicKey: key.publicKey, receiverId, nonce, blockHash: await this.options.rpc.finalBlockHash(), actions });
-      const outcome = await this.options.rpc.send(signWith(key.secretKey, transaction, hash), this.config.ruggyAccountId);
+      const nonce = await this.nextNonce(key.publicKey, attempt > 0, signerId);
+      const { transaction, hash } = buildTransaction({ signerId, publicKey: key.publicKey, receiverId, nonce, blockHash: await this.options.rpc.finalBlockHash(), actions });
+      const outcome = await this.options.rpc.send(signWith(key.secretKey, transaction, hash), signerId);
       // Two plays on one key can reach NEAR in the other order: the later nonce wins, retry the other.
       if (outcome.kind === "rejected" && outcome.error === "InvalidNonce" && attempt < 3) continue;
       return outcome;
@@ -396,6 +416,155 @@ export class RobService {
     await this.options.store.robPlay.create({
       data: { card: result.card, verdict: result.verdict, refusedBy: result.refusedBy ?? "none", error: result.error, tx: result.tx, publicKey, clientHash },
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // The council: Look Legit, Inside Job, and the sweep
+  // ---------------------------------------------------------------------------
+
+  private owner(index: 0 | 1 | 2) {
+    const owner = this.options.owners?.[index];
+    if (!owner) throw new RobError(503, "not_configured", "this card needs the demo company's owners (ROB_OWNER_KEYS)");
+    const publicKey = KeyPair.fromString(owner.secretKey as Parameters<typeof KeyPair.fromString>[0]).getPublicKey().toString();
+    return { accountId: owner.accountId, key: { publicKey, secretKey: owner.secretKey } };
+  }
+
+  /** The council bot: the third owner signs a veto on the vault. */
+  private veto(method: "veto_operation" | "veto_rule_change", args: Record<string, unknown>): Promise<Outcome> {
+    const council = this.owner(2);
+    return this.sendWithKey(council.key, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: method, args, gasTgas: 50 }], council.accountId);
+  }
+
+  /**
+   * X · Look Legit: a payment on Base that respects every rule, above the 1 USDC delay threshold.
+   * prepare (lawful, reserved), authorize (queued: the wait starts, MPC signs nothing), then the
+   * council bot vetoes it. One at a time: the Base wallet holds one operation.
+   */
+  private lookLegit(card: CardInfo, clientHash: string, started: number): Promise<PlayResult> {
+    const run = this.baseTurn.then(() => this.lookLegitNow(card, clientHash, started));
+    this.baseTurn = run.catch(() => undefined);
+    return run;
+  }
+
+  private async lookLegitNow(card: CardInfo, clientHash: string, started: number): Promise<PlayResult> {
+    const base = this.config.base;
+    if (!base) throw new RobError(503, "not_configured", "Look Legit needs Ruggy's Base role");
+    this.owner(2);
+    const shared = this.nextShared();
+    const reference = `rob-legit-${this.now().toString(36)}-${randomBytes(3).toString("hex")}`;
+    const request = {
+      chain_id: base.chainId,
+      target: Array.from(hexToBytes(getAddress(base.token as Hex))),
+      value: "0",
+      calldata: Array.from(hexToBytes(encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [getAddress(base.suppliers[0] as Hex), 2_000_000n] }))),
+      allowance_amount: "2000000",
+      reference,
+      gas_limit: "100000",
+      max_fee_per_gas: "2000000000",
+      max_priority_fee_per_gas: "1000000000",
+    };
+    const signedBy = `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}, then the council bot (${this.owner(2).accountId})`;
+    const prepared = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "prepare", args: { role: base.role, request }, gasTgas: 150 }]);
+    if (prepared.kind !== "succeeded") return this.finish(card, prepared, signedBy, shared.publicKey, clientHash, started);
+    const operation = JSON.parse(prepared.value ?? "{}") as { op_id?: number[]; execute_after_ns?: string | null };
+    if (!operation.op_id) throw new RobError(503, "unexpected", "the vault did not return the operation");
+    const steps: Step[] = [{ label: "LAWFUL", detail: "every rule passes: prepared", tx: prepared.tx }];
+    const authorized = await this.sendWithKey(shared, this.config.vaultAccountId, [{ type: "FunctionCall", methodName: "authorize", args: { op_id: operation.op_id, approval: null }, gasTgas: 100 }]);
+    steps.push(authorized.kind === "succeeded"
+      ? { label: "SCHEDULED", detail: "over 1 USDC: it waits 10 minutes", tx: authorized.tx }
+      : { label: "SCHEDULED", detail: `authorize refused: ${authorized.error}`, tx: authorized.kind === "failed" ? authorized.tx : null });
+    const vetoed = await this.veto("veto_operation", { op_id: operation.op_id });
+    steps.push({ label: "UNSIGNED", detail: "MPC signs nothing during the wait", tx: null });
+    return this.finishVeto(card, vetoed, steps, signedBy, shared.publicKey, clientHash, started, `prepare + authorize: 2 USDC on Base to ${base.suppliers[0].slice(0, 8)}…, reference ${reference}`);
+  }
+
+  /**
+   * XI · Inside Job: two of the three owners (bribed: their keys are the game's) vote a rule that
+   * adds the player to Ruggy's NEAR suppliers. The vote passes and the change waits in the vault's
+   * queue; the council bot vetoes it at once, long before its veto window ends.
+   */
+  private async insideJob(card: CardInfo, clientHash: string, started: number): Promise<PlayResult> {
+    const [bribed, accomplice] = [this.owner(0), this.owner(1)];
+    this.owner(2);
+    const day = new Date(this.now() - 24 * 3_600_000);
+    if (await this.options.store.robPlay.count({ where: { card: card.id, clientHash, createdAt: { gt: day } } }) >= 1) {
+      throw new RobError(429, "one_inside_job_a_day", "one Inside Job a day per player: it costs four real transactions");
+    }
+    if (await this.options.store.robPlay.count({ where: { card: card.id, createdAt: { gt: day } } }) >= (this.options.insideJobsPerDay ?? 100)) {
+      throw new RobError(429, "inside_jobs_spent", "the owners have been bribed enough today: try again tomorrow");
+    }
+    // The player's name in the corrupted rule (it needs no account: the rule never applies).
+    const attacker = `rob-thief-${clientHash.slice(0, 8)}.testnet`;
+    const permissions = await this.options.rpc.view<Array<{ token: string; receivers: string[]; allowance: number[]; min_per_transfer: string; max_per_transfer: string }>>(this.config.vaultAccountId, "get_near_permissions", { role: this.config.role });
+    const corrupted = permissions.map((permission, index) => (index === 0 ? { ...permission, receivers: [...permission.receivers, attacker] } : permission));
+    const change = { SetNearPermissions: { role: this.config.role, permissions: corrupted } };
+    const args = proposalArgs(this.config.vaultAccountId, `Rob the Agent · Inside Job: add ${attacker} to Ruggy's suppliers`, [{ method: "queue_rule_change", change: change as never }]);
+    const signedBy = `${bribed.accountId} and ${accomplice.accountId} (bribed owners), then the council bot (${this.owner(2).accountId})`;
+    const steps: Step[] = [];
+    const proposed = await this.sendWithKey(bribed.key, this.config.daoAccountId, [{ type: "FunctionCall", methodName: "add_proposal", args, gasTgas: 150, depositYocto: await this.bond() }], bribed.accountId);
+    if (proposed.kind !== "succeeded") return this.finish(card, proposed, signedBy, null, clientHash, started);
+    const id = Number(proposed.value);
+    steps.push({ label: "BRIBED", detail: `2 of 3 owners · proposal #${id}`, tx: proposed.tx });
+    const proposal = await this.options.rpc.view<{ kind: unknown }>(this.config.daoAccountId, "get_proposal", { id });
+    let voted: Outcome | null = null;
+    for (const owner of [bribed, accomplice]) {
+      voted = await this.sendWithKey(owner.key, this.config.daoAccountId, [{ type: "FunctionCall", methodName: "act_proposal", args: { id, action: "VoteApprove", proposal: proposal.kind, memo: null }, gasTgas: 250 }], owner.accountId);
+      if (voted.kind !== "succeeded") return this.finish(card, voted, signedBy, null, clientHash, started);
+    }
+    const queued = (voted?.kind === "succeeded" ? voted.logs ?? [] : []).map((log) => /OMNIROLES_RULE_QUEUED:([0-9a-f]{64})/.exec(log)?.[1]).find(Boolean);
+    steps.push({ label: "VOTED", detail: "proposal passed", tx: voted?.kind === "succeeded" ? voted.tx : null });
+    if (!queued) throw new RobError(503, "unexpected", "the vote passed but the vault queued nothing");
+    steps.push({ label: "QUEUED", detail: "veto window open", tx: null });
+    const vetoed = await this.veto("veto_rule_change", { queue_id: Array.from(Buffer.from(queued, "hex")) });
+    return this.finishVeto(card, vetoed, steps, signedBy, null, clientHash, started, `2 of 3 owners vote: add ${attacker} to Ruggy's suppliers`);
+  }
+
+  private async bond(): Promise<string> {
+    this.bondCache ??= (await this.options.rpc.view<{ proposal_bond: string }>(this.config.daoAccountId, "get_policy")).proposal_bond;
+    return this.bondCache;
+  }
+
+  private async finishVeto(card: CardInfo, vetoed: Outcome, steps: Step[], signedBy: string, publicKey: string | null, clientHash: string, started: number, call: string): Promise<PlayResult> {
+    if (vetoed.kind !== "succeeded") {
+      // The sweep retries; the play reports what happened.
+      void this.sweep().catch(() => undefined);
+      return this.finish(card, vetoed, signedBy, publicKey, clientHash, started);
+    }
+    steps.push({ label: "VETOED", detail: "by the council", tx: vetoed.tx });
+    const result: PlayResult = {
+      card: card.id, verdict: "vetoed", refusedBy: "council", line: card.line, error: card.id === "look-legit" ? "VETOED · veto_operation" : "VETOED · veto_rule_change",
+      tx: vetoed.tx, nearblocks: `https://testnet.nearblocks.io/txns/${vetoed.tx}`, call, signedBy, steps, ms: this.now() - started,
+    };
+    await this.record(result, publicKey, clientHash);
+    this.statsCache = null;
+    return result;
+  }
+
+  /**
+   * The council bot's sweep: veto every rule change still in the queue and Ruggy's Base operation
+   * still waiting. Nothing the game opens may outlive its veto window, even after a crash.
+   */
+  async sweep(): Promise<{ rules: number; operations: number }> {
+    if (!this.options.owners?.[2]) return { rules: 0, operations: 0 };
+    let rules = 0;
+    let operations = 0;
+    const queued = await this.options.rpc.view<Array<{ queue_id: number[]; state: string }>>(this.config.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    for (const rule of queued.filter((item) => item.state === "Queued")) {
+      if ((await this.veto("veto_rule_change", { queue_id: rule.queue_id })).kind === "succeeded") rules += 1;
+    }
+    if (this.config.base) {
+      const wallet = await this.options.rpc.view<{ active_operation: number[] | null } | null>(this.config.vaultAccountId, "get_wallet", { chain_id: this.config.base.chainId });
+      if (wallet?.active_operation) {
+        const operation = await this.options.rpc.view<{ member: string; state: string } | null>(this.config.vaultAccountId, "get_operation", { op_id: wallet.active_operation });
+        if (operation && operation.member === this.config.ruggyAccountId && ["Prepared", "Queued", "Scheduled"].includes(operation.state)) {
+          // Not while Look Legit is between its own steps: it vetoes its operation itself.
+          let idle = false;
+          await Promise.race([this.baseTurn.then(() => { idle = true; }), new Promise((resolve) => setTimeout(resolve, 0))]);
+          if (idle && (await this.veto("veto_operation", { op_id: wallet.active_operation })).kind === "succeeded") operations += 1;
+        }
+      }
+    }
+    return { rules, operations };
   }
 
   // ---------------------------------------------------------------------------
