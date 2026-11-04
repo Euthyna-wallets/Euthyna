@@ -32,6 +32,7 @@
 .rob .rseal b{font:900 30px var(--font-brand);letter-spacing:.14em;color:#4A2208;text-shadow:0 1px 0 rgba(255,214,150,.55),0 -1px 1px rgba(30,10,0,.7);transform:rotate(-8deg)}
 .rob .rseal.counter b{font-size:22px;color:#063B48;text-shadow:0 1px 0 rgba(200,245,250,.5),0 -1px 1px rgba(0,20,30,.7)}
 .rob .rseal.paid b{font-size:24px;color:#063B48}
+.rob .rseal.veto b{font-size:24px;color:#2A1A04}
 .rob .rseal.wait{opacity:.55;filter:grayscale(.4)}
 .rob .rseal.wait b{font-size:18px}
 .rob .stamp{animation:robstamp .55s cubic-bezier(.2,1.6,.4,1) both}
@@ -62,6 +63,7 @@
   .rob .rseal b{font-size:24px}
   .rob .hero-statue{height:360px !important}
   .rob .vhead{grid-template-columns:minmax(0,1fr) !important;justify-items:center;text-align:center}
-  .rob .rseal.counter b{font-size:18px}
+  .rob .rseal.counter b,.rob .rseal.veto b{font-size:18px}
+  .rob .steps4{grid-template-columns:repeat(2,minmax(0,1fr)) !important;row-gap:14px !important}
   .rob .stat{border-right:0 !important;border-bottom:1px solid rgba(13,23,48,.14);padding:22px 24px !important}
 }
