@@ -1,0 +1,115 @@
+--- upstream/lib/Nargo.toml
++++ vendor/zkemail/Nargo.toml
+@@ -5,9 +5,9 @@
+ compiler_version = ">=1.0.0"
+ 
+ [dependencies]
+-bignum = { tag = "v0.6.0", git = "https://github.com/noir-lang/noir-bignum" }
+-rsa = { tag = "v0.7.0", git = "https://github.com/noir-lang/noir_rsa" }
+-base64 = { tag = "v0.4.0", git = "https://github.com/noir-lang/noir_base64" }
+-nodash = { tag = "v0.40.2", git = "https://github.com/olehmisar/nodash" }
+-sha256 = { git = "https://github.com/noir-lang/sha256", tag = "v0.1.2" }
+-poseidon = { tag = "v0.1.0", git = "https://github.com/noir-lang/poseidon" }
+\ No newline at end of file
++bignum = { tag = "v0.11.0", git = "https://github.com/noir-lang/noir-bignum" }
++rsa = { path = "../noir_rsa" }
++base64 = { tag = "v0.5.1", git = "https://github.com/noir-lang/noir_base64" }
++nodash = { tag = "v0.46.0", git = "https://github.com/olehmisar/nodash" }
++sha256 = { git = "https://github.com/noir-lang/sha256", tag = "v0.3.0" }
++poseidon = { tag = "v0.4.0", git = "https://github.com/noir-lang/poseidon" }
+--- upstream/lib/src/lib.nr
++++ vendor/zkemail/src/lib.nr
+@@ -1,25 +1,21 @@
+ use std::hash::pedersen_hash;
+ pub mod dkim;
+ pub mod headers;
+-pub mod masking;
+-pub mod partial_hash;
+-pub mod remove_soft_line_breaks;
+ pub mod hash;
+ pub mod utils;
+-mod tests;
+ 
+-global RSA_EXPONENT: u32 = 65537;
+-global KEY_LIMBS_1024: u32 = 9;
+-global KEY_LIMBS_2048: u32 = 18;
++pub global RSA_EXPONENT: u32 = 65537;
++pub global KEY_LIMBS_1024: u32 = 9;
++pub global KEY_LIMBS_2048: u32 = 18;
+ global BODY_HASH_BASE64_LENGTH: u32 = 44;
+ global CR: u8 = 0x0D;
+ global LF: u8 = 0x0A;
+ global MAX_DKIM_HEADER_FIELD_LENGTH: u32 = 300; // kinda arbitrary but gives > 100 chars for selector and domain
+-global MAX_EMAIL_ADDRESS_LENGTH: u32 = 320; // derived via (https://datatracker.ietf.org/doc/html/rfc5321#section-4.5.3.1.1)
++pub global MAX_EMAIL_ADDRESS_LENGTH: u32 = 320; // derived via (https://datatracker.ietf.org/doc/html/rfc5321#section-4.5.3.1.1)
+ 
+ pub struct Sequence {
+-    index: u32,
+-    length: u32,
++    pub index: u32,
++    pub length: u32,
+ }
+ 
+ impl Sequence {
+--- upstream/lib/src/dkim.nr
++++ vendor/zkemail/src/dkim.nr
+@@ -28,7 +28,7 @@
+         signature: [Field; KEY_LIMBS_1024],
+     ) -> [u8; 32] {
+         // hash the header
+-        let header_hash = sha256_var(header.storage(), header.len() as u64);
++        let header_hash = sha256_var(header.storage(), header.len());
+ 
+         let params: BigNumParams<KEY_LIMBS_1024, 1024> = BigNumParams::new(
+             false,
+@@ -69,7 +69,7 @@
+         signature: [Field; KEY_LIMBS_2048],
+     ) -> [u8; 32] {
+         // hash the header
+-        let header_hash = sha256_var(header.storage(), header.len() as u64);
++        let header_hash = sha256_var(header.storage(), header.len());
+ 
+         let params: BigNumParams<KEY_LIMBS_2048, 2048> = BigNumParams::new(
+             false,
+--- upstream/lib/src/headers/email_address.nr
++++ vendor/zkemail/src/headers/email_address.nr
+@@ -40,7 +40,7 @@
+     // check the sequence is proceeded by an acceptable character
+     if email_address_sequence.index != 0 {
+         assert(
+-            EMAIL_ADDRESS_CHAR_TABLE[header.get_unchecked(email_address_sequence.index - 1)] == 2,
++            EMAIL_ADDRESS_CHAR_TABLE[header.get_unchecked(email_address_sequence.index - 1) as u32] == 2,
+             "Email address must start with an acceptable character",
+         );
+     }
+@@ -48,25 +48,24 @@
+         assert(
+             EMAIL_ADDRESS_CHAR_TABLE[header.get_unchecked(
+                 email_address_sequence.index + email_address_sequence.length,
+-            )]
++            ) as u32]
+                 == 3,
+             "Email address must end with an acceptable character",
+         );
+     }
+     // check the email address and assign
+-    let mut email_address: BoundedVec<u8, MAX_EMAIL_ADDRESS_LENGTH> = BoundedVec::new();
++    let mut storage: [u8; MAX_EMAIL_ADDRESS_LENGTH] = [0; MAX_EMAIL_ADDRESS_LENGTH];
+     for i in 0..MAX_EMAIL_ADDRESS_LENGTH {
+         let index = email_address_sequence.index + i;
+         if index < email_address_sequence.end_index() {
+             let letter = header.get_unchecked(index);
+-            email_address.set_unchecked(i, letter);
++            storage[i] = letter;
+             assert(
+-                EMAIL_ADDRESS_CHAR_TABLE[letter] == 1,
++                EMAIL_ADDRESS_CHAR_TABLE[letter as u32] == 1,
+                 "Email address must only contain acceptable characters",
+             );
+         }
+     }
+-    email_address.len = email_address_sequence.length;
+     // todo: should probably introduce a check for @
+-    email_address
++    BoundedVec::from_parts_unchecked(storage, email_address_sequence.length)
+ }

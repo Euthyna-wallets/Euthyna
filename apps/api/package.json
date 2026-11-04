@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aztec/bb.js": "0.84.0",
+    "@aztec/bb.js": "5.3.0",
     "@better-auth/api-key": "^1.7.12",
     "@better-auth/prisma-adapter": "^1.7.12",
     "@hono/node-server": "^1.14.4",
@@ -30,7 +30,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@noir-lang/noir_js": "1.0.0-beta.5",
+    "@noir-lang/noir_js": "1.0.0-beta.26",
     "mailauth": "7.2.0"
   }
 }
