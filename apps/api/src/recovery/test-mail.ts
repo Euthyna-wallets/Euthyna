@@ -7,8 +7,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { UltraHonkBackend } from "@aztec/bb.js";
-import { circuitInputs, modulusFromDkimRecord } from "@mandateos/sdk/email-proof";
+import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
+import { circuitInputs, modulusFromDkimRecord, newSalt, PROOF_TARGET } from "@mandateos/sdk/email-proof";
 import { Noir } from "@noir-lang/noir_js";
 
 const circuit = () => JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../console/public/circuits/email_recovery.json"), "utf8")) as { bytecode: string };
@@ -32,12 +32,17 @@ export async function signedEmail(mail: ReturnType<typeof testMailDomain>, from:
   return signed.signatures + message;
 }
 
-/** What the browser does: build the inputs with the domain's key, prove. */
-export async function proveEmail(eml: string, record: string) {
+/** What the browser does: build the inputs with the domain's key and the enrollment's salt, prove. */
+export async function proveEmail(eml: string, record: string, salt = newSalt()) {
   const compiled = circuit();
-  const { inputs, selector } = circuitInputs(eml, modulusFromDkimRecord(record));
+  const { inputs, selector } = circuitInputs(eml, modulusFromDkimRecord(record), salt);
   const { witness } = await new Noir(compiled as never).execute(inputs as never);
-  const proof = await new UltraHonkBackend(compiled.bytecode, { threads: 2 }).generateProof(witness);
-  return { proof: Buffer.from(proof.proof).toString("base64"), publicInputs: proof.publicInputs, selector };
+  const api = await Barretenberg.new({ threads: 2 });
+  try {
+    const proof = await new UltraHonkBackend(compiled.bytecode, api).generateProof(witness, { verifierTarget: PROOF_TARGET });
+    return { proof: Buffer.from(proof.proof).toString("base64"), publicInputs: proof.publicInputs, selector };
+  } finally {
+    await api.destroy();
+  }
 }
 

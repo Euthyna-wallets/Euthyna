@@ -1,9 +1,9 @@
 import { useState } from "react";
 
-import { API_BASE } from "../../api.js";
 import { authClient } from "../../auth.js";
-import { proveEmailFile, recoverySubject } from "../../lib/email-proof.js";
-import { EmailProofStep } from "../RecoveryCard.js";
+import { enrollmentOf, proveEmailFile, RECOVERY_CONTRACT_ID, recoverySubject } from "../../lib/email-proof.js";
+import { signContractCall, viewContract } from "../../wallets.js";
+import { EmailProofStep, RECOVERY_DEPOSIT, RECOVERY_GAS } from "../RecoveryCard.js";
 import { SignIn } from "../SignIn.js";
 
 /** A founder who lost their NEAR account asks for their seat, signed in with a new one. */
@@ -22,15 +22,17 @@ export function RecoverPage() {
     setBusy(true);
     setMessage(null);
     try {
-      const { evidence } = await proveEmailFile(file, setMessage);
-      setMessage("Checking the proof…");
-      const response = await fetch(`${API_BASE}/v1/recovery/requests`, {
-        method: "POST", credentials: "include", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ daoAccountId: dao.trim(), lostAccountId: lost.trim(), evidence }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { message?: string; notBefore?: string };
-      if (!response.ok) throw new Error(body.message ?? `HTTP ${response.status}`);
-      setMessage(`Request recorded. ${lost.trim()} can cancel it until ${new Date(body.notBefore!).toLocaleString()}; after that, the other founders vote to give you the seat.`);
+      const daoId = dao.trim();
+      const lostId = lost.trim();
+      // The recovery proof must use the salt the founder enrolled with: read it from the contract.
+      const enrollment = await enrollmentOf(daoId, lostId);
+      if (!enrollment) throw new Error(`${lostId} never enrolled a mailbox for this DAO`);
+      const { proof } = await proveEmailFile(file, `0x${enrollment.salt}`, setMessage);
+      setMessage("Sign the request in your wallet: the contract checks the proof…");
+      await signContractCall(me, RECOVERY_CONTRACT_ID, "request", { dao_id: daoId, lost_account_id: lostId, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
+      const open = await viewContract<{ not_before_ns: string } | null>(RECOVERY_CONTRACT_ID, "recovery", { dao_id: daoId, lost_account_id: lostId });
+      const until = open ? new Date(Number(BigInt(open.not_before_ns) / 1_000_000n)).toLocaleString() : "the end of the waiting period";
+      setMessage(`Request recorded on chain. ${lostId} can cancel it until ${until}; after that, the other founders vote to give you the seat.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -46,7 +48,8 @@ export function RecoverPage() {
           <h1>Recover your founder seat</h1>
           <p className="muted">
             Signed in as <strong className="mono">{me}</strong>, the account that will take the seat. Prove with an email
-            that you hold the mailbox the founder enrolled. Nothing changes until the other founders vote.
+            that you hold the mailbox the founder enrolled: the recovery contract on NEAR verifies the proof, and you sign the
+            request with this account. Nothing changes until the other founders vote.
           </p>
         </div>
       </header>

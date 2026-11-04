@@ -1,13 +1,24 @@
 /**
  * ZK Email in the console: the person drops the .eml of an email they sent themself; the
- * browser proves, with the Noir circuit, that their mail provider signed it. The email
- * never leaves the browser, only the proof does.
+ * browser proves, with the Noir circuit, that their mail provider signed it. The email never
+ * leaves the browser: only the zero-knowledge proof does, and the recovery contract on NEAR
+ * verifies it (contracts/email-recovery).
  */
-import { circuitInputs, EMAIL_RECOVERY_VK_BASE64, emlFromBytes, modulusFromDkimRecord, readPublicInputs, senderDkim, type EmailEvidence } from "@mandateos/sdk/email-proof";
+import {
+  circuitInputs, dkimKeyHash, emlFromBytes, modulusFromDkimRecord, PROOF_TARGET, publicInputBytes, readPublicInputs, senderDkim,
+} from "@mandateos/sdk/email-proof";
 
 import { API_BASE } from "../api.js";
+import { viewContract } from "../wallets.js";
 
-export { recoverySubject, type EmailEvidence } from "@mandateos/sdk/email-proof";
+export { newSalt, recoverySubject } from "@mandateos/sdk/email-proof";
+
+/** The recovery contract: it verifies the proofs, keeps the enrollments, runs the waiting period. */
+export const RECOVERY_CONTRACT_ID: string = import.meta.env.VITE_EUTHYNA_RECOVERY_ID ?? "euthyna-recovery.testnet";
+
+export type ChainEnrollment = { account_id: string; salt: string; identity: string; domain: string; enrolled_at_ns: string };
+/** What a contract call takes: the proof and its public inputs, base64. */
+export type ContractProof = { proof: string; public_inputs: string };
 
 type Circuit = { bytecode: string; abi: unknown };
 let circuit: Promise<Circuit> | null = null;
@@ -29,42 +40,55 @@ export async function emailSource(input: File | string): Promise<string> {
   return emlFromBytes(new Uint8Array(await input.arrayBuffer()));
 }
 
-/** Prove that the mailbox sent this email. Takes about a minute; `onStep` reports progress. */
-export async function proveEmailFile(input: File | string, onStep: (step: string) => void): Promise<{ evidence: EmailEvidence; domain: string; subject: string }> {
+/** A seat's enrollment, read from the contract (null when the founder never enrolled). */
+export function enrollmentOf(daoAccountId: string, accountId: string): Promise<ChainEnrollment | null> {
+  return viewContract<ChainEnrollment | null>(RECOVERY_CONTRACT_ID, "enrollment", { dao_id: daoAccountId, account_id: accountId });
+}
+
+/**
+ * Prove that the mailbox sent this email, with `salt` in the address hash. Only DKIM keys the
+ * contract knows for the domain are tried. `onStep` reports progress.
+ */
+export async function proveEmailFile(input: File | string, salt: string, onStep: (step: string) => void): Promise<{ proof: ContractProof; domain: string; subject: string }> {
   const eml = await emailSource(input);
   const dkim = senderDkim(eml);
   onStep(`Fetching ${dkim.domain}'s DKIM key…`);
   const response = await fetch(`${API_BASE}/v1/recovery/dkim-key?${new URLSearchParams({ domain: dkim.domain, selector: dkim.selector })}`, { credentials: "include" });
   const { records } = (await response.json()) as { records?: string[] };
   if (!records?.length) throw new Error(`${dkim.domain} publishes no DKIM key for selector ${dkim.selector}`);
-  const [{ Noir }, { UltraHonkBackend }, compiled] = await Promise.all([import("@noir-lang/noir_js"), import("@aztec/bb.js"), loadCircuit()]);
-  onStep("Checking the email's signature…");
-  let witness: Uint8Array | null = null;
+  const known = new Set(await viewContract<string[]>(RECOVERY_CONTRACT_ID, "dkim_keys", { domain: dkim.domain }));
+  const moduli: bigint[] = [];
   for (const record of records) {
     try {
-      const { inputs } = circuitInputs(eml, modulusFromDkimRecord(record));
+      const modulus = modulusFromDkimRecord(record);
+      if (known.has(await dkimKeyHash(modulus))) moduli.push(modulus);
+    } catch { /* not a 2048-bit RSA key */ }
+  }
+  if (!moduli.length) {
+    throw new Error(`The recovery contract does not accept ${dkim.domain}'s DKIM key yet (selector ${dkim.selector}). Use another mailbox (Gmail, Outlook, iCloud…) or ask Euthyna to add it.`);
+  }
+  const [{ Noir }, { Barretenberg, UltraHonkBackend }, compiled] = await Promise.all([import("@noir-lang/noir_js"), import("@aztec/bb.js"), loadCircuit()]);
+  onStep("Checking the email's signature…");
+  let witness: Uint8Array | null = null;
+  for (const modulus of moduli) {
+    try {
+      const { inputs } = circuitInputs(eml, modulus, salt);
       witness = (await new Noir(compiled as never).execute(inputs as never)).witness;
       break;
     } catch (error) {
-      if (records.length === 1) throw new Error(`This email does not verify: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
+      if (moduli.length === 1) throw new Error(`This email does not verify: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
     }
   }
   if (!witness) throw new Error("No DKIM key of the domain verifies this email");
-  onStep("Proving in your browser (about a minute)…");
-  const backend = new UltraHonkBackend(compiled.bytecode, { threads: threads() });
-  const proof = await backend.generateProof(witness);
-  const evidence = { proof: base64(proof.proof), publicInputs: proof.publicInputs, selector: dkim.selector };
-  const stated = readPublicInputs(evidence.publicInputs);
-  return { evidence, domain: stated.domain, subject: stated.subject };
-}
-
-/** Verify a proof in this browser, with the circuit's key: no trust in Euthyna's server. */
-export async function checkEmailProof(evidence: EmailEvidence) {
-  const { BarretenbergVerifier } = await import("@aztec/bb.js");
-  const vk = Uint8Array.from(atob(EMAIL_RECOVERY_VK_BASE64), (char) => char.charCodeAt(0));
-  const proof = Uint8Array.from(atob(evidence.proof), (char) => char.charCodeAt(0));
-  const valid = await new BarretenbergVerifier({ threads: 1 }).verifyUltraHonkProof({ proof, publicInputs: evidence.publicInputs }, vk);
-  return { valid, ...readPublicInputs(evidence.publicInputs) };
+  onStep("Proving in your browser…");
+  const api = await Barretenberg.new({ threads: threads() });
+  try {
+    const result = await new UltraHonkBackend(compiled.bytecode, api).generateProof(witness, { verifierTarget: PROOF_TARGET });
+    const stated = readPublicInputs(result.publicInputs);
+    return { proof: { proof: base64(result.proof), public_inputs: base64(publicInputBytes(result.publicInputs)) }, domain: stated.domain, subject: stated.subject };
+  } finally {
+    await api.destroy();
+  }
 }
 
 function base64(bytes: Uint8Array): string {
