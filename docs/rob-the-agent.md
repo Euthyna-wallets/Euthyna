@@ -173,7 +173,8 @@ With an existing account, pass its key as `LEASH_PRIVATE_KEY` instead. `--lock` 
 after deploying (nobody can redeploy it; irreversible). The script deploys `contracts/res/leash.wasm`
 (`contracts/leash`): a NEP-141 named Leash, symbol `LEASH`, 0 decimals, initialised with one minter
 (`LEASH_MINTER`, default `ruggy-euthyna.testnet`, the account the API mints with); any other account's `mint` is
-refused (`only the minter mints LEASH`).
+refused (`only the minter mints LEASH`). Deployed on 5 November 2026: `leash.ruggy-euthyna.testnet`, minter
+`ruggy-euthyna.testnet`.
 
 **Hall of thieves.** `GET /v1/rob/hall` (cached 30 s) answers `{ creative, gas, boldest, recent }`:
 

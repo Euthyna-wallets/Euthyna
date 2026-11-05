@@ -65,8 +65,8 @@ async function rpc(method, params) {
   if (body.error || body.result?.error) throw new Error(JSON.stringify(body.error ?? body.result.error));
   return body.result;
 }
-async function view(method, viewArgs = {}) {
-  const result = await rpc("query", { request_type: "call_function", finality: "final", account_id: ACCOUNT, method_name: method, args_base64: Buffer.from(JSON.stringify(viewArgs)).toString("base64") });
+async function view(method, viewArgs = {}, finality = "final") {
+  const result = await rpc("query", { request_type: "call_function", finality, account_id: ACCOUNT, method_name: method, args_base64: Buffer.from(JSON.stringify(viewArgs)).toString("base64") });
   return JSON.parse(Buffer.from(result.result).toString("utf8"));
 }
 const state = await rpc("query", { request_type: "view_account", finality: "final", account_id: ACCOUNT }).catch((error) => {
@@ -107,9 +107,10 @@ if (args.lock) {
   console.log(`full-access key deleted: ${removed.transaction.hash}`);
 }
 
-const metadata = await view("ft_metadata");
+// Read right after init: "final" can still show the account before it; optimistic sees the init.
+const metadata = await view("ft_metadata", {}, "optimistic");
 console.log(`ft_metadata: ${metadata.name} (${metadata.symbol}), ${metadata.decimals} decimals`);
 if (metadata.symbol !== "LEASH") {
-  console.warn(`warning: the deployed metadata says ${metadata.symbol}, not LEASH: test-ft's metadata is fixed in its code. Wallets will show ${metadata.symbol}.`);
+  console.warn(`warning: the deployed metadata says ${metadata.symbol}, not LEASH: check --wasm (contracts/res/leash.wasm). Wallets will show ${metadata.symbol}.`);
 }
 console.log(`\nAPI environment:\nROB_LEASH_TOKEN=${ACCOUNT}`);
