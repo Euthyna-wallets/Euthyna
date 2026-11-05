@@ -42,10 +42,10 @@ export class NearRpc {
     return body.result as T;
   }
 
-  async view<T>(accountId: string, methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+  async view<T>(accountId: string, methodName: string, args: Record<string, unknown> = {}, finality: "optimistic" | "final" = "optimistic"): Promise<T> {
     const result = await this.call<{ result: number[] }>("query", {
       request_type: "call_function",
-      finality: "optimistic",
+      finality,
       account_id: accountId,
       method_name: methodName,
       args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),

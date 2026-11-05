@@ -49,7 +49,7 @@ export interface HireStore {
   };
 }
 
-type Rpc = { call<T>(method: string, params: unknown): Promise<T>; view<T>(accountId: string, methodName: string, args?: Record<string, unknown>): Promise<T> };
+type Rpc = { call<T>(method: string, params: unknown): Promise<T>; view<T>(accountId: string, methodName: string, args?: Record<string, unknown>, finality?: "optimistic" | "final"): Promise<T> };
 
 /** What hire needs from the game: its accounts, its RPC, Ruggy's full key (RobService.asRuggy()). */
 export type HireDesk = {
@@ -99,9 +99,10 @@ export class RobHire {
     };
   }
 
+  /** At finality final, as the market gateway reads it: an optimistic balance lets the page send a cheque the gateway refuses. */
   private async balance(account: string): Promise<bigint> {
     try {
-      return BigInt(await this.desk.rpc.view<string>(this.desk.config.token, "ft_balance_of", { account_id: account }));
+      return BigInt(await this.desk.rpc.view<string>(this.desk.config.token, "ft_balance_of", { account_id: account }, "final"));
     } catch (error) {
       if (missing(error)) return 0n;
       throw error;
