@@ -22,6 +22,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Roles for payments, Uniswap swaps, Aave lending, WETH wrapping, Solana transfers, NEAR token transfers, revenue sharing | Code | `packages/sdk/src/roles.ts`, `contracts/omniroles-conditions/src/presets.rs` |
 | Rob the Agent: every card is a real testnet transaction, refused by the vault, the DAO or NEAR; 0 USDC stolen | Testnet | [docs/rob-the-agent.md](./docs/rob-the-agent.md) (hashes per card); the vault pays only its two listed suppliers, accounts of ours; `/v1/rob/stats` counts the recorded plays |
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
+| Rob the Agent, Hire him: the player buys Ruggy's tx-check for 1 TestUSDC from the throwaway key, the cheque held and cashed on delivery, no gas paid | Code | [docs/rob-the-agent.md](./docs/rob-the-agent.md#hire-him-ruggys-service-on-the-market), `apps/api/src/rob/hire.test.ts`; not run on testnet yet: add the settlement hash |
 
 ## Chains
 

@@ -1,5 +1,27 @@
 import { z } from "zod";
 
+/**
+ * Rob the Agent, « Hire him » (apps/api/src/rob/hire.ts): Ruggy's tx-check listing on the Market, delivered
+ * by the API itself with the listing's delivery token, and the one test-token top-up per player.
+ */
+const robHireFields = {
+  ROB_HIRE_HANDLE: z.string().regex(/^[a-z0-9][a-z0-9-]{2,39}$/).default("ruggy-tx-check"),
+  /** The listing's delivery token (mdt_…, from scripts/rob-hire-setup.mjs or a console rotation); unset: no in-process delivery. */
+  ROB_HIRE_DELIVERY_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().regex(/^mdt_[A-Za-z0-9_-]{43}$/).optional()),
+  /** Top-ups a UTC day, for everyone (each costs Ruggy a storage deposit and three transactions' gas). */
+  ROB_HIRE_DAILY_TOPUPS: z.coerce.number().int().min(0).default(100),
+  /** NEAR sent to create a player's implicit account. 1 yocto: an account this small needs no storage stake (NEP-448). */
+  ROB_HIRE_ACCOUNT_YOCTO: z.string().regex(/^[1-9]\d*$/).default("1"),
+  /** How often the API looks for Ruggy's tasks to deliver. */
+  ROB_HIRE_POLL_MS: z.coerce.number().int().min(500).default(2_000),
+};
+const robHireSchema = z.object(robHireFields);
+export type RobHireSettings = z.infer<typeof robHireSchema>;
+/** Only the « Hire him » settings: the module reads them itself (the extras context carries no env). */
+export function robHireSettings(input: NodeJS.ProcessEnv = process.env): RobHireSettings {
+  return robHireSchema.parse(input);
+}
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   NEAR_NETWORK_ID: z.string().default("testnet"),
@@ -79,6 +101,7 @@ const schema = z.object({
   ROB_OWNER_KEYS: z.string().optional(),
   /** Look Legit: Ruggy's two Base Sepolia suppliers (role "base-payments" of Rob the Agent Co.). */
   ROB_BASE_SUPPLIERS: z.string().default("0x770FEe7954f3FC813AD65d33dAb0D9cc696a2702,0xd63f3e36Dd87e8f8d480Bfe8093b708887156595"),
+  ...robHireFields,
   MARKET_RELAYER_ACCOUNT_ID: z.string().optional(),
   MARKET_RELAYER_PRIVATE_KEY: z.string().optional(),
   /** Derives each listing's webhook signing key. */

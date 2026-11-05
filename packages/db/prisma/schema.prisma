@@ -614,3 +614,26 @@ model RobPlay {
   @@index([createdAt])
   @@map("rob_play")
 }
+
+/// Rob the Agent, « Hire him »: the one test-token top-up of a throwaway key (one per key, one per client).
+/// Each step is recorded as it lands, so a retry resumes where the last one stopped.
+model RobHireTopup {
+  /// The throwaway key (ed25519:…); its implicit account is `account`.
+  publicKey  String   @id
+  account    String
+  /// sha256 of the client's address with a server salt, as rob_key: one top-up per client.
+  clientHash String   @unique
+  /// pending | done
+  state      String   @default("pending")
+  /// The NEAR transfer that created the implicit account (none if it existed).
+  createTx   String?
+  /// storage_deposit on the token for the account (none if it was registered).
+  registerTx String?
+  /// mint of the test token to the account.
+  mintTx     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("rob_hire_topup")
+}

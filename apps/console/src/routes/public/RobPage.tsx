@@ -211,7 +211,7 @@ export function RobPage() {
             </p>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
               <a href="#arena" className="rbtn ori">ROB HIM</a>
-              <a href="#robots" className="ghost">OR SCRIPT IT</a>
+              <a href="#hire" className="ghost">OR HIRE HIM</a>
             </div>
             <small style={{ color: "#8FA2CC", fontSize: 13 }}>No wallet needed to play. A throwaway key is made in your browser.</small>
           </div>
