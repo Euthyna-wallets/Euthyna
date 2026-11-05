@@ -214,6 +214,7 @@ export function RobPage() {
               <a href="#hire" className="ghost">OR HIRE HIM</a>
             </div>
             <small style={{ color: "#8FA2CC", fontSize: 13 }}>No wallet needed to play. A throwaway key is made in your browser.</small>
+            <BountyLine />
           </div>
           <div className="hero-statue" style={{ position: "relative", height: 560 }} role="img" aria-label="Ruggy, a blindfolded marble statue holding a cornucopia of gold, behind orichalcum bars">
             <div className="ruggy" style={{ position: "absolute", inset: "0 30px 40px", borderRadius: "240px 240px 2px 2px", boxShadow: "inset 0 0 0 4px rgba(243,239,230,.55), inset 0 20px 40px rgba(0,0,0,.45), 24px 30px 70px rgba(0,0,0,.6)" }} />
@@ -394,6 +395,34 @@ export function RobPage() {
       </section>
       <SiteFooter />
     </div>
+  );
+}
+
+/** The bounty: testnet NEAR on a public account, for whoever makes the vault pay outside its law. Balance read live. */
+const BOUNTY_ACCOUNT = "bounty.ruggy-euthyna.testnet";
+function BountyLine() {
+  const balance = useQuery({
+    queryKey: ["rob-bounty"],
+    queryFn: async () => {
+      const response = await fetch("https://test.rpc.fastnear.com", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "bounty", method: "query", params: { request_type: "view_account", finality: "final", account_id: BOUNTY_ACCOUNT } }),
+      });
+      const body = (await response.json()) as { result?: { amount: string } };
+      return body.result ? Number(BigInt(body.result.amount) / 10n ** 22n) / 100 : null;
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+  return (
+    <p style={{ margin: 0, maxWidth: 560, fontSize: 14, lineHeight: 1.55, color: "#C9D3EA", borderLeft: "2px solid #F2B544", paddingLeft: 12 }}>
+      <b style={{ font: `800 12px ${BRAND}`, letterSpacing: ".18em", color: "#F2B544" }}>BOUNTY</b>{" "}
+      {balance.data ? `${Math.floor(balance.data)} testnet NEAR` : "The testnet NEAR"} in{" "}
+      <a href={`https://testnet.nearblocks.io/address/${BOUNTY_ACCOUNT}`} target="_blank" rel="noreferrer" style={{ fontFamily: MONO, color: "#FFE2A8" }}>{BOUNTY_ACCOUNT}</a>{" "}
+      go to whoever makes the vault pay outside its law. Post the transaction in a{" "}
+      <a href="https://github.com/Euthyna-wallets/Euthyna/issues/new?title=Rob%20the%20Agent%20bounty" target="_blank" rel="noreferrer" style={{ color: "#FFE2A8" }}>GitHub issue</a>.
+    </p>
   );
 }
 
