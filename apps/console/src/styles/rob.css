@@ -67,3 +67,30 @@
   .rob .steps4{grid-template-columns:repeat(2,minmax(0,1fr)) !important;row-gap:14px !important}
   .rob .stat{border-right:0 !important;border-bottom:1px solid rgba(13,23,48,.14);padding:22px 24px !important}
 }
+
+/* share: the link under the verdict, the share card and its buttons (handoff: SHARE THIS REFUSAL, LEADERBOARD + SHARE) */
+.rob .rshare{margin-left:auto;display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border:1px solid rgba(242,181,68,.5);font:800 12px var(--font-brand);letter-spacing:.18em;color:#F2B544;text-decoration:none}
+.rob .rshare:hover{background:rgba(242,181,68,.1)}
+.rob .rshare-card{box-sizing:border-box;aspect-ratio:1200/675;border:1px solid rgba(242,181,68,.4);padding:24px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:20px;align-items:center;box-shadow:0 24px 50px rgba(0,0,0,.6);overflow:hidden}
+.rob .rshare-card .rseal{width:130px;height:130px}
+.rob .rshare-card .rseal b,.rob .rshare-card .rseal.paid b{font-size:17px}
+.rob .rshare-card .rseal.counter b{font-size:13px}
+.rob .rshare-card .rseal.veto b,.rob .rshare-card .rseal.idle b{font-size:14px}
+.rob .rshare-head{font-weight:800;font-size:19px;line-height:1.2;color:#F3EFE6}
+.rob .rshare-detail{font-weight:600;font-size:12.5px;color:#F2B544}
+.rob .rshare-tags{font-weight:600;font-size:12px;color:#8FA2CC}
+.rob .rshare-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rob .rshare-actions .ghost{justify-content:center;padding:0 14px;background:none;cursor:pointer}
+.rob .rshare-actions .ghost:disabled{opacity:.6;cursor:default}
+.rob .rshare-actions .ghost:hover:not(:disabled){color:#F2B544;border-color:rgba(242,181,68,.6)}
+@media (max-width:600px){
+  .rob .rshare{margin-left:0}
+  .rob .rshare-card{padding:14px;gap:14px}
+  .rob .rshare-card .rseal{width:84px;height:84px}
+  .rob .rshare-card .rseal b,.rob .rshare-card .rseal.paid b{font-size:11px}
+  .rob .rshare-card .rseal.counter b,.rob .rshare-card .rseal.veto b,.rob .rshare-card .rseal.idle b{font-size:9px}
+  .rob .rshare-head{font-size:15px}
+  .rob .rshare-detail{font-size:11px}
+  .rob .rshare-tags{font-size:10.5px}
+  .rob .rshare-actions{grid-template-columns:minmax(0,1fr)}
+}

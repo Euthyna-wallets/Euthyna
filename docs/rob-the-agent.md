@@ -86,7 +86,28 @@ Set `ROB_RUGGY_ACCOUNT_ID`, `ROB_RUGGY_PRIVATE_KEY`, `ROB_VAULT_ACCOUNT_ID`, `RO
 environment (`ROB_BASE_SUPPLIERS` defaults to the two Base suppliers above), then `prisma db push` (tables `rob_key`, `rob_play`). Tests:
 `pnpm --filter @mandateos/api exec vitest run src/rob`.
 
+## Fork Ruggy's law
+
+The card « Fork Ruggy's law » opens `/onboarding?path=euthyna&law=ruggy`. The onboarding shows « Ruggy's law,
+pre-filled. Change anything. » on every step, preselects the « Pay suppliers » hire, and its « Write the role » link
+carries `law=ruggy` to the role builder (`/roles?new=1&role=…&job=…&law=ruggy`), which opens with one « NEAR · pay in
+tokens » block: TestUSDC, 0.1 to 2 a payment, a budget of 10 every day, and **no recipient** (Ruggy's suppliers are
+ours: the founders add their own). Every field stays editable and the role is voted as usual; nothing else in the
+onboarding changes. The preset and its storage are in `apps/console/src/routes/onboarding-law.ts`: creating the
+company clears the URL, so the choice is kept in this browser (pending for 24 h, then bound to the first company set
+up). A member whose company is already set up is still sent to `/overview`; the law then waits for « + New company ».
+
+## Share card
+
+`rob/RobShareCard.tsx`: before any play, a generic card (« Can you rob an AI agent? »); after a play, the seal with
+the verdict panel's word (DENIED, COUNTER, VETOED, PAID), a sentence naming who said no (the law, NEAR itself, the
+DAO, the council; the counter-offer and a lawful payment have their own), « <card> · line <numeral> » and
+« #RobTheAgent · euthyna.io/rob ». It keeps the last answer while the next card is on its way. « POST ON X » opens
+`https://x.com/intent/post` with the card, the verdict, @NEARProtocol, #RobTheAgent and #NEARHackathon, and
+`url=https://euthyna.io/rob`. « DOWNLOAD CARD » draws the same card at 1200×675 on a canvas in the browser (after
+`document.fonts.ready`; Cinzel and JetBrains Mono), with the transaction hash shortened when the play has one, and
+saves it as a PNG. Nothing is sent to a server. The verdict panel links to it (« SHARE THIS REFUSAL »).
+
 ## Not built yet
 
-Hire him (Ruggy's service on the Market), the onboarding pre-filled with Ruggy's law,
-the leaderboard, Rug O'Clock and the share card.
+Hire him (Ruggy's service on the Market), the leaderboard and Rug O'Clock.
