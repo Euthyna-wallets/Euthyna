@@ -345,8 +345,8 @@ export function RobPage() {
               <div className="law"><b>II</b><span>2 USDC a payment · 10 a day</span></div>
               <div className="law" style={{ borderBottom: "1px solid rgba(13,23,48,.14)" }}><b>III</b><span>No NEAR, no new keys</span></div>
             </div>
-            <Link to="/onboarding?path=euthyna" className="rbtn ori" style={{ alignSelf: "stretch" }}>USE THIS LAW IN EUTHYNA</Link>
-            <small style={{ color: "#4A5675" }}>Create your company, then set these limits in its first role.</small>
+            <Link to="/onboarding?path=euthyna&law=ruggy" className="rbtn ori" style={{ alignSelf: "stretch" }}>USE THIS LAW IN EUTHYNA</Link>
+            <small style={{ color: "#4A5675" }}>Opens /onboarding?path=euthyna with these rules and your wallet.</small>
           </div>
         </div>
       </section>
@@ -497,6 +497,7 @@ function Verdict({ shown, laws }: { shown: Shown | null; laws: string[] }) {
         ) : (
           <span style={{ fontSize: 13, color: "#8FA2CC" }}>No transaction to show: NEAR rejected it before the chain.</span>
         )}
+        <a href="#share" className="rshare">{paid ? "SHARE THIS PAYMENT" : "SHARE THIS REFUSAL"}</a>
       </div>
     </>
   );
