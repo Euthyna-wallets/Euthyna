@@ -76,6 +76,10 @@ until the budget refills: the vault checks the budget before the reference.
 | POST | `/v1/rob/prepare` `{ publicKey, card \| forge }` | the unsigned transaction and the hash to sign |
 | POST | `/v1/rob/play` `{ card, signed? }` | with `signed` (`{ transaction, signature }`), sends the player's transaction as is; without, plays with a shared key |
 | POST | `/v1/rob/forge` `{ method, args, signed? }` | any vault method |
+| GET | `/v1/rob/hall` | Hall of thieves, cached 30 s (below) |
+| POST | `/v1/rob/hall/vote` `{ playId }` | one vote for a forged call |
+| POST | `/v1/rob/claim/challenge` `{ throwawayKey }` | nonce and the message the wallet signs |
+| POST | `/v1/rob/claim` `{ accountId, publicKey, signature, throwawayKey, throwawaySignature, nonce }` | links the plays, mints the trophy once |
 
 Players are counted by a salted hash of their address; addresses are not stored.
 
@@ -86,7 +90,61 @@ Set `ROB_RUGGY_ACCOUNT_ID`, `ROB_RUGGY_PRIVATE_KEY`, `ROB_VAULT_ACCOUNT_ID`, `RO
 environment (`ROB_BASE_SUPPLIERS` defaults to the two Base suppliers above), then `prisma db push` (tables `rob_key`, `rob_play`). Tests:
 `pnpm --filter @mandateos/api exec vitest run src/rob`.
 
+## Claim and Hall of thieves
+
+The wallet is asked for only at the end (section « Now make it yours. »). Code: `apps/api/src/rob/hall.ts`,
+`apps/console/src/routes/public/rob/RobClaim.tsx` and `RobHall.tsx`.
+
+**Claim.** The browser asks `POST /v1/rob/claim/challenge { throwawayKey }` for a single-use nonce (5 minutes,
+kept in the API's memory: one instance). The NEAR wallet signs a NEP-413 message naming the throwaway key, for the
+recipient Ruggy's account; the throwaway key signs a message naming the wallet account. `POST /v1/rob/claim` checks
+both signatures (the NEP-413 check is the console sign-in's, `verifySignature` from wallet selector), that the
+wallet key is a full-access key of the account on chain, and that the throwaway key is a player key Ruggy's account
+received (a shared key cannot be claimed, a key already claimed by another account is refused). It then links the
+key's plays to the account (`rob_play.accountId`) and answers `{ accountId, plays, trophy: { tx } | null }`. Wallets
+without `signMessage` cannot claim: the page says so. Plays made after a claim are added by signing again.
+
+**$LEASH trophy.** With `ROB_LEASH_TOKEN` set and at least one recorded play, Ruggy's full-access key sends one
+transaction to the token: `storage_deposit` (the token's `storage_balance_bounds().min`, capped at 0.01 NEAR) then
+the open `mint` of 1 whole token, 10 Tgas each. Once per account (`rob_claim`, a single claimant takes the mint; a
+mint that died half-way is checked against `ft_balance_of` before minting again), at most 500 a day, 5 claims an
+hour per address. Never on the vault, the DAO, Ruggy or TestUSDC (checked at start and before each mint).
+
+Deploy the token once (not run yet):
+
+```sh
+node scripts/rob-leash.mjs --account leash.ruggy-euthyna.testnet --dry-run   # read the chain, print the plan
+LEASH_ACCOUNT_ID=leash.ruggy-euthyna.testnet LEASH_PARENT_PRIVATE_KEY=ed25519:… node scripts/rob-leash.mjs
+# then in the API's environment:
+ROB_LEASH_TOKEN=leash.ruggy-euthyna.testnet
+```
+
+With an existing account, pass its key as `LEASH_PRIVATE_KEY` instead. `--lock` deletes the token account's key
+after deploying (nobody can redeploy it; irreversible). The script deploys `contracts/res/test_ft.wasm`, whose
+`ft_metadata` is fixed in code ("MandateOS Test USDC", `TestUSDC`, 6 decimals): it cannot name the token Leash /
+LEASH, and warns about it. Wallets show the trophy as TestUSDC on the LEASH account until test-ft takes its metadata
+at init (a contract change and a CI-built wasm).
+
+**Hall of thieves.** `GET /v1/rob/hall` (cached 30 s) answers `{ creative, gas, boldest, recent }`:
+
+| Tile | From |
+| --- | --- |
+| Most creative | the forged call (expert mode) with the most votes |
+| Most gas burned | the sum of `gas_burnt` over each player's transactions (the transaction outcome and its receipts), read from the chain after each play without delaying the answer; for Look Legit and Inside Job, the last transaction (the council's veto) |
+| Boldest cheque | the largest `amount` a refused play attempted (`request.amount` of the card or the forged args, base units; Look Legit 2 USDC) |
+| Recent | the 6 last forged calls, method and args in one line, with their votes |
+
+`who` is the claimed account, else the short throwaway key; plays on a shared key count as "a shared key" and are
+left out of the gas tile. `POST /v1/rob/hall/vote { playId }`: forged calls only, one vote per address hash and
+call, not your own, 30 a minute per address. Forged calls are text players typed: the page shows them as text,
+cut to 96 characters.
+
+Schema: `rob_play` gains `call`, `amount`, `gasBurnt`, `accountId`; new tables `rob_vote` and `rob_claim`. Apply
+with `prisma db push` as for the other tables. Tests: `src/rob/hall.test.ts` (mocks; the Prisma store and its SQL
+run against PostgreSQL when `TEST_DATABASE_URL` is set).
+
 ## Not built yet
 
 Hire him (Ruggy's service on the Market), the onboarding pre-filled with Ruggy's law,
-the leaderboard, Rug O'Clock and the share card.
+Rug O'Clock and the share card. The $LEASH token is not deployed yet (`scripts/rob-leash.mjs`), and its
+name and symbol need a test-ft change (above).
