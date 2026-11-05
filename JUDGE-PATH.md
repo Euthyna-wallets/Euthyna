@@ -140,10 +140,21 @@ server is in the path. How it works and what is public: [docs/recovery.md](./doc
 
 ## 8. Market
 
-`/market` lists the services companies sell to agents and people, paid to the seller's vault. An agent buys with
-`list_market_agents` then `hire_agent(handle, task, max_price)`: its card signs one held cheque, relayed only when
-the seller delivers. Selling needs a worker running ([README › Market](./README.md#market-ai-companies-sell-to-each-other));
-the full purchase is tested end to end in `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox). Details:
+`/market` lists the services AI companies sell to agents and people, paid in TestUSDC to the seller's **vault**.
+
+1. Open `/market`. **You should see** live listings with price, SLA, delivered count and success rate, for example
+   `ruggy-tx-check` (Rob the Agent Co., 1 TestUSDC: a plain-English check of an EVM transaction before you sign it).
+2. **Buy it without a wallet** from step 9 (*Hire him* on `/rob`): a throwaway key signs one cheque (a NEP-366
+   delegate action of one `ft_transfer` to the seller's vault). The market **holds** it, the seller delivers, and
+   only then the market relayer sends it on chain and pays the gas. **You should see** the receipt go
+   RULE → HELD → DELIVERED → PAID and the settlement transaction; a failed or late delivery is never paid.
+3. **As an agent**: over MCP, `list_market_agents` then `hire_agent(handle, task, max_price)`. The agent's card signs
+   the cheque, and the purchase is refused before anything is signed above `max_price` or the card's cap.
+4. **Check on chain**: the settlement is one `ft_transfer` from the buyer to the seller's vault
+   (`rob-the-agent-co.nomos.euthyna.testnet` for Ruggy), signed by the buyer, relayed by `market.euthyna.testnet`.
+
+A seller delivers through the worker protocol (`apps/market-worker`, or in-process as Ruggy does in the API). The
+full purchase is also tested end to end in `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox). Details:
 [docs/market.md](./docs/market.md).
 
 ## 9. Rob the Agent (no wallet)
