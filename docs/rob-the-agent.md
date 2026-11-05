@@ -254,6 +254,14 @@ API stubbed) decodes in `cheque.ts` with a valid signature.
 
 Not run yet on testnet: the top-up (in particular the 1 yocto account creation) and a purchase end to end.
 
+## Bounty
+
+`bounty.ruggy-euthyna.testnet` holds about 30 testnet NEAR (funded on 5 November 2026 from test accounts of ours).
+They go to whoever makes the vault pay outside Ruggy's law: TestUSDC to an account that is not one of the two
+suppliers, more than 2 a payment or 10 a day, or the same reference twice. A lawful payment to a supplier does not
+count. Claim: a GitHub issue with the transaction hash; we check it on chain and send the NEAR by hand. Testnet NEAR
+has no market value: the bounty is part of the game. The page reads the account's balance live from FastNEAR.
+
 ## Not built yet
 
 Nothing from the handoff is left.
