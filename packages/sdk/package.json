@@ -39,6 +39,14 @@
     "./email-proof": {
       "types": "./dist/email-proof.d.ts",
       "default": "./dist/email-proof.js"
+    },
+    "./cheque": {
+      "types": "./dist/cheque.d.ts",
+      "default": "./dist/cheque.js"
+    },
+    "./tx-check": {
+      "types": "./dist/tx-check.d.ts",
+      "default": "./dist/tx-check.js"
     }
   }
 }

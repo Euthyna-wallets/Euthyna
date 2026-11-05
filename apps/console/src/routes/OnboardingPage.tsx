@@ -20,6 +20,7 @@ import { useWallets, WalletProvider } from "../lib/wallet-context.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
 import { NewAgent, RunYourAgent, type AgentReady } from "./AgentSetup.js";
+import { forkedLawOf, lawForCompany, rememberPendingLaw, roleBuilderPath, type ForkedLaw } from "./onboarding-law.js";
 import { FundWallet, TreasuryCreate, WalletSetup } from "./TreasurySetup.js";
 
 type Organization = { id: string; name: string; slug: string };
@@ -90,6 +91,12 @@ export function OnboardingPage() {
   // "+ New company" in the sidebar: one user can found several companies, each with its own DAO.
   const [searchParams, setSearchParams] = useSearchParams();
   const creating = searchParams.has("new");
+  // A law forked from /rob (?law=ruggy): kept for the company being set up, then pre-filled in its first role.
+  const [law, setLaw] = useState<ForkedLaw | null>(() => {
+    const fromUrl = forkedLawOf(searchParams.get("law"));
+    if (fromUrl) rememberPendingLaw(fromUrl);
+    return fromUrl;
+  });
 
   // One path: the vault is private during setup; Atlantis is offered at the end.
   const path: Path = "euthyna";
@@ -145,6 +152,12 @@ export function OnboardingPage() {
     const working = activeAgents.length > 0 && (roles.data?.roles.length ?? 0) > 0;
     firstStage.current = stage === "shares" && working ? "done" : stage;
   }
+  // The company exists and is being set up: the forked law becomes its own.
+  useEffect(() => {
+    if (!active || creating || loading || firstStage.current === "done") return;
+    const own = lawForCompany(active.id);
+    if (own) setLaw(own);
+  }, [active?.id, creating, loading]);
   const firstAgent = activeAgents[0];
   const contractJob = JOBS.find((item) => item.role === firstAgent?.role) ?? job;
 
@@ -227,6 +240,8 @@ export function OnboardingPage() {
         </div>
       ) : (
         <>
+          {law && stage !== "done" ? <ForkedLawBanner law={law} /> : null}
+
           <SetupProgress steps={steps} current={currentIndex} skipped={sharesSkipped && !shares.data?.deployed ? ["shares"] : []} />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 760 }}>
@@ -295,6 +310,7 @@ export function OnboardingPage() {
           {stage === "agent" && treasury && !newAgent && !job ? (
             <JobPicker
               hasShares={Boolean(shares.data?.deployed)}
+              initial={law ? JOBS.find((item) => item.id === "payments") ?? null : null}
               onPick={(picked) => {
                 if (active) rememberJob(active.id, picked.id);
                 setJob(picked);
@@ -342,7 +358,11 @@ export function OnboardingPage() {
                   the founders vote on it.
                 </p>
                 <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: "var(--ink-2)", display: "flex", flexDirection: "column", gap: 6 }}>
-                  <li>The role <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
+                  {law ? (
+                    <li>The role <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{firstAgent?.role ?? "treasury"}</span> opens with Ruggy's law already added: add your own suppliers, change anything else.</li>
+                  ) : (
+                    <li>The role <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{firstAgent?.role ?? "treasury"}</span> opens with {contractJob ? `"${contractJob.title}"` : "nothing"} already added: set the budget{contractJob?.id === "payments" ? " and pick the suppliers" : ""}.</li>
+                  )}
                   <li>Preview, then submit it to the founders' vote.</li>
                   <li>They approve it in Decisions; it applies after the veto window, and the agent can start.</li>
                 </ol>
@@ -350,7 +370,7 @@ export function OnboardingPage() {
               <Link
                 className="btn-ori"
                 style={{ textDecoration: "none", display: "inline-block", alignSelf: "flex-start" }}
-                to={`/roles?new=1&role=${encodeURIComponent(firstAgent?.role ?? "treasury")}${contractJob ? `&job=${contractJob.id}` : ""}`}
+                to={roleBuilderPath(firstAgent?.role ?? "treasury", contractJob?.id ?? null, law)}
               >
                 WRITE THE ROLE
               </Link>
@@ -473,8 +493,25 @@ function SetupProgress({ steps, current, skipped }: { steps: StepView[]; current
   );
 }
 
-function JobPicker(props: { hasShares: boolean; onPick: (job: Job) => void }) {
-  const [selected, setSelected] = useState<Job | null>(null);
+/** « Fork Ruggy's law » on /rob: what the first role opens with. */
+function ForkedLawBanner({ law }: { law: ForkedLaw }) {
+  return (
+    <div
+      role="status"
+      style={{
+        display: "flex", flexDirection: "column", gap: 6, maxWidth: 1000, padding: "12px 16px",
+        background: "var(--gold-bg)", border: "1px solid rgba(201,137,12,.45)", borderLeft: "3px solid #C9890C", color: "var(--ink)",
+      }}
+    >
+      <b style={{ font: "800 14px var(--font-brand)", letterSpacing: ".06em" }}>{law.banner}</b>
+      <span style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>{law.rules.join(" · ")}.</span>
+      <span style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--gold-ink)" }}>{law.hint}</span>
+    </div>
+  );
+}
+
+function JobPicker(props: { hasShares: boolean; initial?: Job | null; onPick: (job: Job) => void }) {
+  const [selected, setSelected] = useState<Job | null>(props.initial ?? null);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 26, alignItems: "start", maxWidth: 1200 }}>
       {JOB_ORDER.map((id) => JOBS.find((item) => item.id === id))

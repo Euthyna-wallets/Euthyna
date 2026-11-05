@@ -17,7 +17,7 @@
  * reports it. A payment the law allows (forged in expert mode) does go through,
  * to one of the two listed suppliers, which are accounts of ours.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { KeyPair, transactions, utils } from "near-api-js";
 
@@ -55,7 +55,21 @@ export type PlayResult = {
 };
 
 type RobKeyRow = { publicKey: string; kind: string; clientHash: string; createdAt: Date; deletedAt: Date | null };
-type RobPlayRow = { card: string; verdict: string; refusedBy: string; error: string | null; tx: string | null; publicKey: string | null; clientHash: string };
+type RobPlayRow = {
+  id?: string;
+  card: string;
+  verdict: string;
+  refusedBy: string;
+  error: string | null;
+  tx: string | null;
+  publicKey: string | null;
+  clientHash: string;
+  /** Hall of thieves: the call in one line, the amount it attempted (base units) and, read later, the gas it burnt. */
+  call?: string | null;
+  amount?: string | null;
+};
+/** What a play's record may also carry: the amount it attempted, and who signed its last transaction (to read its gas). */
+type RecordExtra = { amount?: string | null; signerId?: string };
 
 /** The two tables the game writes (a Prisma client fits). */
 export interface RobStore {
@@ -68,6 +82,8 @@ export interface RobStore {
   };
   robPlay: {
     create(args: { data: RobPlayRow }): Promise<unknown>;
+    /** Hall of thieves: the gas burnt, read after the play. Optional: without it, gas is not recorded. */
+    update?(args: { where: { id: string }; data: { gasBurnt: bigint } }): Promise<unknown>;
     count(args?: { where?: { verdict?: string; card?: string; clientHash?: string; createdAt?: { gt: Date } } }): Promise<number>;
     groupBy(args: { by: ["clientHash"] }): Promise<unknown[]>;
   };
@@ -115,6 +131,9 @@ export class RobService {
   /** Inside Jobs between their vote and their veto: the sweep leaves their rules to them. */
   private insideJobsRunning = 0;
   private bondCache: string | null = null;
+  /** Gas reads after plays: one at a time, at most this many waiting (a read lost is a null gasBurnt, nothing else). */
+  private gasReads: Promise<unknown> = Promise.resolve();
+  private gasReadsWaiting = 0;
   private readonly now: () => number;
 
   constructor(private readonly options: RobServiceOptions) {
@@ -136,6 +155,34 @@ export class RobService {
       // signer: "function-call" = your key (or a shared one), "ruggy" = Ruggy's own account, "none" = off chain.
       cards: CARDS.map((card) => ({ ...card, signer: card.playable ? cardCall(card, this.config, sample).signer : "none" })),
     };
+  }
+
+  /** For the sections registered in extras.ts (Hall of thieves, claim): the store, the RPC and Ruggy's account. */
+  get store(): RobStore {
+    return this.options.store;
+  }
+
+  get rpc(): NearRpc {
+    return this.options.rpc;
+  }
+
+  get ruggyAccountId(): string {
+    return this.config.ruggyAccountId;
+  }
+
+  /**
+   * The $LEASH trophy: one transaction from Ruggy's full-access key on the token, storage_deposit for the
+   * account then the open mint, both on the token (one receipt: the deposit is refunded if the mint fails).
+   * Never on the vault, the DAO or Ruggy's own account.
+   */
+  async mintTrophy(input: { token: string; accountId: string; amount: string; storageDepositYocto: string }): Promise<Outcome> {
+    if ([this.config.vaultAccountId, this.config.daoAccountId, this.config.ruggyAccountId, this.config.token].includes(input.token)) {
+      throw new RobError(503, "not_configured", "ROB_LEASH_TOKEN must be its own token contract");
+    }
+    return this.sendAsRuggy(input.token, [
+      { type: "FunctionCall", methodName: "storage_deposit", args: { account_id: input.accountId, registration_only: true }, gasTgas: 10, depositYocto: input.storageDepositYocto },
+      { type: "FunctionCall", methodName: "mint", args: { account_id: input.accountId, amount: input.amount }, gasTgas: 10 },
+    ]);
   }
 
   clientHash(address: string): string {
@@ -302,32 +349,38 @@ export class RobService {
       const { publicKey, signedBase64 } = this.playerSigned(input.signed);
       await this.activeKey(publicKey);
       const outcome = await this.options.rpc.send(signedBase64, this.config.ruggyAccountId);
-      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started);
+      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started, { amount: amountOfSigned(input.signed.transaction) });
     }
     const shared = this.nextShared();
     const call = this.callFor(card, RobService.attackerOf(shared.publicKey));
     if (call.signer === "ruggy") {
       const outcome = await this.sendAsRuggy(call.receiverId, call.actions);
-      return this.finish(card, outcome, `${this.config.ruggyAccountId} (his own account: a function-call key cannot reach the DAO)`, null, input.clientHash, started);
+      return this.finish(card, outcome, `${this.config.ruggyAccountId} (his own account: a function-call key cannot reach the DAO)`, null, input.clientHash, started, { amount: amountOfActions(call.actions) });
     }
     const outcome = await this.sendWithKey(shared, call.receiverId, call.actions);
-    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started);
+    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started, { amount: amountOfActions(call.actions) });
   }
 
-  /** Expert mode: any method on the vault, signed by a function-call key. */
-  async forge(input: { method: string; args: Record<string, unknown>; signed?: { transaction: string; signature: string }; clientHash: string }): Promise<PlayResult> {
+  /**
+   * Expert mode: any method on the vault, signed by a function-call key. `as` records it under another
+   * card (Rug O'Clock sends the call its LLM made this way; never set from an HTTP body).
+   */
+  async forge(input: { method: string; args: Record<string, unknown>; signed?: { transaction: string; signature: string }; clientHash: string; as?: "rug-o-clock" }): Promise<PlayResult> {
     const started = this.now();
-    const card: CardInfo = { id: "forge", numeral: "", title: "Forged call", rarity: "BRONZE", line: 0, by: "vault", attempt: `${input.method}(${JSON.stringify(input.args ?? {}).slice(0, 160)})`, why: "", playable: true };
+    const card: CardInfo = { id: input.as ?? "forge", numeral: "", title: input.as ? "Rug O'Clock" : "Forged call", rarity: "BRONZE", line: 0, by: "vault", attempt: `${input.method}(${JSON.stringify(input.args ?? {}).slice(0, 160)})`, why: "", playable: true };
     if (input.signed) {
       const { publicKey, signedBase64 } = this.playerSigned(input.signed);
       await this.activeKey(publicKey);
       const outcome = await this.options.rpc.send(signedBase64, this.config.ruggyAccountId);
-      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started);
+      // The call the player signed, not the one they described: read method and args from the transaction.
+      const signedCall = callOfSigned(input.signed.transaction);
+      if (signedCall) card.attempt = signedCall;
+      return this.finish(card, outcome, `your key ${short(publicKey)} on ${this.config.ruggyAccountId}`, publicKey, input.clientHash, started, { amount: amountOfSigned(input.signed.transaction) });
     }
     const shared = this.nextShared();
     const { receiverId, actions } = this.forgeCall(input);
     const outcome = await this.sendWithKey(shared, receiverId, actions);
-    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started);
+    return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started, { amount: amountOfActions(actions) });
   }
 
   /** A transaction from /prepare and the player's signature over its hash. Only Ruggy's transactions are sent. */
@@ -392,6 +445,14 @@ export class RobService {
     }
   }
 
+  /**
+   * For the sections registered in extras.ts (Hire him): the game's accounts, its RPC, and Ruggy's
+   * full key, on the same nonce counter as the cards (two signers of one key would race).
+   */
+  asRuggy() {
+    return { config: this.config, rpc: this.options.rpc, send: (receiverId: string, actions: RobAction[]) => this.sendAsRuggy(receiverId, actions) };
+  }
+
   private sendAsRuggy(receiverId: string, actions: RobAction[]): Promise<Outcome> {
     return this.sendWithKey({ publicKey: this.ruggyPublicKey, secretKey: this.options.ruggySecretKey }, receiverId, actions).then((outcome) => {
       if (receiverId === this.config.ruggyAccountId && outcome.kind !== "succeeded") {
@@ -401,7 +462,7 @@ export class RobService {
     });
   }
 
-  private async finish(card: CardInfo, outcome: Outcome, signedBy: string, publicKey: string | null, clientHash: string, started: number): Promise<PlayResult> {
+  private async finish(card: CardInfo, outcome: Outcome, signedBy: string, publicKey: string | null, clientHash: string, started: number, extra: RecordExtra = {}): Promise<PlayResult> {
     const result: PlayResult = {
       card: card.id,
       verdict: outcome.kind === "succeeded" ? "paid" : "denied",
@@ -414,14 +475,39 @@ export class RobService {
       signedBy,
       ms: this.now() - started,
     };
-    await this.record(result, publicKey, clientHash);
+    await this.record(result, publicKey, clientHash, extra);
     this.statsCache = null;
     return result;
   }
 
-  private async record(result: PlayResult, publicKey: string | null, clientHash: string) {
+  private async record(result: PlayResult, publicKey: string | null, clientHash: string, extra: RecordExtra = {}) {
+    const id = randomUUID();
     await this.options.store.robPlay.create({
-      data: { card: result.card, verdict: result.verdict, refusedBy: result.refusedBy ?? "none", error: result.error, tx: result.tx, publicKey, clientHash },
+      data: {
+        id, card: result.card, verdict: result.verdict, refusedBy: result.refusedBy ?? "none", error: result.error, tx: result.tx, publicKey, clientHash,
+        call: result.call.slice(0, 200), amount: extra.amount ?? null,
+      },
+    });
+    if (result.tx) this.readGasLater(id, result.tx, extra.signerId ?? this.config.ruggyAccountId);
+  }
+
+  /** The gas a play's transaction burnt, from the chain, after the answer: never delays the play. */
+  private readGasLater(id: string, tx: string, signerId: string) {
+    const update = this.options.store.robPlay.update?.bind(this.options.store.robPlay);
+    if (!update || this.gasReadsWaiting >= 200) return;
+    this.gasReadsWaiting += 1;
+    this.gasReads = this.gasReads.then(async () => {
+      try {
+        const result = await this.options.rpc.call<{ transaction_outcome?: { outcome?: { gas_burnt?: number | string } }; receipts_outcome?: Array<{ outcome?: { gas_burnt?: number | string } }> }>(
+          "tx", { tx_hash: tx, sender_account_id: signerId, wait_until: "EXECUTED_OPTIMISTIC" },
+        );
+        const gasBurnt = [result.transaction_outcome, ...(result.receipts_outcome ?? [])].reduce((sum, item) => sum + BigInt(item?.outcome?.gas_burnt ?? 0), 0n);
+        if (gasBurnt > 0n) await update({ where: { id }, data: { gasBurnt } });
+      } catch (error) {
+        console.warn(`rob gas read ${tx}: ${String(error).slice(0, 200)}`);
+      } finally {
+        this.gasReadsWaiting -= 1;
+      }
     });
   }
 
@@ -503,7 +589,7 @@ export class RobService {
       : { label: "NOT QUEUED", detail: `authorize: ${authorized.kind === "succeeded" ? "no wait logged" : authorized.error}`, tx: authorized.kind === "rejected" ? null : authorized.tx });
     const vetoed = await this.vetoAndConfirm("operation", operation.op_id);
     steps.push({ label: "UNSIGNED", detail: "MPC signs nothing during the wait", tx: null });
-    return this.finishVeto(card, vetoed, steps, signedBy, shared.publicKey, clientHash, started, `prepare + authorize: 2 USDC on Base to ${base.suppliers[0].slice(0, 8)}…, reference ${reference}`);
+    return this.finishVeto(card, vetoed, steps, signedBy, shared.publicKey, clientHash, started, `prepare + authorize: 2 USDC on Base to ${base.suppliers[0].slice(0, 8)}…, reference ${reference}`, request.allowance_amount);
   }
 
   /**
@@ -545,14 +631,14 @@ export class RobService {
   ): Promise<PlayResult> {
     const { bribed, accomplice, attacker, args, signedBy, steps } = input;
     const proposed = await this.sendWithKey(bribed.key, this.config.daoAccountId, [{ type: "FunctionCall", methodName: "add_proposal", args, gasTgas: 150, depositYocto: await this.bond() }], bribed.accountId);
-    if (proposed.kind !== "succeeded") return this.finish(card, proposed, signedBy, null, clientHash, started);
+    if (proposed.kind !== "succeeded") return this.finish(card, proposed, signedBy, null, clientHash, started, { signerId: bribed.accountId });
     const id = Number(proposed.value);
     steps.push({ label: "BRIBED", detail: `2 of 3 owners · proposal #${id}`, tx: proposed.tx });
     const proposal = await this.options.rpc.view<{ kind: unknown }>(this.config.daoAccountId, "get_proposal", { id });
     let voted: Outcome | null = null;
     for (const owner of [bribed, accomplice]) {
       voted = await this.sendWithKey(owner.key, this.config.daoAccountId, [{ type: "FunctionCall", methodName: "act_proposal", args: { id, action: "VoteApprove", proposal: proposal.kind, memo: null }, gasTgas: 250 }], owner.accountId);
-      if (voted.kind !== "succeeded") return this.finish(card, voted, signedBy, null, clientHash, started);
+      if (voted.kind !== "succeeded") return this.finish(card, voted, signedBy, null, clientHash, started, { signerId: owner.accountId });
     }
     const queued = (voted?.kind === "succeeded" ? voted.logs ?? [] : []).map((log) => /OMNIROLES_RULE_QUEUED:([0-9a-f]{64})/.exec(log)?.[1]).find(Boolean);
     steps.push({ label: "VOTED", detail: "proposal passed", tx: voted?.kind === "succeeded" ? voted.tx : null });
@@ -576,18 +662,20 @@ export class RobService {
     clientHash: string,
     started: number,
     call: string,
+    amount: string | null = null,
   ): Promise<PlayResult> {
     if (!vetoed.vetoed) {
       // The sweep retries at once; the play reports what the chain answered.
       void this.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`));
-      return this.finish(card, vetoed.outcome, signedBy, publicKey, clientHash, started);
+      return this.finish(card, vetoed.outcome, signedBy, publicKey, clientHash, started, { amount, signerId: this.owner(2).accountId });
     }
     steps.push({ label: "VETOED", detail: vetoed.tx ? "by the council" : `already, by ${vetoed.by ?? "the council"}`, tx: vetoed.tx });
     const result: PlayResult = {
       card: card.id, verdict: "vetoed", refusedBy: "council", line: card.line, error: card.id === "look-legit" ? "VETOED · veto_operation" : "VETOED · veto_rule_change",
       tx: vetoed.tx, nearblocks: vetoed.tx ? `https://testnet.nearblocks.io/txns/${vetoed.tx}` : null, call, signedBy, steps, ms: this.now() - started,
     };
-    await this.record(result, publicKey, clientHash);
+    // The last transaction is the council's veto.
+    await this.record(result, publicKey, clientHash, { amount, signerId: this.owner(2).accountId });
     this.statsCache = null;
     return result;
   }
@@ -644,6 +732,54 @@ export class RobService {
     // The vault pays only its two listed suppliers (accounts of ours): nothing can leave elsewhere.
     return { attacks, players, denied, lawfulPayments: lawful, linesOfDefense: 3, stolen: 0 };
   }
+}
+
+/** The amount a call attempts, in base units: execute_near's request.amount (digits only, at most 78), else null. */
+export function amountOfArgs(args: unknown): string | null {
+  const request = args && typeof args === "object" ? (args as { request?: unknown }).request : undefined;
+  const amount = request && typeof request === "object" ? (request as { amount?: unknown }).amount : undefined;
+  const text = typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0 ? String(amount) : amount;
+  return typeof text === "string" && /^\d{1,78}$/.test(text) ? text.replace(/^0+(?=\d)/, "") : null;
+}
+
+function amountOfActions(actions: RobAction[]): string | null {
+  for (const action of actions) {
+    if (action.type !== "FunctionCall") continue;
+    const amount = amountOfArgs(action.args);
+    if (amount) return amount;
+  }
+  return null;
+}
+
+/** The function calls of a transaction from /prepare (unsigned bytes, base64). */
+function callsOfSigned(transactionBase64: string): Array<{ method: string; args: unknown }> {
+  try {
+    const transaction = transactions.Transaction.decode(Buffer.from(transactionBase64, "base64"));
+    return transaction.actions.flatMap((action: transactions.Action) => {
+      const call = action.functionCall;
+      if (!call) return [];
+      let args: unknown = null;
+      try {
+        args = JSON.parse(Buffer.from(call.args).toString("utf8"));
+      } catch { /* not JSON */ }
+      return [{ method: call.methodName, args }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function amountOfSigned(transactionBase64: string): string | null {
+  for (const call of callsOfSigned(transactionBase64)) {
+    const amount = amountOfArgs(call.args);
+    if (amount) return amount;
+  }
+  return null;
+}
+
+function callOfSigned(transactionBase64: string): string | null {
+  const call = callsOfSigned(transactionBase64)[0];
+  return call ? `${call.method}(${JSON.stringify(call.args ?? {}).slice(0, 160)})` : null;
 }
 
 function short(publicKey: string): string {

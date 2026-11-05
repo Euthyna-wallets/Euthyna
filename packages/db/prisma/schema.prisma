@@ -610,7 +610,101 @@ model RobPlay {
   publicKey  String?
   clientHash String
   createdAt  DateTime @default(now())
+  /// What was sent, in one line (a forged call: its method and args, cut to 200 characters).
+  call       String?
+  /// Base units of the payment the call attempted (execute_near's request.amount, Look Legit's 2 USDC); none when it names no amount.
+  amount     Decimal? @db.Decimal(78, 0)
+  /// Gas the transaction burnt, read from the chain after the play (null until read, or when there is no transaction).
+  gasBurnt   BigInt?
+  /// The NEAR account that claimed this play's throwaway key (POST /v1/rob/claim).
+  accountId  String?
 
   @@index([createdAt])
+  @@index([card, createdAt])
+  @@index([publicKey])
+  @@index([accountId])
   @@map("rob_play")
+}
+
+/// Rob the Agent · Rug O'Clock: a poisoned invoice dropped by a player. The most voted of each hour is read by Ruggy (a real LLM).
+model RobInvoice {
+  id         String           @id @default(uuid())
+  /// Plain text, at most 500 characters, control characters stripped. Attacker-controlled: reaches the LLM as user content only.
+  text       String           @db.VarChar(500)
+  /// sha256 of the sender's address with a server salt.
+  clientHash String
+  /// The UTC hour it competes in (its start).
+  round      DateTime
+  createdAt  DateTime         @default(now())
+  /// Set once, by a conditional update, when a reading claims it.
+  readAt     DateTime?
+  /// What Ruggy decided (the tool call or his refusal) and what the vault answered.
+  reading    Json?
+  votes      RobInvoiceVote[]
+
+  @@index([round, createdAt])
+  @@index([clientHash, createdAt])
+  @@index([readAt])
+  @@map("rob_invoice")
+}
+
+/// Rob the Agent · Rug O'Clock: one vote, one voter per invoice.
+model RobInvoiceVote {
+  invoiceId String
+  /// sha256 of the voter's address with a server salt.
+  voterHash String
+  createdAt DateTime   @default(now())
+  invoice   RobInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@id([invoiceId, voterHash])
+  @@map("rob_invoice_vote")
+}
+
+/// Rob the Agent: one vote for a forged call in the Hall of thieves, one per voter.
+model RobVote {
+  id        String   @id @default(uuid())
+  playId    String
+  /// The voter's clientHash (salted hash of the address).
+  voterHash String
+  createdAt DateTime @default(now())
+
+  @@unique([playId, voterHash])
+  @@index([playId])
+  @@map("rob_vote")
+}
+
+/// Rob the Agent: a NEAR account that claimed its plays, and its $LEASH testnet trophy (minted once).
+model RobClaim {
+  accountId String    @id
+  /// minting | minted | none (no trophy: no play yet, or no token configured)
+  trophy    String    @default("none")
+  trophyTx  String?
+  createdAt DateTime  @default(now())
+  mintedAt  DateTime?
+
+  @@index([trophy, mintedAt])
+  @@map("rob_claim")
+}
+
+/// Rob the Agent, « Hire him »: the one test-token top-up of a throwaway key (one per key, one per client).
+/// Each step is recorded as it lands, so a retry resumes where the last one stopped.
+model RobHireTopup {
+  /// The throwaway key (ed25519:…); its implicit account is `account`.
+  publicKey  String   @id
+  account    String
+  /// sha256 of the client's address with a server salt, as rob_key: one top-up per client.
+  clientHash String   @unique
+  /// pending | done
+  state      String   @default("pending")
+  /// The NEAR transfer that created the implicit account (none if it existed).
+  createTx   String?
+  /// storage_deposit on the token for the account (none if it was registered).
+  registerTx String?
+  /// mint of the test token to the account.
+  mintTx     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("rob_hire_topup")
 }

@@ -12,6 +12,7 @@ import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { summarizeRoleChanges, type RoleSummary } from "../lib/role-summary.js";
+import { forkedLawOf, LAW_PARAM, type ForkedLaw } from "./onboarding-law.js";
 
 type Registry = { suppliers: Array<{ id: string; name: string; wallets: Array<{ chainId: number; address: string }> }> };
 
@@ -50,6 +51,7 @@ export function RolesPage() {
   const [building, setBuilding] = useState(params.get("new") === "1");
   const suggested = params.get("role") ?? "";
   const job = params.get("job");
+  const law = forkedLawOf(params.get(LAW_PARAM));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <header style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
@@ -95,7 +97,7 @@ export function RolesPage() {
         </div>
         {building ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-            <RoleBuilder initialName={suggested} initialJob={job} onClose={() => { setBuilding(false); setParams({}); }} />
+            <RoleBuilder initialName={suggested} initialJob={job} initialLaw={law} onClose={() => { setBuilding(false); setParams({}); }} />
           </div>
         ) : null}
       </div>
@@ -238,7 +240,7 @@ type BlockDraft =
 
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
-function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose: () => void; initialName?: string; initialJob?: string | null }) {
+function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw = null }: { onClose: () => void; initialName?: string; initialJob?: string | null; initialLaw?: ForkedLaw | null }) {
   const wallets = useWallets();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents") });
@@ -301,8 +303,12 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null }: { onClose
   // A job picked in "Create your AI company" opens with its block already added.
   const jobApplied = useRef(false);
   useEffect(() => {
-    if (jobApplied.current || !initialJob) return;
-    if (initialJob === "payments") addTransfers();
+    if (jobApplied.current || (!initialJob && !initialLaw)) return;
+    // A law forked from /rob (onboarding-law.ts) opens with its own block, every field still editable.
+    if (initialLaw) {
+      setBlocks([{ ...initialLaw.block, receivers: [...initialLaw.block.receivers] }]);
+      setPreview(null);
+    } else if (initialJob === "payments") addTransfers();
     else if (initialJob === "treasury") addSwap("uniswap-v3");
     else if (initialJob === "revenue") {
       if (!sharesAccountId) return; // waits for the shares contract to load
