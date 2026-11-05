@@ -610,7 +610,44 @@ model RobPlay {
   publicKey  String?
   clientHash String
   createdAt  DateTime @default(now())
+  /// What was sent, in one line (a forged call: its method and args, cut to 200 characters).
+  call       String?
+  /// Base units of the payment the call attempted (execute_near's request.amount, Look Legit's 2 USDC); none when it names no amount.
+  amount     Decimal? @db.Decimal(78, 0)
+  /// Gas the transaction burnt, read from the chain after the play (null until read, or when there is no transaction).
+  gasBurnt   BigInt?
+  /// The NEAR account that claimed this play's throwaway key (POST /v1/rob/claim).
+  accountId  String?
 
   @@index([createdAt])
+  @@index([card, createdAt])
+  @@index([publicKey])
+  @@index([accountId])
   @@map("rob_play")
+}
+
+/// Rob the Agent: one vote for a forged call in the Hall of thieves, one per voter.
+model RobVote {
+  id        String   @id @default(uuid())
+  playId    String
+  /// The voter's clientHash (salted hash of the address).
+  voterHash String
+  createdAt DateTime @default(now())
+
+  @@unique([playId, voterHash])
+  @@index([playId])
+  @@map("rob_vote")
+}
+
+/// Rob the Agent: a NEAR account that claimed its plays, and its $LEASH testnet trophy (minted once).
+model RobClaim {
+  accountId String    @id
+  /// minting | minted | none (no trophy: no play yet, or no token configured)
+  trophy    String    @default("none")
+  trophyTx  String?
+  createdAt DateTime  @default(now())
+  mintedAt  DateTime?
+
+  @@index([trophy, mintedAt])
+  @@map("rob_claim")
 }

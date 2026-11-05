@@ -79,6 +79,11 @@ const schema = z.object({
   ROB_OWNER_KEYS: z.string().optional(),
   /** Look Legit: Ruggy's two Base Sepolia suppliers (role "base-payments" of Rob the Agent Co.). */
   ROB_BASE_SUPPLIERS: z.string().default("0x770FEe7954f3FC813AD65d33dAb0D9cc696a2702,0xd63f3e36Dd87e8f8d480Bfe8093b708887156595"),
+  /**
+   * Rob the Agent's $LEASH testnet trophy: a test-ft token (open mint) deployed by scripts/rob-leash.mjs.
+   * Set, a player who claims their plays with a wallet gets 1 LEASH, once. Empty: claims link plays, no trophy.
+   */
+  ROB_LEASH_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().regex(/^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/, "ROB_LEASH_TOKEN must be a NEAR account id").optional()),
   MARKET_RELAYER_ACCOUNT_ID: z.string().optional(),
   MARKET_RELAYER_PRIVATE_KEY: z.string().optional(),
   /** Derives each listing's webhook signing key. */
@@ -129,6 +134,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
     if (parsed.NEAR_NETWORK_ID !== "testnet") throw new Error("Rob the Agent runs on testnet only");
     if (parsed.ROB_OWNER_KEYS && parsed.ROB_OWNER_KEYS.split(",").filter((item) => /^[a-z0-9._-]+:ed25519:\w+$/.test(item.trim())).length !== 3) {
       throw new Error("ROB_OWNER_KEYS must be three account:ed25519:<secret> entries");
+    }
+    if (parsed.ROB_LEASH_TOKEN && [parsed.ROB_TOKEN_ACCOUNT_ID, parsed.ROB_VAULT_ACCOUNT_ID, parsed.ROB_DAO_ACCOUNT_ID, parsed.ROB_RUGGY_ACCOUNT_ID].includes(parsed.ROB_LEASH_TOKEN)) {
+      throw new Error("ROB_LEASH_TOKEN must be its own token contract, not the vault's TestUSDC, the vault, the DAO or Ruggy");
     }
   }
   if (parsed.MARKET_RELAYER_ACCOUNT_ID) {

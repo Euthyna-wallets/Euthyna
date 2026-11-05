@@ -21,6 +21,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Vault versions published on Nomos by hash and upgraded by DAO vote, state kept | Code | `contracts/tests` (upgrade tests); the whitepaper reports three versions live on testnet |
 | Roles for payments, Uniswap swaps, Aave lending, WETH wrapping, Solana transfers, NEAR token transfers, revenue sharing | Code | `packages/sdk/src/roles.ts`, `contracts/omniroles-conditions/src/presets.rs` |
 | Rob the Agent: every card is a real testnet transaction, refused by the vault, the DAO or NEAR; 0 USDC stolen | Testnet | [docs/rob-the-agent.md](./docs/rob-the-agent.md) (hashes per card); the vault pays only its two listed suppliers, accounts of ours; `/v1/rob/stats` counts the recorded plays |
+| Rob the Agent Hall of thieves: gas burned read from the chain, boldest cheque from the amounts refused, votes by players; a wallet claims the plays with a signed message and gets a $LEASH testnet trophy | Code | `apps/api/src/rob/hall.ts`, `hall.test.ts`; [docs/rob-the-agent.md](./docs/rob-the-agent.md#claim-and-hall-of-thieves). The LEASH token is not deployed yet (`scripts/rob-leash.mjs`) |
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
 
 ## Chains
