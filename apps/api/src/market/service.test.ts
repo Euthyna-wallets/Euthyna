@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 
 import { a2aState, assertPublicWebhook, MarketService, privateAddress, toAtomic } from "./service.js";
 

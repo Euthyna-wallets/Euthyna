@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { singleRoleTitle } from "../lib/role-summary.js";
 
-import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeRegistryProposal, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeRegistryProposal, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@euthyna/sdk/roles";
 
 import { api } from "../api.js";
 import { displayAccount, PageState } from "../components/ui.js";

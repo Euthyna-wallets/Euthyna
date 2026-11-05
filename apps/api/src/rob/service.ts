@@ -21,7 +21,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { KeyPair, transactions, utils } from "near-api-js";
 
-import { proposalArgs } from "@mandateos/sdk/roles";
+import { proposalArgs } from "@euthyna/sdk/roles";
 import { encodeFunctionData, erc20Abi, getAddress, hexToBytes, type Hex } from "viem";
 
 import { CARDS, cardById, cardCall, EXECUTE_GAS_TGAS, LAWS, PLAYER_METHODS, SHARED_METHODS, type CardInfo, type Defender, type RobConfig } from "./cards.js";

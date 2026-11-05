@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { cardAccountIdOf } from "@mandateos/sdk/roles";
+import { cardAccountIdOf } from "@euthyna/sdk/roles";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 

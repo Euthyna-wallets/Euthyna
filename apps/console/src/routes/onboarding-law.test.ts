@@ -1,4 +1,4 @@
-import { BASE_SEPOLIA, compileRole } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, compileRole } from "@euthyna/sdk/roles";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { forkedLawOf, lawForCompany, rememberPendingLaw, roleBuilderPath, RUGGY_LAW } from "./onboarding-law.js";

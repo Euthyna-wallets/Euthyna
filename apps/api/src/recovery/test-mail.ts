@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
-import { circuitInputs, modulusFromDkimRecord, newSalt, PROOF_TARGET } from "@mandateos/sdk/email-proof";
+import { circuitInputs, modulusFromDkimRecord, newSalt, PROOF_TARGET } from "@euthyna/sdk/email-proof";
 import { Noir } from "@noir-lang/noir_js";
 
 const circuit = () => JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../console/public/circuits/email_recovery.json"), "utf8")) as { bytecode: string };

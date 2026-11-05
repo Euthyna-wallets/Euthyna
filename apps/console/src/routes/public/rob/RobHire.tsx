@@ -3,7 +3,7 @@
  * throwaway key. Handoff: rob-the-agent.html, section HIRE HIM.
  *
  * The browser does what any buyer agent does (x402 + NEP-366): reads the 402 from the A2A endpoint, signs one
- * ft_transfer as a delegate action with the throwaway key (`@mandateos/sdk/cheque`, the builder the API tests
+ * ft_transfer as a delegate action with the throwaway key (`@euthyna/sdk/cheque`, the builder the API tests
  * against its own cheque checks), and sends the task with the cheque. The gateway holds it; the API delivers
  * Ruggy's check; the market relayer cashes the cheque. The receipt shows the task's and the hold's real states.
  * API: /v1/rob/hire/* (apps/api/src/rob/hire.ts), /a2a/<handle>/v1, /v1/market/tasks/<id>.
@@ -11,7 +11,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { signCheque, type ChequeRequirement } from "@mandateos/sdk/cheque";
+import { signCheque, type ChequeRequirement } from "@euthyna/sdk/cheque";
 
 import { API_BASE } from "../../../api.js";
 import { Markdown } from "../../../lib/markdown.js";

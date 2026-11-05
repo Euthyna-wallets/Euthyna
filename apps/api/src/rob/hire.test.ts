@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { KeyPair } from "near-api-js";
 import { describe, expect, it } from "vitest";
 
-import { signCheque } from "@mandateos/sdk/cheque";
+import { signCheque } from "@euthyna/sdk/cheque";
 
 import { decodeCheque, parsePaymentHeader, verifyCheque, type ChequeChain, type PaymentRequirement } from "../market/cheque.js";
 import { BUYER, buyerKey, cheque, requirement } from "../market/test-cheque.js";
@@ -15,7 +15,7 @@ const VAULT = "rob.nomos.testnet";
 const settings = { ROB_HIRE_HANDLE: "ruggy-tx-check", ROB_HIRE_DAILY_TOPUPS: 5, ROB_HIRE_TOPUPS_PER_CLIENT: 2, ROB_HIRE_ACCOUNT_YOCTO: "1", ROB_HIRE_POLL_MS: 2_000, ROB_HIRE_DELIVERY_TOKEN: undefined };
 const sign = (pair: KeyPair) => (hash: Uint8Array) => pair.sign(hash).signature;
 
-describe("the cheque the browser builds (@mandateos/sdk/cheque)", () => {
+describe("the cheque the browser builds (@euthyna/sdk/cheque)", () => {
   it("is byte for byte the cheque near-api-js builds, for the same key, nonce and height", async () => {
     // test-cheque.ts: nonce 101, maxBlockHeight 20 000, 30 Tgas, 1 yocto, {"receiver_id":VAULT,"amount":"2000000"} on USDC.
     const ours = await signCheque({

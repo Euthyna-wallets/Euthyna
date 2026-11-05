@@ -11,8 +11,8 @@ import { lookup } from "node:dns/promises";
 import { request } from "node:https";
 import { isIP } from "node:net";
 
-import type { PrismaClient } from "@mandateos/db";
-import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+import type { PrismaClient } from "@euthyna/db";
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 
 import { ChequeError, parsePaymentHeader, verifyCheque, X402_VERSION, type ChequeChain, type PaymentRequirement } from "./cheque.js";
 import type { ChequeRelayer, FinalTransaction } from "./near-market.js";

@@ -6,7 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
-import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 
 import { Markdown } from "../../lib/markdown.js";
 import { market, tokenAmount, type MarketTaskView } from "../../lib/market.js";

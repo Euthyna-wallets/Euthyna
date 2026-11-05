@@ -7,8 +7,8 @@ import {
   OnchainAgentClient,
   type MarketBuyer,
   type PaymentRequest,
-} from "@mandateos/sdk";
-import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+} from "@euthyna/sdk";
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const uint = z.string().regex(/^\d+$/);
@@ -73,14 +73,16 @@ export class MandateMcpTools {
     value?: string | undefined;
     allowanceAmount?: string | undefined;
     chainId?: number | undefined;
-    reference: string;
+    reference?: string | undefined;
   }) {
+    // A dry run reserves nothing: a reference is only needed to test one the agent means to reuse.
+    const reference = input.reference ?? `check-${Date.now()}`;
     if (input.token && input.recipient && input.amount) {
       return this.client.check({
         token: evmAddressBytes(input.token as `0x${string}`),
         recipient: evmAddressBytes(input.recipient as `0x${string}`),
         amount: input.amount,
-        reference: input.reference,
+        reference,
       }, input.chainId ?? 84532);
     }
     if (!input.to) throw new Error("give either token + recipient + amount (a transfer) or to (+ data, value) for any other call");
@@ -90,7 +92,7 @@ export class MandateMcpTools {
       ...(input.data ? { data: input.data as `0x${string}` } : {}),
       ...(input.value ? { value: input.value } : {}),
       ...(input.allowanceAmount ? { allowanceAmount: input.allowanceAmount } : {}),
-      reference: input.reference,
+      reference,
     });
   }
 
@@ -144,7 +146,7 @@ function result(value: unknown) {
 }
 
 export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
-  const server = new McpServer({ name: "mandateos", version: "0.2.0" }, {
+  const server = new McpServer({ name: "euthyna", version: "0.2.0" }, {
     instructions: [
       "You act inside a role on a company wallet governed by Euthyna.",
       "Call `mandate` first to learn what your role allows, your remaining budgets and the recipients you may pay.",
@@ -164,7 +166,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.call(input)));
   server.registerTool("mandate", {
     title: "Read my mandate",
-    description: "What this agent may do: its role, what each budget has left this period, the on-chain supplier list and the company wallet. Read from the vault on NEAR.",
+    description: "What this agent may do: its role, what each budget has left this period, who it may pay (`payees`: addresses the role names, and whether the on-chain `suppliers` list also counts) and the company wallet. Read from the vault on NEAR.",
     inputSchema: {},
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async () => result(await tools.mandate()));
@@ -180,7 +182,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
       value: uint.optional(),
       allowanceAmount: uint.optional().describe("Budget the call consumes, in the token's smallest unit (e.g. the amount supplied to a protocol)."),
       chainId: z.number().int().positive().optional(),
-      reference: z.string().min(1).max(120),
+      reference: z.string().min(1).max(120).optional().describe("The reference the payment will use; optional for a dry run."),
     },
     annotations: { readOnlyHint: true, idempotentHint: true },
   }, async (input) => result(await tools.check(input)));

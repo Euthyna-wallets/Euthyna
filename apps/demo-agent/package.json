@@ -1,5 +1,5 @@
 {
-  "name": "@mandateos/demo-agent",
+  "name": "@euthyna/demo-agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mandateos/sdk": "workspace:^",
+    "@euthyna/sdk": "workspace:^",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   },

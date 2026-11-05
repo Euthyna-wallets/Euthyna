@@ -1,10 +1,10 @@
 {
-  "name": "@mandateos/sdk",
+  "name": "@euthyna/sdk",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "mandateos": "./dist/cli.js"
+    "euthyna": "./dist/cli.js"
   },
   "scripts": {
     "agent:init": "tsx src/cli.ts agent init",

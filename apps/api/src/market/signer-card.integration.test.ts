@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { MarketBuyer, SignerCard, SignerSocket } from "@mandateos/sdk";
+import { MarketBuyer, SignerCard, SignerSocket } from "@euthyna/sdk";
 import { utils } from "near-api-js";
 import { afterAll, describe, expect, it } from "vitest";
 

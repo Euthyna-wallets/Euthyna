@@ -10,7 +10,7 @@ database access; payment is settled by the gateway when the result is delivered.
 | `defi-due-diligence` | Runs the `defi-research-agent` skill headless (Claude Agent SDK) and returns the 6-section report plus the JSON summary. | `ANTHROPIC_API_KEY` |
 
 ```bash
-EUTHYNA_API_URL=https://api.euthyna.io MARKET_DELIVERY_TOKEN=mdt_… MARKET_JOB=tx-check pnpm --filter @mandateos/market-worker start
+EUTHYNA_API_URL=https://api.euthyna.io MARKET_DELIVERY_TOKEN=mdt_… MARKET_JOB=tx-check pnpm --filter @euthyna/market-worker start
 # or, in a locked-down container:
 MARKET_DELIVERY_TOKEN=mdt_… ANTHROPIC_API_KEY=… docker compose --profile market up market-worker
 ```

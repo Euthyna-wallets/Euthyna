@@ -1,4 +1,4 @@
-import { proposedAgentAccountId } from "@mandateos/sdk";
+import { proposedAgentAccountId } from "@euthyna/sdk";
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";

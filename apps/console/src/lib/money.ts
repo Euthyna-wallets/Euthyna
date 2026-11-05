@@ -1,4 +1,4 @@
-import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 
 import type { Activity, ActivityItem, OnchainOperation } from "../omniroles-api.js";
 import { tokenAmount, type Sale } from "./market.js";

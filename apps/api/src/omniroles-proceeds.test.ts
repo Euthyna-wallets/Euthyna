@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@mandateos/db";
-import { proceedsToEvmKinds } from "@mandateos/sdk/roles";
+import type { PrismaClient } from "@euthyna/db";
+import { proceedsToEvmKinds } from "@euthyna/sdk/roles";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";

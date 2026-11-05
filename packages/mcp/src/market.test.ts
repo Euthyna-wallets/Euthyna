@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MarketBuyer, OnchainAgentClient } from "@mandateos/sdk";
+import type { MarketBuyer, OnchainAgentClient } from "@euthyna/sdk";
 import { MandateMcpTools } from "./index.js";
 
 describe("market tools", () => {

@@ -34,7 +34,7 @@ services:
 
   db-init:
     <<: *app
-    command: ["pnpm", "--filter", "@mandateos/db", "exec", "prisma", "db", "push"]
+    command: ["pnpm", "--filter", "@euthyna/db", "exec", "prisma", "db", "push"]
     depends_on:
       postgres:
         condition: service_healthy

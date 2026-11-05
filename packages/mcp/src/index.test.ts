@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentApiGateway, VaultGateway } from "@mandateos/sdk";
-import { MandateAgentClient } from "@mandateos/sdk";
+import type { AgentApiGateway, VaultGateway } from "@euthyna/sdk";
+import { MandateAgentClient } from "@euthyna/sdk";
 
 import { MandateMcpTools } from "./index.js";
 

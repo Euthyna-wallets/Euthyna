@@ -561,7 +561,7 @@ export function AtlantisLanding() {
             <div className="ori" style={{ height: 6 }} />
             <pre style={{ margin: 0, padding: "28px 30px", background: "#030B20", color: "#D5DDF0", font: `14px/1.85 ${MONO}`, overflowX: "auto", whiteSpace: "pre" }}>
               <span style={{ color: "#6F82AE" }}># give the agent a wallet</span>
-              {"\n"}claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- pnpm --silent --dir MandateOS/packages/mcp exec tsx src/server.ts{"\n\n"}
+              {"\n"}claude mcp add euthyna --env EUTHYNA_AGENT=naomi.acme.testnet -- pnpm --silent --dir Euthyna/packages/mcp exec tsx src/server.ts{"\n\n"}
               <span style={{ color: "#6F82AE" }}>{"// or ask the vault directly, free"}</span>
               {"\n"}vault.<span style={{ color: "#4FD1E8" }}>check_operation</span>(role, member, request) <span style={{ color: "#6F82AE" }}>{"// → allowed | reason"}</span>
               {"\n"}op = vault.<span style={{ color: "#4FD1E8" }}>prepare</span>(role, request){"\n"}vault.<span style={{ color: "#4FD1E8" }}>authorize</span>(op.op_id,{" "}
@@ -598,7 +598,7 @@ export function AtlantisLanding() {
             </div>
           </div>
           <p style={{ margin: 0, textAlign: "center", fontSize: 15, color: "#4A5675" }}>
-            Every claim on this page is mapped to its proof in <a href="https://github.com/Euthyna-wallets/MandateOS/blob/main/CLAIMS.md" style={{ color: "#0D1730" }}>CLAIMS.md</a> ·{" "}
+            Every claim on this page is mapped to its proof in <a href="https://github.com/Euthyna-wallets/Euthyna/blob/main/CLAIMS.md" style={{ color: "#0D1730" }}>CLAIMS.md</a> ·{" "}
             <Link to="/whitepaper" style={{ color: "#0D1730" }}>Read the whitepaper</Link>
           </p>
         </div>

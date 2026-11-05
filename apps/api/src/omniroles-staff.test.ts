@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@mandateos/db";
-import { BASE_SEPOLIA, compileRole, decodeVaultCalls, type RuleChange } from "@mandateos/sdk/roles";
+import type { PrismaClient } from "@euthyna/db";
+import { BASE_SEPOLIA, compileRole, decodeVaultCalls, type RuleChange } from "@euthyna/sdk/roles";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";

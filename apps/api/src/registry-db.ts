@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@mandateos/db";
+import type { Prisma, PrismaClient } from "@euthyna/db";
 import { getAddress } from "viem";
 
 

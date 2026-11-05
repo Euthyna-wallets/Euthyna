@@ -118,7 +118,7 @@ With euthyna-signer, the config is one line and holds no secret: the socket is
 found by itself, and the vault, role and network are read from the signer.
 
 ```bash
-# once: git clone https://github.com/Euthyna-wallets/MandateOS && cd Euthyna && pnpm install
+# once: git clone https://github.com/Euthyna-wallets/Euthyna && cd Euthyna && pnpm install
 claude mcp add euthyna --env EUTHYNA_AGENT=<agent>.testnet -- pnpm --silent --dir $PWD/packages/mcp exec tsx src/server.ts
 ```
 
@@ -127,8 +127,7 @@ from a clone of this repository, as above. From the repository, with a local
 key instead:
 
 ```bash
-pnpm --filter @mandateos/sdk build
-pnpm --filter @mandateos/mcp build
+pnpm --filter "@euthyna/mcp..." build   # the server and the SDK it uses
 
 MANDATEOS_API_URL=… MANDATEOS_AGENT_API_KEY=… AGENT_NEAR_ACCOUNT_ID=… \
 VAULT_ACCOUNT_ID=… AGENT_ROLE=… node packages/mcp/dist/server.js

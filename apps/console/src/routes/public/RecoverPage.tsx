@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { authClient } from "../../auth.js";
 import { enrollmentOf, proveEmailFile, RECOVERY_CONTRACT_ID, recoverySubject } from "../../lib/email-proof.js";
+import { recoveryErrorText } from "../../lib/recovery-errors.js";
 import { signContractCall, viewContract } from "../../wallets.js";
 import { EmailProofStep, RECOVERY_DEPOSIT, RECOVERY_GAS } from "../RecoveryCard.js";
 import { SignIn } from "../SignIn.js";
@@ -39,7 +40,7 @@ export function RecoverPage() {
       const until = open ? new Date(Number(BigInt(open.not_before_ns) / 1_000_000n)).toLocaleString() : "the end of the waiting period";
       setMessage(`Request recorded on chain. ${lostId} can cancel it until ${until}; after that, the other founders vote to give you the seat.`);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
+      setMessage(recoveryErrorText(cause));
     } finally {
       setBusy(false);
     }

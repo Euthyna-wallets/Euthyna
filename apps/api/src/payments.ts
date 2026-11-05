@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import { bytesToHex, decodeFunctionData, encodeFunctionData, getAddress, type Hex } from "viem";
 import { z } from "zod";
 

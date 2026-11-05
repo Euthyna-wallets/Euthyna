@@ -114,7 +114,7 @@ jobs:
       - name: Typecheck then API, console, MCP and SDK tests
         run: |
           pnpm typecheck
-          pnpm --filter @mandateos/api test
-          pnpm --filter @mandateos/console test
-          pnpm --filter @mandateos/mcp test
-          pnpm --filter @mandateos/sdk test
+          pnpm --filter @euthyna/api test
+          pnpm --filter @euthyna/console test
+          pnpm --filter @euthyna/mcp test
+          pnpm --filter @euthyna/sdk test

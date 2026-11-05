@@ -6,7 +6,7 @@
  * ZK_EMAIL_PROVE=1 vitest run src/recovery/email.prove
  */
 import { Barretenberg, UltraHonkVerifierBackend } from "@aztec/bb.js";
-import { EMAIL_RECOVERY_VK_BASE64, newSalt, PROOF_TARGET, readPublicInputs, recoverySubject } from "@mandateos/sdk/email-proof";
+import { EMAIL_RECOVERY_VK_BASE64, newSalt, PROOF_TARGET, readPublicInputs, recoverySubject } from "@euthyna/sdk/email-proof";
 import { describe, expect, it } from "vitest";
 
 import { proveEmail, signedEmail, testMailDomain } from "./test-mail.js";

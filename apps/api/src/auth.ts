@@ -2,7 +2,7 @@ import { apiKey } from "@better-auth/api-key";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { organization } from "better-auth/plugins";
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 
 import type { Env } from "./env.js";
 import { nearSignIn, type NearSignInOptions } from "./near-auth.js";

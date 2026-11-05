@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@mandateos/db";
-import { AGENT_FUNCTION_CALL_METHODS, AGENT_METHOD_GENERATIONS, proposedAgentAccountId } from "@mandateos/sdk";
+import type { PrismaClient } from "@euthyna/db";
+import { AGENT_FUNCTION_CALL_METHODS, AGENT_METHOD_GENERATIONS, proposedAgentAccountId } from "@euthyna/sdk";
 
 import type { NearClient } from "./near.js";
 

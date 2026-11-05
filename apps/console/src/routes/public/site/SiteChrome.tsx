@@ -68,7 +68,7 @@ export function SiteFooter() {
       >
         <span style={{ font: "700 14px Cinzel, serif", letterSpacing: ".24em", color: "#F3EFE6" }}>EUTHYNA · ATLANTIS</span>
         <span>
-          Testnets only · contracts not audited · <a href="https://github.com/Euthyna-wallets/MandateOS">GitHub</a> ·{" "}
+          Testnets only · contracts not audited · <a href="https://github.com/Euthyna-wallets/Euthyna">GitHub</a> ·{" "}
           <Link to="/whitepaper">Whitepaper</Link>
         </span>
       </div>

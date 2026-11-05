@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@mandateos/db";
+import type { Prisma, PrismaClient } from "@euthyna/db";
 import { getAddress } from "viem";
 
 import { AGENT_API_KEY_CONFIG_ID, type MandateAuth } from "./auth.js";

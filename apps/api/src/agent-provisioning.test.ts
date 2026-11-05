@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AGENT_FUNCTION_CALL_METHODS, NEAR_AGENT_METHODS } from "@mandateos/sdk";
+import { AGENT_FUNCTION_CALL_METHODS, NEAR_AGENT_METHODS } from "@euthyna/sdk";
 
 import { attestAgentAccessKeys } from "./agent-provisioning.js";
 

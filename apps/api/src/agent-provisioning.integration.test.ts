@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { PrismaClient } from "@mandateos/db";
-import { AGENT_FUNCTION_CALL_METHODS, proposedAgentAccountId } from "@mandateos/sdk";
+import { PrismaClient } from "@euthyna/db";
+import { AGENT_FUNCTION_CALL_METHODS, proposedAgentAccountId } from "@euthyna/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { AgentProvisioningService } from "./agent-provisioning.js";

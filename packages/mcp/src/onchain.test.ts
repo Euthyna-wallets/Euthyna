@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { OnchainAgentClient } from "@mandateos/sdk";
+import { OnchainAgentClient } from "@euthyna/sdk";
 import { MandateMcpTools } from "./index.js";
 type Hex = `0x${string}`;
 

@@ -1,5 +1,5 @@
 {
-  "name": "@mandateos/console",
+  "name": "@euthyna/console",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@aztec/bb.js": "5.3.0",
-    "@mandateos/sdk": "workspace:^",
+    "@euthyna/sdk": "workspace:^",
     "@near-wallet-selector/core": "^9.1.0",
     "@near-wallet-selector/meteor-wallet": "^9.5.4",
     "@near-wallet-selector/modal-ui": "^9.1.0",

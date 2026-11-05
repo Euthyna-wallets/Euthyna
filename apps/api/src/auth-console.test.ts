@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import { describe, expect, it } from "vitest";
 
 import type { MandateAuth } from "./auth.js";

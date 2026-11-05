@@ -3,8 +3,8 @@
  * relayer with a public key the agent's euthyna-signer made. The relayer never
  * holds the card's key; it only pays the account and its token registration.
  */
-import { cardAccountIdOf } from "@mandateos/sdk";
-import { NEAR_TESTNET_TOKENS } from "@mandateos/sdk/roles";
+import { cardAccountIdOf } from "@euthyna/sdk";
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 
 /** Enough for the account's storage; the card never pays gas (relayers do). */
 export const CARD_FUNDING_YOCTO = "10000000000000000000000"; // 0.01 NEAR
