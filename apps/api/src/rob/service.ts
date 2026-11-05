@@ -445,6 +445,14 @@ export class RobService {
     }
   }
 
+  /**
+   * For the sections registered in extras.ts (Hire him): the game's accounts, its RPC, and Ruggy's
+   * full key, on the same nonce counter as the cards (two signers of one key would race).
+   */
+  asRuggy() {
+    return { config: this.config, rpc: this.options.rpc, send: (receiverId: string, actions: RobAction[]) => this.sendAsRuggy(receiverId, actions) };
+  }
+
   private sendAsRuggy(receiverId: string, actions: RobAction[]): Promise<Outcome> {
     return this.sendWithKey({ publicKey: this.ruggyPublicKey, secretKey: this.options.ruggySecretKey }, receiverId, actions).then((outcome) => {
       if (receiverId === this.config.ruggyAccountId && outcome.kind !== "succeeded") {

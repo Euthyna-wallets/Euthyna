@@ -80,6 +80,8 @@ until the budget refills: the vault checks the budget before the reference.
 | POST | `/v1/rob/hall/vote` `{ playId }` | one vote for a forged call |
 | POST | `/v1/rob/claim/challenge` `{ throwawayKey }` | nonce and the message the wallet signs |
 | POST | `/v1/rob/claim` `{ accountId, publicKey, signature, throwawayKey, throwawaySignature, nonce }` | links the plays, mints the trophy once |
+| POST | `/v1/rob/hire/terms` `{ publicKey }` | Hire him: the key's account, nonce, a final height, balance |
+| POST | `/v1/rob/hire/topup` `{ publicKey }` | Hire him: 1 TestUSDC on the key's implicit account, once per player |
 
 Players are counted by a salted hash of their address; addresses are not stored.
 
@@ -191,6 +193,66 @@ Schema: `rob_play` gains `call`, `amount`, `gasBurnt`, `accountId`; new tables `
 with `prisma db push` as for the other tables. Tests: `src/rob/hall.test.ts` (mocks; the Prisma store and its SQL
 run against PostgreSQL when `TEST_DATABASE_URL` is set).
 
+## Hire him (Ruggy's service on the Market)
+
+« Can't rob him? Hire him. »: the player buys Ruggy's real service on the [Euthyna Market](market.md) for 1 TestUSDC,
+from the same throwaway key, with the held cheque of any buyer agent.
+
+| | |
+| --- | --- |
+| Listing | `ruggy-tx-check` (`ROB_HIRE_HANDLE`), « Check a transaction before you sign it », seller Rob the Agent Co., category security |
+| Pays | 1 TestUSDC (`1000000`, 6 decimals) to the Rob vault (`payTo` = `ROB_VAULT_ACCOUNT_ID`, already registered on the token) |
+| SLA | 120 s; the cheque must then live 720 s (SLA + `MARKET_SETTLEMENT_MARGIN_SECONDS`), 1,440 blocks |
+| Work | the worker's deterministic `tx-check` (`@mandateos/sdk/tx-check`, the same function `apps/market-worker` runs) |
+
+**Top-up**, `POST /v1/rob/hire/topup { publicKey }`. Ruggy's full key (the one the cards use, on the same nonce counter)
+creates the key's implicit account (`attackerOf`, 64 hex; the browser key is its full-access key) with a 1 yoctoNEAR
+transfer (`ROB_HIRE_ACCOUNT_YOCTO`: an account that small needs no storage stake, NEP-448), calls `storage_deposit` for it on
+the token (the token's `storage_balance_bounds.min`, paid by Ruggy) and mints it 1 TestUSDC. Once per key and once per client
+(salted address hash, as `rob_key`), at most `ROB_HIRE_DAILY_TOPUPS` (100) a UTC day for everyone. Each step is recorded in
+`rob_hire_topup` as it lands and skipped when the chain already shows it, so a retry resumes; a second call returns the same
+transactions. Players behind one address (a conference network) share one top-up.
+
+**Terms**, `POST /v1/rob/hire/terms { publicKey }`: the account, the key's nonce (final; null before the account exists), a
+final block height, the balance and whether the key was topped up.
+
+**The purchase, in the browser** (`apps/console/src/routes/public/rob/RobHire.tsx`):
+
+1. top-up if the balance is short, then the terms;
+2. `SendMessage` to `/a2a/<handle>/v1` without payment: the `402` gives the requirement. The page refuses to sign unless it asks
+   for the Rob vault, TestUSDC and at most 1 (step « 1 · RULE »: the throwaway key has no on-chain law; the cap is the price
+   the player agreed to, as `max_price` for an agent);
+3. `signCheque` (`@mandateos/sdk/cheque`) signs, with the throwaway key, a NEP-366 delegate of one `ft_transfer`
+   `{"receiver_id":"<vault>","amount":"1000000"}`, 1 yoctoNEAR, 30 Tgas, nonce + 1, max height = height + 2 × timeout + 120;
+4. `SendMessage` with `X-PAYMENT`; then `GET /v1/market/tasks/<id>` every 2 s. The receipt: HELD once the gateway holds the
+   cheque, DELIVERED once the result is stored (hold `settling` or later), PAID once the hold is `settled`, with the
+   settlement transaction on nearblocks and the report (released only once paid). The buyer pays no gas: the market relayer
+   sends the delegate.
+
+**Delivery, inside the API.** No worker container: with `ROB_HIRE_DELIVERY_TOKEN` set, the API polls its own worker endpoints
+every `ROB_HIRE_POLL_MS` (2 s) in-process (`app.request`, the listing's delivery token), starts each task, runs `tx-check` and
+delivers it; `MarketService.deliver` then relays the cheque with the market relayer, as for any seller. Input that is not a
+transaction fails the task: the cheque is never relayed and the player keeps the test USDC.
+
+**Tests** (`apps/api/src/rob/hire.test.ts`): the cheque `signCheque` builds is byte for byte the one near-api-js builds in the
+market's own test helper, and passes every check of `cheque.ts` from an implicit account (and fails with another payee or
+another key); top-up steps, idempotence, one per client, daily cap, resume after a failed step without a second mint; the
+in-process delivery (deliver, fail on bad input, retries); the routes. A cheque signed by the real page bundle (Playwright,
+API stubbed) decodes in `cheque.ts` with a valid signature.
+
+### Setup, once, in production
+
+1. `prisma db push` (table `rob_hire_topup`).
+2. `DATABASE_URL=… ROB_VAULT_ACCOUNT_ID=… node scripts/rob-hire-setup.mjs` (dry run), then `--apply`. It checks with a view
+   call that the vault is registered on the token, finds Rob the Agent Co. from the vault's treasury (or `--org <id>`, or
+   `--create-company`), creates the listing live and prints a delivery token. It sends nothing on NEAR.
+3. Set `ROB_HIRE_DELIVERY_TOKEN` to that token in the API's environment and restart it. The market must be enabled
+   (`MARKET_RELAYER_*`, `MARKET_WEBHOOK_SECRET`) with its relayer funded.
+4. Ruggy pays each top-up: 1 yocto, the storage deposit (0.00125 NEAR if the token uses the usual minimum) and three
+   transactions' gas; keep his account funded accordingly.
+
+Not run yet on testnet: the top-up (in particular the 1 yocto account creation) and a purchase end to end.
+
 ## Not built yet
 
-Hire him (Ruggy's service on the Market).
+Nothing from the handoff is left. Next: the $LEASH trophy under its own name (test-ft has a fixed name and symbol).
