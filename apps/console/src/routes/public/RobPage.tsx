@@ -8,48 +8,38 @@
  * screens/01-deck-desktop.png. API: /v1/rob/* (apps/api/src/rob).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyPair, utils } from "near-api-js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { API_BASE, PUBLIC_API_URL } from "../../api.js";
+import { PUBLIC_API_URL } from "../../api.js";
 import "../../styles/site.css";
 import "../../styles/rob.css";
+import { RobClaim } from "./rob/RobClaim.js";
+import { RobHall } from "./rob/RobHall.js";
+import { RobHire } from "./rob/RobHire.js";
+import { RobRugOClock } from "./rob/RobRugOClock.js";
+import { RobShareCard } from "./rob/RobShareCard.js";
+import {
+  attackerOf,
+  BRAND,
+  type Card,
+  type Deck,
+  fromBase64,
+  keyPairOf,
+  loadKey,
+  loadKeyFresh,
+  MONO,
+  NUMERALS,
+  type Play,
+  robCall,
+  saveKey,
+  shortKey,
+  type Shown,
+  type Stats,
+  type Throwaway,
+  toBase64,
+} from "./rob/shared.js";
 import { SiteFooter, SiteHeader } from "./site/SiteChrome.js";
-
-const BRAND = "Cinzel, serif";
-const MONO = "'JetBrains Mono', monospace";
-const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
-
-type Card = {
-  id: string;
-  numeral: string;
-  title: string;
-  rarity: "BRONZE" | "MARBLE" | "LEGENDARY" | "BOSS";
-  line: number;
-  by: string;
-  attempt: string;
-  why: string;
-  playable: boolean;
-  signer: "function-call" | "ruggy" | "scripted" | "none";
-};
-type Deck = { ruggy: string; vault: string; dao: string; suppliers: string[]; token: string; role: string; laws: string[]; cards: Card[] };
-type Stats = { attacks: number; players: number; denied: number; lawfulPayments: number; linesOfDefense: number; stolen: number };
-type Play = {
-  card: string;
-  verdict: "denied" | "counter" | "vetoed" | "paid";
-  refusedBy: "vault" | "near" | "dao" | "ruggy" | "council" | null;
-  line: number | null;
-  error: string | null;
-  tx: string | null;
-  nearblocks: string | null;
-  call: string;
-  signedBy: string;
-  counter?: { counter: number; expires_in: number; to: string };
-  steps?: Array<{ label: string; detail: string; tx: string | null }>;
-  ms: number;
-};
-type Shown = { card: Card | null; state: "sending" | "done" | "error"; play?: Play; message?: string };
 
 const ART: Record<string, string> = {
   "pay-the-attacker": "card-pay-attacker",
@@ -74,46 +64,6 @@ const KICKER: Record<string, string> = {
   ruggy: "Counter-offer · inside the law",
   council: "Vetoed by the council",
 };
-
-async function robCall<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const json = (await response.json().catch(() => ({}))) as T & { error?: string; message?: string };
-  if (!response.ok) throw Object.assign(new Error(json.message ?? json.error ?? response.statusText), { status: response.status, code: json.error });
-  return json;
-}
-
-/** The throwaway key, kept in this browser for a day (best effort: a fresh one otherwise). */
-const KEY_STORE = "rob.throwaway";
-type Throwaway = { secret: string; publicKey: string; createdAt: number; onRuggy: boolean };
-function loadKey(): Throwaway {
-  try {
-    const saved = JSON.parse(localStorage.getItem(KEY_STORE) ?? "null") as Throwaway | null;
-    if (saved && Date.now() - saved.createdAt < 23 * 3_600_000) return saved;
-  } catch { /* storage unavailable: a key for this visit only */ }
-  const pair = KeyPair.fromRandom("ed25519");
-  return { secret: pair.toString(), publicKey: pair.getPublicKey().toString(), createdAt: Date.now(), onRuggy: false };
-}
-function saveKey(key: Throwaway) {
-  try {
-    localStorage.setItem(KEY_STORE, JSON.stringify(key));
-  } catch { /* fine */ }
-}
-function shortKey(publicKey: string) {
-  const body = publicKey.replace(/^ed25519:/, "");
-  return `ed25519:${body.slice(0, 3)}…${body.slice(-3)}`;
-}
-function fromBase64(value: string): Uint8Array {
-  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
-}
-function toBase64(bytes: Uint8Array): string {
-  let text = "";
-  bytes.forEach((byte) => { text += String.fromCharCode(byte); });
-  return btoa(text);
-}
-/** The player's own account: the implicit account of their key (64 hex characters). */
-function attackerOf(publicKey: string): string {
-  return Array.from(utils.PublicKey.fromString(publicKey).data, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
 
 export function RobPage() {
   const queryClient = useQueryClient();
@@ -167,8 +117,7 @@ export function RobPage() {
 
   async function signed(own: Throwaway, body: Record<string, unknown>) {
     const prepared = await robCall<{ transaction: string; hash: string }>("/v1/rob/prepare", { publicKey: own.publicKey, ...body });
-    const pair = KeyPair.fromString(own.secret as Parameters<typeof KeyPair.fromString>[0]);
-    return { transaction: prepared.transaction, signature: toBase64(pair.sign(fromBase64(prepared.hash)).signature) };
+    return { transaction: prepared.transaction, signature: toBase64(keyPairOf(own).sign(fromBase64(prepared.hash)).signature) };
   }
 
   /** A key removed after its day (or never added) is replaced once, then the play is sent again. */
@@ -381,19 +330,13 @@ export function RobPage() {
         </div>
       </section>
 
-      {/* FORK */}
+      {/* HIRE HIM */}
+      <RobHire throwaway={key} deck={deck.data ?? null} />
+
+      {/* CLAIM + FORK */}
       <section className="nightm" style={{ padding: "90px 0" }}>
         <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 48, alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <span className="kick" style={{ color: "#F2B544" }}>You lost. Fairly.</span>
-            <h2 style={{ margin: 0, font: `900 clamp(34px,4.2vw,58px)/1.02 ${BRAND}`, letterSpacing: ".04em", color: "#F3EFE6" }}>
-              NOW MAKE IT <span className="leaf">YOURS.</span>
-            </h2>
-            <p style={{ margin: 0, fontSize: 17, lineHeight: 1.6, color: "#A9B6D6" }}>
-              The law that just beat you is a role in a vault, voted by a DAO. Give your own agents the same one: they can be hacked, the money
-              still follows the law.
-            </p>
-          </div>
+          <RobClaim throwaway={key} />
           <div className="marblelit" style={{ color: "#0D1730", padding: 30, boxShadow: "24px 30px 70px rgba(0,0,0,.6)", display: "flex", flexDirection: "column", gap: 16 }}>
             <b className="carved" style={{ font: `900 26px/1.1 ${BRAND}`, letterSpacing: ".1em" }}>FORK RUGGY'S LAW</b>
             <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55, color: "#4A5675" }}>The same rules, in your own vault. Plug in your agent. Keep the law.</p>
@@ -405,6 +348,17 @@ export function RobPage() {
             <Link to="/onboarding?path=euthyna" className="rbtn ori" style={{ alignSelf: "stretch" }}>USE THIS LAW IN EUTHYNA</Link>
             <small style={{ color: "#4A5675" }}>Create your company, then set these limits in its first role.</small>
           </div>
+        </div>
+      </section>
+
+      {/* HALL OF THIEVES + RUG O'CLOCK + SHARE */}
+      <section id="share" style={{ padding: "80px 0", background: "#030918" }}>
+        <div className="wrap g2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, .9fr)", gap: 40, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <RobHall throwaway={key} />
+            <RobRugOClock />
+          </div>
+          <RobShareCard shown={shown} laws={laws} />
         </div>
       </section>
 
@@ -441,13 +395,6 @@ export function RobPage() {
       <SiteFooter />
     </div>
   );
-}
-
-function loadKeyFresh(): Throwaway {
-  try {
-    localStorage.removeItem(KEY_STORE);
-  } catch { /* fine */ }
-  return loadKey();
 }
 
 function StatCell({ value, label, first = false }: { value: number | undefined; label: string; first?: boolean }) {

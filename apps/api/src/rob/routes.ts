@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { clientIp } from "../market/routes.js";
 import type { RateLimiter } from "../rate-limit.js";
+import { registerRobExtras } from "./extras.js";
 import { RobError, type RobService } from "./service.js";
 
 const signedSchema = z.object({ transaction: z.string().min(1).max(20_000), signature: z.string().min(1).max(200) }).strict();
@@ -63,4 +64,6 @@ export function registerRobRoutes(app: Hono<any>, rob: RobService, options: { li
     const input = await body(context, forgeSchema);
     return context.json(await onChain(() => rob.forge({ method: input.method, args: input.args, ...(input.signed ? { signed: input.signed } : {}), clientHash: rob.clientHash(ipOf(context)) })));
   });
+
+  registerRobExtras(app, { rob, limiters: options.limiters, trustProxy: options.trustProxy });
 }
