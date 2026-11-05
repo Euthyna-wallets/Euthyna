@@ -84,6 +84,8 @@
 .rob .rshare-actions .ghost:disabled{opacity:.6;cursor:default}
 .rob .rshare-actions .ghost:hover:not(:disabled){color:#F2B544;border-color:rgba(242,181,68,.6)}
 @media (max-width:600px){
+  .rob .rseal b{font-size:20px;letter-spacing:.08em}
+  .rob .rseal.counter b,.rob .rseal.veto b,.rob .rseal.paid b{font-size:16px;letter-spacing:.06em}
   .rob .rshare{margin-left:0}
   .rob .rshare-card{padding:14px;gap:14px}
   .rob .rshare-card .rseal{width:84px;height:84px}
