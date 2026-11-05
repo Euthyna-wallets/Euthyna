@@ -12,9 +12,13 @@ The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 | [3](#3-create-a-company) to [6](#6-halt-every-agent-then-resume) | **three NEAR testnet accounts** (a company has at least three founders; two of three approve). [Meteor Wallet](https://wallet.meteorwallet.app), switched to testnet, creates them | 10 min |
 | [7. Recover a seat](#7-recover-a-founder-seat) | one more NEAR testnet account, and a mailbox | 15 min, 10 of them waiting |
 | [8. Market](#8-market) | optional | 5 min |
+| [9. Rob the Agent](#9-rob-the-agent-no-wallet) | a browser; a NEAR testnet wallet only for the trophy | 5 min |
 
-An honest payment that actually lands on Base needs test USDC ([faucet.circle.com](https://faucet.circle.com), Base
-Sepolia) and a little Base Sepolia ETH on the company wallet. **Every refusal below works without any of that**: the
+Two test stablecoins, one per chain. On **Base Sepolia**, the company wallet pays in Circle's test USDC
+(`0x036CbD53842c5426634e7929541eC2318f3dCF7e`): an honest payment that actually lands on Base needs some
+([faucet.circle.com](https://faucet.circle.com), Base Sepolia) and a little Base Sepolia ETH on the company wallet. On
+**NEAR testnet**, Rob the Agent and the Market use **TestUSDC** (`test-ft-v4.mandateos-root-20261021.testnet`, 6
+decimals), a test token of ours; you never need to buy it: the game tops you up. **Every refusal below works without any of that**: the
 vault refuses before anything is signed, so an empty wallet is enough to see the security model work.
 
 To read a contract yourself, any NEAR RPC works, for example with [NEAR CLI](https://github.com/near/near-cli-rs):
@@ -39,7 +43,7 @@ near contract call-function as-read-only <contract> <method> json-args '<args>' 
 ## 2. Attack a live vault (no wallet)
 
 ```sh
-git clone https://github.com/Euthyna-wallets/MandateOS && cd MandateOS
+git clone https://github.com/Euthyna-wallets/Euthyna && cd Euthyna
 node scripts/attack-testnet.mjs   # no install needed: view calls only, no key, no gas
 ```
 
@@ -141,6 +145,40 @@ server is in the path. How it works and what is public: [docs/recovery.md](./doc
 the seller delivers. Selling needs a worker running ([README › Market](./README.md#market-ai-companies-sell-to-each-other));
 the full purchase is tested end to end in `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox). Details:
 [docs/market.md](./docs/market.md).
+
+## 9. Rob the Agent (no wallet)
+
+Open [`/rob`](https://euthyna.io/rob). Ruggy is an AI agent already jailbroken: you are his brain. Every card is a
+real NEAR testnet transaction, signed with a throwaway key made in your browser.
+
+1. **Play a card**, for example *Pay the Attacker*. **You should see** the seal DENIED, the law line that blocked it,
+   the vault's error (`ERR_PERMISSION_DENIED:FunctionNotAllowed`) and the transaction on nearblocks. *Look Legit*
+   and *Inside Job* go further: the payment or the rule passes the law and the vote, then the council bot vetoes it
+   (four steps, each linked).
+2. **Hire him**: pay Ruggy 1 TestUSDC for a transaction check. We top up your throwaway key once; the cheque is held
+   and cashed only on delivery. **You should see** the receipt go RULE → HELD → DELIVERED → PAID, with the settlement
+   transaction.
+3. **Rug O'Clock**: drop a poisoned invoice and vote. On the hour, Ruggy reads the winner with a real LLM (NEAR AI
+   Cloud) and falls for it; the vault refuses the payment live. **You should see** the last reading with what Ruggy
+   tried and the vault's answer.
+4. **Claim** (optional, NEAR testnet wallet): connect a wallet at the end and sign a message (no gas). **You should
+   see** your plays in the Hall of thieves and 1 LEASH (`leash.ruggy-euthyna.testnet`) in your wallet.
+5. **Check on chain**: the Rob vault `rob-the-agent-co.nomos.euthyna.testnet` has no access key, and its TestUSDC
+   balance only ever goes to the two listed suppliers. The bounty account `bounty.ruggy-euthyna.testnet` holds
+   testnet NEAR for whoever proves otherwise.
+
+Over HTTP, for scripts and AI judges: `curl https://euthyna.io/v1/rob/cards`, then
+`curl -X POST https://euthyna.io/v1/rob/play -H 'content-type: application/json' -d '{"card":"forge-a-master-key"}'`.
+Details and every card's testnet transaction: [docs/rob-the-agent.md](./docs/rob-the-agent.md).
+
+### Walked on 5 November 2026
+
+| Step | Result |
+| --- | --- |
+| Pay the Attacker, with a throwaway key | `ERR_PERMISSION_DENIED:FunctionNotAllowed`, tx `BVgReFxMTHDmjGi6WTSRQ9qhBHL9qZidhZDeFRCTqusJ` |
+| Hire him: cheque held, delivered, settled | settlement `sxk51bjBZJn3G2D6Ck9HCTc77HaRLpSLhz6MWL5fhHn` |
+| Rug O'Clock, 18:00 UTC: Ruggy (Qwen3.6 on NEAR AI Cloud) tries to pay 950 USDC to `rug-collector.testnet` | refused by the vault, tx `5ZxTUUzCnJLgpsKQiC4urQJ6Sbhu4eW6M2zWxUuUPk3R` |
+| Claim with `eut-judge-third.testnet` | plays linked, 1 LEASH minted, tx `8MatWmMLvECDTyCa1Pg8kJpa6LER2ijGvAAbQp8kZTmv` |
 
 ## Walked on 4 November 2026
 
