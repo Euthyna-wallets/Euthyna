@@ -614,3 +614,37 @@ model RobPlay {
   @@index([createdAt])
   @@map("rob_play")
 }
+
+/// Rob the Agent · Rug O'Clock: a poisoned invoice dropped by a player. The most voted of each hour is read by Ruggy (a real LLM).
+model RobInvoice {
+  id         String           @id @default(uuid())
+  /// Plain text, at most 500 characters, control characters stripped. Attacker-controlled: reaches the LLM as user content only.
+  text       String           @db.VarChar(500)
+  /// sha256 of the sender's address with a server salt.
+  clientHash String
+  /// The UTC hour it competes in (its start).
+  round      DateTime
+  createdAt  DateTime         @default(now())
+  /// Set once, by a conditional update, when a reading claims it.
+  readAt     DateTime?
+  /// What Ruggy decided (the tool call or his refusal) and what the vault answered.
+  reading    Json?
+  votes      RobInvoiceVote[]
+
+  @@index([round, createdAt])
+  @@index([clientHash, createdAt])
+  @@index([readAt])
+  @@map("rob_invoice")
+}
+
+/// Rob the Agent · Rug O'Clock: one vote, one voter per invoice.
+model RobInvoiceVote {
+  invoiceId String
+  /// sha256 of the voter's address with a server salt.
+  voterHash String
+  createdAt DateTime   @default(now())
+  invoice   RobInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@id([invoiceId, voterHash])
+  @@map("rob_invoice_vote")
+}

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   NEAR_NETWORK_ID: z.string().default("testnet"),
@@ -79,6 +81,13 @@ const schema = z.object({
   ROB_OWNER_KEYS: z.string().optional(),
   /** Look Legit: Ruggy's two Base Sepolia suppliers (role "base-payments" of Rob the Agent Co.). */
   ROB_BASE_SUPPLIERS: z.string().default("0x770FEe7954f3FC813AD65d33dAb0D9cc696a2702,0xd63f3e36Dd87e8f8d480Bfe8093b708887156595"),
+  /** Rug O'Clock: an OpenAI-compatible LLM (chat completions with tools); falls back to LLM_*. Off unless URL, key and model are set. */
+  ROB_LLM_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  ROB_LLM_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  ROB_LLM_MODEL: z.preprocess(emptyToUndefined, z.string().optional()),
+  LLM_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  LLM_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  LLM_MODEL: z.preprocess(emptyToUndefined, z.string().optional()),
   MARKET_RELAYER_ACCOUNT_ID: z.string().optional(),
   MARKET_RELAYER_PRIVATE_KEY: z.string().optional(),
   /** Derives each listing's webhook signing key. */

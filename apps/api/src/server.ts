@@ -19,6 +19,7 @@ import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } f
 import { MarketService } from "./market/service.js";
 import { NearRpc } from "./rob/near-tx.js";
 import { RobService } from "./rob/service.js";
+import { attachRugOClock, rugOClockLlm, scheduleRugOClock } from "./rob/rugoclock.js";
 import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
 
@@ -143,6 +144,8 @@ if (rob) {
   setInterval(() => void rob.maintain().catch((error: unknown) => console.warn(`rob maintenance: ${String(error)}`)), 10 * 60_000).unref();
   // The council bot: nothing the game queues may outlive its veto window.
   setInterval(() => void rob.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`)), 20_000).unref();
+  // Rug O'Clock: on the hour, Ruggy (a real LLM) reads the most voted invoice; off without an LLM.
+  scheduleRugOClock(attachRugOClock(rob, { store: prisma, llm: rugOClockLlm(env) }));
 }
 
 // Founder seat recovery: ZK Email proofs, verified by the recovery contract on NEAR; the
