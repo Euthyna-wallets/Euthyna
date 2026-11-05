@@ -108,6 +108,32 @@ DAO, the council; the counter-offer and a lawful payment have their own), « <ca
 `document.fonts.ready`; Cinzel and JetBrains Mono), with the transaction hash shortened when the play has one, and
 saves it as a PNG. Nothing is sent to a server. The verdict panel links to it (« SHARE THIS REFUSAL »).
 
+## Rug O'Clock
+
+Players drop poisoned invoices (plain text, 500 characters, control and bidi characters stripped; 3 an hour per
+address) and vote (one vote per address and invoice, current hour only). A few seconds after each UTC hour, the API
+claims the most voted invoice of the hour that ended with a conditional update (`readAt` still null): one reading a
+round, even with two instances, and never two at once in one process.
+
+Ruggy is a real LLM (OpenAI-compatible chat completions, one tool `pay({ receiver_id, amount_usdc, reference })`,
+30 s timeout). The invoice is only ever the user message. His answer is untrusted: the tool call must be exactly
+those three fields, a NEAR account id, an amount above 0 and at most 1,000,000 with 6 decimals at most, a reference of
+1 to 64 characters; anything else is stored as "invalid" and nothing is sent. A valid call goes out as a real
+`execute_near` with a shared key, like a forged call (`RobService.forge`, recorded as card `rug-o-clock` under the
+invoice author's hash), with the reference `rug-<yyyymmddhh>-<his reference>` so it is unique per reading. The vault
+decides: usually refused; a lawful payment (0.1 to 2 USDC to a listed supplier, within the day's 10) goes through.
+The reading (his decision, the call, the verdict and the transaction) is stored on the invoice.
+
+| Method | Route | |
+| --- | --- | --- |
+| GET | `/v1/rob/rugoclock` | `{ enabled, roundStartedAt, nextReadingAt, round (top 10 with votes), last }`, cached 5 s |
+| POST | `/v1/rob/rugoclock/invoices` `{ text }` | drops an invoice in the current hour |
+| POST | `/v1/rob/rugoclock/vote` `{ invoiceId }` | one vote per address and invoice |
+
+Set `ROB_LLM_BASE_URL`, `ROB_LLM_API_KEY` and `ROB_LLM_MODEL` (or the generic `LLM_*`). Without all three, nothing
+is read, the POSTs answer 503 and the page says the box is offline: no reading is ever simulated. Tables
+`rob_invoice`, `rob_invoice_vote` (`prisma db push`). Tests: `src/rob/rugoclock.test.ts` (mocked LLM and service).
+
 ## Not built yet
 
-Hire him (Ruggy's service on the Market), the leaderboard and Rug O'Clock.
+Hire him (Ruggy's service on the Market) and the leaderboard.

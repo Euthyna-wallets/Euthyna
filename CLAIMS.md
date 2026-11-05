@@ -20,6 +20,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | 48 attacks, 48 refused | Code | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
 | Vault versions published on Nomos by hash and upgraded by DAO vote, state kept | Code | `contracts/tests` (upgrade tests); the whitepaper reports three versions live on testnet |
 | Roles for payments, Uniswap swaps, Aave lending, WETH wrapping, Solana transfers, NEAR token transfers, revenue sharing | Code | `packages/sdk/src/roles.ts`, `contracts/omniroles-conditions/src/presets.rs` |
+| Rob the Agent · Rug O'Clock: each hour a real LLM reads the most voted invoice and its tool call is sent as a real `execute_near`; the vault answers | Testnet | `apps/api/src/rob/rugoclock.ts` (+ tests); each reading (LLM output, verdict, tx) is stored on its invoice and shown with its nearblocks link; off, never simulated, without an LLM |
 | Rob the Agent: every card is a real testnet transaction, refused by the vault, the DAO or NEAR; 0 USDC stolen | Testnet | [docs/rob-the-agent.md](./docs/rob-the-agent.md) (hashes per card); the vault pays only its two listed suppliers, accounts of ours; `/v1/rob/stats` counts the recorded plays |
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
 

@@ -314,10 +314,13 @@ export class RobService {
     return this.finish(card, outcome, `a shared throwaway key ${short(shared.publicKey)} on ${this.config.ruggyAccountId}`, shared.publicKey, input.clientHash, started);
   }
 
-  /** Expert mode: any method on the vault, signed by a function-call key. */
-  async forge(input: { method: string; args: Record<string, unknown>; signed?: { transaction: string; signature: string }; clientHash: string }): Promise<PlayResult> {
+  /**
+   * Expert mode: any method on the vault, signed by a function-call key. `as` records it under another
+   * card (Rug O'Clock sends the call its LLM made this way; never set from an HTTP body).
+   */
+  async forge(input: { method: string; args: Record<string, unknown>; signed?: { transaction: string; signature: string }; clientHash: string; as?: "rug-o-clock" }): Promise<PlayResult> {
     const started = this.now();
-    const card: CardInfo = { id: "forge", numeral: "", title: "Forged call", rarity: "BRONZE", line: 0, by: "vault", attempt: `${input.method}(${JSON.stringify(input.args ?? {}).slice(0, 160)})`, why: "", playable: true };
+    const card: CardInfo = { id: input.as ?? "forge", numeral: "", title: input.as ? "Rug O'Clock" : "Forged call", rarity: "BRONZE", line: 0, by: "vault", attempt: `${input.method}(${JSON.stringify(input.args ?? {}).slice(0, 160)})`, why: "", playable: true };
     if (input.signed) {
       const { publicKey, signedBase64 } = this.playerSigned(input.signed);
       await this.activeKey(publicKey);
