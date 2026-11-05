@@ -149,8 +149,8 @@ export function RobHire({ throwaway, deck }: { throwaway: Throwaway | null; deck
         await robCall("/v1/rob/hire/topup", { publicKey });
         terms = await robCall<Terms>("/v1/rob/hire/terms", { publicKey });
       }
-      // A new account can take a block or two to show on every RPC node.
-      for (let attempt = 0; terms.nonce === null; attempt += 1) {
+      // A new account, and its test USDC, take a block or two to be final: the market reads the balance there.
+      for (let attempt = 0; terms.nonce === null || BigInt(terms.balance) < BigInt(terms.price); attempt += 1) {
         if (attempt >= 10) throw new Error("your account is not visible on NEAR yet: try again in a few seconds");
         await new Promise((resolve) => setTimeout(resolve, 1_000));
         terms = await robCall<Terms>("/v1/rob/hire/terms", { publicKey });
