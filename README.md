@@ -94,6 +94,22 @@ the same mailbox, prove and sign. → *Request recorded on chain … can cancel 
 Settings and can **cancel**; after 10 minutes any member gets **Submit the vote**. The email never leaves the
 browser; only the zero-knowledge proof and a salted hash of the address go on chain.
 
+## Sealed orders: limit orders nobody sees
+
+A company can place a limit order (buy WETH with USDC on Uniswap when 1 WETH costs at most X) without
+showing it. The DAO votes on one hash. Whoever holds the order file (the member who sealed it) runs the
+watcher; when the market meets the hidden limit, it proves in zero knowledge (Noir, UltraHonk) that the
+fill meets the limit, the total and the deadline. `contracts/sealed-orders` verifies the proof on NEAR,
+then asks the vault for the swap as a member of a `sealed-orders` role, so the role still decides the
+router, the pair, the recipient and the budget. The hidden terms never reach the chain, not even after
+a fill; the fill itself (amount, pair, rate) is a public Base transaction. Details and limits:
+[CLAIMS.md](./CLAIMS.md#sealed-orders-private-limit-orders).
+
+```sh
+pnpm --filter @mandateos/api sealed new --vault <vault> --dao <dao> --price 1800 --cap 50 --days 7 > order.json
+pnpm --filter @mandateos/api sealed watch order.json --key watcher.json
+```
+
 ## Product architecture
 
 ![Product architecture: investors and the security council outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)

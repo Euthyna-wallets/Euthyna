@@ -47,6 +47,10 @@
     "./tx-check": {
       "types": "./dist/tx-check.d.ts",
       "default": "./dist/tx-check.js"
+    },
+    "./sealed-orders": {
+      "types": "./dist/sealed-orders.d.ts",
+      "default": "./dist/sealed-orders.js"
     }
   }
 }

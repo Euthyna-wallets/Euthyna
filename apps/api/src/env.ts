@@ -132,6 +132,8 @@ const schema = z.object({
    * ZK Email proofs and runs the waiting period. Default on testnet: euthyna-recovery.testnet.
    */
   RECOVERY_CONTRACT_ID: z.string().optional(),
+  /** contracts/sealed-orders; unset turns sealed orders off in the console. */
+  SEALED_ORDERS_ACCOUNT_ID: z.string().optional(),
   /**
    * Testnet only: DKIM keys of test mail domains, as JSON {"<selector>._domainkey.<domain>": "v=DKIM1; k=rsa; p=…"}.
    * Lets tests sign their own emails. Ignored unless NEAR_NETWORK_ID is testnet.

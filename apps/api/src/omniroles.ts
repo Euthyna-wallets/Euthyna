@@ -54,11 +54,12 @@ import {
   type VaultCall,
   NEAR_TESTNET_TOKENS,
 } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, SEALED_ROLE, sealedCancelKind, sealedConfigureKind, sealedSealKind } from "@mandateos/sdk";
 import bs58 from "bs58";
 import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
 import { vaultLogs } from "./chain-activity.js";
 import { usdPrices, usdValue } from "./prices.js";
-import { bytesToHex, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
+import { bytesToHex, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 
 import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } from "./evm-gas.js";
 import type { KmsSigner } from "./kms.js";
@@ -109,6 +110,8 @@ export interface OmniRolesConfig {
   omniBridgeApi?: string;
   /** Public directory of AI companies; unset disables listing. */
   registryId?: string | undefined;
+  /** contracts/sealed-orders; unset turns sealed orders off. */
+  sealedOrdersId?: string | undefined;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
   sharesRevenueToken?: string | null;
   baseRpcUrl: string;
@@ -868,6 +871,90 @@ export class OmniRolesService {
     return { receiverId: directory.daoAccountId, args: proposalOf(summary.title, kind), deposit: this.config.proposalBondYocto, title: summary.title, summary: [summary] };
   }
 
+  // -------------------------------------------------------------------------
+  // Sealed orders (contracts/sealed-orders)
+  // -------------------------------------------------------------------------
+
+  private requireSealed(): string {
+    if (!this.config.sealedOrdersId) throw new OmniRolesError(409, "sealed_disabled", "sealed orders are not configured on this server");
+    return this.config.sealedOrdersId;
+  }
+
+  /** The company's sealed orders as the chain shows them: a hash each, what was filled, nothing else. */
+  async sealedOrders(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const sealedId = this.config.sealedOrdersId ?? null;
+    if (!sealedId) return { enabled: false as const, sealedAccountId: null, config: null, orders: [], roleReady: false, vaultAccountId: treasury.vaultAccountId, daoAccountId: treasury.daoAccountId };
+    const [config, orders, role, member] = await Promise.all([
+      this.view<Record<string, unknown> | null>(sealedId, "config", { dao: treasury.daoAccountId }).catch(() => null),
+      this.view<unknown[]>(sealedId, "orders", { dao: treasury.daoAccountId, limit: 50 }).catch(() => []),
+      this.view<unknown | null>(treasury.vaultAccountId, "get_role", { role: SEALED_ROLE }).catch(() => null),
+      this.view<unknown | null>(treasury.vaultAccountId, "get_membership", { role: SEALED_ROLE, member: sealedId }).catch(() => null),
+    ]);
+    return { enabled: true as const, sealedAccountId: sealedId, config, orders, roleReady: Boolean(role && member), vaultAccountId: treasury.vaultAccountId, daoAccountId: treasury.daoAccountId };
+  }
+
+  /**
+   * Turning sealed orders on: three votes. The vault role the contract will act in (swap USDC for
+   * WETH on Uniswap v3, within a public budget), the contract's configuration (this vault, this
+   * role, the slippage), and the wallet's approval of the router.
+   */
+  async sealedSetupProposals(organizationId: string, input: { budgetUsdc: string; periodDays: number; maxApprovalUsdc: string; slippageBps: number }) {
+    const sealedId = this.requireSealed();
+    const treasury = await this.requireTreasury(organizationId);
+    const role = await this.roleProposal(organizationId, {
+      name: SEALED_ROLE,
+      blocks: [{
+        kind: "swap",
+        tokenIn: BASE_SEPOLIA_UNISWAP.usdc,
+        tokensOut: [BASE_SEPOLIA_UNISWAP.weth],
+        protocols: ["uniswap-v3"],
+        budget: { amount: input.budgetUsdc, periodDays: input.periodDays },
+        maxApproval: input.maxApprovalUsdc,
+      }],
+      members: [{ accountId: sealedId, kind: "Agent", maxUses: null }],
+    });
+    let kind: ReturnType<typeof sealedConfigureKind>;
+    try {
+      kind = sealedConfigureKind(sealedId, { vault: treasury.vaultAccountId, chainId: BASE_SEPOLIA_UNISWAP.chainId, router: BASE_SEPOLIA_UNISWAP.router, slippageBps: input.slippageBps });
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_sealed", error instanceof Error ? error.message : String(error));
+    }
+    const configure = this.sealedProposal(treasury, kind, sealedId);
+    const approval = await this.transactionProposal(organizationId, {
+      title: "Let Uniswap take USDC for sealed orders",
+      transactions: [{
+        chainId: BASE_SEPOLIA_UNISWAP.chainId,
+        to: BASE_SEPOLIA_UNISWAP.usdc,
+        data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [BASE_SEPOLIA_UNISWAP.router, parseUnits(input.maxApprovalUsdc, 6)] }),
+      }],
+    });
+    return [role, configure, approval];
+  }
+
+  async sealedSealProposal(organizationId: string, commitment: string) {
+    const sealedId = this.requireSealed();
+    const treasury = await this.requireTreasury(organizationId);
+    let kind: ReturnType<typeof sealedSealKind>;
+    try {
+      kind = sealedSealKind(sealedId, commitment as Hex);
+    } catch (error) {
+      throw new OmniRolesError(400, "invalid_sealed", error instanceof Error ? error.message : String(error));
+    }
+    return this.sealedProposal(treasury, kind, sealedId);
+  }
+
+  async sealedCancelProposal(organizationId: string, id: number) {
+    const sealedId = this.requireSealed();
+    const treasury = await this.requireTreasury(organizationId);
+    return this.sealedProposal(treasury, sealedCancelKind(sealedId, id), sealedId);
+  }
+
+  private sealedProposal(treasury: { daoAccountId: string }, kind: unknown, sealedId: string) {
+    const summary = describeSealedProposal(kind, sealedId)!;
+    return { receiverId: treasury.daoAccountId, args: proposalOf(summary.title, kind), deposit: this.config.proposalBondYocto, title: summary.title, summary: [summary] };
+  }
+
   private daoProposal(treasury: { daoAccountId: string }, title: string, kind: unknown, sharesAccountId: string) {
     return {
       receiverId: treasury.daoAccountId,
@@ -1424,7 +1511,7 @@ export class OmniRolesService {
               ? calls.map((call) => describeVaultCall(call, context))
               : (() => {
                 const policyChange = describePolicyChange(proposal.kind);
-                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeProceedsProposal(proposal.kind, companyWallet) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null);
+                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeProceedsProposal(proposal.kind, companyWallet) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null) ?? describeSealedProposal(proposal.kind, this.config.sealedOrdersId ?? null);
                 return policyChange
                   ? [{ title: policyChange.title, details: policyChange.details }]
                   : sharesChange

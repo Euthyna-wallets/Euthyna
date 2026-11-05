@@ -76,6 +76,7 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,
   omniBridgeApi: env.OMNI_BRIDGE_API_URL,
   registryId: env.OMNIROLES_REGISTRY_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "atlantis-registry.testnet" : undefined),
+  sealedOrdersId: env.SEALED_ORDERS_ACCOUNT_ID,
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
   extraRpcUrls: { 11155111: env.ETHEREUM_SEPOLIA_RPC_URL },
   ruleDelayNs: env.OMNIROLES_RULE_DELAY_SECONDS * 1_000_000_000,

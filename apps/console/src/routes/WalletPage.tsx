@@ -12,6 +12,7 @@ import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js"
 import { formatAmount, omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { HoldingsCard } from "./HoldingsCard.js";
+import { SealedOrdersCard } from "./SealedOrdersCard.js";
 
 export type Requested = { chainId: number; to: string; value: string; data: string; gas?: string };
 
@@ -212,6 +213,8 @@ export function WalletPage() {
           </div>
 
           {address ? <HoldingsCard /> : null}
+
+          {address ? <SealedOrdersCard /> : null}
 
           {address && status.data?.solana ? (
             <Slab style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
