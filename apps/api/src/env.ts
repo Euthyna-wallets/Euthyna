@@ -11,6 +11,8 @@ const robHireFields = {
   ROB_HIRE_DELIVERY_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().regex(/^mdt_[A-Za-z0-9_-]{43}$/).optional()),
   /** Top-ups a UTC day, for everyone (each costs Ruggy a storage deposit and three transactions' gas). */
   ROB_HIRE_DAILY_TOPUPS: z.coerce.number().int().min(0).default(100),
+  /** Top-ups per connection (salted address hash) over 24 hours. */
+  ROB_HIRE_TOPUPS_PER_CLIENT: z.coerce.number().int().min(1).default(3),
   /** NEAR sent to create a player's implicit account. 1 yocto: an account this small needs no storage stake (NEP-448). */
   ROB_HIRE_ACCOUNT_YOCTO: z.string().regex(/^[1-9]\d*$/).default("1"),
   /** How often the API looks for Ruggy's tasks to deliver. */

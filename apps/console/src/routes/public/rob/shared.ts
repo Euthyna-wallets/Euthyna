@@ -57,7 +57,10 @@ export function loadKey(): Throwaway {
     if (saved && Date.now() - saved.createdAt < 23 * 3_600_000) return saved;
   } catch { /* storage unavailable: a key for this visit only */ }
   const pair = KeyPair.fromRandom("ed25519");
-  return { secret: pair.toString(), publicKey: pair.getPublicKey().toString(), createdAt: Date.now(), onRuggy: false };
+  // Saved at once: a reload (a wallet round trip, a link opened in this tab) must not lose the key its top-up went to.
+  const fresh: Throwaway = { secret: pair.toString(), publicKey: pair.getPublicKey().toString(), createdAt: Date.now(), onRuggy: false };
+  saveKey(fresh);
+  return fresh;
 }
 export function loadKeyFresh(): Throwaway {
   try {

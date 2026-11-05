@@ -42,8 +42,7 @@ type TopupSteps = Pick<TopupRow, "createTx" | "registerTx" | "mintTx">;
 export interface HireStore {
   robHireTopup: {
     findUnique(args: { where: { publicKey: string } }): Promise<TopupRow | null>;
-    findFirst(args: { where: { clientHash: string } }): Promise<TopupRow | null>;
-    count(args: { where: { createdAt: { gte: Date } } }): Promise<number>;
+    count(args: { where: { createdAt: { gte: Date }; clientHash?: string } }): Promise<number>;
     create(args: { data: { publicKey: string; account: string; clientHash: string } }): Promise<TopupRow>;
     update(args: { where: { publicKey: string }; data: Partial<TopupSteps> & { state?: string } }): Promise<TopupRow>;
   };
@@ -66,7 +65,7 @@ export class RobHire {
   constructor(
     private readonly desk: HireDesk,
     private readonly store: HireStore,
-    private readonly settings: Pick<RobHireSettings, "ROB_HIRE_HANDLE" | "ROB_HIRE_DAILY_TOPUPS" | "ROB_HIRE_ACCOUNT_YOCTO">,
+    private readonly settings: Pick<RobHireSettings, "ROB_HIRE_HANDLE" | "ROB_HIRE_DAILY_TOPUPS" | "ROB_HIRE_TOPUPS_PER_CLIENT" | "ROB_HIRE_ACCOUNT_YOCTO">,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -127,7 +126,11 @@ export class RobHire {
     let row = await topups.findUnique({ where: { publicKey } });
     if (row?.state === "done") return this.view(row);
     if (!row) {
-      if (await topups.findFirst({ where: { clientHash } })) throw new RobError(409, "already_topped_up", "one top-up per player: this address already had one");
+      // A few per connection a day, not one for life: a reload can lose a throwaway key, and judges may share an office's address.
+      const since = new Date(this.now() - 86_400_000);
+      if ((await topups.count({ where: { clientHash, createdAt: { gte: since } } })) >= this.settings.ROB_HIRE_TOPUPS_PER_CLIENT) {
+        throw new RobError(409, "already_topped_up", "this connection already had its test USDC today: come back tomorrow");
+      }
       const day = new Date(this.now());
       day.setUTCHours(0, 0, 0, 0);
       if ((await topups.count({ where: { createdAt: { gte: day } } })) >= this.settings.ROB_HIRE_DAILY_TOPUPS) {
@@ -137,9 +140,9 @@ export class RobHire {
         row = await topups.create({ data: { publicKey, account, clientHash } });
       } catch (error) {
         if ((error as { code?: string }).code !== "P2002") throw error;
-        // Raced: this key (then resume it) or this client (then refuse) got there first.
+        // Raced: this key got there first; resume it.
         row = await topups.findUnique({ where: { publicKey } });
-        if (!row) throw new RobError(409, "already_topped_up", "one top-up per player: this address already had one");
+        if (!row) throw error;
       }
     }
     const steps: TopupSteps = { createTx: row.createTx, registerTx: row.registerTx, mintTx: row.mintTx };
