@@ -11,11 +11,11 @@
   },
   "dependencies": {
     "@mandateos/sdk": "workspace:^",
-    "@modelcontextprotocol/sdk": "^1.20.2",
-    "zod": "^3.25.57"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "tsx": "^4.19.4",
-    "vitest": "^3.2.3"
+    "vitest": "^4.1.12"
   }
 }
