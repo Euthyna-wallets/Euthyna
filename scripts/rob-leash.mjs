@@ -2,8 +2,9 @@
 /**
  * Rob the Agent: deploy the $LEASH testnet trophy token (docs/rob-the-agent.md, "Claim and Hall of thieves").
  *
- * Deploys contracts/res/test_ft.wasm (contracts/test-ft: NEP-141, open mint, no owner) on a testnet account and
- * initialises it, then prints the ROB_LEASH_TOKEN line for the API. Idempotent: an account that already runs the
+ * Deploys contracts/res/leash.wasm (contracts/leash: NEP-141 "Leash" / LEASH, 0 decimals, only the minter mints)
+ * on a testnet account and initialises it with the minter (LEASH_MINTER or --minter, default ruggy-euthyna.testnet:
+ * the account the API mints trophies with), then prints the ROB_LEASH_TOKEN line for the API. Idempotent: an account that already runs the
  * token is left as is. Testnet only.
  *
  *   # the token account exists, with a full-access key you hold:
@@ -12,14 +13,12 @@
  *   # or create it as a sub-account of a parent you hold (funded with LEASH_FUND_NEAR, default 2.5):
  *   LEASH_ACCOUNT_ID=leash.ruggy-euthyna.testnet LEASH_PARENT_PRIVATE_KEY=ed25519:… node scripts/rob-leash.mjs
  *
- * Arguments override the environment: --account <id> --wasm <path> --rpc <url> --dry-run --lock.
+ * Arguments override the environment: --account <id> --wasm <path> --minter <id> --rpc <url> --dry-run --lock.
  *   --dry-run  read the chain and print the plan, send nothing.
  *   --lock     after deploying, delete the account's full-access key: nobody can redeploy the token. Irreversible.
  *
- * Name and symbol: the test-ft wasm's ft_metadata is fixed in its code ("MandateOS Test USDC", TestUSDC, 6
- * decimals); this script cannot set "Leash"/"LEASH" on it. It deploys the wasm given by --wasm / LEASH_WASM, and
- * warns when the deployed metadata is not symbol LEASH. The API reads the decimals from ft_metadata and mints
- * 1 whole token (10^decimals base units) per trophy.
+ * The API reads the decimals from ft_metadata and mints 1 whole token (10^decimals base units) per trophy. The
+ * script warns when the deployed metadata is not symbol LEASH.
  */
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -32,6 +31,7 @@ const { values: args } = parseArgs({
   options: {
     account: { type: "string" },
     wasm: { type: "string" },
+    minter: { type: "string" },
     rpc: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     lock: { type: "boolean", default: false },
@@ -39,7 +39,8 @@ const { values: args } = parseArgs({
 });
 
 const ACCOUNT = args.account ?? process.env.LEASH_ACCOUNT_ID;
-const WASM = args.wasm ?? process.env.LEASH_WASM ?? new URL("../contracts/res/test_ft.wasm", import.meta.url).pathname;
+const MINTER = args.minter ?? process.env.LEASH_MINTER ?? "ruggy-euthyna.testnet";
+const WASM = args.wasm ?? process.env.LEASH_WASM ?? new URL("../contracts/res/leash.wasm", import.meta.url).pathname;
 const RPC = args.rpc ?? process.env.LEASH_RPC_URL ?? "https://test.rpc.fastnear.com";
 const FUND = process.env.LEASH_FUND_NEAR ?? "2.5";
 const DRY = args["dry-run"];
@@ -77,7 +78,7 @@ const initialised = state && state.code_hash !== "111111111111111111111111111111
 const plan = [
   !state ? `create ${ACCOUNT} from ${parent} with ${FUND} NEAR, key ${tokenKey.getPublicKey().toString()}` : null,
   !initialised && (!state || state.code_hash === "11111111111111111111111111111111") ? `deploy ${WASM} (${code.length} bytes)` : null,
-  !initialised ? "call new()" : null,
+  !initialised ? `call new({ minter: ${MINTER} })` : null,
   args.lock ? `delete the full-access key ${tokenKey.getPublicKey().toString()} (irreversible)` : null,
 ].filter(Boolean);
 if (state && state.code_hash !== "11111111111111111111111111111111" && !initialised) {
@@ -98,7 +99,7 @@ if (!initialised) {
     const deployed = await token.deployContract(code);
     console.log(`deployed: ${deployed.transaction.hash}`);
   }
-  const init = await token.functionCall({ contractId: ACCOUNT, methodName: "new", args: {}, gas: 30_000_000_000_000n });
+  const init = await token.functionCall({ contractId: ACCOUNT, methodName: "new", args: { minter: MINTER }, gas: 30_000_000_000_000n });
   console.log(`initialised: ${init.transaction.hash}`);
 }
 if (args.lock) {

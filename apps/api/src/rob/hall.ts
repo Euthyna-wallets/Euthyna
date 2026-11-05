@@ -4,7 +4,7 @@
  * Claim: the player's wallet signs a NEP-413 message naming the throwaway key (and a nonce from here); the
  * throwaway key signs a message naming the wallet account. Both checked, the key's plays are linked to the
  * account and, when ROB_LEASH_TOKEN is set and the account has a play, Ruggy's full-access key mints it
- * 1 LEASH once (storage_deposit then the open mint, one transaction on the token).
+ * 1 LEASH once (storage_deposit then mint, which only Ruggy may call; one transaction on the token).
  *
  * Hall: three tiles (most voted forged call, most gas burnt, largest amount refused) and the recent forged
  * calls with their votes. Read from the recorded plays, cached 30 s.
@@ -167,7 +167,7 @@ export type HallOptions = {
   rpc: Pick<NearRpc, "call" | "view">;
   /** NEP-413 recipient the wallet signs for. */
   recipient: string;
-  /** The $LEASH token (test-ft, open mint); null: no trophy. */
+  /** The $LEASH token (contracts/leash, Ruggy is its minter); null: no trophy. */
   leashToken: string | null;
   /** Ruggy's full-access key signs the mint (RobService.mintTrophy). */
   mint: (input: { token: string; accountId: string; amount: string; storageDepositYocto: string }) => Promise<Outcome>;

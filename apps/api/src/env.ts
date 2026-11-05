@@ -110,7 +110,7 @@ const schema = z.object({
   LLM_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   LLM_MODEL: z.preprocess(emptyToUndefined, z.string().optional()),
   /**
-   * Rob the Agent's $LEASH testnet trophy: a test-ft token (open mint) deployed by scripts/rob-leash.mjs.
+   * Rob the Agent's $LEASH testnet trophy: the Leash token (contracts/leash, Ruggy mints) deployed by scripts/rob-leash.mjs.
    * Set, a player who claims their plays with a wallet gets 1 LEASH, once. Empty: claims link plays, no trophy.
    */
   ROB_LEASH_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().regex(/^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/, "ROB_LEASH_TOKEN must be a NEAR account id").optional()),

@@ -170,10 +170,10 @@ ROB_LEASH_TOKEN=leash.ruggy-euthyna.testnet
 ```
 
 With an existing account, pass its key as `LEASH_PRIVATE_KEY` instead. `--lock` deletes the token account's key
-after deploying (nobody can redeploy it; irreversible). The script deploys `contracts/res/test_ft.wasm`, whose
-`ft_metadata` is fixed in code ("MandateOS Test USDC", `TestUSDC`, 6 decimals): it cannot name the token Leash /
-LEASH, and warns about it. Wallets show the trophy as TestUSDC on the LEASH account until test-ft takes its metadata
-at init (a contract change and a CI-built wasm).
+after deploying (nobody can redeploy it; irreversible). The script deploys `contracts/res/leash.wasm`
+(`contracts/leash`): a NEP-141 named Leash, symbol `LEASH`, 0 decimals, initialised with one minter
+(`LEASH_MINTER`, default `ruggy-euthyna.testnet`, the account the API mints with); any other account's `mint` is
+refused (`only the minter mints LEASH`).
 
 **Hall of thieves.** `GET /v1/rob/hall` (cached 30 s) answers `{ creative, gas, boldest, recent }`:
 
@@ -255,4 +255,4 @@ Not run yet on testnet: the top-up (in particular the 1 yocto account creation) 
 
 ## Not built yet
 
-Nothing from the handoff is left. Next: the $LEASH trophy under its own name (test-ft has a fixed name and symbol).
+Nothing from the handoff is left.

@@ -1,5 +1,5 @@
 [workspace]
-members = ["vault", "nomos", "omniroles-conditions", "dao-factory", "mock-mpc", "test-ft", "shares", "registry", "email-recovery", "tests"]
+members = ["vault", "nomos", "omniroles-conditions", "dao-factory", "mock-mpc", "test-ft", "leash", "shares", "registry", "email-recovery", "tests"]
 exclude = ["vendor"]
 resolver = "2"
 
