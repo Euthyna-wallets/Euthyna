@@ -12,7 +12,7 @@ import { RobError, RobService } from "./service.js";
 
 const TOKEN = "test-ft.testnet";
 const VAULT = "rob.nomos.testnet";
-const settings = { ROB_HIRE_HANDLE: "ruggy-tx-check", ROB_HIRE_DAILY_TOPUPS: 3, ROB_HIRE_ACCOUNT_YOCTO: "1", ROB_HIRE_POLL_MS: 2_000, ROB_HIRE_DELIVERY_TOKEN: undefined };
+const settings = { ROB_HIRE_HANDLE: "ruggy-tx-check", ROB_HIRE_DAILY_TOPUPS: 5, ROB_HIRE_TOPUPS_PER_CLIENT: 2, ROB_HIRE_ACCOUNT_YOCTO: "1", ROB_HIRE_POLL_MS: 2_000, ROB_HIRE_DELIVERY_TOKEN: undefined };
 const sign = (pair: KeyPair) => (hash: Uint8Array) => pair.sign(hash).signature;
 
 describe("the cheque the browser builds (@mandateos/sdk/cheque)", () => {
@@ -78,10 +78,9 @@ function fakes(o: { accountExists?: boolean; registered?: boolean; balance?: big
   const store: HireStore = {
     robHireTopup: {
       findUnique: async ({ where }) => rows.get(where.publicKey) ?? null,
-      findFirst: async ({ where }) => [...rows.values()].find((row) => row.clientHash === where.clientHash) ?? null,
-      count: async ({ where }) => [...rows.values()].filter((row) => row.createdAt >= where.createdAt.gte).length,
+      count: async ({ where }) => [...rows.values()].filter((row) => row.createdAt >= where.createdAt.gte && (!where.clientHash || row.clientHash === where.clientHash)).length,
       create: async ({ data }) => {
-        if ([...rows.values()].some((row) => row.clientHash === data.clientHash) || rows.has(data.publicKey)) throw Object.assign(new Error("unique"), { code: "P2002" });
+        if (rows.has(data.publicKey)) throw Object.assign(new Error("unique"), { code: "P2002" });
         const row: Row = { ...data, state: "pending", createTx: null, registerTx: null, mintTx: null, createdAt: new Date() };
         rows.set(data.publicKey, row);
         return row;
@@ -158,14 +157,16 @@ describe("top-up", () => {
     expect(sent).toHaveLength(3);
   });
 
-  it("gives one top-up per client and stops at the daily cap", async () => {
+  it("gives a few top-ups per client (a lost key gets a new one) and stops at the daily cap", async () => {
     const { hire, sent } = fakes();
+    await hire.topup(key(), "client-a");
     await hire.topup(key(), "client-a");
     await expect(code(hire.topup(key(), "client-a"))).resolves.toBe("already_topped_up");
     await hire.topup(key(), "client-b");
     await hire.topup(key(), "client-c");
-    await expect(code(hire.topup(key(), "client-d"))).resolves.toBe("topups_exhausted");
-    expect(sent).toHaveLength(9);
+    await hire.topup(key(), "client-d");
+    await expect(code(hire.topup(key(), "client-e"))).resolves.toBe("topups_exhausted");
+    expect(sent).toHaveLength(15);
   });
 
   it("skips what is already there and resumes after a failed step without minting twice", async () => {
@@ -257,6 +258,7 @@ describe("routes", () => {
     expect(topup.status).toBe(200);
     expect(await topup.json()).toMatchObject({ state: "done", account: RobService.attackerOf(publicKey) });
     expect(sent).toHaveLength(3);
+    expect((await post("/v1/rob/hire/topup", { publicKey: key() })).status).toBe(200);
     expect((await post("/v1/rob/hire/topup", { publicKey: key() })).status).toBe(409);
     expect((await post("/v1/rob/hire/topup", { nope: 1 })).status).toBe(400);
     const terms = await post("/v1/rob/hire/terms", { publicKey });

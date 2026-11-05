@@ -692,8 +692,8 @@ model RobHireTopup {
   /// The throwaway key (ed25519:…); its implicit account is `account`.
   publicKey  String   @id
   account    String
-  /// sha256 of the client's address with a server salt, as rob_key: one top-up per client.
-  clientHash String   @unique
+  /// sha256 of the client's address with a server salt, as rob_key: ROB_HIRE_TOPUPS_PER_CLIENT per client a day.
+  clientHash String
   /// pending | done
   state      String   @default("pending")
   /// The NEAR transfer that created the implicit account (none if it existed).
