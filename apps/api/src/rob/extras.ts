@@ -4,6 +4,7 @@
  */
 import type { Hono } from "hono";
 
+import { registerHallRoutes } from "./hall.js";
 import { registerRugOClockRoutes } from "./rugoclock.js";
 import type { RobLimiters } from "./routes.js";
 import type { RobService } from "./service.js";
@@ -13,6 +14,6 @@ export type RobExtrasContext = { rob: RobService; limiters: RobLimiters; trustPr
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerRobExtras(app: Hono<any>, context: RobExtrasContext) {
   // registerHireRoutes(app, context);
-  // registerHallRoutes(app, context);
+  registerHallRoutes(app, context);
   registerRugOClockRoutes(app, context);
 }
