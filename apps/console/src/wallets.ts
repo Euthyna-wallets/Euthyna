@@ -318,8 +318,11 @@ export async function signDaoProposal(
   return { transactionHash, proposalId };
 }
 
-/** Sputnik prepays this much gas for a vote; members need about 0.3 NEAR. */
-const DAO_VOTE_GAS = "200000000000000";
+/**
+ * The deciding vote runs the proposal, so it carries that proposal's gas: 300 Tgas, the most a
+ * transaction may have (a sealed order with its router approval needs 260 Tgas). Unused gas is refunded.
+ */
+const DAO_VOTE_GAS = "300000000000000";
 
 /** Approve or reject a DAO proposal from the connected member wallet. */
 export async function signDaoAction(

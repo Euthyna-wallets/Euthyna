@@ -573,5 +573,45 @@ async fn the_role_still_decides_and_members_register_reading_keys() -> Result<()
         .json()?;
     assert_eq!(readers.len(), 1);
     assert_eq!(readers[0]["account"], s.f.council[0].id().as_str());
+
+    // The console's one proposal when the wallet needs an approval: approve, then seal, within the
+    // gas of one vote (packages/sdk `sealedOrderKind`: 210 + 50 Tgas).
+    let action = |method: &str, args: Value, deposit: NearToken, tgas: u64| {
+        json!({
+            "method_name": method,
+            "args": STANDARD.encode(serde_json::to_vec(&args).unwrap()),
+            "deposit": deposit.as_yoctonear().to_string(),
+            "gas": Gas::from_tgas(tgas).as_gas().to_string()
+        })
+    };
+    let approve_args = json!({
+        "vault": s.f.vault.id(), "role": ROLE, "chain_id": CHAIN_ID, "token": USDC, "router": ROUTER,
+        "amount": MAX_APPROVAL.to_string(), "gas_limit": "80000", "max_fee_per_gas": "2000000000", "max_priority_fee_per_gas": "1000000"
+    });
+    let both = json!({ "FunctionCall": { "receiver_id": s.sealed.id(), "actions": [
+        action("approve", approve_args, NearToken::from_yoctonear(0), 210),
+        action("seal", seal_args(&s, &commitment, None), DEPOSIT, 50),
+    ] } });
+    let proposal = add_proposal(&s.f, &s.f.council[0], both.clone()).await?;
+    vote(&s.f, &s.f.council[0], proposal, both.clone())
+        .await?
+        .into_result()?;
+    // The console votes with 300 Tgas (DAO_VOTE_GAS), the most a transaction may carry.
+    let voted = s.f.council[1]
+        .call(s.f.dao.id(), "act_proposal")
+        .args_json(json!({ "id": proposal, "action": "VoteApprove", "proposal": both, "memo": null }))
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?;
+    let voted_events = events(&voted);
+    assert!(
+        event(&voted_events, "approved").is_some(),
+        "approve in the DAO's proposal: {:?} {:?}",
+        voted.logs(),
+        voted.receipt_failures()
+    );
+    let sealed = event(&voted_events, "sealed").context("seal in the DAO's proposal")?;
+    assert_eq!(sealed["data"][0]["sealer"], s.f.dao.id().as_str());
+    println!("DAO approve + seal vote: {} Tgas burnt", voted.total_gas_burnt.as_tgas());
     Ok(())
 }

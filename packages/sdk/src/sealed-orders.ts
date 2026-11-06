@@ -140,8 +140,11 @@ export function parseOrder(value: Record<string, unknown>): SealedOrder {
 
 /** Storage for an order or a reader key (contracts/sealed-orders STORAGE_DEPOSIT, 0.02 NEAR). */
 export const SEALED_DEPOSIT_YOCTO = "20000000000000000000000";
-const SEAL_GAS = "100000000000000";
-const APPROVE_GAS = "300000000000000";
+// One DAO vote carries at most 300 Tgas, the DAO's own work included: approve + seal must fit in it.
+// approve: two views (5 + 5) and on_approve_checked (190); seal: two views and on_seal (20).
+// contracts/tests/tests/sealed_orders.rs votes this exact pair.
+const SEAL_GAS = "50000000000000";
+const APPROVE_GAS = "210000000000000";
 const CANCEL_GAS = "50000000000000";
 
 function jsonBase64(value: unknown): string {
