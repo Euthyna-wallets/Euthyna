@@ -9,6 +9,7 @@
     "confirm:operation": "tsx src/confirm-operation.ts",
     "deploy:dao-factory": "tsx src/deploy-dao-factory.ts",
     "worker": "tsx src/worker.ts",
+    "sealed": "tsx src/sealed/watch.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -40,7 +40,7 @@ jobs:
           "$NEAR_SANDBOX_BIN_PATH" --version
       - name: Record checked-in contract hashes
         run: |
-          sha256sum contracts/res/vault.wasm contracts/res/nomos.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/leash.wasm contracts/res/shares.wasm contracts/res/registry.wasm contracts/res/email_recovery.wasm > /tmp/checked-in-contracts.sha256
+          sha256sum contracts/res/vault.wasm contracts/res/nomos.wasm contracts/res/dao_factory.wasm contracts/res/mock_mpc.wasm contracts/res/test_ft.wasm contracts/res/leash.wasm contracts/res/shares.wasm contracts/res/registry.wasm contracts/res/email_recovery.wasm contracts/res/sealed_orders.wasm > /tmp/checked-in-contracts.sha256
       - name: Build all contracts with cargo near
         id: build
         working-directory: contracts
@@ -60,6 +60,7 @@ jobs:
             contracts/res/shares.wasm
             contracts/res/registry.wasm
             contracts/res/email_recovery.wasm
+            contracts/res/sealed_orders.wasm
       - name: Require checked-in WASM to match the build
         run: |
           sha256sum --check /tmp/checked-in-contracts.sha256
@@ -70,6 +71,13 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test --workspace --lib
           cargo test -p omniroles-conditions
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install the sealed-order prover (bb.js and noir_js, for the sandbox tests)
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile --filter @euthyna/api...
       - name: Complete sandbox suite
         working-directory: contracts
         run: |

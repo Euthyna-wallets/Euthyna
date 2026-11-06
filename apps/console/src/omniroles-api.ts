@@ -229,6 +229,22 @@ export const omni = {
   registryProposal: (input: { name: string; description: string }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/registry", { method: "POST", body: JSON.stringify(input) }),
   revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
+  sealed: () => api<SealedView>("/v1/console/omniroles/sealed"),
+  sealedSetup: (input: { budgetUsdc: string; periodDays: number; maxApprovalUsdc: string; slippageBps: number }) =>
+    api<ProposalDraft[]>("/v1/console/omniroles/proposals/sealed-setup", { method: "POST", body: JSON.stringify(input) }),
+  sealedSeal: (commitment: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-seal", { method: "POST", body: JSON.stringify({ commitment }) }),
+  sealedCancel: (id: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-cancel", { method: "POST", body: JSON.stringify({ id }) }),
+};
+
+export type SealedOrderView = { id: number; commitment: string; filled: string; fills: number; cancelled: boolean; sealed_at_ns: string };
+export type SealedView = {
+  enabled: boolean;
+  sealedAccountId: string | null;
+  config: null | { vault: string; role: string; chain_id: number; router: string; wallet: string; slippage_bps: number; vault_tag: string; next_id: number };
+  orders: SealedOrderView[];
+  roleReady: boolean;
+  vaultAccountId: string;
+  daoAccountId: string;
 };
 
 export function thresholdText(threshold: unknown, members: number): string {
