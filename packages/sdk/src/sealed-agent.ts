@@ -148,7 +148,7 @@ export class SealedAgent {
   async tick(file: OrderFile, chunk?: bigint): Promise<Tick> {
     const order = parseOrder(file.order);
     // An order file saved before its vote passed holds a guessed id: find the order by its hash.
-    let stored = await this.order(file.vault, file.id);
+    let stored = Number.isInteger(file.id) && file.id >= 0 ? await this.order(file.vault, file.id) : null;
     if (!stored || stored.commitment !== file.commitment.toLowerCase()) {
       stored = (await this.orders(file.vault)).find((candidate) => candidate.commitment === file.commitment.toLowerCase()) ?? null;
       if (!stored) return { status: "missing" };
