@@ -27,6 +27,19 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
 | Rob the Agent, Hire him: the player buys Ruggy's tx-check for 1 TestUSDC from the throwaway key, the cheque held and cashed on delivery, no gas paid | Code | [docs/rob-the-agent.md](./docs/rob-the-agent.md#hire-him-ruggys-service-on-the-market), `apps/api/src/rob/hire.test.ts`; not run on testnet yet: add the settlement hash |
 
+## Sealed orders (private limit orders)
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| A sealed order is one hash on chain: the pair, the limit, the size and the deadline are not stored anywhere on chain, before or after a fill | Code | `contracts/sealed-orders/src/lib.rs` (`seal` stores the commitment only); `circuits/sealed-order/src/main.nr` |
+| A fill proves in zero knowledge that the swap's rate meets the hidden limit, stays within the hidden total and comes before the hidden deadline, for this vault and this pair | Code | `circuits/sealed-order` (`nargo test`: 7 tests, including a worse rate, over the cap, expired, another pair, another vault) |
+| The proof is verified on NEAR (UltraHonk, BN254 host functions) before the vault is asked for anything; a replayed or edited proof is refused | Code | `contracts/tests/tests/sealed_orders.rs`: real proofs made at test time; a fill burns 94 Tgas in the sandbox, verification included |
+| The proof adds to the role, it never replaces it: the vault still checks the router, the pair, the recipient (the company wallet) and the public budget, and a refused fill gives its amount back to the order | Code | `contracts/tests/tests/sealed_orders.rs` (`the_role_still_decides…`): 6 USDC within the hidden cap but over the 5 USDC budget is refused by the vault |
+| A false rate in a proof can only make a fill fail: the swap's minimum output comes from the proven rate, so a rate better than the market reverts on Uniswap | Code | `packages/sdk/scripts/sealed-order-fork.ts`: on a fork of Base Sepolia, the market rate swaps and a rate 2% above it reverts |
+| Only the vault's owner (its DAO) can point the contract at a vault | Code | `contracts/tests/tests/sealed_orders.rs` (a stranger's `configure` is refused) |
+| What stays public: each fill's amount, the pair, the rate it demanded and the company wallet (the swap is a Base transaction); the order's running total; who holds the order file (the members who sealed it, and whoever runs the watcher) | Code | By design; `apps/api/src/sealed/watch.ts` runs on the member's machine and prints the limit only there |
+| A sealed order filled on testnet | NEXT | Needs `sealed-orders.euthyna.testnet` deployed and a funded company wallet; add the hashes here |
+
 ## Chains
 
 | Claim | Status | Proof |

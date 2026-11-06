@@ -892,6 +892,25 @@ export function createApp({
       const input = await parseJson(context, z.object({ chainId: z.number().int().positive(), amountNear: z.string().regex(/^\d+(\.\d{1,24})?$/) }));
       return context.json(await omniroles.proceedsProposals(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/sealed", requireConsole(auth, consoleLimiter), async (context) =>
+      context.json(await omniroles.sealedOrders(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/sealed-setup", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        budgetUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/),
+        periodDays: z.number().int().min(1).max(365),
+        maxApprovalUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/),
+        slippageBps: z.number().int().min(0).max(500),
+      }));
+      return context.json(await omniroles.sealedSetupProposals(orgOf(context), input));
+    });
+    app.post("/v1/console/omniroles/proposals/sealed-seal", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ commitment: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }));
+      return context.json(await omniroles.sealedSealProposal(orgOf(context), input.commitment));
+    });
+    app.post("/v1/console/omniroles/proposals/sealed-cancel", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ id: z.number().int().min(0) }));
+      return context.json(await omniroles.sealedCancelProposal(orgOf(context), input.id));
+    });
     app.get("/v1/console/omniroles/directory", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.directory(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/registry", requireConsole(auth, consoleLimiter), async (context) => {
