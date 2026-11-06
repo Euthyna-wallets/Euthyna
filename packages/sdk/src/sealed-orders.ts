@@ -5,7 +5,8 @@
  * what must match the contract byte for byte: the vault tag, the rate scale, the minimum output and
  * the swap calldata.
  */
-import { bytesToHex, encodeAbiParameters, getAddress, hexToBytes, sha256, stringToBytes, type Hex } from "viem";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { bytesToHex, concatBytes, encodeAbiParameters, getAddress, hexToBytes, sha256, stringToBytes, type Hex } from "viem";
 
 /** Rates are the output per unit of input (raw units), scaled by 1e18. */
 export const RATE_SCALE = 10n ** 18n;
@@ -134,13 +135,14 @@ export function parseOrder(value: Record<string, unknown>): SealedOrder {
 }
 
 // ---------------------------------------------------------------------------
-// DAO proposals (Sputnik FunctionCall kinds) for the sealed-orders contract
+// Calls and DAO proposals for contracts/sealed-orders (v2)
 // ---------------------------------------------------------------------------
 
-/** The vault role contracts/sealed-orders is a member of. */
-export const SEALED_ROLE = "sealed-orders";
-/** Storage for a config or an order, attached by the DAO (contracts/sealed-orders STORAGE_DEPOSIT). */
-export const SEALED_DEPOSIT_YOCTO = "10000000000000000000000";
+/** Storage for an order or a reader key (contracts/sealed-orders STORAGE_DEPOSIT, 0.02 NEAR). */
+export const SEALED_DEPOSIT_YOCTO = "20000000000000000000000";
+const SEAL_GAS = "100000000000000";
+const APPROVE_GAS = "300000000000000";
+const CANCEL_GAS = "50000000000000";
 
 function jsonBase64(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
@@ -151,37 +153,124 @@ function jsonBase64(value: unknown): string {
 function jsonFromBase64(value: string): unknown {
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(value), (char) => char.charCodeAt(0))));
 }
-const call = (receiverId: string, method: string, args: unknown, deposit: string, gas: string) => ({
-  FunctionCall: { receiver_id: receiverId, actions: [{ method_name: method, args: jsonBase64(args), deposit, gas }] },
-});
 
-export function sealedConfigureKind(sealedId: string, input: { vault: string; chainId: number; router: Hex; slippageBps: number }) {
+export type SealArgs = { vault: string; role: string; chainId: number; commitment: Hex; slippageBps: number; terms?: string | null };
+export type ApproveArgs = { vault: string; role: string; chainId: number; token: Hex; router: Hex; amount: bigint; gasLimit?: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas?: bigint };
+
+export function sealArgs(input: SealArgs) {
+  if (!/^0x[0-9a-f]{64}$/i.test(input.commitment) || parseInt(input.commitment.slice(2, 4), 16) >= 0x30) throw new Error("the commitment is not a field element");
   if (input.slippageBps < 0 || input.slippageBps > MAX_SLIPPAGE_BPS) throw new Error(`slippage: 0 to ${MAX_SLIPPAGE_BPS} basis points`);
-  return call(sealedId, "configure", { vault: input.vault, role: SEALED_ROLE, chain_id: input.chainId, router: getAddress(input.router), slippage_bps: input.slippageBps }, SEALED_DEPOSIT_YOCTO, "60000000000000");
+  return { vault: input.vault, role: input.role, chain_id: input.chainId, commitment: input.commitment.toLowerCase(), slippage_bps: input.slippageBps, terms: input.terms ?? null };
 }
 
-export function sealedSealKind(sealedId: string, commitment: Hex) {
-  if (!/^0x[0-9a-f]{64}$/i.test(commitment) || parseInt(commitment.slice(2, 4), 16) >= 0x30) throw new Error("the commitment is not a field element");
-  return call(sealedId, "seal", { commitment: commitment.toLowerCase() }, SEALED_DEPOSIT_YOCTO, "15000000000000");
+export function approveArgs(input: ApproveArgs) {
+  return {
+    vault: input.vault, role: input.role, chain_id: input.chainId, token: getAddress(input.token), router: getAddress(input.router),
+    amount: input.amount.toString(), gas_limit: (input.gasLimit ?? 80_000n).toString(),
+    max_fee_per_gas: input.maxFeePerGas.toString(), max_priority_fee_per_gas: (input.maxPriorityFeePerGas ?? 1_000_000n).toString(),
+  };
 }
 
-export function sealedCancelKind(sealedId: string, id: number) {
+type Action = { method_name: string; args: string; deposit: string; gas: string };
+const action = (method: string, args: unknown, deposit: string, gas: string): Action => ({ method_name: method, args: jsonBase64(args), deposit, gas });
+
+/** The DAO's order: one proposal, the router approval first when the wallet needs one, then the seal. */
+export function sealedOrderKind(sealedId: string, seal: SealArgs, approve?: ApproveArgs) {
+  const actions = [
+    ...(approve ? [action("approve", approveArgs(approve), "0", APPROVE_GAS)] : []),
+    action("seal", sealArgs(seal), SEALED_DEPOSIT_YOCTO, SEAL_GAS),
+  ];
+  return { FunctionCall: { receiver_id: sealedId, actions } };
+}
+
+export function sealedCancelKind(sealedId: string, vault: string, id: number) {
   if (!Number.isInteger(id) || id < 0) throw new Error("order id");
-  return call(sealedId, "cancel", { id }, "0", "15000000000000");
+  return { FunctionCall: { receiver_id: sealedId, actions: [action("cancel", { vault, id }, "0", CANCEL_GAS)] } };
 }
 
 /** Describes a sealed-orders proposal for the vote page; null for anything else. */
 export function describeSealedProposal(kind: unknown, sealedId: string | null): { title: string; details: string[] } | null {
-  const fn = (kind as { FunctionCall?: { receiver_id?: string; actions?: Array<{ method_name: string; args: string }> } })?.FunctionCall;
+  const fn = (kind as { FunctionCall?: { receiver_id?: string; actions?: Action[] } })?.FunctionCall;
   if (!sealedId || fn?.receiver_id !== sealedId || !fn.actions?.length) return null;
-  const action = fn.actions[0]!;
-  const args = jsonFromBase64(action.args) as Record<string, unknown>;
-  if (action.method_name === "configure") {
-    return { title: "Turn on sealed orders", details: [`vault ${String(args.vault)}, role ${String(args.role)}`, `router ${String(args.router)}, at most ${Number(args.slippage_bps) / 100}% under the proven rate`] };
+  const details: string[] = [];
+  let title = "Sealed orders";
+  for (const item of fn.actions) {
+    const args = jsonFromBase64(item.args) as Record<string, unknown>;
+    if (item.method_name === "seal") {
+      title = "Seal an order";
+      details.push(`hash ${String(args.commitment)}, filled through the role ${String(args.role)}`);
+      details.push("Price limit, size and deadline stay hidden; members read them with their key.");
+    } else if (item.method_name === "approve") {
+      details.push(`Uniswap may take up to ${Number(args.amount) / 1e6} USDC from the wallet (within the role)`);
+    } else if (item.method_name === "cancel") {
+      title = `Cancel sealed order #${String(args.id)}`;
+    }
   }
-  if (action.method_name === "seal") {
-    return { title: "Seal an order", details: [`commitment ${String(args.commitment)}`, "Pair, limit, size and deadline stay hidden: only members holding the order file know them."] };
+  return { title, details };
+}
+
+// ---------------------------------------------------------------------------
+// Terms for the members: X25519 keys derived from a wallet signature
+// ---------------------------------------------------------------------------
+
+/** What a member signs (NEP-413) to derive their reading key; fixed, so the key is the same each time. */
+export function readerMessage(vault: string) {
+  return {
+    message: `Read the sealed orders of ${vault} on Euthyna. This signature derives a reading key; it moves nothing.`,
+    recipient: "euthyna.io",
+    nonce: hexToBytes(sha256(stringToBytes(`euthyna-sealed-reader:${vault}`))),
+  };
+}
+
+/** The member's X25519 key pair from their NEP-413 signature (ed25519 signatures are deterministic). */
+export function readerKeyFromSignature(signature: Uint8Array) {
+  const privateKey = hexToBytes(sha256(concatBytes([stringToBytes("euthyna-sealed-terms-v1"), signature])));
+  return { privateKey, publicKey: x25519.getPublicKey(privateKey) };
+}
+
+const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const unb64 = (text: string) => Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
+export const publicKeyBase64 = b64;
+
+async function aes(key: Uint8Array, usage: "encrypt" | "decrypt") {
+  return globalThis.crypto.subtle.importKey("raw", key as BufferSource, "AES-GCM", false, [usage]);
+}
+
+type Envelope = { v: 1; epk: string; iv: string; ct: string; keys: Record<string, { iv: string; key: string }> };
+
+/**
+ * Encrypts the terms for each reader: one random content key (AES-256-GCM), wrapped for every
+ * reader with a key from X25519(ephemeral, reader) hashed with both public keys.
+ */
+export async function encryptTerms(terms: SealedOrder, readers: Array<{ account: string; publicKey: string }>): Promise<string> {
+  if (!readers.length) throw new Error("no member has registered a reading key yet");
+  const random = (size: number) => globalThis.crypto.getRandomValues(new Uint8Array(size));
+  const contentKey = random(32);
+  const ephemeral = random(32);
+  const epk = x25519.getPublicKey(ephemeral);
+  const iv = random(12);
+  const plaintext = new TextEncoder().encode(JSON.stringify(serializeOrder(terms)));
+  const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aes(contentKey, "encrypt"), plaintext));
+  const keys: Envelope["keys"] = {};
+  for (const reader of readers) {
+    const readerKey = unb64(reader.publicKey);
+    const kek = hexToBytes(sha256(concatBytes([x25519.getSharedSecret(ephemeral, readerKey), epk, readerKey])));
+    const wrapIv = random(12);
+    const wrapped = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv: wrapIv }, await aes(kek, "encrypt"), contentKey));
+    keys[reader.account] = { iv: b64(wrapIv), key: b64(wrapped) };
   }
-  if (action.method_name === "cancel") return { title: `Cancel sealed order #${String(args.id)}`, details: [] };
-  return null;
+  const envelope: Envelope = { v: 1, epk: b64(epk), iv: b64(iv), ct: b64(ct), keys };
+  return btoa(JSON.stringify(envelope));
+}
+
+/** The terms, for a reader holding their private key; null when the order was not encrypted to them. */
+export async function decryptTerms(terms: string, account: string, privateKey: Uint8Array): Promise<SealedOrder | null> {
+  const envelope = JSON.parse(atob(terms)) as Envelope;
+  const mine = envelope.keys[account];
+  if (envelope.v !== 1 || !mine) return null;
+  const epk = unb64(envelope.epk);
+  const kek = hexToBytes(sha256(concatBytes([x25519.getSharedSecret(privateKey, epk), epk, x25519.getPublicKey(privateKey)])));
+  const contentKey = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(mine.iv) }, await aes(kek, "decrypt"), unb64(mine.key)));
+  const plaintext = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(envelope.iv) }, await aes(contentKey, "decrypt"), unb64(envelope.ct));
+  return parseOrder(JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>);
 }

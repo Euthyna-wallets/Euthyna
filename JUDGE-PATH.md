@@ -100,8 +100,8 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 
 Put the MCP config into Claude Desktop, Claude Code, Cursor or Codex, with your paths (build the server and the SDK
 once, in the clone: `pnpm install && pnpm --filter "@euthyna/mcp..." build`). The server refuses to start if the key
-file sits in its own working directory, where the agent could read it: keep it elsewhere. It lists 14 tools; the ones
-used here are `mandate`, `check` and `pay` (the others: Market, NEAR and Solana transfers, revenue sharing, status
+file sits in its own working directory, where the agent could read it: keep it elsewhere. It lists 17 tools; the ones
+used here are `mandate`, `check` and `pay` (the others: Market, sealed orders, NEAR and Solana transfers, revenue sharing, status
 and cancel). Every one goes through the vault. Then talk to it:
 
 | Ask the agent | You should see |

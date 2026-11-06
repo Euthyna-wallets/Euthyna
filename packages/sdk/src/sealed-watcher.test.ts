@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { RATE_SCALE, type SealedOrder } from "@euthyna/sdk";
+import { RATE_SCALE, type SealedOrder } from "./sealed-orders.js";
 
-import { commitmentOf, proveFill } from "./prover.js";
-import { fillOutcome, tick, type WatcherDeps } from "./watcher.js";
+import { commitmentOf, proveFill } from "./sealed-prover.js";
+import { fillOutcome, tick, type WatcherDeps } from "./sealed-watcher.js";
 
 const order: SealedOrder = {
   vaultId: "acme-vault.test.near",
@@ -47,6 +47,12 @@ describe("sealed-order watcher", () => {
     expect(chunked.sent[0]!.amountIn).toBe(500_000n);
   });
 
+  it("does not send a fill the router allowance cannot cover", async () => {
+    const { deps: d, sent } = deps({ allowance: async () => 1_000_000n });
+    expect(await tick(order, d)).toEqual({ status: "needs-approval", amountIn: 3_000_000n, allowance: 1_000_000n });
+    expect(sent).toHaveLength(0);
+  });
+
   it("stops on a cancelled, expired or full order", async () => {
     expect((await tick(order, deps({ orderState: async () => ({ filled: 0n, fills: 0, cancelled: true }) }).deps)).status).toBe("cancelled");
     expect((await tick(order, deps({ now: () => 2_000_000_001 }).deps)).status).toBe("expired");
@@ -55,9 +61,9 @@ describe("sealed-order watcher", () => {
 
   it("reads the contract's events", () => {
     const filled = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "filled", data: [{ op_id: [9, 9] }] })}`;
-    const failed = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "fill_failed", data: [{ reason: "vault refused the swap" }] })}`;
+    const failed = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "failed", data: [{ reason: "vault refused" }] })}`;
     expect(fillOutcome(["x", filled])).toEqual({ opId: [9, 9], failed: null });
-    expect(fillOutcome([failed])).toEqual({ opId: null, failed: "vault refused the swap" });
+    expect(fillOutcome([failed])).toEqual({ opId: null, failed: "vault refused" });
   });
 });
 

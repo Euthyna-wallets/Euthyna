@@ -1,21 +1,24 @@
 //! Sealed orders: limit orders a company's treasury places without showing them.
 //!
-//! A DAO seals an order by storing one hash, the commitment of the circuit in
-//! `circuits/sealed-order`: the pair, the fee tier, and three hidden terms (the worst rate it
-//! accepts, the most it will sell in total, and a deadline), with a salt and this vault's tag. Nothing
-//! else about the order is on chain, before or after it fills.
+//! An order is one hash, the commitment of the circuit in `circuits/sealed-order`: the pair, the
+//! fee tier, and three hidden terms (the worst rate it accepts, the most it sells in total, and a
+//! deadline), with a salt and the vault's tag. Nothing else about it is on chain, before or after a
+//! fill.
 //!
-//! Whoever knows the order (a member, or the watcher the company runs) fills it with a proof that the
-//! rate the swap demands is at least the hidden limit, that what was filled plus this fill stays under
-//! the hidden cap, and that the order has not expired. This contract verifies the proof on chain
-//! (UltraHonk on NEAR's BN254 host functions), then asks the company's vault for the swap, as a member
-//! of the role the DAO gave it. The vault checks that role like any other: the router, the pair, the
-//! recipient (the company wallet) and the budget. The proof adds the hidden terms on top of the role;
-//! it never replaces it.
+//! Who places one: the vault's owner (its DAO, by a vote) or a member of the vault role named in the
+//! order (an agent with a swap role). This contract must itself be a member of that role: the role
+//! is where the members decided the router, the pair, the recipient and the budget, and every fill
+//! goes through it. The proof adds the hidden terms on top of the role; it never replaces it.
 //!
-//! The swap's minimum output comes from the rate in the proof, so a fill that claims a better rate
-//! than the market reverts on Base: a false rate makes a fill fail, never trade worse. A fill whose
-//! swap reverts still counts against the hidden cap; a failure only ever trades less.
+//! A fill proves (Noir, UltraHonk, verified here on NEAR's BN254 host functions) that the rate the
+//! swap demands is at least the hidden limit, that the running total stays under the hidden cap and
+//! that the deadline holds. The swap's minimum output comes from that rate, so a fill claiming a
+//! better rate than the market reverts on Base: a false rate makes a fill fail, never trade worse. A
+//! fill whose swap reverts still counts against the hidden cap; a failure only ever trades less.
+//!
+//! The terms can travel with the order, encrypted for the company's members (`terms`): each member
+//! registers an X25519 key derived from a signature of their own wallet, and whoever seals encrypts
+//! the terms to those keys. This contract stores the ciphertext and never reads it.
 //!
 //! The account is deployed without access keys and has no owner.
 
@@ -44,63 +47,107 @@ const MAX_SLIPPAGE_BPS: u16 = 500;
 /// A proof states the time it was made; it must be this recent (and not in the future).
 const MAX_PROOF_AGE_S: u64 = 600;
 const MAX_FUTURE_S: u64 = 60;
-const MAX_ORDERS_PER_DAO: u64 = 1_000;
-/// Storage for a config or an order, paid by the DAO (unused deposit stays as storage buffer).
-const STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(10);
+const MAX_ORDERS_PER_VAULT: u64 = 1_000;
+const MAX_TERMS_BYTES: usize = 8_192;
+const MAX_READERS: usize = 20;
+/// Storage for an order or a reader key, paid by whoever adds it (refunded when refused).
+const STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(20);
 /// Uniswap SwapRouter02 `exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))`.
 const EXACT_INPUT_SINGLE: [u8; 4] = [0x04, 0xe4, 0x5a, 0xaf];
+/// ERC-20 `approve(address,uint256)`.
+const APPROVE: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
 
-const VIEW_GAS: Gas = Gas::from_tgas(10);
-const CONFIGURE_CALLBACK_GAS: Gas = Gas::from_tgas(15);
+const VIEW_GAS: Gas = Gas::from_tgas(5);
 const PREPARE_GAS: Gas = Gas::from_tgas(50);
 const AUTHORIZE_GAS: Gas = Gas::from_tgas(90);
 const ON_AUTHORIZED_GAS: Gas = Gas::from_tgas(10);
 const ON_PREPARED_GAS: Gas = Gas::from_tgas(115);
+const ON_SEAL_GAS: Gas = Gas::from_tgas(20);
+/// The approval's check callback then prepares, authorizes and records it.
+const ON_APPROVE_CHECKED_GAS: Gas = Gas::from_tgas(190);
+const ON_READER_GAS: Gas = Gas::from_tgas(30);
 
 #[derive(BorshStorageKey)]
 #[near]
 enum Key {
-    Configs,
     Orders,
-}
-
-/// What a DAO set for its sealed orders. The vault, its wallet and the role are checked when set.
-#[near(serializers = [borsh, json])]
-#[derive(Clone)]
-pub struct Config {
-    pub vault: AccountId,
-    /// The vault role this contract is a member of: router, pair, recipient and budget.
-    pub role: String,
-    pub chain_id: u64,
-    /// The swap router (0x…).
-    pub router: String,
-    /// The company wallet on `chain_id`, the swap's recipient (0x…).
-    pub wallet: String,
-    /// How far below the proven rate the swap may fill.
-    pub slippage_bps: u16,
-    /// sha256 of the vault account, as a field: a commitment opens for one vault only.
-    pub vault_tag: String,
-    pub next_id: u64,
+    NextIds,
+    Readers,
 }
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone)]
 pub struct Order {
     pub id: u64,
+    pub vault: AccountId,
+    /// The vault role this contract fills through: router, pair, recipient and budget.
+    pub role: String,
+    pub chain_id: u64,
+    /// The company wallet on `chain_id`, the swap's recipient (0x…), read when sealed.
+    pub wallet: String,
+    /// Who sealed it: the vault's owner (a vote) or a member of `role`.
+    pub sealer: AccountId,
     /// The circuit's Poseidon2 commitment (0x…, a BN254 field).
     pub commitment: String,
+    /// How far below the proven rate a fill may execute.
+    pub slippage_bps: u16,
     /// Sum of the amounts asked for so far, public: each proof binds to it.
     pub filled: U128,
     pub fills: u32,
     pub cancelled: bool,
     pub sealed_at_ns: U64,
+    /// The terms, encrypted for the members' registered keys (opaque here).
+    pub terms: Option<String>,
+}
+
+/// A member's X25519 key for reading sealed terms (base64), registered by the member.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Reader {
+    pub account: AccountId,
+    pub public_key: String,
+}
+
+/// Who may act for a vault, read with one view each: its owner and a role membership.
+struct Authority {
+    owner: Option<AccountId>,
+    member_active: bool,
+}
+
+fn authority(
+    owner: Result<AccountId, PromiseError>,
+    membership: Result<Option<Value>, PromiseError>,
+) -> Authority {
+    Authority {
+        owner: owner.ok(),
+        member_active: membership
+            .ok()
+            .flatten()
+            .is_some_and(|membership| membership["active"].as_bool() == Some(true)),
+    }
+}
+
+impl Authority {
+    fn allows(&self, caller: &AccountId) -> bool {
+        self.owner.as_ref() == Some(caller) || self.member_active
+    }
 }
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct SealedOrders {
-    configs: LookupMap<AccountId, Config>,
     orders: LookupMap<(AccountId, u64), Order>,
+    next_ids: LookupMap<AccountId, u64>,
+    readers: LookupMap<AccountId, Vec<Reader>>,
+}
+
+fn view(account: &AccountId, method: &str, args: Value) -> Promise {
+    Promise::new(account.clone()).function_call(
+        method.to_string(),
+        args.to_string().into_bytes(),
+        NearToken::from_yoctonear(0),
+        VIEW_GAS,
+    )
 }
 
 #[near]
@@ -108,21 +155,26 @@ impl SealedOrders {
     #[init]
     pub fn new() -> Self {
         Self {
-            configs: LookupMap::new(Key::Configs),
             orders: LookupMap::new(Key::Orders),
+            next_ids: LookupMap::new(Key::NextIds),
+            readers: LookupMap::new(Key::Readers),
         }
     }
 
-    /// Called by a DAO: its vault, the role it gave this contract, the chain, the router and the
-    /// slippage. The vault must say the caller is its owner; its wallet on the chain is read then.
+    // ---------------------------------------------------------------- sealing
+
+    /// Seals an order for `vault`. The caller must be the vault's owner or an active member of
+    /// `role`, and this contract must be a member of `role` too; the wallet on `chain_id` is read
+    /// now. Returns the order (or null, with the deposit back, when refused).
     #[payable]
-    pub fn configure(
+    pub fn seal(
         &mut self,
         vault: AccountId,
         role: String,
         chain_id: u64,
-        router: String,
+        commitment: String,
         slippage_bps: u16,
+        terms: Option<String>,
     ) -> Promise {
         require!(
             env::attached_deposit() >= STORAGE_DEPOSIT,
@@ -130,111 +182,238 @@ impl SealedOrders {
         );
         require!(slippage_bps <= MAX_SLIPPAGE_BPS, "ERR_SLIPPAGE");
         require!(!role.is_empty() && role.len() <= 64, "ERR_ROLE");
-        parse_address(&router);
-        let dao = env::predecessor_account_id();
-        Promise::new(vault.clone())
-            .function_call(
-                "owner_id".to_string(),
-                vec![],
-                NearToken::from_yoctonear(0),
-                VIEW_GAS,
-            )
-            .and(Promise::new(vault.clone()).function_call(
-                "get_wallet".to_string(),
-                json!({ "chain_id": chain_id }).to_string().into_bytes(),
-                NearToken::from_yoctonear(0),
-                VIEW_GAS,
+        require!(
+            terms
+                .as_ref()
+                .is_none_or(|terms| terms.len() <= MAX_TERMS_BYTES),
+            "ERR_TERMS_SIZE"
+        );
+        parse_field(&commitment);
+        let caller = env::predecessor_account_id();
+        view(&vault, "owner_id", json!({}))
+            .and(view(
+                &vault,
+                "get_membership",
+                json!({ "role": role, "member": caller }),
             ))
+            .and(view(
+                &vault,
+                "get_membership",
+                json!({ "role": role, "member": env::current_account_id() }),
+            ))
+            .and(view(&vault, "get_wallet", json!({ "chain_id": chain_id })))
             .then(
                 Self::ext(env::current_account_id())
-                    .with_static_gas(CONFIGURE_CALLBACK_GAS)
-                    .on_configure(dao, vault, role, chain_id, router, slippage_bps),
+                    .with_static_gas(ON_SEAL_GAS)
+                    .on_seal(
+                        caller,
+                        vault,
+                        role,
+                        chain_id,
+                        commitment,
+                        slippage_bps,
+                        terms,
+                    ),
             )
     }
 
     #[private]
     #[allow(clippy::too_many_arguments)]
-    pub fn on_configure(
+    pub fn on_seal(
         &mut self,
-        dao: AccountId,
+        caller: AccountId,
         vault: AccountId,
         role: String,
         chain_id: u64,
-        router: String,
+        commitment: String,
         slippage_bps: u16,
+        terms: Option<String>,
         #[callback_result] owner: Result<AccountId, PromiseError>,
+        #[callback_result] caller_membership: Result<Option<Value>, PromiseError>,
+        #[callback_result] own_membership: Result<Option<Value>, PromiseError>,
         #[callback_result] wallet: Result<Option<Value>, PromiseError>,
-    ) -> bool {
+    ) -> Option<Order> {
+        let allowed = authority(owner, caller_membership).allows(&caller);
+        let filler = authority(Err(PromiseError::Failed), own_membership).member_active;
         let wallet = wallet
             .ok()
             .flatten()
             .and_then(|wallet| address_of_json(&wallet["address"]));
-        let accepted = owner.as_ref().is_ok_and(|owner| owner == &dao) && wallet.is_some();
-        if !accepted {
-            // Not the vault's owner, or no wallet on that chain: give the deposit back.
-            Promise::new(dao).transfer(STORAGE_DEPOSIT).detach();
-            env::log_str("ERR_NOT_VAULT_OWNER_OR_NO_WALLET");
-            return false;
-        }
-        let next_id = self.configs.get(&dao).map_or(0, |config| config.next_id);
-        let config = Config {
-            vault_tag: hex0x(&vault_tag(&vault)),
-            vault,
-            role,
-            chain_id,
-            router: router.to_ascii_lowercase(),
-            wallet: hex0x(&wallet.unwrap()),
-            slippage_bps,
-            next_id,
+        let refusal = if !allowed {
+            Some("ERR_NOT_OWNER_OR_MEMBER")
+        } else if !filler {
+            Some("ERR_CONTRACT_NOT_IN_ROLE")
+        } else if wallet.is_none() {
+            Some("ERR_NO_WALLET")
+        } else {
+            None
         };
-        event("configured", &json!(config));
-        self.configs.insert(dao, config);
-        true
-    }
-
-    /// Called by a DAO (a proposal): stores a commitment. Returns the order's id.
-    #[payable]
-    pub fn seal(&mut self, commitment: String) -> u64 {
-        require!(
-            env::attached_deposit() >= STORAGE_DEPOSIT,
-            "ERR_STORAGE_DEPOSIT"
-        );
-        let field = parse_field(&commitment);
-        let dao = env::predecessor_account_id();
-        let config = self.configs.get_mut(&dao).expect("ERR_NOT_CONFIGURED");
-        require!(config.next_id < MAX_ORDERS_PER_DAO, "ERR_TOO_MANY_ORDERS");
-        let id = config.next_id;
-        config.next_id += 1;
+        if let Some(reason) = refusal {
+            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            env::log_str(reason);
+            return None;
+        }
+        let id = self.next_ids.get(&vault).copied().unwrap_or(0);
+        if id >= MAX_ORDERS_PER_VAULT {
+            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            env::log_str("ERR_TOO_MANY_ORDERS");
+            return None;
+        }
+        self.next_ids.insert(vault.clone(), id + 1);
         let order = Order {
             id,
-            commitment: hex0x(&field),
+            vault: vault.clone(),
+            role,
+            chain_id,
+            wallet: hex0x(&wallet.unwrap()),
+            sealer: caller,
+            commitment: hex0x(&parse_field(&commitment)),
+            slippage_bps,
             filled: U128(0),
             fills: 0,
             cancelled: false,
             sealed_at_ns: U64(env::block_timestamp()),
+            terms,
         };
-        event("sealed", &json!({ "dao": dao, "order": order }));
-        self.orders.insert((dao, id), order);
-        id
+        event(
+            "sealed",
+            &json!({ "vault": vault, "id": id, "sealer": order.sealer, "commitment": order.commitment }),
+        );
+        self.orders.insert((vault, id), order.clone());
+        Some(order)
     }
 
-    /// Called by a DAO: no fill after this one.
-    pub fn cancel(&mut self, id: u64) {
-        let dao = env::predecessor_account_id();
+    /// The sealer cancels at once; the vault's owner too (checked on chain).
+    pub fn cancel(&mut self, vault: AccountId, id: u64) -> PromiseOrValue<bool> {
+        let caller = env::predecessor_account_id();
         let order = self
             .orders
-            .get_mut(&(dao.clone(), id))
+            .get(&(vault.clone(), id))
             .expect("ERR_ORDER_NOT_FOUND");
-        order.cancelled = true;
-        event("cancelled", &json!({ "dao": dao, "id": id }));
+        if order.sealer == caller {
+            self.mark_cancelled(&vault, id);
+            return PromiseOrValue::Value(true);
+        }
+        PromiseOrValue::Promise(
+            view(&vault, "owner_id", json!({})).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(10))
+                    .on_cancel(caller, vault, id),
+            ),
+        )
     }
+
+    #[private]
+    pub fn on_cancel(
+        &mut self,
+        caller: AccountId,
+        vault: AccountId,
+        id: u64,
+        #[callback_result] owner: Result<AccountId, PromiseError>,
+    ) -> bool {
+        if owner.ok().as_ref() != Some(&caller) {
+            env::log_str("ERR_NOT_SEALER_OR_OWNER");
+            return false;
+        }
+        self.mark_cancelled(&vault, id);
+        true
+    }
+
+    // --------------------------------------------------------------- approval
+
+    /// Lets the router take `token` from the company wallet, through the vault and within `role`
+    /// (the role caps the amount). For the vault's owner or a member of the role.
+    #[allow(clippy::too_many_arguments)]
+    pub fn approve(
+        &mut self,
+        vault: AccountId,
+        role: String,
+        chain_id: u64,
+        token: String,
+        router: String,
+        amount: U128,
+        gas_limit: U128,
+        max_fee_per_gas: U128,
+        max_priority_fee_per_gas: U128,
+    ) -> Promise {
+        parse_address(&token);
+        parse_address(&router);
+        let caller = env::predecessor_account_id();
+        view(&vault, "owner_id", json!({}))
+            .and(view(
+                &vault,
+                "get_membership",
+                json!({ "role": role, "member": caller }),
+            ))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(ON_APPROVE_CHECKED_GAS)
+                    .on_approve_checked(
+                        caller,
+                        vault,
+                        role,
+                        chain_id,
+                        token,
+                        router,
+                        amount,
+                        [gas_limit, max_fee_per_gas, max_priority_fee_per_gas],
+                    ),
+            )
+    }
+
+    #[private]
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_approve_checked(
+        &mut self,
+        caller: AccountId,
+        vault: AccountId,
+        role: String,
+        chain_id: u64,
+        token: String,
+        router: String,
+        amount: U128,
+        gas: [U128; 3],
+        #[callback_result] owner: Result<AccountId, PromiseError>,
+        #[callback_result] membership: Result<Option<Value>, PromiseError>,
+    ) -> PromiseOrValue<bool> {
+        if !authority(owner, membership).allows(&caller) {
+            env::log_str("ERR_NOT_OWNER_OR_MEMBER");
+            return PromiseOrValue::Value(false);
+        }
+        let mut calldata = APPROVE.to_vec();
+        calldata.extend_from_slice(&address_word(&parse_address(&router)));
+        calldata.extend_from_slice(&word(amount.0));
+        let reference = format!("sealed-approve-{}", env::block_height());
+        event(
+            "approve_requested",
+            &json!({ "vault": vault, "token": token, "router": router, "amount": amount }),
+        );
+        PromiseOrValue::Promise(
+            self.prepare_and_sign(
+                &vault,
+                &role,
+                chain_id,
+                parse_address(&token),
+                calldata,
+                U128(0),
+                reference,
+                gas,
+                Self::ext(env::current_account_id())
+                    .with_static_gas(ON_PREPARED_GAS)
+                    .on_prepared(vault.clone(), None, U128(0)),
+            ),
+        )
+    }
+
+    // ------------------------------------------------------------------ fills
 
     /// Anyone with a proof: verifies it, then asks the vault for the swap.
     #[allow(clippy::too_many_arguments)]
     pub fn fill(
         &mut self,
-        dao: AccountId,
+        vault: AccountId,
         id: u64,
+        router: String,
         token_in: String,
         token_out: String,
         fee: u32,
@@ -255,10 +434,9 @@ impl SealedOrders {
             now_s.0 <= block_s + MAX_FUTURE_S && now_s.0 + MAX_PROOF_AGE_S >= block_s,
             "ERR_PROOF_TIME"
         );
-        let config = self.configs.get(&dao).cloned().expect("ERR_NOT_CONFIGURED");
         let order = self
             .orders
-            .get(&(dao.clone(), id))
+            .get(&(vault.clone(), id))
             .cloned()
             .expect("ERR_ORDER_NOT_FOUND");
         require!(!order.cancelled, "ERR_ORDER_CANCELLED");
@@ -267,8 +445,8 @@ impl SealedOrders {
 
         let pubs: Vec<[u8; 32]> = vec![
             parse_field(&order.commitment),
-            parse_field(&config.vault_tag),
-            word(config.chain_id as u128),
+            vault_tag(&vault),
+            word(order.chain_id as u128),
             address_word(&token_in_bytes),
             address_word(&token_out_bytes),
             word(fee as u128),
@@ -284,76 +462,64 @@ impl SealedOrders {
             env::panic_str("ERR_PROOF_INVALID");
         }
 
-        let filled_before = order.filled.0;
         let stored = self
             .orders
-            .get_mut(&(dao.clone(), id))
+            .get_mut(&(vault.clone(), id))
             .expect("ERR_ORDER_NOT_FOUND");
         stored.filled = U128(
-            filled_before
+            order
+                .filled
+                .0
                 .checked_add(amount_in.0)
                 .unwrap_or_else(|| env::panic_str("ERR_OVERFLOW")),
         );
         stored.fills += 1;
         let reference = format!("sealed-{}-{}", id, stored.fills);
 
-        let min_out = min_out(amount_in.0, rate.0, config.slippage_bps);
+        let min_out = min_out(amount_in.0, rate.0, order.slippage_bps);
         let calldata = exact_input_single(
             &token_in_bytes,
             &token_out_bytes,
             fee,
-            &parse_address(&config.wallet),
+            &parse_address(&order.wallet),
             amount_in.0,
             min_out,
         );
         event(
             "fill_requested",
-            &json!({ "dao": dao, "id": id, "amount_in": amount_in, "rate": rate, "min_out": U128(min_out), "reference": reference }),
+            &json!({ "vault": vault, "id": id, "amount_in": amount_in, "rate": rate, "min_out": U128(min_out), "reference": reference }),
         );
-        let request = json!({
-            "role": config.role,
-            "request": {
-                "chain_id": config.chain_id,
-                "target": parse_address(&config.router),
-                "value": "0",
-                "calldata": calldata,
-                "allowance_amount": amount_in,
-                "reference": reference,
-                "gas_limit": gas_limit,
-                "max_fee_per_gas": max_fee_per_gas,
-                "max_priority_fee_per_gas": max_priority_fee_per_gas,
-            }
-        });
-        Promise::new(config.vault)
-            .function_call(
-                "prepare".to_string(),
-                request.to_string().into_bytes(),
-                NearToken::from_yoctonear(0),
-                PREPARE_GAS,
-            )
-            .then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(ON_PREPARED_GAS)
-                    .on_prepared(dao, id, amount_in),
-            )
+        self.prepare_and_sign(
+            &vault,
+            &order.role,
+            order.chain_id,
+            parse_address(&router),
+            calldata,
+            amount_in,
+            reference,
+            [gas_limit, max_fee_per_gas, max_priority_fee_per_gas],
+            Self::ext(env::current_account_id())
+                .with_static_gas(ON_PREPARED_GAS)
+                .on_prepared(vault.clone(), Some(id), amount_in),
+        )
     }
 
+    /// `id` is the order of a fill, none for an approval.
     #[private]
     pub fn on_prepared(
         &mut self,
-        dao: AccountId,
-        id: u64,
+        vault: AccountId,
+        id: Option<u64>,
         amount_in: U128,
         #[callback_result] operation: Result<Value, PromiseError>,
     ) -> PromiseOrValue<bool> {
         let Ok(operation) = operation else {
-            self.undo(&dao, id, amount_in.0, "vault refused the swap");
+            self.undo(&vault, id, amount_in.0, "vault refused");
             return PromiseOrValue::Value(false);
         };
-        let config = self.configs.get(&dao).cloned().expect("ERR_NOT_CONFIGURED");
         let op_id = operation["op_id"].clone();
         PromiseOrValue::Promise(
-            Promise::new(config.vault)
+            Promise::new(vault.clone())
                 .function_call(
                     "authorize".to_string(),
                     json!({ "op_id": op_id, "approval": null })
@@ -365,7 +531,7 @@ impl SealedOrders {
                 .then(
                     Self::ext(env::current_account_id())
                         .with_static_gas(ON_AUTHORIZED_GAS)
-                        .on_authorized(dao, id, amount_in, op_id),
+                        .on_authorized(vault, id, amount_in, op_id),
                 ),
         )
     }
@@ -373,40 +539,127 @@ impl SealedOrders {
     #[private]
     pub fn on_authorized(
         &mut self,
-        dao: AccountId,
-        id: u64,
+        vault: AccountId,
+        id: Option<u64>,
         amount_in: U128,
         op_id: Value,
     ) -> bool {
         // authorize answers nothing, or the MPC callback's value: only success matters.
         if env::promise_result_checked(0, 16_384).is_err() {
-            self.undo(&dao, id, amount_in.0, "vault did not sign the swap");
+            self.undo(&vault, id, amount_in.0, "vault did not sign");
             return false;
         }
-        event(
-            "filled",
-            &json!({ "dao": dao, "id": id, "amount_in": amount_in, "op_id": op_id }),
-        );
+        match id {
+            Some(id) => event(
+                "filled",
+                &json!({ "vault": vault, "id": id, "amount_in": amount_in, "op_id": op_id }),
+            ),
+            None => event("approved", &json!({ "vault": vault, "op_id": op_id })),
+        }
         true
     }
 
-    pub fn config(&self, dao: AccountId) -> Option<Config> {
-        self.configs.get(&dao).cloned()
+    // ---------------------------------------------------------------- readers
+
+    /// A member of the vault's DAO registers the key their sealed terms are encrypted to (X25519,
+    /// base64). Checked on chain: the vault's owner, then that DAO's policy.
+    #[payable]
+    pub fn register_reader(&mut self, vault: AccountId, public_key: String) -> Promise {
+        require!(
+            env::attached_deposit() >= STORAGE_DEPOSIT,
+            "ERR_STORAGE_DEPOSIT"
+        );
+        require!(
+            public_key.len() == 44 && public_key.ends_with('='),
+            "ERR_PUBLIC_KEY"
+        );
+        let caller = env::predecessor_account_id();
+        view(&vault, "owner_id", json!({})).then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(ON_READER_GAS)
+                .on_reader_owner(caller, vault, public_key),
+        )
     }
 
-    pub fn order(&self, dao: AccountId, id: u64) -> Option<Order> {
-        self.orders.get(&(dao, id)).cloned()
+    #[private]
+    pub fn on_reader_owner(
+        &mut self,
+        caller: AccountId,
+        vault: AccountId,
+        public_key: String,
+        #[callback_result] owner: Result<AccountId, PromiseError>,
+    ) -> PromiseOrValue<bool> {
+        let Ok(dao) = owner else {
+            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            return PromiseOrValue::Value(false);
+        };
+        PromiseOrValue::Promise(
+            view(&dao, "get_policy", json!({})).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(10))
+                    .on_reader_policy(caller, vault, public_key),
+            ),
+        )
     }
 
-    /// The DAO's orders, newest first (at most `limit`, 50 by default).
-    pub fn orders(&self, dao: AccountId, limit: Option<u64>) -> Vec<Order> {
-        let next = self.configs.get(&dao).map_or(0, |config| config.next_id);
+    #[private]
+    pub fn on_reader_policy(
+        &mut self,
+        caller: AccountId,
+        vault: AccountId,
+        public_key: String,
+        #[callback_result] policy: Result<Value, PromiseError>,
+    ) -> bool {
+        let member = policy.ok().is_some_and(|policy| {
+            policy["roles"].as_array().is_some_and(|roles| {
+                roles.iter().any(|role| {
+                    role["kind"]["Group"].as_array().is_some_and(|group| {
+                        group
+                            .iter()
+                            .any(|account| account.as_str() == Some(caller.as_str()))
+                    })
+                })
+            })
+        });
+        let mut readers = self.readers.get(&vault).cloned().unwrap_or_default();
+        readers.retain(|reader| reader.account != caller);
+        if !member || readers.len() >= MAX_READERS {
+            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            env::log_str(if member {
+                "ERR_TOO_MANY_READERS"
+            } else {
+                "ERR_NOT_A_MEMBER"
+            });
+            return false;
+        }
+        readers.push(Reader {
+            account: caller.clone(),
+            public_key,
+        });
+        event("reader", &json!({ "vault": vault, "account": caller }));
+        self.readers.insert(vault, readers);
+        true
+    }
+
+    // ------------------------------------------------------------------ views
+
+    pub fn order(&self, vault: AccountId, id: u64) -> Option<Order> {
+        self.orders.get(&(vault, id)).cloned()
+    }
+
+    /// The vault's orders, newest first (at most `limit`, 50 by default).
+    pub fn orders(&self, vault: AccountId, limit: Option<u64>) -> Vec<Order> {
+        let next = self.next_ids.get(&vault).copied().unwrap_or(0);
         let limit = limit.unwrap_or(50).min(100);
         (0..next)
             .rev()
             .take(limit as usize)
-            .filter_map(|id| self.orders.get(&(dao.clone(), id)).cloned())
+            .filter_map(|id| self.orders.get(&(vault.clone(), id)).cloned())
             .collect()
+    }
+
+    pub fn readers(&self, vault: AccountId) -> Vec<Reader> {
+        self.readers.get(&vault).cloned().unwrap_or_default()
     }
 
     pub fn verification_key(&self) -> String {
@@ -425,19 +678,64 @@ impl SealedOrders {
 }
 
 impl SealedOrders {
-    /// The vault refused or did not sign: the amount goes back to the order.
-    fn undo(&mut self, dao: &AccountId, id: u64, amount_in: u128, why: &str) {
-        if let Some(order) = self.orders.get_mut(&(dao.clone(), id)) {
+    fn mark_cancelled(&mut self, vault: &AccountId, id: u64) {
+        if let Some(order) = self.orders.get_mut(&(vault.clone(), id)) {
+            order.cancelled = true;
+            event("cancelled", &json!({ "vault": vault, "id": id }));
+        }
+    }
+
+    /// The vault refused or did not sign: a fill's amount goes back to its order.
+    fn undo(&mut self, vault: &AccountId, id: Option<u64>, amount_in: u128, why: &str) {
+        if let Some(id) = id
+            && let Some(order) = self.orders.get_mut(&(vault.clone(), id))
+        {
             order.filled = U128(order.filled.0.saturating_sub(amount_in));
         }
         event(
-            "fill_failed",
-            &json!({ "dao": dao, "id": id, "reason": why }),
+            "failed",
+            &json!({ "vault": vault, "id": id, "reason": why }),
         );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_and_sign(
+        &self,
+        vault: &AccountId,
+        role: &str,
+        chain_id: u64,
+        target: [u8; 20],
+        calldata: Vec<u8>,
+        allowance_amount: U128,
+        reference: String,
+        gas: [U128; 3],
+        then: Promise,
+    ) -> Promise {
+        let request = json!({
+            "role": role,
+            "request": {
+                "chain_id": chain_id,
+                "target": target,
+                "value": "0",
+                "calldata": calldata,
+                "allowance_amount": allowance_amount,
+                "reference": reference,
+                "gas_limit": gas[0],
+                "max_fee_per_gas": gas[1],
+                "max_priority_fee_per_gas": gas[2],
+            }
+        });
+        Promise::new(vault.clone())
+            .function_call(
+                "prepare".to_string(),
+                request.to_string().into_bytes(),
+                NearToken::from_yoctonear(0),
+                PREPARE_GAS,
+            )
+            .then(then)
     }
 }
 
-/// sha256 of the account id with its first byte cleared, so it is below the BN254 modulus.
 fn vault_tag(vault: &AccountId) -> [u8; 32] {
     let mut tag = env::sha256_array(vault.as_bytes());
     tag[0] = 0;
@@ -534,6 +832,17 @@ mod tests {
         assert_eq!(&data[4 + 12..4 + 32], &[0xaa; 20]);
         assert_eq!(data[4 + 3 * 32 - 2..4 + 3 * 32], [0x0b, 0xb8]);
         assert_eq!(data[4 + 6 * 32 - 1], 7);
+    }
+
+    #[test]
+    fn authority_is_the_owner_or_an_active_member() {
+        let owner: AccountId = "dao.testnet".parse().unwrap();
+        let agent: AccountId = "agent.testnet".parse().unwrap();
+        let active = Ok(Some(json!({ "active": true })));
+        assert!(authority(Ok(owner.clone()), Ok(None)).allows(&owner));
+        assert!(!authority(Ok(owner.clone()), Ok(None)).allows(&agent));
+        assert!(authority(Ok(owner.clone()), active).allows(&agent));
+        assert!(!authority(Ok(owner), Ok(Some(json!({ "active": false })))).allows(&agent));
     }
 
     #[test]

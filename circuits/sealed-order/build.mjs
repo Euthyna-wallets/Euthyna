@@ -1,6 +1,6 @@
 // Compile the sealed-order circuit (nargo 1.0.0-beta.26) and publish what the rest needs:
-//   apps/api/src/sealed/sealed_order.json            the circuit, for the watcher that proves fills
-//                                                    (and prove.mjs); sealing only hashes, in the browser
+//   packages/sdk/circuits/sealed_order.json          the circuit, for the SDK prover (watcher, MCP,
+//                                                    prove.mjs); sealing only hashes, in the browser
 //   contracts/sealed-orders/src/vk.bin               its verification key, built into the contract
 // The key is for zero-knowledge proofs with a Keccak transcript (bb's "evm" target), the format the
 // on-chain verifier reads, as for circuits/email-recovery.
@@ -18,7 +18,7 @@ const nargo = process.env.NARGO ?? join(homedir(), ".nargo/bin/nargo");
 execFileSync(nargo, ["compile"], { cwd: here, stdio: "inherit" });
 const circuitPath = join(here, "target/sealed_order.json");
 const circuit = JSON.parse(readFileSync(circuitPath, "utf8"));
-for (const dir of ["apps/api/src/sealed"]) {
+for (const dir of ["packages/sdk/circuits"]) {
   mkdirSync(join(root, dir), { recursive: true });
   copyFileSync(circuitPath, join(root, dir, "sealed_order.json"));
 }

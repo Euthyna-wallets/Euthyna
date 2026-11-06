@@ -23,6 +23,8 @@ import {
 } from "@euthyna/sdk";
 
 import { createMandateMcpServer, MandateMcpTools } from "./index.js";
+import { SealedOrdersMcp } from "./sealed.js";
+import { DEFAULT_SEALED_ACCOUNT, SealedAgent } from "@euthyna/sdk/sealed-agent";
 reserveStdoutForMcp();
 
 const env = z.object({
@@ -73,6 +75,19 @@ const rpcUrl = process.env.EVM_RPC_URL ?? (env.EVM_CHAIN_ID === 84532 ? "https:/
 const { publicRpc } = await import("@euthyna/sdk");
 let client: OnchainAgentClient;
 let buyer: MarketBuyer | undefined;
+let sealed: SealedOrdersMcp | undefined;
+
+/** Sealed orders, on testnet by default; SEALED_ORDERS_ACCOUNT_ID="" turns them off. */
+async function sealedFor(
+  common: { networkId: string; rpcUrl: string; accountId: string; vaultAccountId: string; role: string },
+  key: { privateKey: string } | { signer: InstanceType<typeof SocketNearSigner> },
+): Promise<SealedOrdersMcp | undefined> {
+  const sealedAccountId = process.env.SEALED_ORDERS_ACCOUNT_ID ?? (common.networkId === "testnet" ? DEFAULT_SEALED_ACCOUNT : "");
+  if (!sealedAccountId) return undefined;
+  const agent = await SealedAgent.connect({ networkId: common.networkId, nearRpc: common.rpcUrl, baseRpc: rpcUrl, sealedAccountId, accountId: common.accountId, ...key } as Parameters<typeof SealedAgent.connect>[0]);
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return new SealedOrdersMcp(agent, common.vaultAccountId, common.role, join(base, "euthyna", "sealed", common.accountId));
+}
 if (socketPath) {
   if (env.MANDATEOS_AGENT_API_KEY || env.AGENT_KEY_PATH) {
     console.error("euthyna: euthyna-signer is used; MANDATEOS_AGENT_API_KEY and AGENT_KEY_PATH are ignored. Remove them from this config.");
@@ -98,6 +113,7 @@ if (socketPath) {
   });
   const vault = await NearVaultGateway.connect({ ...common, signer: new SocketNearSigner(socket, accountId) });
   client = new OnchainAgentClient(vault, publicRpc(rpcUrl), new SignerAgentApi(socket, accountId));
+  sealed = await sealedFor(common, { signer: new SocketNearSigner(socket, accountId) });
   // The market, when the agent has a spending card in the signer.
   const card = new SignerCard(socket, accountId);
   if (await card.info().then(() => true, () => false)) {
@@ -115,6 +131,7 @@ if (socketPath) {
   const key = await new FileAgentKeyStore(keyPath).loadOrCreate(common.networkId, common.accountId);
   const vault = await NearVaultGateway.connect({ ...common, privateKey: key.privateKey });
   client = new OnchainAgentClient(vault, publicRpc(rpcUrl), env.MANDATEOS_AGENT_API_KEY ? new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY) : undefined);
+  sealed = await sealedFor(common, { privateKey: key.privateKey });
 }
 function defaultAgentKeyPath(accountId: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
@@ -126,6 +143,6 @@ function isInside(path: string, dir: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-const server = createMandateMcpServer(new MandateMcpTools(client, buyer));
+const server = createMandateMcpServer(new MandateMcpTools(client, buyer, sealed));
 await server.connect(new StdioServerTransport());
 

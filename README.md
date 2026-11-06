@@ -107,8 +107,12 @@ router, the pair, the recipient and the budget. The hidden terms never reach the
 a fill; the fill itself (amount, pair, rate) is a public Base transaction. Details and limits:
 [CLAIMS.md](./CLAIMS.md#sealed-orders-private-limit-orders).
 
+Turn it on with "Allow sealed orders" in a swap role (Rules); place orders by a vote (Wallet → Sealed orders) or from
+an agent of that role (MCP `place_sealed_order`, or the CLI below); members read the terms with a key derived from a
+signature of their wallet.
+
 ```sh
-pnpm --filter @euthyna/api sealed new --vault <vault> --dao <dao> --price 1800 --cap 50 --days 7 > order.json
+pnpm --filter @euthyna/api sealed place --key agent.json --vault <vault> --role <role> --price 1800 --cap 50 --days 7 > order.json
 pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 ```
 

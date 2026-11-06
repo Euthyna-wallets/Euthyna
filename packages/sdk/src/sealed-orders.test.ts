@@ -44,3 +44,42 @@ describe("sealed orders, as contracts/sealed-orders computes them", () => {
     expect(parseOrder(serializeOrder(order))).toEqual(order);
   });
 });
+
+describe("sealed orders v2: proposals and the members' terms", () => {
+  const order = {
+    vaultId: "acme.nomos.euthyna.testnet", chainId: 84532,
+    tokenIn: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", tokenOut: "0x4200000000000000000000000000000000000006",
+    fee: 3000, limitRate: 3n * 10n ** 26n, cap: 8_000_000n, expiry: 1_800_000_000, salt: 0x1234n,
+  } as const;
+
+  it("puts the approval before the seal in one DAO proposal, and describes it", async () => {
+    const { sealedOrderKind, describeSealedProposal } = await import("./sealed-orders.js");
+    const kind = sealedOrderKind("sealed.testnet",
+      { vault: "acme.nomos.euthyna.testnet", role: "desk", chainId: 84532, commitment: `0x02${"ab".repeat(31)}`, slippageBps: 50 },
+      { vault: "acme.nomos.euthyna.testnet", role: "desk", chainId: 84532, token: order.tokenIn, router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4", amount: 20_000_000n, maxFeePerGas: 3_000_000_000n });
+    expect(kind.FunctionCall.actions.map((a) => a.method_name)).toEqual(["approve", "seal"]);
+    expect(kind.FunctionCall.actions[1]!.deposit).toBe("20000000000000000000000");
+    const described = describeSealedProposal(kind, "sealed.testnet")!;
+    expect(described.title).toBe("Seal an order");
+    expect(described.details.join(" ")).toContain("20 USDC");
+  });
+
+  it("encrypts the terms to each member's key; only they read them", async () => {
+    const { decryptTerms, encryptTerms, publicKeyBase64, readerKeyFromSignature } = await import("./sealed-orders.js");
+    const alice = readerKeyFromSignature(new Uint8Array(64).fill(1));
+    const bob = readerKeyFromSignature(new Uint8Array(64).fill(2));
+    const eve = readerKeyFromSignature(new Uint8Array(64).fill(3));
+    // Same signature, same key: a member can derive it again on any device.
+    expect(readerKeyFromSignature(new Uint8Array(64).fill(1)).publicKey).toEqual(alice.publicKey);
+    const blob = await encryptTerms(order, [
+      { account: "alice.testnet", publicKey: publicKeyBase64(alice.publicKey) },
+      { account: "bob.testnet", publicKey: publicKeyBase64(bob.publicKey) },
+    ]);
+    expect(blob.length).toBeLessThan(8192);
+    expect(await decryptTerms(blob, "alice.testnet", alice.privateKey)).toEqual(order);
+    expect(await decryptTerms(blob, "bob.testnet", bob.privateKey)).toEqual(order);
+    expect(await decryptTerms(blob, "eve.testnet", eve.privateKey)).toBeNull();
+    // Eve claiming Alice's slot without Alice's key fails to decrypt.
+    await expect(decryptTerms(blob, "alice.testnet", eve.privateKey)).rejects.toThrow();
+  });
+});

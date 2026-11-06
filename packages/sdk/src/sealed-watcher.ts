@@ -4,9 +4,9 @@
  * hidden limit: it proves the fill, sends it to contracts/sealed-orders, then follows the vault's
  * operation until the swap is on Base and settled. The hidden terms never leave this process.
  */
-import { rateOf, type SealedOrder } from "@euthyna/sdk";
+import { rateOf, type SealedOrder } from "./sealed-orders.js";
 
-import type { Fill, FillProof } from "./prover.js";
+import type { Fill, FillProof } from "./sealed-prover.js";
 
 export type OrderState = { filled: bigint; fills: number; cancelled: boolean };
 
@@ -16,6 +16,8 @@ export type WatcherDeps = {
   orderState(): Promise<OrderState | null>;
   /** What `amountIn` of tokenIn buys now (Uniswap quoter). */
   quote(amountIn: bigint): Promise<bigint>;
+  /** What the router may take from the wallet now; a fill above it would only revert on Base. */
+  allowance?(): Promise<bigint>;
   prove(fill: Fill): Promise<FillProof>;
   /** Sends `fill` to the sealed-orders contract; the vault operation id when it was signed. */
   fill(input: { amountIn: bigint; rate: bigint; now: number; proof: string }): Promise<{ transaction: string; opId: number[] | null; failed: string | null }>;
@@ -24,6 +26,7 @@ export type WatcherDeps = {
 export type Tick =
   | { status: "missing" | "cancelled" | "expired" | "done" }
   | { status: "waiting"; amountIn: bigint; marketRate: bigint }
+  | { status: "needs-approval"; amountIn: bigint; allowance: bigint }
   | { status: "filled"; amountIn: bigint; rate: bigint; transaction: string; opId: number[] }
   | { status: "refused"; amountIn: bigint; rate: bigint; transaction: string; reason: string };
 
@@ -39,6 +42,10 @@ export async function tick(order: SealedOrder, deps: WatcherDeps, chunk?: bigint
   const amountIn = chunk !== undefined && chunk > 0n && chunk < remaining ? chunk : remaining;
   const marketRate = rateOf(amountIn, await deps.quote(amountIn));
   if (marketRate < order.limitRate) return { status: "waiting", amountIn, marketRate };
+  if (deps.allowance) {
+    const allowance = await deps.allowance();
+    if (allowance < amountIn) return { status: "needs-approval", amountIn, allowance };
+  }
   const { proof } = await deps.prove({ amountIn, filledBefore: state.filled, rate: marketRate, now });
   const sent = await deps.fill({ amountIn, rate: marketRate, now, proof });
   if (sent.failed || !sent.opId) {
@@ -55,7 +62,7 @@ export function fillOutcome(logs: string[]): { opId: number[] | null; failed: st
       const event = JSON.parse(line.slice("EVENT_JSON:".length)) as { standard?: string; event?: string; data?: Array<{ op_id?: number[]; reason?: string }> };
       if (event.standard !== "euthyna-sealed-orders") continue;
       if (event.event === "filled") return { opId: event.data?.[0]?.op_id ?? null, failed: null };
-      if (event.event === "fill_failed") return { opId: null, failed: event.data?.[0]?.reason ?? "fill failed" };
+      if (event.event === "failed") return { opId: null, failed: event.data?.[0]?.reason ?? "fill failed" };
     } catch {
       /* not ours */
     }

@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@euthyna/db";
-import { describeSealedProposal, sealedSealKind } from "@euthyna/sdk";
+import { describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";
@@ -7,45 +7,60 @@ import type { NearClient } from "./near.js";
 import { OmniRolesService, type OmniRolesConfig } from "./omniroles.js";
 
 const treasury = { organizationId: "org-1", daoAccountId: "acme.factory.testnet", vaultAccountId: "acme-vault.mandateos.testnet" };
-const SEALED = "euthyna-sealed-orders.testnet";
+const SEALED = "euthyna-sealed-orders-v2.testnet";
 const COMMITMENT = `0x02${"ab".repeat(31)}`;
 
 function service(sealedOrdersId: string | undefined) {
   const prisma = { treasury: { findUnique: async () => treasury } } as unknown as PrismaClient;
   const near = {
     viewFunction: vi.fn(async (accountId: string, method: string) => {
-      if (accountId === SEALED && method === "config") return { vault: treasury.vaultAccountId, role: "sealed-orders", next_id: 1 };
-      if (accountId === SEALED && method === "orders") return [{ id: 0, commitment: COMMITMENT, filled: "0", fills: 0, cancelled: false }];
-      if (accountId === treasury.vaultAccountId && (method === "get_role" || method === "get_membership")) return { enabled: true };
+      if (accountId === SEALED && method === "orders") return [{ id: 0, commitment: COMMITMENT, filled: "0", fills: 0, cancelled: false, terms: "x" }];
+      if (accountId === SEALED && method === "readers") return [{ account: "alice.testnet", public_key: "k" }];
+      if (accountId === treasury.vaultAccountId && method === "get_wallet") return null;
       throw new Error(`unexpected view ${accountId}.${method}`);
     }),
   } as unknown as NearClient;
   const config = { proposalBondYocto: "100000000000000000000000", proposalPeriodNs: "600000000000", sealedOrdersId } as OmniRolesConfig;
-  return new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, config);
+  const omni = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, config);
+  vi.spyOn(omni, "roles").mockResolvedValue({
+    roles: [
+      { name: "desk", enabled: true, description: null, budgets: [], members: [{ member: "agent.testnet", kind: "Agent" }, { member: SEALED, kind: "Agent" }] },
+      { name: "payments", enabled: true, description: null, budgets: [], members: [{ member: "agent.testnet", kind: "Agent" }] },
+    ],
+  } as never);
+  return omni;
 }
 
-describe("sealed orders", () => {
-  it("proposes a seal: one hash to the sealed-orders contract, from the company's DAO", async () => {
-    const draft = await service(SEALED).sealedSealProposal("org-1", COMMITMENT);
+describe("sealed orders v2", () => {
+  it("proposes an order: a seal to the sealed-orders contract from the company's DAO, terms encrypted", async () => {
+    const draft = await service(SEALED).sealedOrderProposal("org-1", { role: "desk", commitment: COMMITMENT, slippageBps: 50, terms: "ZW5j", approveUsdc: null });
     expect(draft.receiverId).toBe(treasury.daoAccountId);
-    expect(draft.args.proposal.kind).toEqual(sealedSealKind(SEALED, COMMITMENT as `0x${string}`));
+    expect(draft.args.proposal.kind).toEqual(sealedOrderKind(SEALED, { vault: treasury.vaultAccountId, role: "desk", chainId: 84532, commitment: COMMITMENT as `0x${string}`, slippageBps: 50, terms: "ZW5j" }));
     expect(draft.title).toBe("Seal an order");
     expect(describeSealedProposal(draft.args.proposal.kind, SEALED)?.details.join(" ")).toContain("stay hidden");
   });
 
   it("refuses a commitment that is not a field element", async () => {
-    await expect(service(SEALED).sealedSealProposal("org-1", `0xff${"00".repeat(31)}`)).rejects.toMatchObject({ code: "invalid_sealed" });
+    await expect(service(SEALED).sealedOrderProposal("org-1", { role: "desk", commitment: `0xff${"00".repeat(31)}`, slippageBps: 50, terms: null, approveUsdc: null }))
+      .rejects.toMatchObject({ code: "invalid_sealed" });
   });
 
-  it("reads what the chain shows: a hash, what was filled, whether the role is ready", async () => {
+  it("lists the roles the contract fills through, the orders and the members' reading keys", async () => {
     const view = await service(SEALED).sealedOrders("org-1");
     expect(view.enabled).toBe(true);
-    expect(view.roleReady).toBe(true);
+    expect(view.roles.map((role) => role.name)).toEqual(["desk"]);
+    expect(view.roles[0]!.agents).toEqual(["agent.testnet"]);
     expect(view.orders).toHaveLength(1);
+    expect(view.readers).toHaveLength(1);
+  });
+
+  it("cancels by a vote", async () => {
+    const draft = await service(SEALED).sealedCancelProposal("org-1", 3);
+    expect(draft.args.proposal.kind).toEqual(sealedCancelKind(SEALED, treasury.vaultAccountId, 3));
   });
 
   it("is off when no contract is configured", async () => {
     expect((await service(undefined).sealedOrders("org-1")).enabled).toBe(false);
-    await expect(service(undefined).sealedSealProposal("org-1", COMMITMENT)).rejects.toMatchObject({ code: "sealed_disabled" });
+    await expect(service(undefined).sealedCancelProposal("org-1", 0)).rejects.toMatchObject({ code: "sealed_disabled" });
   });
 });

@@ -1,17 +1,17 @@
 /**
  * Commitments and fill proofs for sealed orders (circuits/sealed-order), with the same bb.js and
- * noir_js as the email recovery. The circuit file is written by circuits/sealed-order/build.mjs.
+ * noir_js as the email recovery (Node). The circuit file is written by circuits/sealed-order/build.mjs.
  */
 import { readFileSync } from "node:fs";
 
 import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
 import { Noir } from "@noir-lang/noir_js";
-import { commitmentInputs, vaultTag, type SealedOrder } from "@euthyna/sdk";
+import { commitmentInputs, vaultTag, type SealedOrder } from "./sealed-orders.js";
 
 type Circuit = { bytecode: string } & Record<string, unknown>;
 let circuit: Circuit | null = null;
 function loadCircuit(): Circuit {
-  circuit ??= JSON.parse(readFileSync(new URL("./sealed_order.json", import.meta.url), "utf8")) as Circuit;
+  circuit ??= JSON.parse(readFileSync(new URL("../circuits/sealed_order.json", import.meta.url), "utf8")) as Circuit;
   return circuit;
 }
 
