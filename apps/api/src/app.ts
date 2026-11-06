@@ -127,6 +127,68 @@ export interface AppDependencies {
   recovery?: RecoveryService | undefined;
 }
 
+/** A role draft from the console's role editor (`/proposals/role`). */
+export const roleDraftSchema = z.object({
+  draft: z.object({
+    guardRequired: z.boolean().optional(),
+    suppliersOnly: z.boolean().optional(),
+    name: z.string(),
+    blocks: z.array(z.union([
+      z.object({
+        kind: z.literal("payments"),
+        token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+        recipients: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(80) })).max(20),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+      }),
+      z.object({
+        kind: z.literal("swap"),
+        tokenIn: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+        tokensOut: z.array(z.string().regex(/^0x[0-9a-fA-F]{40}$/)).min(1).max(10),
+        protocols: z.array(z.enum(["uniswap-v3", "uniswap-v2"])).min(1),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+        maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
+        /** contracts/sealed-orders joins the role (the "Allow sealed orders" box). */
+        sealedOrders: z.boolean().optional(),
+      }),
+      z.object({
+        kind: z.literal("lending"),
+        protocol: z.literal("aave-v3"),
+        token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+        maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
+      }),
+      z.object({
+        kind: z.literal("solana-transfer"),
+        token: z.enum(["USDC"]).nullable(),
+        recipients: z.array(z.object({ address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/), label: z.string().max(80) })).min(1).max(32),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+      }),
+      z.object({
+        kind: z.literal("near-transfer"),
+        token: z.enum(["USDC", "TestUSDC"]),
+        receivers: z.array(z.object({ accountId: z.string().regex(/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/).min(2).max(64), label: z.string().max(80) })).min(1).max(32),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+        maxPerTransfer: z.string().regex(/^\d+(\.\d+)?$/),
+        minPerTransfer: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+      }),
+      z.object({
+        kind: z.literal("wrap"),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+      }),
+      z.object({
+        kind: z.literal("share-revenue"),
+        sharesAccountId: z.string().regex(/^[a-z0-9._-]{2,64}$/),
+        budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
+      }),
+    ])).min(1).max(10),
+    members: z.array(z.object({
+      accountId: z.string().min(2).max(64),
+      kind: z.enum(["Agent", "Human"]),
+      maxUses: z.number().int().positive().nullable().optional(),
+    })).max(20),
+  }),
+});
+
 function isAdmin(identity: ConsoleIdentity): boolean {
   return identity.role === "admin" || identity.role === "owner";
 }
@@ -714,64 +776,6 @@ export function createApp({
 
   if (omniroles) {
     const daoNameSchema = z.object({ daoName: z.string().min(2).max(60) });
-    const roleDraftSchema = z.object({
-      draft: z.object({
-        guardRequired: z.boolean().optional(),
-        suppliersOnly: z.boolean().optional(),
-        name: z.string(),
-        blocks: z.array(z.union([
-          z.object({
-            kind: z.literal("payments"),
-            token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-            recipients: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(80) })).max(20),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-          }),
-          z.object({
-            kind: z.literal("swap"),
-            tokenIn: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-            tokensOut: z.array(z.string().regex(/^0x[0-9a-fA-F]{40}$/)).min(1).max(10),
-            protocols: z.array(z.enum(["uniswap-v3", "uniswap-v2"])).min(1),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-            maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
-          }),
-          z.object({
-            kind: z.literal("lending"),
-            protocol: z.literal("aave-v3"),
-            token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-            maxApproval: z.string().regex(/^\d+(\.\d+)?$/),
-          }),
-          z.object({
-            kind: z.literal("solana-transfer"),
-            token: z.enum(["USDC"]).nullable(),
-            recipients: z.array(z.object({ address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/), label: z.string().max(80) })).min(1).max(32),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-          }),
-          z.object({
-            kind: z.literal("near-transfer"),
-            token: z.enum(["USDC", "TestUSDC"]),
-            receivers: z.array(z.object({ accountId: z.string().regex(/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/).min(2).max(64), label: z.string().max(80) })).min(1).max(32),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-            maxPerTransfer: z.string().regex(/^\d+(\.\d+)?$/),
-            minPerTransfer: z.string().regex(/^\d+(\.\d+)?$/).optional(),
-          }),
-          z.object({
-            kind: z.literal("wrap"),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-          }),
-          z.object({
-            kind: z.literal("share-revenue"),
-            sharesAccountId: z.string().regex(/^[a-z0-9._-]{2,64}$/),
-            budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
-          }),
-        ])).min(1).max(10),
-        members: z.array(z.object({
-          accountId: z.string().min(2).max(64),
-          kind: z.enum(["Agent", "Human"]),
-          maxUses: z.number().int().positive().nullable().optional(),
-        })).max(20),
-      }),
-    });
     const membershipSchema = z.object({
       role: z.string().min(2).max(32),
       member: z.string().min(2).max(64),
