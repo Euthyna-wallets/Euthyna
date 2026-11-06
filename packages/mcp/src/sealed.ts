@@ -10,7 +10,7 @@ import type { OrderFile, SealedAgent } from "@euthyna/sdk/sealed-agent";
 import { parseOrder } from "@euthyna/sdk/sealed-orders";
 import { formatUnits, parseUnits } from "viem";
 
-type Stored = OrderFile & { pending?: number[][] };
+type Stored = OrderFile;
 
 export type SealedAgentLike = Pick<SealedAgent, "place" | "orders" | "tick" | "settle">;
 
@@ -87,6 +87,7 @@ export class SealedOrdersMcp {
         status: tick.status,
         ...(tick.status === "filled" ? { amountUsdc: formatUnits(tick.amountIn, 6), nearTransaction: tick.transaction } : {}),
         ...(tick.status === "refused" ? { reason: tick.reason } : {}),
+        ...(tick.status === "needs-approval" ? { reason: `the router may take ${formatUnits(tick.allowance, 6)} USDC, under the ${formatUnits(tick.amountIn, 6)} to fill: place an approval within the role` } : {}),
         swapsAwaitingSettlement: still.length,
       });
     }

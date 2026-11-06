@@ -37,6 +37,8 @@ export type OrderFile = {
   id: number;
   sealedAccountId: string;
   commitment: string;
+  /** Base operations signed for this order but not settled yet (the router approval, then the fills). */
+  pending?: number[][];
 };
 
 export type OrderView = {
@@ -47,6 +49,9 @@ export type OrderView = {
 type Logs = { receipts_outcome: Array<{ outcome: { logs: string[] } }>; transaction_outcome: { id: string } };
 const logsOf = (outcome: unknown) => (outcome as Logs).receipts_outcome.flatMap((receipt) => receipt.outcome.logs);
 const hashOf = (outcome: unknown) => (outcome as Logs).transaction_outcome.id;
+const eventOf = (outcome: unknown, name: string) => logsOf(outcome)
+  .map((line) => line.startsWith("EVENT_JSON:") ? JSON.parse(line.slice(11)) as { standard?: string; event: string; data: Array<Record<string, unknown>> } : null)
+  .find((event) => event?.standard === "euthyna-sealed-orders" && event.event === name)?.data[0];
 
 export class SealedAgent {
   private constructor(
@@ -108,6 +113,7 @@ export class SealedAgent {
       expiry: Math.floor(Date.now() / 1000) + Math.round(input.days * 86_400), salt: randomSalt(),
     };
     const transactions: string[] = [];
+    const pending: number[][] = [];
     if (input.approveUsdc) {
       const gasPrice = await this.base.getGasPrice();
       const outcome = await this.account.functionCall({
@@ -115,7 +121,12 @@ export class SealedAgent {
         args: approveArgs({ vault: input.vault, role: input.role, chainId: U.chainId, token: U.usdc, router: U.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }),
       });
       transactions.push(hashOf(outcome));
-      if (!logsOf(outcome).some((line) => line.includes('"event":"approved"'))) throw new Error(`the router approval was refused: ${logsOf(outcome).join(" ")}`);
+      const approved = eventOf(outcome, "approved");
+      if (!approved) throw new Error(`the router approval was refused: ${logsOf(outcome).join(" ")}`);
+      // Signed by the vault: broadcast it now so the allowance is on Base before the first fill.
+      const opId = approved.op_id as number[];
+      pending.push(opId);
+      await this.settle(input.vault, opId, 0);
     }
     const commitment = await commitmentOf(order);
     const readers = await this.view<Array<{ account: string; public_key: string }>>("readers", { vault: input.vault });
@@ -125,10 +136,10 @@ export class SealedAgent {
       args: sealArgs({ vault: input.vault, role: input.role, chainId: U.chainId, commitment: commitment as Hex, slippageBps: input.slippageBps ?? 50, terms }),
     });
     transactions.push(hashOf(outcome));
-    const sealed = logsOf(outcome).map((line) => line.startsWith("EVENT_JSON:") ? JSON.parse(line.slice(11)) as { event: string; data: Array<{ id: number }> } : null).find((event) => event?.event === "sealed");
+    const sealed = eventOf(outcome, "sealed");
     if (!sealed) throw new Error(`the seal was refused: ${logsOf(outcome).join(" ")}`);
     return {
-      file: { order: serializeOrder(order), vault: input.vault, role: input.role, id: sealed.data[0]!.id, sealedAccountId: this.sealedId, commitment },
+      file: { order: serializeOrder(order), vault: input.vault, role: input.role, id: sealed.id as number, sealedAccountId: this.sealedId, commitment, ...(pending.length ? { pending } : {}) },
       transactions,
     };
   }
@@ -137,12 +148,13 @@ export class SealedAgent {
   async tick(file: OrderFile, chunk?: bigint): Promise<Tick> {
     const order = parseOrder(file.order);
     // An order file saved before its vote passed holds a guessed id: find the order by its hash.
-    const stored = await this.order(file.vault, file.id);
+    let stored = await this.order(file.vault, file.id);
     if (!stored || stored.commitment !== file.commitment.toLowerCase()) {
-      const found = (await this.orders(file.vault)).find((candidate) => candidate.commitment === file.commitment.toLowerCase());
-      if (!found) return { status: "missing" };
-      file.id = found.id;
+      stored = (await this.orders(file.vault)).find((candidate) => candidate.commitment === file.commitment.toLowerCase()) ?? null;
+      if (!stored) return { status: "missing" };
+      file.id = stored.id;
     }
+    const wallet = stored.wallet as Hex;
     const quoter = parseAbi(["function quoteExactInputSingle((address,address,uint256,uint24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
     return tick(order, {
       now: () => Math.floor(Date.now() / 1000),
@@ -154,6 +166,7 @@ export class SealedAgent {
         const { result } = await this.base.simulateContract({ address: U.quoter, abi: quoter, functionName: "quoteExactInputSingle", args: [[order.tokenIn, order.tokenOut, amountIn, order.fee, 0n]] });
         return result[0];
       },
+      allowance: () => this.allowance(wallet),
       prove: (fill) => proveFill(order, fill),
       fill: async (input) => {
         const gasPrice = await this.base.getGasPrice();

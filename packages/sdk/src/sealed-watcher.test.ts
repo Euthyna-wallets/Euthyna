@@ -47,6 +47,12 @@ describe("sealed-order watcher", () => {
     expect(chunked.sent[0]!.amountIn).toBe(500_000n);
   });
 
+  it("does not send a fill the router allowance cannot cover", async () => {
+    const { deps: d, sent } = deps({ allowance: async () => 1_000_000n });
+    expect(await tick(order, d)).toEqual({ status: "needs-approval", amountIn: 3_000_000n, allowance: 1_000_000n });
+    expect(sent).toHaveLength(0);
+  });
+
   it("stops on a cancelled, expired or full order", async () => {
     expect((await tick(order, deps({ orderState: async () => ({ filled: 0n, fills: 0, cancelled: true }) }).deps)).status).toBe("cancelled");
     expect((await tick(order, deps({ now: () => 2_000_000_001 }).deps)).status).toBe("expired");

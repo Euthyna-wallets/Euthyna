@@ -11,7 +11,10 @@
  *     ({account_id, private_key}) of any account with a little NEAR (it pays gas only).
  * Env: NEAR_RPC_URL, BASE_SEPOLIA_RPC_URL, SEALED_ORDERS_ACCOUNT_ID.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+
+// `place` prints the order file on stdout; near-api-js logs receipts with console.log.
+console.log = console.info = console.debug = console.error.bind(console);
 
 import { parseUnits } from "viem";
 import { DEFAULT_SEALED_ACCOUNT, SealedAgent, type OrderFile } from "@euthyna/sdk/sealed-agent";
@@ -59,16 +62,28 @@ async function watch(args: string[]) {
   const chunk = flag(args, "chunk") ? parseUnits(flag(args, "chunk")!, 6) : undefined;
   const every = Number(flag(args, "every") ?? 60) * 1000;
   const settleMinutes = Number(flag(args, "settle-minutes") ?? 40);
+  const stamp = () => new Date().toISOString();
+  const keep = () => writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
   for (;;) {
+    // The router approval placed with the order, and swaps sent earlier: settle them once final.
+    const still: number[][] = [];
+    for (const opId of file.pending ?? []) {
+      const state = await agent.settle(file.vault, opId, 0);
+      console.log(`${stamp()} earlier operation ${state}`);
+      if (state === "PossiblySigned") still.push(opId);
+    }
+    if ((file.pending ?? []).length !== still.length) { file.pending = still; keep(); }
     const result = await agent.tick(file, chunk);
-    const stamp = () => new Date().toISOString();
     if (result.status === "filled") {
       console.log(`${stamp()} filled ${result.amountIn} at rate ${result.rate}: NEAR tx ${result.transaction}`);
       // The vault settles a Base operation only on a finalized block (about 20 minutes on Base Sepolia).
       const state = await agent.settle(file.vault, result.opId, settleMinutes);
+      if (state === "PossiblySigned") { file.pending = [...(file.pending ?? []), result.opId]; keep(); }
       console.log(state === "PossiblySigned"
         ? `${stamp()} swap sent, Base block not final yet; it settles on the next run`
         : `${stamp()} swap ${state}`);
+    } else if (result.status === "needs-approval") {
+      console.log(`${stamp()} the router may take ${result.allowance} of the wallet's USDC, under the ${result.amountIn} to fill; approve more within the role`);
     } else if (result.status === "waiting") {
       // Printed on this machine only: the limit never leaves it.
       console.log(`${stamp()} waiting: market rate ${result.marketRate} under the limit`);
