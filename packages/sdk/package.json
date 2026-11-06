@@ -59,9 +59,18 @@
       "types": "./dist/sealed-prover.d.ts",
       "default": "./dist/sealed-prover.js"
     },
+    "./sealed-proof": {
+      "types": "./dist/sealed-proof.d.ts",
+      "default": "./dist/sealed-proof.js"
+    },
+    "./sealed-watcher": {
+      "types": "./dist/sealed-watcher.d.ts",
+      "default": "./dist/sealed-watcher.js"
+    },
     "./sealed-agent": {
       "types": "./dist/sealed-agent.d.ts",
       "default": "./dist/sealed-agent.js"
-    }
+    },
+    "./circuits/sealed_order.json": "./circuits/sealed_order.json"
   }
 }

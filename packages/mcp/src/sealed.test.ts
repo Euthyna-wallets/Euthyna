@@ -4,6 +4,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { commitmentOf } from "@euthyna/sdk/sealed-prover";
+import { parseOrder } from "@euthyna/sdk/sealed-orders";
+
 import { SealedOrdersMcp, type SealedAgentLike } from "./sealed.js";
 
 const VAULT = "acme.nomos.euthyna.testnet";
@@ -44,5 +47,19 @@ describe("sealed orders over MCP", () => {
     // The swap still waits for Base finality: the next call settles it first.
     await mcp.fill({});
     expect(settled).toEqual(["7", "7", "7"]);
+  });
+
+  it("takes over a member's order only when its terms hash to an open order of this company", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "sealed-")), "orders");
+    const { agent } = fake();
+    const commitment = (await commitmentOf(parseOrder(terms))).toLowerCase();
+    agent.orders = async () => [{ id: 9, vault: VAULT, role: "desk", chain_id: 84532, wallet: "0x1", sealer: "dao.testnet", commitment, slippage_bps: 50, filled: "0", fills: 0, cancelled: false, sealed_at_ns: "0", terms: null }];
+    const mcp = new SealedOrdersMcp(agent, VAULT, "desk", dir);
+    const file = { order: terms, vault: VAULT, role: "desk", id: 0, sealedAccountId: "sealed.testnet", commitment: "0x00" };
+    const adopted = await mcp.adopt({ orderFile: JSON.stringify(file) });
+    expect(adopted.id).toBe(9);
+    expect(JSON.parse(readFileSync(adopted.orderFile, "utf8")).commitment).toBe(commitment);
+    await expect(mcp.adopt({ orderFile: JSON.stringify({ ...file, vault: "other.testnet" }) })).rejects.toThrow(/not this company/);
+    await expect(mcp.adopt({ orderFile: JSON.stringify({ ...file, order: { ...terms, cap: "1" } }) })).rejects.toThrow(/no order of this company/);
   });
 });

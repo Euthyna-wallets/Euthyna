@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import type { OrderFile, SealedAgent } from "@euthyna/sdk/sealed-agent";
 import { parseOrder } from "@euthyna/sdk/sealed-orders";
+import { commitmentOf } from "@euthyna/sdk/sealed-prover";
 import { formatUnits, parseUnits } from "viem";
 
 type Stored = OrderFile;
@@ -49,6 +50,26 @@ export class SealedOrdersMcp {
       onChain: "only the hash; the members read the terms with their key",
       next: "call fill_sealed_orders from time to time: it fills when the market meets the limit",
     };
+  }
+
+  /**
+   * Takes over an order a member placed (by a vote, or in their role) and handed to this agent: the
+   * terms must hash to an order of this company on chain. The agent then fills it with the others.
+   */
+  async adopt(input: { orderFile: string }) {
+    let file: OrderFile;
+    try {
+      file = JSON.parse(input.orderFile) as OrderFile;
+    } catch {
+      throw new Error("orderFile is not the JSON of an order file");
+    }
+    if (file.vault !== this.vault) throw new Error(`this order is for ${file.vault}, not this company (${this.vault})`);
+    const commitment = (await commitmentOf(parseOrder(file.order))).toLowerCase();
+    const onChain = (await this.agent.orders(this.vault)).find((order) => order.commitment === commitment);
+    if (!onChain) throw new Error("no order of this company has these terms: check the file, or wait for the vote to pass");
+    if (onChain.cancelled) throw new Error(`order #${onChain.id} is cancelled`);
+    const path = this.save({ ...file, id: onChain.id, commitment, role: onChain.role });
+    return { id: onChain.id, role: onChain.role, orderFile: path, next: "fill_sealed_orders now fills it with your other orders" };
   }
 
   /** The vault's orders as the chain shows them; the terms only for the ones this agent holds. */

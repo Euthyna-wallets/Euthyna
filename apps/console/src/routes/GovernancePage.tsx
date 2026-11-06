@@ -9,6 +9,7 @@ import { displayAccount, PageState } from "../components/ui.js";
 import { Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab, VetoRing, VoteTokens } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { approvalsNeeded, omni, thresholdText, type GovernanceProposal, type GovernanceRule, type Sentence } from "../omniroles-api.js";
+import { sendSealedApprovals } from "../lib/sealed-approval.js";
 import { signDaoAction, signDaoProposal, signVaultCall } from "../wallets.js";
 
 function hexToBytes(hex: string): number[] {
@@ -199,10 +200,15 @@ export function GovernancePage() {
                 busy={busy}
                 now={now}
                 onVote={(action) => run(`vote-${proposal.id}`, async () => {
-                  await signDaoAction(me, data!.dao.accountId, proposal.id, proposal.kind, action);
+                  const voteHash = await signDaoAction(me, data!.dao.accountId, proposal.id, proposal.kind, action);
                   if (action !== "VoteApprove") return `You rejected proposal #${proposal.id}.`;
                   const approved = await approveProposedSuppliers(proposal.kind);
-                  return `You approved proposal #${proposal.id}.${approved ? ` ${approved} new supplier${approved > 1 ? "s" : ""} it pays registered with your approval.` : ""}`;
+                  // A deciding vote on a sealed order may have signed its router approval: send it to Base now.
+                  const sent = await sendSealedApprovals(voteHash, me, data!.vaultAccountId).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+                  const routed = sent instanceof Error
+                    ? ` The router approval it signed could not be sent to Base (${sent.message.slice(0, 120)}): the order will not fill until it is.`
+                    : sent.length ? ` The router approval is on its way to Base (${sent[0]!.slice(0, 10)}…).` : "";
+                  return `You approved proposal #${proposal.id}.${approved ? ` ${approved} new supplier${approved > 1 ? "s" : ""} it pays registered with your approval.` : ""}${routed}`;
                 })}
               />
             ))}

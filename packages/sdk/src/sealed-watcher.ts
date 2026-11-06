@@ -6,7 +6,7 @@
  */
 import { rateOf, type SealedOrder } from "./sealed-orders.js";
 
-import type { Fill, FillProof } from "./sealed-prover.js";
+import type { Fill, FillProof } from "./sealed-proof.js";
 
 export type OrderState = { filled: bigint; fills: number; cancelled: boolean };
 
