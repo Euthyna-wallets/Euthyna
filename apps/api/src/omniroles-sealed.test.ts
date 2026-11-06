@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
+import { roleDraftSchema } from "./app.js";
 import { OmniRolesService, type OmniRolesConfig } from "./omniroles.js";
 
 const treasury = { organizationId: "org-1", daoAccountId: "acme.factory.testnet", vaultAccountId: "acme-vault.mandateos.testnet" };
@@ -62,5 +63,11 @@ describe("sealed orders v2", () => {
   it("is off when no contract is configured", async () => {
     expect((await service(undefined).sealedOrders("org-1")).enabled).toBe(false);
     await expect(service(undefined).sealedCancelProposal("org-1", 0)).rejects.toMatchObject({ code: "sealed_disabled" });
+  });
+
+  it("keeps the console's \"Allow sealed orders\" box through the route's validation", () => {
+    const swap = { kind: "swap", tokenIn: `0x${"11".repeat(20)}`, tokensOut: [`0x${"22".repeat(20)}`], protocols: ["uniswap-v3"], budget: { amount: "10", periodDays: 1 }, maxApproval: "20", sealedOrders: true };
+    const parsed = roleDraftSchema.parse({ draft: { name: "desk", blocks: [swap], members: [] } });
+    expect(parsed.draft.blocks[0]).toMatchObject({ kind: "swap", sealedOrders: true });
   });
 });
