@@ -38,7 +38,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | A false rate in a proof can only make a fill fail: the swap's minimum output comes from the proven rate | Code | `packages/sdk/scripts/sealed-order-fork.ts`: on a fork of Base Sepolia the market rate swaps and a rate 2% above reverts |
 | The terms travel encrypted for the members: each member registers an X25519 key derived from a signature of their own wallet (checked against the DAO's policy on chain); whoever seals encrypts the terms to those keys | Code | `packages/sdk/src/sealed-orders.ts` (`encryptTerms`, `decryptTerms`, tests: a non-member cannot read); `register_reader` in the contract and its sandbox test |
 | What stays public: each fill's amount, the pair, the rate it demanded and the company wallet (the swap is a Base transaction); the order's running total; who sealed it | Code | By design |
-| A sealed order filled on testnet: one hash sealed by a DAO vote, a fill proved and verified on NEAR, the swap signed by NEAR MPC and mined on Base Sepolia | Testnet | [docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md) (first version of the contract, 6 November) |
+| A sealed order placed by an agent of a swap role and filled on testnet: the router approval and the seal from the agent, the terms decrypted from the chain by the two members who registered a key (not by one who did not), a fill proved and verified on NEAR (101.8 Tgas), the swap signed by NEAR MPC, mined on Base Sepolia and settled | Testnet | [docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md) (v2, `euthyna-sealed-orders-v2.testnet`; the v1 run by DAO vote is below it) |
 
 ## Chains
 
