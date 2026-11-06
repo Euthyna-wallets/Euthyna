@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@mandateos/db";
-import { describeSealedProposal, sealedSealKind } from "@mandateos/sdk";
+import type { PrismaClient } from "@euthyna/db";
+import { describeSealedProposal, sealedSealKind } from "@euthyna/sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";

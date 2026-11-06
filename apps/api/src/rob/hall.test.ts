@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { PrismaClient } from "@mandateos/db";
+import { PrismaClient } from "@euthyna/db";
 
 import { serializeNep413 } from "@near-wallet-selector/core";
 import { KeyPair, transactions, utils } from "near-api-js";

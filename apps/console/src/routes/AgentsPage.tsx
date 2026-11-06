@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { decodeVaultCalls } from "@mandateos/sdk/roles";
+import { decodeVaultCalls } from "@euthyna/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Kicker, Niche, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";

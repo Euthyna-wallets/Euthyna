@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, useRef, type CSSProperties, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
-import { isSolanaAddress, SOLANA_DEVNET } from "@mandateos/sdk/solana";
-import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, validNearAccountId, validRoleName, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@mandateos/sdk/roles";
+import { isSolanaAddress, SOLANA_DEVNET } from "@euthyna/sdk/solana";
+import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, validNearAccountId, validRoleName, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@euthyna/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Kicker, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";

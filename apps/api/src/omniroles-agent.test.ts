@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";

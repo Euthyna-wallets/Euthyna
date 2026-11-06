@@ -1,10 +1,10 @@
 /**
  * Sealed orders from the command line, for the member who holds an order.
  *
- *   pnpm --filter @mandateos/api sealed new --vault <vault> --dao <dao> --price 2000 --cap 50 --days 7 [--fee 3000] > order.json
+ *   pnpm --filter @euthyna/api sealed new --vault <vault> --dao <dao> --price 2000 --cap 50 --days 7 [--fee 3000] > order.json
  *     A new order (USDC → WETH on Base Sepolia, filled at `price` USDC per WETH or better, at most
  *     `cap` USDC): prints the order file (keep it secret) and, on stderr, the commitment to seal.
- *   pnpm --filter @mandateos/api sealed watch order.json --key watcher.json [--chunk 5] [--every 60] [--once]
+ *   pnpm --filter @euthyna/api sealed watch order.json --key watcher.json [--chunk 5] [--every 60] [--once]
  *     Watches the market and fills when it meets the hidden limit: proves, sends `fill`, then
  *     broadcasts the signed swap to Base and settles it on the vault. `--key`: a NEAR credentials file
  *     ({account_id, private_key}) for any account with a little NEAR; it only pays gas.
@@ -26,7 +26,7 @@ import {
   rateFromPrice,
   serializeOrder,
   type SealedOrder,
-} from "@mandateos/sdk";
+} from "@euthyna/sdk";
 
 import { commitmentOf, proveFill } from "./prover.js";
 import { fillOutcome, tick } from "./watcher.js";

@@ -12,7 +12,7 @@
 import { randomBytes } from "node:crypto";
 
 import { verifySignature } from "@near-wallet-selector/core";
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import type { Context, Hono } from "hono";
 import { utils } from "near-api-js";
 import { z } from "zod";

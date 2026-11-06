@@ -24,7 +24,7 @@ function run(label, command, args, cwd) {
 
 const results = [
   await run("Vault (NEAR sandbox)", "cargo", ["test", "-p", "tests", "--test", "attacks", "--", "--nocapture", "--test-threads=1"], `${root}/contracts`),
-  await run("Guard", "pnpm", ["--filter", "@mandateos/api", "exec", "vitest", "run", "src/attacks.test.ts"], root),
+  await run("Guard", "pnpm", ["--filter", "@euthyna/api", "exec", "vitest", "run", "src/attacks.test.ts"], root),
 ];
 
 let count = 0;

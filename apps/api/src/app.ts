@@ -1,5 +1,5 @@
 import { checkInvoice } from "./payments.js";
-import type { RoleDraft } from "@mandateos/sdk/roles";
+import type { RoleDraft } from "@euthyna/sdk/roles";
 import { OmniRolesError, type OmniRolesService } from "./omniroles.js";
 import { listingCreateSchema, listingUpdateSchema, registerMarketPublicRoutes, registerMarketWorkerRoutes } from "./market/routes.js";
 import { registerRobRoutes } from "./rob/routes.js";
@@ -7,9 +7,9 @@ import { RobError, type RobService } from "./rob/service.js";
 import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
-import { cardAccountIdOf } from "@mandateos/sdk";
+import { cardAccountIdOf } from "@euthyna/sdk";
 
-import { proposedAgentAccountId } from "@mandateos/sdk";
+import { proposedAgentAccountId } from "@euthyna/sdk";
 import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";

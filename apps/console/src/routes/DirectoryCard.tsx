@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { REGISTRY_DESCRIPTION_MAX, REGISTRY_NAME_MAX, registryProposalKind } from "@mandateos/sdk/roles";
+import { REGISTRY_DESCRIPTION_MAX, REGISTRY_NAME_MAX, registryProposalKind } from "@euthyna/sdk/roles";
 
 import { Card } from "../components/ui.js";
 import { chainView } from "../lib/chain-view.js";

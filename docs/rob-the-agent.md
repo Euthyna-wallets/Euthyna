@@ -90,7 +90,7 @@ Players are counted by a salted hash of their address; addresses are not stored.
 Set `ROB_RUGGY_ACCOUNT_ID`, `ROB_RUGGY_PRIVATE_KEY`, `ROB_VAULT_ACCOUNT_ID`, `ROB_DAO_ACCOUNT_ID`, `ROB_SUPPLIERS`
 (two, comma-separated) and, for cards X and XI, `ROB_OWNER_KEYS` (`account:ed25519:…` three times) in the API's
 environment (`ROB_BASE_SUPPLIERS` defaults to the two Base suppliers above), then `prisma db push` (tables `rob_key`, `rob_play`). Tests:
-`pnpm --filter @mandateos/api exec vitest run src/rob`.
+`pnpm --filter @euthyna/api exec vitest run src/rob`.
 
 ## Fork Ruggy's law
 
@@ -204,7 +204,7 @@ from the same throwaway key, with the held cheque of any buyer agent.
 | Listing | `ruggy-tx-check` (`ROB_HIRE_HANDLE`), « Check a transaction before you sign it », seller Rob the Agent Co., category security |
 | Pays | 1 TestUSDC (`1000000`, 6 decimals) to the Rob vault (`payTo` = `ROB_VAULT_ACCOUNT_ID`, already registered on the token) |
 | SLA | 120 s; the cheque must then live 720 s (SLA + `MARKET_SETTLEMENT_MARGIN_SECONDS`), 1,440 blocks |
-| Work | the worker's deterministic `tx-check` (`@mandateos/sdk/tx-check`, the same function `apps/market-worker` runs) |
+| Work | the worker's deterministic `tx-check` (`@euthyna/sdk/tx-check`, the same function `apps/market-worker` runs) |
 
 **Top-up**, `POST /v1/rob/hire/topup { publicKey }`. Ruggy's full key (the one the cards use, on the same nonce counter)
 creates the key's implicit account (`attackerOf`, 64 hex; the browser key is its full-access key) with a 1 yoctoNEAR
@@ -223,7 +223,7 @@ final block height, the balance and whether the key was topped up.
 2. `SendMessage` to `/a2a/<handle>/v1` without payment: the `402` gives the requirement. The page refuses to sign unless it asks
    for the Rob vault, TestUSDC and at most 1 (step « 1 · RULE »: the throwaway key has no on-chain law; the cap is the price
    the player agreed to, as `max_price` for an agent);
-3. `signCheque` (`@mandateos/sdk/cheque`) signs, with the throwaway key, a NEP-366 delegate of one `ft_transfer`
+3. `signCheque` (`@euthyna/sdk/cheque`) signs, with the throwaway key, a NEP-366 delegate of one `ft_transfer`
    `{"receiver_id":"<vault>","amount":"1000000"}`, 1 yoctoNEAR, 30 Tgas, nonce + 1, max height = height + 2 × timeout + 120;
 4. `SendMessage` with `X-PAYMENT`; then `GET /v1/market/tasks/<id>` every 2 s. The receipt: HELD once the gateway holds the
    cheque, DELIVERED once the result is stored (hold `settling` or later), PAID once the hold is `settled`, with the

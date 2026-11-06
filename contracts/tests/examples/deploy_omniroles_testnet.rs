@@ -207,7 +207,7 @@ async fn main() -> Result<()> {
         .context("derived Base wallet missing")?;
     let wallet_address = format!("0x{}", hex::encode(byte_array(&wallet["address"], 20)?));
     println!("OMNIROLES_WALLET_READY={wallet_address}");
-    println!("Fund it with: pnpm --filter @mandateos/deployer fund:omniroles");
+    println!("Fund it with: pnpm --filter @euthyna/deployer fund:omniroles");
     wait_for_funds(&base_rpc, &token, &wallet_address, amount, minimum_gas_wei).await?;
 
     let role_change = json!({"SetRole": {"role": ROLE, "config": {

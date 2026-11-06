@@ -5,7 +5,7 @@ import {
   NearVaultGateway,
   operationIdBytes,
   type GuardApproval,
-} from "@mandateos/sdk";
+} from "@euthyna/sdk";
 
 import {
   MandateDemoAgent,
@@ -20,7 +20,7 @@ const env = z.object({
   LLM_API_KEY: z.string().min(1).optional(),
   LLM_MODEL: z.string().default("gpt-4o-mini"),
   MCP_COMMAND: z.string().default("pnpm"),
-  MCP_ARGS_JSON: z.string().default('["--filter","@mandateos/mcp","start"]'),
+  MCP_ARGS_JSON: z.string().default('["--filter","@euthyna/mcp","start"]'),
   DEMO_TOKEN: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   DEMO_APPROVED_RECIPIENT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   DEMO_ATTACKER_RECIPIENT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),

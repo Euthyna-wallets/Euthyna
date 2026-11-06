@@ -1,4 +1,4 @@
-import { BASE_SEPOLIA } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA } from "@euthyna/sdk/roles";
 import { encodeFunctionData, erc20Abi, maxUint256, parseAbi } from "viem";
 import { describe, expect, it } from "vitest";
 

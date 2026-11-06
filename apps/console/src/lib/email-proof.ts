@@ -6,12 +6,12 @@
  */
 import {
   circuitInputs, dkimKeyHash, emlFromBytes, modulusFromDkimRecord, PROOF_TARGET, publicInputBytes, readPublicInputs, senderDkim,
-} from "@mandateos/sdk/email-proof";
+} from "@euthyna/sdk/email-proof";
 
 import { API_BASE } from "../api.js";
 import { viewContract } from "../wallets.js";
 
-export { newSalt, recoverySubject } from "@mandateos/sdk/email-proof";
+export { newSalt, recoverySubject } from "@euthyna/sdk/email-proof";
 
 /**
  * Public or disposable inboxes: anyone who knows the address can open them. Accepted on testnet so the

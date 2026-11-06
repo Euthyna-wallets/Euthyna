@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { serve } from "@hono/node-server";
-import { PrismaClient } from "@mandateos/db";
-import { MarketBuyer, nearRpc, SignerCard, SignerSocket } from "@mandateos/sdk";
+import { PrismaClient } from "@euthyna/db";
+import { MarketBuyer, nearRpc, SignerCard, SignerSocket } from "@euthyna/sdk";
 import { Hono } from "hono";
 import { KeyPair, keyStores, Near, utils } from "near-api-js";
 import { encodeFunctionData, erc20Abi, maxUint256 } from "viem";

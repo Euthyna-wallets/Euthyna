@@ -77,7 +77,7 @@ jobs:
       - name: Install the sealed-order prover (bb.js and noir_js, for the sandbox tests)
         run: |
           npm install --global pnpm@12.15.0
-          pnpm install --frozen-lockfile --filter @mandateos/api...
+          pnpm install --frozen-lockfile --filter @euthyna/api...
       - name: Complete sandbox suite
         working-directory: contracts
         run: |
@@ -122,7 +122,7 @@ jobs:
       - name: Typecheck then API, console, MCP and SDK tests
         run: |
           pnpm typecheck
-          pnpm --filter @mandateos/api test
-          pnpm --filter @mandateos/console test
-          pnpm --filter @mandateos/mcp test
-          pnpm --filter @mandateos/sdk test
+          pnpm --filter @euthyna/api test
+          pnpm --filter @euthyna/console test
+          pnpm --filter @euthyna/mcp test
+          pnpm --filter @euthyna/sdk test

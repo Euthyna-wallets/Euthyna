@@ -10,9 +10,9 @@ ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable && corepack prepare pnpm@12.15.0 --activate
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile --filter @mandateos/market-worker... \
-    && pnpm --filter @mandateos/sdk build \
-    && pnpm --filter @mandateos/market-worker build
+RUN pnpm install --frozen-lockfile --filter @euthyna/market-worker... \
+    && pnpm --filter @euthyna/sdk build \
+    && pnpm --filter @euthyna/market-worker build
 
 # Production dependencies only, resolved from the lockfile.
 FROM node:22-bookworm-slim AS deps
@@ -22,7 +22,7 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/market-worker/package.json apps/market-worker/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
-RUN pnpm install --prod --frozen-lockfile --filter @mandateos/market-worker...
+RUN pnpm install --prod --frozen-lockfile --filter @euthyna/market-worker...
 
 FROM node:22-bookworm-slim
 # python3 for the DeFiLlama CLI (stdlib only); bubblewrap and socat for the agent SDK's sandbox.

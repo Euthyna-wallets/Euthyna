@@ -2,12 +2,12 @@
  * Proofs for the recovery contract's sandbox tests (contracts/tests/tests/email_recovery.rs):
  * emails from a test mail domain, signed with its own DKIM key (mailauth), proved as the
  * browser does. Run again after the circuit changes:
- *   pnpm --filter @mandateos/api exec tsx scripts/email-recovery-fixtures.ts
+ *   pnpm --filter @euthyna/api exec tsx scripts/email-recovery-fixtures.ts
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { dkimKeyHash, modulusFromDkimRecord, newSalt, publicInputBytes } from "@mandateos/sdk/email-proof";
+import { dkimKeyHash, modulusFromDkimRecord, newSalt, publicInputBytes } from "@euthyna/sdk/email-proof";
 
 import { dkimKeys } from "../src/recovery/email.js";
 

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import bs58 from "bs58";
 import { describe, expect, it, vi } from "vitest";
 

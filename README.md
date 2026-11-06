@@ -7,8 +7,10 @@ cannot sign anything its role does not allow, even when it is hacked.
 Built for the [NEAR Hackathon](https://nearhackathon.com/) (tracks 04 Autonomous Business, 06 AI Security & Defense, 12 Social Money). Testnet only, unaudited.
 
 **Names.** **Euthyna** is the project: this repository, its contracts, API and console. **Atlantis** is its public
-site at [euthyna.io](https://euthyna.io), where anyone creates an AI company and finds the others. The repository is
-still called `MandateOS` and the code packages `@mandateos/*`, its first name; nothing else uses it.
+site at [euthyna.io](https://euthyna.io), where anyone creates an AI company and finds the others. The code packages
+are `@euthyna/*`. `MandateOS`, the project's first name, survives only in testnet account names
+(`*.mandateos-root-20261021.testnet`), the local database name and the contracts' Cargo metadata (changing it would
+change the wasm hashes).
 
 **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md) walks through the product in about 20 minutes, each step with what you
 should see and how to check it on chain.
@@ -81,7 +83,7 @@ The account's code hash is `Eg1Ht4oYrNVjDVaqgsGrwPgsev1ZsbfzMr4HPd5uRhPa`, base5
 cd contracts && cargo test -p tests --test email_recovery
 #   → 4 passed: an unknown DKIM key, another account's email, a flipped public input, another mailbox,
 #     another salt are refused; a real iCloud email verifies on chain; ready only after the delay
-ZK_EMAIL_PROVE=1 pnpm --filter @mandateos/api exec vitest run src/recovery/email.prove
+ZK_EMAIL_PROVE=1 pnpm --filter @euthyna/api exec vitest run src/recovery/email.prove
 #   → the circuit in Node: a zero-knowledge proof verifies, a forged one does not
 ```
 
@@ -106,8 +108,8 @@ a fill; the fill itself (amount, pair, rate) is a public Base transaction. Detai
 [CLAIMS.md](./CLAIMS.md#sealed-orders-private-limit-orders).
 
 ```sh
-pnpm --filter @mandateos/api sealed new --vault <vault> --dao <dao> --price 1800 --cap 50 --days 7 > order.json
-pnpm --filter @mandateos/api sealed watch order.json --key watcher.json
+pnpm --filter @euthyna/api sealed new --vault <vault> --dao <dao> --price 1800 --cap 50 --days 7 > order.json
+pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 ```
 
 ## Product architecture
@@ -126,7 +128,7 @@ pnpm --filter @mandateos/api sealed watch order.json --key watcher.json
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
-| Agent | no: a NEAR key limited to `prepare`, `authorize`, `cancel_nonce`, `renounce_role` |
+| Agent | no: a NEAR function-call key on the vault only (14 agent methods, each checked against the agent's role on chain; no NEAR transfer, no other contract, no new key) |
 | API, Guard, worker | no: visa keys and broadcasting only |
 | OmniRoles vault, registry, DAO factory | no access key after deployment |
 | Company wallet | no private key exists; NEAR MPC signs only what the vault asks |
@@ -192,10 +194,10 @@ Rust with `cargo-near` for the contracts.
 ```bash
 pnpm install
 cp env.example .env            # fill it; never commit it
-pnpm --filter @mandateos/db exec prisma db push
-pnpm --filter @mandateos/api dev        # API on :3000
-pnpm --filter @mandateos/api worker     # broadcasts what the vault signed
-pnpm --filter @mandateos/console dev    # console on :5173
+pnpm --filter @euthyna/db exec prisma db push
+pnpm --filter @euthyna/api dev        # API on :3000
+pnpm --filter @euthyna/api worker     # broadcasts what the vault signed
+pnpm --filter @euthyna/console dev    # console on :5173
 ```
 
 ### Docker Compose

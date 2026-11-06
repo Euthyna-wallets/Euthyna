@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OnchainAgentClient } from "@mandateos/sdk";
+import { OnchainAgentClient } from "@euthyna/sdk";
 import { MandateMcpTools } from "./index.js";
 
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";

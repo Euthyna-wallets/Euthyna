@@ -2,7 +2,7 @@
  * Seat recovery end to end on NEAR testnet, against the deployed recovery contract: the same
  * proving code as the browser (noir_js + bb.js, zero-knowledge), real transactions.
  *
- *   KEYS=<dir> DAO=<dao>.sputnikv2.testnet pnpm --filter @mandateos/api exec tsx scripts/recovery-testnet-e2e.ts <step>
+ *   KEYS=<dir> DAO=<dao>.sputnikv2.testnet pnpm --filter @euthyna/api exec tsx scripts/recovery-testnet-e2e.ts <step>
  *
  * <dir> holds <account>.json key files ({ account_id, secret_key }) for the founders and the new
  * account, and test-mail-domain.json (a test mail domain whose DKIM key the contract's keeper
@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { newSalt, publicInputBytes, recoverySubject } from "@mandateos/sdk/email-proof";
+import { newSalt, publicInputBytes, recoverySubject } from "@euthyna/sdk/email-proof";
 
 import { proveEmail, signedEmail } from "../src/recovery/test-mail.js";
 

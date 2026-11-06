@@ -13,7 +13,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { Prisma, PrismaClient } from "@mandateos/db";
+import type { Prisma, PrismaClient } from "@euthyna/db";
 import {
   BASE_SEPOLIA,
   budgetsOf,
@@ -53,10 +53,10 @@ import {
   type RuleChange,
   type VaultCall,
   NEAR_TESTNET_TOKENS,
-} from "@mandateos/sdk/roles";
-import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, SEALED_ROLE, sealedCancelKind, sealedConfigureKind, sealedSealKind } from "@mandateos/sdk";
+} from "@euthyna/sdk/roles";
+import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, SEALED_ROLE, sealedCancelKind, sealedConfigureKind, sealedSealKind } from "@euthyna/sdk";
 import bs58 from "bs58";
-import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@mandateos/sdk";
+import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@euthyna/sdk";
 import { vaultLogs } from "./chain-activity.js";
 import { usdPrices, usdValue } from "./prices.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";

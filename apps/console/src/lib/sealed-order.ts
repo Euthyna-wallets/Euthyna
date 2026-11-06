@@ -1,5 +1,5 @@
 /** Sealed orders in the browser: the Poseidon2 commitment (bb.js), so the hidden terms never leave it. */
-import { commitmentInputs, type SealedOrder } from "@mandateos/sdk/sealed-orders";
+import { commitmentInputs, type SealedOrder } from "@euthyna/sdk/sealed-orders";
 
 const bytes32 = (value: bigint) => {
   const out = new Uint8Array(32);

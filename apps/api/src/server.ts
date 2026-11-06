@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { serve } from "@hono/node-server";
-import { prisma } from "@mandateos/db";
+import { prisma } from "@euthyna/db";
 import { AgentProvisioningService } from "./agent-provisioning.js";
 import { BaseGasEstimator } from "./base-gas.js";
 import { Guard } from "./guard.js";

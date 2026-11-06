@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { accountInSubject, circuitInputs, dkimKeyHash, newSalt, PUBLIC_INPUT_COUNT, publicInputBytes, readPublicInputs, recoverySubject } from "@mandateos/sdk/email-proof";
+import { accountInSubject, circuitInputs, dkimKeyHash, newSalt, PUBLIC_INPUT_COUNT, publicInputBytes, readPublicInputs, recoverySubject } from "@euthyna/sdk/email-proof";
 import { describe, expect, it } from "vitest";
 
 import { dkimKeys } from "./email.js";

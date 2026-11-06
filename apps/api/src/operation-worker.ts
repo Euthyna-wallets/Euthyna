@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@mandateos/db";
+import type { Prisma, PrismaClient } from "@euthyna/db";
 import { hexToBytes, type Hex } from "viem";
 
 import { onChainWalletEvmAddress } from "./agent-chain.js";

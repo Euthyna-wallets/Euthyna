@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/joindefi/MandateOS.git",
+    "url": "git+https://github.com/Euthyna-wallets/Euthyna.git",
     "directory": "packages/mcp"
   },
   "publishConfig": {

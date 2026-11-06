@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { prisma } from "@mandateos/db";
+import { prisma } from "@euthyna/db";
 
 import { loadEnv } from "./env.js";
 import { Guard } from "./guard.js";

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 
 import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
 import { Noir } from "@noir-lang/noir_js";
-import { commitmentInputs, vaultTag, type SealedOrder } from "@mandateos/sdk";
+import { commitmentInputs, vaultTag, type SealedOrder } from "@euthyna/sdk";
 
 type Circuit = { bytecode: string } & Record<string, unknown>;
 let circuit: Circuit | null = null;

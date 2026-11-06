@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type CSSProperties } from "react";
 import { bytesToHex, hexToBytes } from "viem";
-import { decodeVaultCalls, type RuleChange } from "@mandateos/sdk/roles";
+import { decodeVaultCalls, type RuleChange } from "@euthyna/sdk/roles";
 import { api } from "../api.js";
 import { Kicker, NightPanel, PageTitle, Seal, Slab } from "../components/design.js";
 import { PageState } from "../components/ui.js";

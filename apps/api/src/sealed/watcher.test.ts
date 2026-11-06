@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RATE_SCALE, type SealedOrder } from "@mandateos/sdk";
+import { RATE_SCALE, type SealedOrder } from "@euthyna/sdk";
 
 import { commitmentOf, proveFill } from "./prover.js";
 import { fillOutcome, tick, type WatcherDeps } from "./watcher.js";

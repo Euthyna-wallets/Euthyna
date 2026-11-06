@@ -20,7 +20,7 @@ import {
   SignerCard,
   SignerSocket,
   SocketNearSigner,
-} from "@mandateos/sdk";
+} from "@euthyna/sdk";
 
 import { createMandateMcpServer, MandateMcpTools } from "./index.js";
 reserveStdoutForMcp();
@@ -70,7 +70,7 @@ const socketPath = env.EUTHYNA_SIGNER_SOCKET
   ?? (env.MANDATEOS_AGENT_API_KEY ? undefined : SIGNER_SOCKETS.find((path) => existsSync(path)));
 
 const rpcUrl = process.env.EVM_RPC_URL ?? (env.EVM_CHAIN_ID === 84532 ? "https://sepolia.base.org" : "https://mainnet.base.org");
-const { publicRpc } = await import("@mandateos/sdk");
+const { publicRpc } = await import("@euthyna/sdk");
 let client: OnchainAgentClient;
 let buyer: MarketBuyer | undefined;
 if (socketPath) {

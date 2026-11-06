@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { BASE_SEPOLIA, chainName, decodeVaultCalls, describeCall, describeVaultCall } from "@mandateos/sdk/roles";
+import { BASE_SEPOLIA, chainName, decodeVaultCalls, describeCall, describeVaultCall } from "@euthyna/sdk/roles";
 import { encodeFunctionData, erc20Abi, getAddress, parseAbi, parseEther, parseUnits, type Hex } from "viem";
 
 import { PageState } from "../components/ui.js";

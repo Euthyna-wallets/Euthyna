@@ -1,6 +1,6 @@
 import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaRpc, solanaTokenOf, type SolanaProfile } from "./solana.js";
-import { bytesToHex, encodeFunctionData, erc20Abi, hexToBytes, type Hex } from "viem";
-import { NEAR_TESTNET_TOKENS } from "./roles.js";
+import { bytesToHex, encodeFunctionData, erc20Abi, getAddress, hexToBytes, type Hex } from "viem";
+import { NEAR_TESTNET_TOKENS, Operator } from "./roles.js";
 import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
 
 export interface DirectVault {
@@ -31,6 +31,26 @@ export function publicRpc(url: string): Rpc {
     return body.result;
   };
 }
+const TRANSFER_SELECTOR = "a9059cbb";
+/**
+ * Who each ERC-20 transfer permission may pay: the addresses the role names itself (EqualTo on the recipient), and
+ * whether it also accepts the vault's on-chain "suppliers" list. A role voted with one supplier names it inline, so
+ * `suppliers` alone can be empty.
+ */
+function payeesOf(config: unknown) {
+  const permissions = (config as { config?: { permissions?: Array<{ chain_id: number; target: number[]; selector: number[]; conditions: Array<{ operator: number; compValue: Hex }> }> } } | null)?.config?.permissions ?? [];
+  return permissions
+    .filter((permission) => bytesToHex(Uint8Array.from(permission.selector)).slice(2) === TRANSFER_SELECTOR)
+    .map((permission) => ({
+      chainId: permission.chain_id,
+      token: getAddress(bytesToHex(Uint8Array.from(permission.target))),
+      recipients: permission.conditions
+        .filter((condition) => condition.operator === Operator.EqualTo && /^0x0{24}[0-9a-fA-F]{40}$/.test(condition.compValue))
+        .map((condition) => getAddress(`0x${condition.compValue.slice(26)}`)),
+      anySupplier: permission.conditions.some((condition) => condition.operator === Operator.InAddressList && condition.compValue.toLowerCase() === bytesToHex(new TextEncoder().encode("suppliers"))),
+    }));
+}
+
 /** Direct NEAR authorization, public RPC broadcast and MPC settlement. No API credentials. */
 export class OnchainAgentClient {
   constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
@@ -69,7 +89,7 @@ export class OnchainAgentClient {
         budget: bytesToHex(Uint8Array.from(permission.allowance)),
       })),
     } : null;
-    return { config, membership, suppliers, wallet, allowances: [...allowances, ...solanaAllowances, ...nearAllowances], solana, near };
+    return { config, membership, suppliers, payees: payeesOf(config), wallet, allowances: [...allowances, ...solanaAllowances, ...nearAllowances], solana, near };
   }
   async pay(intent: PaymentRequest, _invoice?: InvoiceContext) {
     const { chain_id } = this.vault.identity();

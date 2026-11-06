@@ -1,5 +1,5 @@
 {
-  "name": "@mandateos/mcp",
+  "name": "@euthyna/mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "bundle": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=esm --outfile=npm/dist/euthyna-mcp.mjs --banner:js=\"#!/usr/bin/env node\nimport { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\""
   },
   "dependencies": {
-    "@mandateos/sdk": "workspace:^",
+    "@euthyna/sdk": "workspace:^",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   },

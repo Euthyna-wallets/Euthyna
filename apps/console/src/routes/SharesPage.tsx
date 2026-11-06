@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type CSSProperties } from "react";
-import { formatNear, OMNI_CHAINS, OMNI_NEAR_TESTNET, parseNear, proceedsToEvmKinds, revenueProposalKind, sharesProposalKinds } from "@mandateos/sdk/roles";
+import { formatNear, OMNI_CHAINS, OMNI_NEAR_TESTNET, parseNear, proceedsToEvmKinds, revenueProposalKind, sharesProposalKinds } from "@euthyna/sdk/roles";
 import { formatUnits, getAddress, toHex, type Hex } from "viem";
 
 import { Kicker, NightPanel, PageTitle, Slab, VetoRing } from "../components/design.js";

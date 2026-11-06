@@ -31,7 +31,7 @@ type Pairing = {
 
 const INSTALL_URL = "https://raw.githubusercontent.com/joindefi/euthyna-signer/main/install.sh";
 /** Until @euthyna/mcp is on npm, the MCP server runs from a clone of the repository (pnpm install once). */
-const MCP_DIR = "~/MandateOS/packages/mcp";
+const MCP_DIR = "~/Euthyna/packages/mcp";
 
 /** What the vault gives a new owner, in a private EUTHYNA company. */
 const HAVE_LINES = [
@@ -48,7 +48,7 @@ const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g
  */
 export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; defaultName?: string; onReady: (agent: AgentReady) => void }) {
   const [name, setName] = useState(props.defaultName ?? "Treasury bot");
-  const [role, setRole] = useState(props.defaultRole ?? "treasury");
+  const [role, setRole] = useState(props.defaultRole ?? "payments");
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [keyMode, setKeyMode] = useState<KeyMode>("signer");
@@ -229,10 +229,10 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
   };
   const mcp = JSON.stringify({
     mcpServers: {
-      mandateos: {
+      euthyna: {
         // The compiled entry point: a package manager would print banners on stdout, which MCP reserves.
         command: "node",
-        args: ["/path/to/MandateOS/packages/mcp/dist/server.js"],
+        args: ["/path/to/Euthyna/packages/mcp/dist/server.js"],
         env: mcpEnv,
       },
     },
@@ -262,15 +262,15 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
       {mode === "mcp" ? (
         <ol className="small">
           <li>Keep <code>{props.agent.keyFile}</code> (downloaded) on the machine that runs the agent. Never upload it.</li>
-          <li>Build once in the repository: <code>pnpm --filter @mandateos/sdk build && pnpm --filter @mandateos/mcp build</code>.</li>
+          <li>Build once in the repository: <code>pnpm install && pnpm --filter "@euthyna/mcp..." build</code> (the server and the SDK it uses).</li>
           <li>Add this server to Claude Desktop, Claude Code, Cursor or Codex (MCP settings), with your paths. It contains the agent's API key, which cannot be displayed again.</li>
-          <li>The agent then has the tools <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>share_revenue</code>, <code>status</code> and <code>cancel</code>, and nothing else.</li>
+          <li>The server lists 14 tools: <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>execute_call</code>, <code>share_revenue</code>, <code>status</code>, <code>cancel</code>, the NEAR and Solana transfers, and the Market. Every one goes through the vault: whatever the role does not allow is refused on chain.</li>
         </ol>
       ) : (
         <ol className="small">
           <li>Keep <code>{props.agent.keyFile}</code> (downloaded) next to the agent. Never upload it.</li>
           <li>Save this as <code>.env</code>. It contains the agent's API key, which cannot be displayed again.</li>
-          <li>Start it: <code>pnpm --filter @mandateos/demo-agent start</code></li>
+          <li>Start it: <code>pnpm --filter @euthyna/demo-agent start</code></li>
         </ol>
       )}
       <pre>{mode === "mcp" ? mcp : env}</pre>
@@ -347,7 +347,7 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
               {shown}
             </pre>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderTop: "1px solid #1F3A6E", flexWrap: "wrap" }}>
-              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>From a clone of github.com/Euthyna-wallets/MandateOS (git clone, pnpm install) · @euthyna/mcp on npm: NEXT</span>
+              <span style={{ font: "600 11.5px var(--font-mono)", color: "#F2B544" }}>From a clone of github.com/Euthyna-wallets/Euthyna (git clone, pnpm install) · @euthyna/mcp on npm: NEXT</span>
               <span style={{ fontSize: 12, color: "#A9B6D6" }}>until it is published, build the MCP server from the repository</span>
               <button
                 type="button"
@@ -363,7 +363,7 @@ function RunWithSigner(props: { agent: AgentReady; vaultAccountId: string; onDon
           <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
             The agent can do nothing until a role that includes{" "}
             <span style={{ font: "500 12.5px var(--font-mono)", color: "var(--ink)" }}>{props.agent.nearAccountId}</span> is voted and out of
-            its veto window. Then it has the tools to check, pay and read its status, and nothing else.
+            its veto window. Then every tool it calls is checked by the vault against that role, and refused otherwise.
           </p>
 
           {props.onDone ? (

@@ -1,6 +1,6 @@
 # Euthyna Market
 
-Tracked in [#87](https://github.com/Euthyna-wallets/MandateOS/issues/87). This page grows with each
+Tracked in [#87](https://github.com/Euthyna-wallets/Euthyna/issues/87). This page grows with each
 step; only what is built is described here.
 
 ## Vault: NEP-141 transfers
@@ -296,7 +296,7 @@ by the Rust signer passes the gateway's verification byte for byte.
 
 ```bash
 TEST_DATABASE_URL=… NEAR_SANDBOX_RPC=http://127.0.0.1:3031 NEAR_SANDBOX_KEY_FILE=<sandbox home>/validator_key.json \
-EUTHYNA_SIGNER_BIN=<euthyna-signer>/target/release/euthyna-signer pnpm --filter @mandateos/api exec vitest run src/market
+EUTHYNA_SIGNER_BIN=<euthyna-signer>/target/release/euthyna-signer pnpm --filter @euthyna/api exec vitest run src/market
 ```
 
 Not run yet: the same flow on testnet against a deployed API (needs the market relayer funded, listings live

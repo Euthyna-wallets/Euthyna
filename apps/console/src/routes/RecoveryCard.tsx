@@ -5,6 +5,7 @@ import { api } from "../api.js";
 import { Card, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { newSalt, proveEmailFile, PUBLIC_INBOX_DOMAINS, RECOVERY_CONTRACT_ID, recoverySubject } from "../lib/email-proof.js";
+import { recoveryErrorText } from "../lib/recovery-errors.js";
 import type { ProposalDraft } from "../omniroles-api.js";
 import { signContractCall, signDaoProposal } from "../wallets.js";
 
@@ -72,7 +73,7 @@ export function RecoveryCard() {
   const run = (action: () => Promise<string | void>) => {
     setBusy(true);
     setMessage(null);
-    void action().then((text) => { if (text) setMessage(text); }, (cause: unknown) => setMessage(cause instanceof Error ? cause.message : String(cause)))
+    void action().then((text) => { if (text) setMessage(text); }, (cause: unknown) => setMessage(recoveryErrorText(cause)))
       .finally(() => { setBusy(false); void queryClient.invalidateQueries({ queryKey: ["recovery"] }); });
   };
 
@@ -129,6 +130,11 @@ function RecoveryRow({ recovery, dao, me, busy, run }: { recovery: Recovery; dao
             for (const draft of proposals) ids.push((await signDaoProposal(me, draft)).proposalId);
             return `Votes #${ids.join(", #")} submitted: approve them in Votes.`;
           })}>Submit the vote</button>
+        ) : recovery.state === "waiting" && me && me !== recovery.lostAccountId ? (
+          // Shown before the delay too, so the next step is visible; the contract and the API refuse it until then.
+          <button className="btn-ori" style={{ padding: "8px 14px" }} disabled title="The founder can still cancel">
+            Submit the vote · from {new Date(recovery.notBefore).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </button>
         ) : null}
       </div>
     </div>

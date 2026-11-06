@@ -4,7 +4,7 @@
  * hidden limit: it proves the fill, sends it to contracts/sealed-orders, then follows the vault's
  * operation until the swap is on Base and settled. The hidden terms never leave this process.
  */
-import { rateOf, type SealedOrder } from "@mandateos/sdk";
+import { rateOf, type SealedOrder } from "@euthyna/sdk";
 
 import type { Fill, FillProof } from "./prover.js";
 

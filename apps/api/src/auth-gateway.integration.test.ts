@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { PrismaClient } from "@mandateos/db";
+import { PrismaClient } from "@euthyna/db";
 
 import { createAuth, type MandateAuth } from "./auth.js";
 import { BetterAuthGateway } from "./auth-gateway.js";
@@ -13,8 +13,8 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
  * Runs only when TEST_DATABASE_URL points at a PostgreSQL database with
  * `packages/db/prisma/schema.prisma` applied:
  *
- *   DATABASE_URL=$TEST_DATABASE_URL pnpm --filter @mandateos/db exec prisma db push
- *   TEST_DATABASE_URL=... pnpm --filter @mandateos/api test
+ *   DATABASE_URL=$TEST_DATABASE_URL pnpm --filter @euthyna/db exec prisma db push
+ *   TEST_DATABASE_URL=... pnpm --filter @euthyna/api test
  */
 describe.skipIf(!databaseUrl)("BetterAuthGateway against PostgreSQL", () => {
   let prisma: PrismaClient;

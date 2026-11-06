@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 
 /** How long a pairing code works. */
 export const PAIRING_TTL_MS = 10 * 60_000;

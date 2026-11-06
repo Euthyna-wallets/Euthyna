@@ -7,10 +7,10 @@
  *   registers it on the test token and mints it the price. Once per key and once per client
  *   (salted address hash), a daily cap for everyone; each step is recorded, a retry resumes.
  * - Terms (`POST /v1/rob/hire/terms`): the key's nonce and a final block height, what the browser
- *   needs (with the 402 from the A2A endpoint) to sign the cheque itself (`@mandateos/sdk/cheque`).
+ *   needs (with the 402 from the A2A endpoint) to sign the cheque itself (`@euthyna/sdk/cheque`).
  * - Delivery: no worker container. The API polls its own market worker endpoints in-process
  *   (`app.request`, the listing's delivery token) and runs the same tx-check as apps/market-worker
- *   (`@mandateos/sdk/tx-check`). Delivering goes through MarketService.deliver, so the cheque is
+ *   (`@euthyna/sdk/tx-check`). Delivering goes through MarketService.deliver, so the cheque is
  *   relayed by the market relayer exactly as for any seller.
  *
  * The buyer pays no gas: the market relayer sends the delegate, the account needs no NEAR.
@@ -18,8 +18,8 @@
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import { prisma } from "@mandateos/db";
-import { txCheckJob } from "@mandateos/sdk/tx-check";
+import { prisma } from "@euthyna/db";
+import { txCheckJob } from "@euthyna/sdk/tx-check";
 
 import { robHireSettings, type RobHireSettings } from "../env.js";
 import { clientIp } from "../market/routes.js";

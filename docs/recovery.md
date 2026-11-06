@@ -97,7 +97,7 @@ no upgrade (the contract has no upgrade method and no access key).
 | A proof made in Chromium by the console's own code (`proveEmailFile`) | `verify_proof` → `true` on `euthyna-recovery.testnet` | view call |
 
 The testnet contract waits **10 minutes** so the whole flow can be tried in one sitting; the mainnet contract is meant to wait 48 hours.
-Re-run: `KEYS=<dir> DAO=<dao> pnpm --filter @mandateos/api exec tsx scripts/recovery-testnet-e2e.ts enroll|request|cancel|status|vote`.
+Re-run: `KEYS=<dir> DAO=<dao> pnpm --filter @euthyna/api exec tsx scripts/recovery-testnet-e2e.ts enroll|request|cancel|status|vote`.
 
 ## Tested
 

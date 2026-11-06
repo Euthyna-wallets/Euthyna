@@ -10,7 +10,7 @@ function option(name: string): string | undefined {
 
 const [resource, command] = process.argv.slice(2);
 if (resource !== "agent" || command !== "init") {
-  throw new Error("usage: mandateos agent init --name <name> [--parent mandateos.testnet] [--key-path .mandateos/agent-key.json]");
+  throw new Error("usage: euthyna agent init --name <name> [--parent mandateos.testnet] [--key-path .mandateos/agent-key.json]");
 }
 const name = option("--name");
 if (!name) throw new Error("--name is required");

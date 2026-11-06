@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { PrismaClient } from "@mandateos/db";
+import { PrismaClient } from "@euthyna/db";
 import { Hono } from "hono";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 

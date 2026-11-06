@@ -15,7 +15,7 @@ import {
   sealedSealKind,
   serializeOrder,
   type SealedOrder,
-} from "@mandateos/sdk/sealed-orders";
+} from "@euthyna/sdk/sealed-orders";
 
 import { Kicker, Slab } from "../components/design.js";
 import { commitmentOf, downloadOrderFile } from "../lib/sealed-order.js";

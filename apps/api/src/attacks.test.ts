@@ -9,7 +9,7 @@
  * The vault part lives in contracts/tests/tests/attacks.rs. Run both with
  * `pnpm attack:all`.
  */
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import { afterAll, describe, expect, it } from "vitest";
 import { encodeFunctionData, getAddress, hexToBytes, type Address } from "viem";
 

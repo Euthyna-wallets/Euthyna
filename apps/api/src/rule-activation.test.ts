@@ -3,7 +3,7 @@
  * idle vaults are not read every pass, passes never overlap, and the job's
  * RPC calls wait behind the screens'.
  */
-import type { PrismaClient } from "@mandateos/db";
+import type { PrismaClient } from "@euthyna/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { KmsSigner } from "./kms.js";
