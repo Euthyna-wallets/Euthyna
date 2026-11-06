@@ -53,6 +53,7 @@ import {
   type RuleChange,
   type VaultCall,
   NEAR_TESTNET_TOKENS,
+  withSealedOrdersMember,
 } from "@euthyna/sdk/roles";
 import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import bs58 from "bs58";
@@ -1269,11 +1270,11 @@ export class OmniRolesService {
     const treasury = await this.requireTreasury(organizationId);
     // A swap block that allows sealed orders makes contracts/sealed-orders a member of the role:
     // fills then go through the same router, pair, recipient and budget as the agents' swaps.
+    // An edited role that already has it keeps its membership as it is.
     if (draft.blocks.some((block) => block.kind === "swap" && block.sealedOrders)) {
       const sealedId = this.requireSealed();
-      if (!draft.members.some((member) => member.accountId === sealedId)) {
-        draft = { ...draft, members: [...draft.members, { accountId: sealedId, kind: "Agent", maxUses: null }] };
-      }
+      const membership = await this.view<{ active?: boolean } | null>(treasury.vaultAccountId, "get_membership", { role: draft.name, member: sealedId }).catch(() => null);
+      draft = withSealedOrdersMember(draft, sealedId, Boolean(membership?.active));
     }
     for (const block of draft.blocks) {
       if (block.kind === "share-revenue" && block.sharesAccountId !== this.sharesAccountOf(treasury)) {
@@ -1577,7 +1578,13 @@ export class OmniRolesService {
     for (const rule of ready) {
       // An upgrade fetches and deploys ~800 KB of code: give it the full 300 Tgas.
       const gas = rule.change && typeof rule.change === "object" && "Upgrade" in rule.change ? "300000000000000" : "100000000000000";
-      hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
+      // One rule the vault refuses for now (a budget still reserved by an unsettled operation:
+      // ERR_ALLOWANCE_IN_USE, ERR_ROLE_IN_USE) must not hold back the others: it is tried again next round.
+      try {
+        hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
+      } catch (error) {
+        console.warn(`rule ${Object.keys(rule.change ?? {})[0] ?? "change"} on ${treasury.vaultAccountId} not applied yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
+      }
     }
     const dao = await this.startDaoTransactions(organizationId, treasury);
     hashes.push(...dao.hashes);

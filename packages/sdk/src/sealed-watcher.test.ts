@@ -53,6 +53,12 @@ describe("sealed-order watcher", () => {
     expect(sent).toHaveLength(0);
   });
 
+  it("does not send a fill the wallet cannot pay", async () => {
+    const { deps: d, sent } = deps({ balance: async () => 500_000n, allowance: async () => 10_000_000n });
+    expect(await tick(order, d)).toEqual({ status: "no-funds", amountIn: 3_000_000n, balance: 500_000n });
+    expect(sent).toHaveLength(0);
+  });
+
   it("stops on a cancelled, expired or full order", async () => {
     expect((await tick(order, deps({ orderState: async () => ({ filled: 0n, fills: 0, cancelled: true }) }).deps)).status).toBe("cancelled");
     expect((await tick(order, deps({ now: () => 2_000_000_001 }).deps)).status).toBe("expired");

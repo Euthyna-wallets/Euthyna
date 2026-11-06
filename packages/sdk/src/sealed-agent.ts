@@ -167,6 +167,7 @@ export class SealedAgent {
         return result[0];
       },
       allowance: () => this.allowance(wallet),
+      balance: () => this.base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(wallet)] }),
       prove: (fill) => proveFill(order, fill),
       fill: async (input) => {
         const gasPrice = await this.base.getGasPrice();

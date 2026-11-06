@@ -44,6 +44,7 @@ export async function fillNow(input: { me: string; sealedId: string; id: number;
       return quoted[0];
     },
     allowance: () => base.readContract({ address: U.usdc, abi: erc20Abi, functionName: "allowance", args: [wallet, U.router] }),
+    balance: () => base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [wallet] }),
     prove: async (fill) => proveSealedFill(await loadCircuit(), order, fill),
     fill: async (proved) => {
       const gasPrice = await base.getGasPrice();

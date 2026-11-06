@@ -82,6 +82,8 @@ async function watch(args: string[]) {
       console.log(state === "PossiblySigned"
         ? `${stamp()} swap sent, Base block not final yet; it settles on the next run`
         : `${stamp()} swap ${state}`);
+    } else if (result.status === "no-funds") {
+      console.log(`${stamp()} the wallet holds ${result.balance} of the token to sell, under the ${result.amountIn} to fill`);
     } else if (result.status === "needs-approval") {
       console.log(`${stamp()} the router may take ${result.allowance} of the wallet's USDC, under the ${result.amountIn} to fill; approve more within the role`);
     } else if (result.status === "waiting") {

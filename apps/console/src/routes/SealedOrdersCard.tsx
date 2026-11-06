@@ -30,7 +30,7 @@ import {
 
 import { Kicker, Slab } from "../components/design.js";
 import { commitmentOf, downloadOrderFile } from "../lib/sealed-order.js";
-import { sendSealedApprovals } from "../lib/sealed-approval.js";
+import { pendingSettlements, recordSettlements, sendSealedApprovals } from "../lib/sealed-approval.js";
 import { baseGasPrice, fillNow } from "../lib/sealed-fill.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type SealedView } from "../omniroles-api.js";
@@ -72,6 +72,12 @@ export function SealedOrdersCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [terms, setTerms] = useState<Record<number, SealedOrder | null>>({});
   const view = query.data;
+  const settlements = useQuery({
+    queryKey: ["sealed-settlements", view?.vaultAccountId],
+    queryFn: () => pendingSettlements(view!.vaultAccountId),
+    enabled: Boolean(view?.vaultAccountId),
+    refetchInterval: 60_000,
+  });
   if (!view?.enabled || !view.sealedAccountId) return null;
   const me = wallets.nearAccountId;
   const sealedId = view.sealedAccountId;
@@ -137,11 +143,20 @@ export function SealedOrdersCard() {
       + "Show the terms, then execute it here or give it to the role's agent.";
   });
 
+  const ready = (settlements.data ?? []).filter((item) => item.state === "ready");
+  const reverted = (settlements.data ?? []).filter((item) => item.state === "reverted");
+  const record = () => run(async () => {
+    const count = await recordSettlements(me!, view.vaultAccountId, ready);
+    await settlements.refetch();
+    return `${count} swap${count === 1 ? "" : "s"} recorded on the vault: the budget it reserved is now spent.`;
+  });
+
   const execute = (id: number, order: SealedOrder) => run(async () => {
     const result = await fillNow({ me: me!, sealedId, id, order });
     switch (result.status) {
       case "filled": return `Filled ${formatUnits(result.amountIn, 6)} USDC.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : ""}`;
       case "waiting": return `Not yet: the market gives ${priceOf(result.marketRate)} USDC/WETH, above your limit of ${priceOf(order.limitRate)}.`;
+      case "no-funds": return `The wallet holds ${formatUnits(result.balance, 6)} USDC, under the ${formatUnits(result.amountIn, 6)} to fill: nothing was sent.`;
       case "needs-approval": return `The router may take ${formatUnits(result.allowance, 6)} USDC, under the ${formatUnits(result.amountIn, 6)} to fill: place an approval within the role first.`;
       case "refused": return `Refused: ${result.reason}.`;
       default: return `Nothing to execute: the order is ${result.status}.`;
@@ -268,6 +283,15 @@ export function SealedOrdersCard() {
               </div>
             );
           })}
+        </div>
+      ) : null}
+      {ready.length || reverted.length ? (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 10 }}>
+          <span style={small}>
+            {ready.length ? `${ready.length} transaction${ready.length === 1 ? "" : "s"} you sent ${ready.length === 1 ? "is" : "are"} final on Base: record ${ready.length === 1 ? "it" : "them"} on the vault so the budget is counted as spent. ` : ""}
+            {reverted.length ? `${reverted.length} reverted on Base: its budget stays reserved until the vault releases it (6 hours).` : ""}
+          </span>
+          {ready.length && me ? <button className="btn" disabled={busy} onClick={() => void record()}>Record on the vault</button> : null}
         </div>
       ) : null}
       {!me ? <p style={{ margin: 0, ...small }}>Connect your NEAR wallet to propose or read orders.</p> : null}

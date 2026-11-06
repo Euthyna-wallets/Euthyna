@@ -18,6 +18,8 @@ export type WatcherDeps = {
   quote(amountIn: bigint): Promise<bigint>;
   /** What the router may take from the wallet now; a fill above it would only revert on Base. */
   allowance?(): Promise<bigint>;
+  /** The wallet's tokenIn balance; a fill above it would only revert on Base. */
+  balance?(): Promise<bigint>;
   prove(fill: Fill): Promise<FillProof>;
   /** Sends `fill` to the sealed-orders contract; the vault operation id when it was signed. */
   fill(input: { amountIn: bigint; rate: bigint; now: number; proof: string }): Promise<{ transaction: string; opId: number[] | null; failed: string | null }>;
@@ -27,6 +29,7 @@ export type Tick =
   | { status: "missing" | "cancelled" | "expired" | "done" }
   | { status: "waiting"; amountIn: bigint; marketRate: bigint }
   | { status: "needs-approval"; amountIn: bigint; allowance: bigint }
+  | { status: "no-funds"; amountIn: bigint; balance: bigint }
   | { status: "filled"; amountIn: bigint; rate: bigint; transaction: string; opId: number[] }
   | { status: "refused"; amountIn: bigint; rate: bigint; transaction: string; reason: string };
 
@@ -42,6 +45,10 @@ export async function tick(order: SealedOrder, deps: WatcherDeps, chunk?: bigint
   const amountIn = chunk !== undefined && chunk > 0n && chunk < remaining ? chunk : remaining;
   const marketRate = rateOf(amountIn, await deps.quote(amountIn));
   if (marketRate < order.limitRate) return { status: "waiting", amountIn, marketRate };
+  if (deps.balance) {
+    const balance = await deps.balance();
+    if (balance < amountIn) return { status: "no-funds", amountIn, balance };
+  }
   if (deps.allowance) {
     const allowance = await deps.allowance();
     if (allowance < amountIn) return { status: "needs-approval", amountIn, allowance };
