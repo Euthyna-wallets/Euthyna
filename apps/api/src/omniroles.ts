@@ -1578,7 +1578,13 @@ export class OmniRolesService {
     for (const rule of ready) {
       // An upgrade fetches and deploys ~800 KB of code: give it the full 300 Tgas.
       const gas = rule.change && typeof rule.change === "object" && "Upgrade" in rule.change ? "300000000000000" : "100000000000000";
-      hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
+      // One rule the vault refuses for now (a budget still reserved by an unsettled operation:
+      // ERR_ALLOWANCE_IN_USE, ERR_ROLE_IN_USE) must not hold back the others: it is tried again next round.
+      try {
+        hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
+      } catch (error) {
+        console.warn(`rule ${Object.keys(rule.change ?? {})[0] ?? "change"} on ${treasury.vaultAccountId} not applied yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
+      }
     }
     const dao = await this.startDaoTransactions(organizationId, treasury);
     hashes.push(...dao.hashes);
