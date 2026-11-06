@@ -7,7 +7,7 @@ import type { NearClient } from "./near.js";
 import { OmniRolesService, type OmniRolesConfig } from "./omniroles.js";
 
 const treasury = { organizationId: "org-1", daoAccountId: "acme.factory.testnet", vaultAccountId: "acme-vault.mandateos.testnet" };
-const SEALED = "sealed-orders.euthyna.testnet";
+const SEALED = "euthyna-sealed-orders.testnet";
 const COMMITMENT = `0x02${"ab".repeat(31)}`;
 
 function service(sealedOrdersId: string | undefined) {

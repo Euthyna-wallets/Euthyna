@@ -38,7 +38,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | A false rate in a proof can only make a fill fail: the swap's minimum output comes from the proven rate, so a rate better than the market reverts on Uniswap | Code | `packages/sdk/scripts/sealed-order-fork.ts`: on a fork of Base Sepolia, the market rate swaps and a rate 2% above it reverts |
 | Only the vault's owner (its DAO) can point the contract at a vault | Code | `contracts/tests/tests/sealed_orders.rs` (a stranger's `configure` is refused) |
 | What stays public: each fill's amount, the pair, the rate it demanded and the company wallet (the swap is a Base transaction); the order's running total; who holds the order file (the members who sealed it, and whoever runs the watcher) | Code | By design; `apps/api/src/sealed/watch.ts` runs on the member's machine and prints the limit only there |
-| A sealed order filled on testnet | NEXT | Needs `sealed-orders.euthyna.testnet` deployed and a funded company wallet; add the hashes here |
+| A sealed order filled on testnet: one hash sealed by a DAO vote, a fill proved and verified on NEAR, the swap signed by NEAR MPC and mined on Base Sepolia | Testnet | [docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md): every transaction of the 6 November run (contract `euthyna-sealed-orders.testnet`, no access key; fill `DDxMCteiUFCtykQj8xRdozt7CSMZWePCBTmWWsXzHqM9`, 101.7 Tgas; swap `0xea08a63f…` on Base Sepolia) |
 
 ## Chains
 
