@@ -264,7 +264,7 @@ export function RunYourAgent(props: { agent: AgentReady; vaultAccountId: string;
           <li>Keep <code>{props.agent.keyFile}</code> (downloaded) on the machine that runs the agent. Never upload it.</li>
           <li>Build once in the repository: <code>pnpm install && pnpm --filter "@euthyna/mcp..." build</code> (the server and the SDK it uses).</li>
           <li>Add this server to Claude Desktop, Claude Code, Cursor or Codex (MCP settings), with your paths. It contains the agent's API key, which cannot be displayed again.</li>
-          <li>The server lists 17 tools: <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>execute_call</code>, <code>share_revenue</code>, <code>status</code>, <code>cancel</code>, the NEAR and Solana transfers, the Market and sealed orders. Every one goes through the vault: whatever the role does not allow is refused on chain.</li>
+          <li>The server lists 18 tools: <code>mandate</code>, <code>check</code>, <code>pay</code>, <code>execute_call</code>, <code>share_revenue</code>, <code>status</code>, <code>cancel</code>, the NEAR and Solana transfers, the Market and sealed orders. Every one goes through the vault: whatever the role does not allow is refused on chain.</li>
         </ol>
       ) : (
         <ol className="small">
