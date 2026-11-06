@@ -4,9 +4,9 @@
  * hidden limit: it proves the fill, sends it to contracts/sealed-orders, then follows the vault's
  * operation until the swap is on Base and settled. The hidden terms never leave this process.
  */
-import { rateOf, type SealedOrder } from "@euthyna/sdk";
+import { rateOf, type SealedOrder } from "./sealed-orders.js";
 
-import type { Fill, FillProof } from "./prover.js";
+import type { Fill, FillProof } from "./sealed-prover.js";
 
 export type OrderState = { filled: bigint; fills: number; cancelled: boolean };
 
@@ -55,7 +55,7 @@ export function fillOutcome(logs: string[]): { opId: number[] | null; failed: st
       const event = JSON.parse(line.slice("EVENT_JSON:".length)) as { standard?: string; event?: string; data?: Array<{ op_id?: number[]; reason?: string }> };
       if (event.standard !== "euthyna-sealed-orders") continue;
       if (event.event === "filled") return { opId: event.data?.[0]?.op_id ?? null, failed: null };
-      if (event.event === "fill_failed") return { opId: null, failed: event.data?.[0]?.reason ?? "fill failed" };
+      if (event.event === "failed") return { opId: null, failed: event.data?.[0]?.reason ?? "fill failed" };
     } catch {
       /* not ours */
     }

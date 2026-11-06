@@ -469,6 +469,8 @@ export type RoleBlock =
       budget: Budget;
       /** Largest single approval to a router, in tokenIn units. */
       maxApproval: string;
+      /** Sealed orders may fill through this role too (contracts/sealed-orders joins it as a member). */
+      sealedOrders?: boolean;
     }
   /** Deposit `token` into a lending pool (budget) and withdraw it back to the wallet. */
   | { kind: "lending"; protocol: LendingId; token: Hex; budget: Budget; maxApproval: string }

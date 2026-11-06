@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { RATE_SCALE, type SealedOrder } from "@euthyna/sdk";
+import { RATE_SCALE, type SealedOrder } from "./sealed-orders.js";
 
-import { commitmentOf, proveFill } from "./prover.js";
-import { fillOutcome, tick, type WatcherDeps } from "./watcher.js";
+import { commitmentOf, proveFill } from "./sealed-prover.js";
+import { fillOutcome, tick, type WatcherDeps } from "./sealed-watcher.js";
 
 const order: SealedOrder = {
   vaultId: "acme-vault.test.near",
@@ -55,9 +55,9 @@ describe("sealed-order watcher", () => {
 
   it("reads the contract's events", () => {
     const filled = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "filled", data: [{ op_id: [9, 9] }] })}`;
-    const failed = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "fill_failed", data: [{ reason: "vault refused the swap" }] })}`;
+    const failed = `EVENT_JSON:${JSON.stringify({ standard: "euthyna-sealed-orders", event: "failed", data: [{ reason: "vault refused" }] })}`;
     expect(fillOutcome(["x", filled])).toEqual({ opId: [9, 9], failed: null });
-    expect(fillOutcome([failed])).toEqual({ opId: null, failed: "vault refused the swap" });
+    expect(fillOutcome([failed])).toEqual({ opId: null, failed: "vault refused" });
   });
 });
 

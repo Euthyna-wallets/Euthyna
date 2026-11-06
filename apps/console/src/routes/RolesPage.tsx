@@ -231,7 +231,7 @@ function RoleCard({ role }: { role: RoleView }) {
 
 type BlockDraft =
   | { kind: "payments"; token: string; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number }
-  | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string }
+  | { kind: "swap"; tokenIn: string; tokensOut: string[]; protocols: ProtocolId[]; amount: string; periodDays: number; maxApproval: string; sealedOrders?: boolean }
   | { kind: "share-revenue"; sharesAccountId: string; amount: string; periodDays: number }
   | { kind: "lending"; protocol: LendingId; token: string; amount: string; periodDays: number; maxApproval: string }
   | { kind: "wrap"; amount: string; periodDays: number }
@@ -339,7 +339,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
           ? { kind: "near-transfer", token: block.token, receivers: block.receivers, budget: { amount: block.amount, periodDays: block.periodDays }, maxPerTransfer: block.maxPerTransfer, ...(block.minPerTransfer ? { minPerTransfer: block.minPerTransfer } : {}) }
         : block.kind === "lending"
           ? { kind: "lending", protocol: block.protocol, token: block.token as `0x${string}`, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }
-          : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }),
+          : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval, ...(block.sealedOrders ? { sealedOrders: true } : {}) }),
     members: members.map((accountId) => ({ accountId, kind: "Agent" as const })),
   });
 
@@ -632,6 +632,18 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
                     );
                   })}
                 </div>
+                {block.protocols.includes("uniswap-v3") ? (
+                  <label style={{ display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, margin: "4px 0", padding: "10px 12px", border: "1px solid rgba(201,137,12,.55)", background: block.sealedOrders ? "#FCF0D4" : "rgba(255,255,255,.5)", color: "var(--aegean-ink, #0D1730)", fontFamily: "\"Plus Jakarta Sans\", \"Segoe UI\", system-ui, sans-serif", fontSize: 13.5, textTransform: "none", letterSpacing: "normal", cursor: "pointer" }}>
+                    <input type="checkbox" checked={Boolean(block.sealedOrders)} onChange={() => update(index, { sealedOrders: !block.sealedOrders })} style={{ ...CHECKBOX, marginTop: 3, flex: "none" }} />
+                    <span style={{ fontFamily: "inherit" }}>
+                      <strong>Allow sealed orders</strong>
+                      <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-2, #4A5468)", marginTop: 2 }}>
+                        Limit orders on Uniswap whose price, size and deadline stay hidden on chain; members read them with their key.
+                        They spend this block's budget, on its pairs, to the company wallet. Agents in this role can place them too.
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
                 <span style={NOTE}>Bought tokens always go back to the company wallet; approvals are capped per transaction, never unlimited.</span>
               </>
             )}

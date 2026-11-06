@@ -230,21 +230,29 @@ export const omni = {
     api<ProposalDraft>("/v1/console/omniroles/proposals/registry", { method: "POST", body: JSON.stringify(input) }),
   revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
   sealed: () => api<SealedView>("/v1/console/omniroles/sealed"),
-  sealedSetup: (input: { budgetUsdc: string; periodDays: number; maxApprovalUsdc: string; slippageBps: number }) =>
-    api<ProposalDraft[]>("/v1/console/omniroles/proposals/sealed-setup", { method: "POST", body: JSON.stringify(input) }),
-  sealedSeal: (commitment: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-seal", { method: "POST", body: JSON.stringify({ commitment }) }),
+  sealedOrder: (input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-order", { method: "POST", body: JSON.stringify(input) }),
   sealedCancel: (id: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-cancel", { method: "POST", body: JSON.stringify({ id }) }),
 };
 
-export type SealedOrderView = { id: number; commitment: string; filled: string; fills: number; cancelled: boolean; sealed_at_ns: string };
+export type SealedOrderView = {
+  id: number; vault: string; role: string; chain_id: number; wallet: string; sealer: string; commitment: string;
+  slippage_bps: number; filled: string; fills: number; cancelled: boolean; sealed_at_ns: string; terms: string | null;
+};
 export type SealedView = {
   enabled: boolean;
   sealedAccountId: string | null;
-  config: null | { vault: string; role: string; chain_id: number; router: string; wallet: string; slippage_bps: number; vault_tag: string; next_id: number };
-  orders: SealedOrderView[];
-  roleReady: boolean;
   vaultAccountId: string;
   daoAccountId: string;
+  router: string;
+  tokenIn: string;
+  tokenOut: string;
+  chainId: number;
+  roles: Array<{ name: string; agents: string[]; budgets: Array<{ label: string; token: string | null; available: string | null; max: string | null; periodDays: number | null }> }>;
+  orders: SealedOrderView[];
+  readers: Array<{ account: string; public_key: string }>;
+  /** USDC the router may take from the wallet now (raw units), null when unknown. */
+  allowance: string | null;
 };
 
 export function thresholdText(threshold: unknown, members: number): string {

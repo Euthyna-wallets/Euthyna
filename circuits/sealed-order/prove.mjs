@@ -3,7 +3,7 @@
 //   echo '{"mode":"prove", ...order, "amountIn":…, "filledBefore":…, "rate":…, "now":…}' | node circuits/sealed-order/prove.mjs
 // An order: vaultId, chainId, tokenIn, tokenOut (0x…), fee, limitRate, cap, expiry (unix seconds), salt
 // (decimal or 0x…). Prints JSON: commitment, vaultTag, and for "prove" the proof (base64) and the
-// public inputs. Uses the published circuit (apps/api/src/sealed) and the bb.js and noir_js installed for apps/api.
+// public inputs. Uses the published circuit (packages/sdk/circuits) and the bb.js and noir_js installed for apps/api.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -35,7 +35,7 @@ const out = { commitment: hex32(commitment), vaultTag: hex32(tag) };
 
 if (order.mode === "prove") {
   // The compiled circuit build.mjs publishes (target/ is not committed).
-  const circuit = JSON.parse(readFileSync(join(root, "apps/api/src/sealed/sealed_order.json"), "utf8"));
+  const circuit = JSON.parse(readFileSync(join(root, "packages/sdk/circuits/sealed_order.json"), "utf8"));
   const inputs = {
     commitment: hex32(commitment),
     vault_tag: hex32(tag),
