@@ -170,7 +170,7 @@ const nearRpcRetryBaseMs = import.meta.env.MODE === "test" ? 0 : 1_000;
 let nearRpcQueue: Promise<void> = Promise.resolve();
 let nextNearRpcAt = 0;
 
-async function nearRpcMethod<T>(method: string, params: unknown): Promise<T> {
+export async function nearRpcMethod<T>(method: string, params: unknown): Promise<T> {
   const previous = nearRpcQueue;
   let release!: () => void;
   nearRpcQueue = new Promise<void>((resolve) => {
