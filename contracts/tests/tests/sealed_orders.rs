@@ -599,7 +599,9 @@ async fn the_role_still_decides_and_members_register_reading_keys() -> Result<()
     // The console votes with 300 Tgas (DAO_VOTE_GAS), the most a transaction may carry.
     let voted = s.f.council[1]
         .call(s.f.dao.id(), "act_proposal")
-        .args_json(json!({ "id": proposal, "action": "VoteApprove", "proposal": both, "memo": null }))
+        .args_json(
+            json!({ "id": proposal, "action": "VoteApprove", "proposal": both, "memo": null }),
+        )
         .gas(Gas::from_tgas(300))
         .transact()
         .await?;
@@ -612,6 +614,9 @@ async fn the_role_still_decides_and_members_register_reading_keys() -> Result<()
     );
     let sealed = event(&voted_events, "sealed").context("seal in the DAO's proposal")?;
     assert_eq!(sealed["data"][0]["sealer"], s.f.dao.id().as_str());
-    println!("DAO approve + seal vote: {} Tgas burnt", voted.total_gas_burnt.as_tgas());
+    println!(
+        "DAO approve + seal vote: {} Tgas burnt",
+        voted.total_gas_burnt.as_tgas()
+    );
     Ok(())
 }
