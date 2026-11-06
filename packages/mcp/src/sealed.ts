@@ -108,6 +108,7 @@ export class SealedOrdersMcp {
         status: tick.status,
         ...(tick.status === "filled" ? { amountUsdc: formatUnits(tick.amountIn, 6), nearTransaction: tick.transaction } : {}),
         ...(tick.status === "refused" ? { reason: tick.reason } : {}),
+        ...(tick.status === "no-funds" ? { reason: `the wallet holds ${formatUnits(tick.balance, 6)} USDC, under the ${formatUnits(tick.amountIn, 6)} to fill` } : {}),
         ...(tick.status === "needs-approval" ? { reason: `the router may take ${formatUnits(tick.allowance, 6)} USDC, under the ${formatUnits(tick.amountIn, 6)} to fill: place an approval within the role` } : {}),
         swapsAwaitingSettlement: still.length,
       });

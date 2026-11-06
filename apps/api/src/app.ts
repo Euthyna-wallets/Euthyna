@@ -186,6 +186,10 @@ export const roleDraftSchema = z.object({
       kind: z.enum(["Agent", "Human"]),
       maxUses: z.number().int().positive().nullable().optional(),
     })).max(20),
+    // Editing a role: budgets left as they are, members removed, Solana rights cleared.
+    keepBudgets: z.array(z.string().regex(/^0x[0-9a-fA-F]{64}$/)).max(32).optional(),
+    revokeMembers: z.array(z.string().min(2).max(64)).max(20).optional(),
+    clearSolanaPermissions: z.boolean().optional(),
   }),
 });
 

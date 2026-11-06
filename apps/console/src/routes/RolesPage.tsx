@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, type CSSProperties, type ReactNode } from 
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getAddress } from "viem";
 import { isSolanaAddress, SOLANA_DEVNET } from "@euthyna/sdk/solana";
-import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, validNearAccountId, validRoleName, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@euthyna/sdk/roles";
+import { BASE_SEPOLIA, budgetsOf, cardAccountIdOf, compileRole, decodeVaultCalls, describeVaultCall, NEAR_TESTNET_TOKENS, nearRecipient, stringHash, unchangedBudgets, validNearAccountId, validRoleName, withSealedOrdersMember, type RuleChange, type LendingId, type ProtocolId, type RoleBlock, type RoleDraft } from "@euthyna/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Kicker, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";
@@ -13,6 +13,7 @@ import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { summarizeRoleChanges, type RoleSummary } from "../lib/role-summary.js";
 import { forkedLawOf, LAW_PARAM, type ForkedLaw } from "./onboarding-law.js";
+import { loadEditableRole, type EditableRole } from "../lib/role-edit.js";
 
 type Registry = { suppliers: Array<{ id: string; name: string; wallets: Array<{ chainId: number; address: string }> }> };
 
@@ -52,6 +53,28 @@ export function RolesPage() {
   const suggested = params.get("role") ?? "";
   const job = params.get("job");
   const law = forkedLawOf(params.get(LAW_PARAM));
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status });
+  const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares });
+  const [editing, setEditing] = useState<EditableRole | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
+  const edit = async (role: RoleView) => {
+    setLoadingEdit(role.name);
+    setEditError(null);
+    try {
+      const vaultAccountId = (status.data ?? await omni.status()).treasury?.vaultAccountId;
+      if (!vaultAccountId) throw new Error("The company's vault is not loaded yet: try again in a moment.");
+      const sealedView = await omni.sealed().catch(() => null);
+      const loaded = await loadEditableRole({ vaultAccountId, name: role.name, members: role.members, sharesAccountId: shares.data?.deployed ? shares.data.accountId : null, sealedId: sealedView?.sealedAccountId ?? null });
+      if (!loaded) throw new Error(`Role ${role.name} was not made with this editor, or has changed since: it cannot be edited here. Create it again under the same name to replace it.`);
+      setEditing(loaded);
+      setBuilding(true);
+    } catch (cause) {
+      setEditError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoadingEdit(null);
+    }
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <header style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
@@ -64,7 +87,7 @@ export function RolesPage() {
           </span>
         </div>
         {!building ? (
-          <button className="btn-line" style={{ marginLeft: "auto", whiteSpace: "nowrap" }} onClick={() => setBuilding(true)}>
+          <button className="btn-line" style={{ marginLeft: "auto", whiteSpace: "nowrap" }} onClick={() => { setEditing(null); setBuilding(true); }}>
             NEW ROLE
           </button>
         ) : null}
@@ -75,6 +98,7 @@ export function RolesPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <RolesInProgress />
+          {editError ? <div style={ERROR_BOX}>{editError}</div> : null}
           <PageState
             loading={roles.isLoading}
             error={roles.error}
@@ -91,13 +115,22 @@ export function RolesPage() {
             )}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {(roles.data?.roles ?? []).map((role) => <RoleCard key={role.name} role={role} />)}
+              {(roles.data?.roles ?? []).map((role) => (
+                <RoleCard key={role.name} role={role} editing={loadingEdit === role.name} onEdit={building ? undefined : () => void edit(role)} />
+              ))}
             </div>
           </PageState>
         </div>
         {building ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-            <RoleBuilder initialName={suggested} initialJob={job} initialLaw={law} onClose={() => { setBuilding(false); setParams({}); }} />
+            <RoleBuilder
+              key={editing ? `edit-${editing.draft.name}` : "new"}
+              initialName={editing ? editing.draft.name : suggested}
+              initialJob={editing ? null : job}
+              initialLaw={editing ? null : law}
+              existing={editing}
+              onClose={() => { setBuilding(false); setEditing(null); setParams({}); }}
+            />
           </div>
         ) : null}
       </div>
@@ -172,13 +205,14 @@ function RolesInProgress() {
   );
 }
 
-function RoleCard({ role }: { role: RoleView }) {
+function RoleCard({ role, onEdit, editing = false }: { role: RoleView; onEdit?: (() => void) | undefined; editing?: boolean }) {
   const details = role.description?.details ?? [];
   let permission = 0;
   return (
     <Slab style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
         <b style={{ font: "800 17px var(--font-brand)", letterSpacing: ".1em" }}>ROLE · {role.name.toUpperCase()}</b>
+        {onEdit ? <button className="btn-line" style={{ padding: "6px 12px", fontSize: 10.5, marginLeft: "auto" }} disabled={editing} onClick={onEdit}>{editing ? "READING…" : "EDIT"}</button> : null}
         <span style={{ fontSize: 12, fontWeight: 700, color: role.enabled ? "var(--aegean-ink)" : "var(--terra-ink)" }}>
           ● {role.enabled ? "active" : "disabled"}{role.members.length ? ` · ${role.members.map((member) => short(member.member, 12)).join(", ")}` : ""}
         </span>
@@ -238,25 +272,44 @@ type BlockDraft =
   | { kind: "solana-transfer"; token: string | null; recipients: Array<{ address: string; label: string }>; amount: string; periodDays: number }
   | { kind: "near-transfer"; token: string; receivers: Array<{ accountId: string; label: string }>; amount: string; periodDays: number; maxPerTransfer: string; minPerTransfer: string };
 
+/** A role block as the editor holds it (budget fields flattened). */
+function blockDraftOf(block: RoleBlock, sealedOrders: boolean): BlockDraft {
+  const { amount, periodDays } = block.budget;
+  switch (block.kind) {
+    case "payments": return { kind: "payments", token: block.token, recipients: block.recipients.map((item) => ({ address: item.address, label: item.label })), amount, periodDays };
+    case "swap": return { kind: "swap", tokenIn: block.tokenIn, tokensOut: [...block.tokensOut], protocols: [...block.protocols], amount, periodDays, maxApproval: block.maxApproval, ...(sealedOrders ? { sealedOrders: true } : {}) };
+    case "share-revenue": return { kind: "share-revenue", sharesAccountId: block.sharesAccountId, amount, periodDays };
+    case "lending": return { kind: "lending", protocol: block.protocol, token: block.token, amount, periodDays, maxApproval: block.maxApproval };
+    case "wrap": return { kind: "wrap", amount, periodDays };
+    case "solana-transfer": return { kind: "solana-transfer", token: block.token, recipients: block.recipients.map((item) => ({ ...item })), amount, periodDays };
+    case "near-transfer": return { kind: "near-transfer", token: block.token, receivers: block.receivers.map((item) => ({ ...item })), amount, periodDays, maxPerTransfer: block.maxPerTransfer, minPerTransfer: block.minPerTransfer ?? "" };
+  }
+}
+
 const tokenSymbol = (address: string) => PROFILE.tokens.find((token) => token.address.toLowerCase() === address.toLowerCase())?.symbol ?? short(address);
 
-function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw = null }: { onClose: () => void; initialName?: string; initialJob?: string | null; initialLaw?: ForkedLaw | null }) {
+function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw = null, existing = null }: { onClose: () => void; initialName?: string; initialJob?: string | null; initialLaw?: ForkedLaw | null; existing?: EditableRole | null }) {
   const wallets = useWallets();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents") });
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status });
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry") });
   const shares = useQuery({ queryKey: ["omni-shares"], queryFn: omni.shares });
+  const sealed = useQuery({ queryKey: ["omni-sealed"], queryFn: omni.sealed });
+  const sealedId = existing ? existing.sealedId : sealed.data?.sealedAccountId ?? null;
   const sharesAccountId = shares.data?.deployed ? shares.data.accountId : null;
+  // Editing: members other than the sealed-orders contract (it follows the swap block's box).
+  const originalMembers = (existing?.members ?? []).filter((member) => member.member !== sealedId);
+  const sealedWasMember = Boolean(sealedId && existing?.members.some((member) => member.member === sealedId));
   const [name, setName] = useState(initialName);
-  const [guardRequired, setGuardRequired] = useState(false);
-  const [suppliersOnly, setSuppliersOnly] = useState(false);
-  const [blocks, setBlocks] = useState<BlockDraft[]>([]);
-  const [members, setMembers] = useState<string[]>([]);
+  const [guardRequired, setGuardRequired] = useState(existing?.draft.guardRequired ?? false);
+  const [suppliersOnly, setSuppliersOnly] = useState(existing?.draft.suppliersOnly ?? false);
+  const [blocks, setBlocks] = useState<BlockDraft[]>(() => (existing ? existing.draft.blocks.map((block) => blockDraftOf(block, sealedWasMember)) : []));
+  const [members, setMembers] = useState<string[]>(() => originalMembers.map((member) => member.member));
   const [preselected, setPreselected] = useState(false);
   useEffect(() => {
     // Agents created for this role are ticked by default.
-    if (preselected || !agents.data || !initialName) return;
+    if (preselected || !agents.data || !initialName || existing) return;
     setMembers(agents.data.agents.filter((agent) => agent.active && agent.role === initialName).map((agent) => agent.nearAccountId));
     setPreselected(true);
   }, [agents.data, initialName, preselected]);
@@ -325,6 +378,11 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
   };
 
   const draft = (): RoleDraft => ({
+    ...draftBase(),
+    members: members.filter((accountId) => !originalMembers.some((member) => member.member === accountId)).map((accountId) => ({ accountId, kind: "Agent" as const })),
+    ...(existing ? editFields() : {}),
+  });
+  const draftBase = (): RoleDraft => ({
     guardRequired, suppliersOnly,
     name,
     blocks: blocks.map((block): RoleBlock => block.kind === "payments"
@@ -340,8 +398,20 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
         : block.kind === "lending"
           ? { kind: "lending", protocol: block.protocol, token: block.token as `0x${string}`, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval }
           : { kind: "swap", tokenIn: block.tokenIn as `0x${string}`, tokensOut: block.tokensOut as `0x${string}`[], protocols: block.protocols, budget: { amount: block.amount, periodDays: block.periodDays }, maxApproval: block.maxApproval, ...(block.sealedOrders ? { sealedOrders: true } : {}) }),
-    members: members.map((accountId) => ({ accountId, kind: "Agent" as const })),
+    members: [],
   });
+
+  /** Editing: what to keep and what to remove, so the vote only changes what changed. */
+  const editFields = (): Partial<RoleDraft> => {
+    const sealedNow = blocks.some((block) => block.kind === "swap" && block.sealedOrders);
+    const revoke = originalMembers.filter((member) => !members.includes(member.member)).map((member) => member.member);
+    if (sealedWasMember && !sealedNow && sealedId) revoke.push(sealedId);
+    return {
+      keepBudgets: unchangedBudgets(existing!.draft, draftBase(), PROFILE),
+      revokeMembers: revoke,
+      ...(existing!.hadSolana && !blocks.some((block) => block.kind === "solana-transfer") ? { clearSolanaPermissions: true } : {}),
+    };
+  };
 
   /**
    * The server prepares the proposal; this browser recompiles the role and
@@ -349,11 +419,16 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
    */
   async function verifiedProposal(role: RoleDraft): Promise<ProposalDraft> {
     const draft = await omni.roleProposal(role);
-    const treasury = status.data?.treasury;
+    // Read again when the page's first read failed (a busy NEAR RPC), rather than refuse.
+    const treasury = (status.data ?? await omni.status()).treasury;
     if (!treasury) throw new Error("The treasury is not loaded yet");
+    const sealedAccountId = existing || !role.blocks.some((block) => block.kind === "swap" && block.sealedOrders)
+      ? sealedId
+      : sealedId ?? (await omni.sealed()).sealedAccountId;
     if (draft.receiverId !== treasury.daoAccountId) throw new Error(`The proposal targets ${draft.receiverId}, not the company DAO`);
     const decoded = decodeVaultCalls(draft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], treasury.vaultAccountId);
-    const changes = compileRole(role, PROFILE);
+    // The server adds the sealed-orders contract to a role that allows sealed orders (unless it is a member already).
+    const changes = compileRole(withSealedOrdersMember(role, sealedAccountId, sealedWasMember), PROFILE);
     const expected = changes.map((change) => ({ method: "queue_rule_change" as const, change }));
     // The server may add one change this browser cannot know: clearing the NEAR
     // permissions the role already has on the vault. It only ever removes rights.
@@ -413,11 +488,16 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Slab style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 0 0 2px rgba(201,137,12,.55), var(--shadow-slab)" }}>
         {error ? <div style={ERROR_BOX}>{error}</div> : null}
-        <SectionHead left={<Kicker>New role</Kicker>} right={<button onClick={onClose} style={PLAIN_BUTTON}>Cancel</button>} />
+        <SectionHead left={<Kicker>{existing ? `Edit role · ${existing.draft.name}` : "New role"}</Kicker>} right={<button onClick={onClose} style={PLAIN_BUTTON}>Cancel</button>} />
+        {existing ? (
+          <p style={{ ...NOTE, fontSize: 12.5 }}>
+            Read from the vault. Change what you need: the vote only re-sends what changed. Budgets you keep as they are stay where they are this period; a changed budget restarts full.
+          </p>
+        ) : null}
         <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field-app" style={{ flex: "0 0 200px" }}>
             <label style={{ marginBottom: 0 }}>Role name</label>
-            <input placeholder="treasury" value={name} onChange={(event) => { setName(event.target.value.toLowerCase()); setPreview(null); }} />
+            <input placeholder="treasury" value={name} disabled={Boolean(existing)} onChange={(event) => { setName(event.target.value.toLowerCase()); setPreview(null); }} />
             {name && !validRoleName(name) ? <span style={{ fontSize: 12, color: "#B8442B" }}>Lowercase letters, digits and dashes, 2 to 32 characters.</span> : null}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -672,6 +752,22 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {existing && originalMembers.some((member) => !(agents.data?.agents ?? []).some((agent) => agent.nearAccountId === member.member)) ? (
+            <>
+              <span style={NOTE}>Other members of this role (untick to remove)</span>
+              <div style={FIELD_ROW}>
+                {originalMembers.filter((member) => !(agents.data?.agents ?? []).some((agent) => agent.nearAccountId === member.member)).map((member) => {
+                  const checked = members.includes(member.member);
+                  return (
+                    <label key={member.member} className="check" style={CHECK_ROW}>
+                      <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== member.member) : [...current, member.member]); setPreview(null); }} style={CHECKBOX} />
+                      {member.kind === "Human" ? "Human" : "AI agent"} <span className="mono" title={member.member} style={{ fontSize: 11.5, color: "#66718C" }}>{displayAccount(member.member)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
           <span style={NOTE}>Agents holding this role</span>
           <div style={FIELD_ROW}>
             {(agents.data?.agents ?? []).filter((agent) => agent.active).map((agent) => {
@@ -694,7 +790,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
             disabled={!ready || Boolean(busy)}
             onClick={() => void run("preview", async () => setPreview(await verifiedProposal(draft())))}
           >
-            {busy === "preview" ? "Preparing…" : "Preview what members vote on"}
+            {busy === "preview" ? "Preparing…" : existing ? "Preview the changes members vote on" : "Preview what members vote on"}
           </button>
           {!ready && missing ? <span style={NOTE}>{missing}</span> : null}
         </div>

@@ -53,6 +53,7 @@ import {
   type RuleChange,
   type VaultCall,
   NEAR_TESTNET_TOKENS,
+  withSealedOrdersMember,
 } from "@euthyna/sdk/roles";
 import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import bs58 from "bs58";
@@ -1269,11 +1270,11 @@ export class OmniRolesService {
     const treasury = await this.requireTreasury(organizationId);
     // A swap block that allows sealed orders makes contracts/sealed-orders a member of the role:
     // fills then go through the same router, pair, recipient and budget as the agents' swaps.
+    // An edited role that already has it keeps its membership as it is.
     if (draft.blocks.some((block) => block.kind === "swap" && block.sealedOrders)) {
       const sealedId = this.requireSealed();
-      if (!draft.members.some((member) => member.accountId === sealedId)) {
-        draft = { ...draft, members: [...draft.members, { accountId: sealedId, kind: "Agent", maxUses: null }] };
-      }
+      const membership = await this.view<{ active?: boolean } | null>(treasury.vaultAccountId, "get_membership", { role: draft.name, member: sealedId }).catch(() => null);
+      draft = withSealedOrdersMember(draft, sealedId, Boolean(membership?.active));
     }
     for (const block of draft.blocks) {
       if (block.kind === "share-revenue" && block.sharesAccountId !== this.sharesAccountOf(treasury)) {

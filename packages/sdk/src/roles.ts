@@ -506,8 +506,28 @@ export type RoleDraft = {
    * Only vaults with NEAR transfers know that change.
    */
   clearNearPermissions?: boolean;
+  /** Editing a role: the role has Solana rights and the draft none, so they are cleared. */
+  clearSolanaPermissions?: boolean;
+  /**
+   * Editing a role: budgets (allowance keys, 0x hex) left as they are. Their SetAllowance is not
+   * re-sent, so what was already spent this period stays spent.
+   */
+  keepBudgets?: Hex[];
+  /** Editing a role: members removed from it. */
+  revokeMembers?: string[];
   gas?: Partial<Pick<RoleConfig, "gas_limit" | "max_fee_per_gas" | "max_priority_fee_per_gas" | "max_total_fee">>;
 };
+
+/**
+ * A swap block that allows sealed orders makes contracts/sealed-orders a member of the role, unless it
+ * already is one. The server and the browser both apply this, so the browser can check the proposal.
+ */
+export function withSealedOrdersMember(draft: RoleDraft, sealedId: string | null, alreadyMember: boolean): RoleDraft {
+  if (!draft.blocks.some((block) => block.kind === "swap" && block.sealedOrders)) return draft;
+  if (!sealedId) throw new Error("sealed orders are not configured on this server");
+  if (alreadyMember || draft.members.some((member) => member.accountId === sealedId)) return draft;
+  return { ...draft, members: [...draft.members, { accountId: sealedId, kind: "Agent", maxUses: null }] };
+}
 
 const DEFAULT_GAS = {
   gas_limit: "300000",
@@ -550,6 +570,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
     conditions: sheet.conditions,
     allow_value: false,
   });
+  const keep = new Set((draft.keepBudgets ?? []).map((key) => key.toLowerCase()));
   draft.blocks.forEach((block, index) => {
     const label = `${block.kind}-${index + 1}`;
     const key = allowanceKey(draft.name, label);
@@ -561,7 +582,7 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
     const amount = parseUnits(block.budget.amount, token.decimals);
     if (amount <= 0n) throw new Error("budget must be positive");
     if (!(block.budget.periodDays > 0)) throw new Error("budget period must be positive");
-    changes.push({
+    if (!keep.has(hexOf(key).toLowerCase())) changes.push({
       SetAllowance: {
         key,
         balance: amount.toString(),
@@ -675,8 +696,10 @@ export function compileRole(draft: RoleDraft, profile: ChainProfile): RuleChange
       },
     });
   }
+  for (const member of draft.revokeMembers ?? []) changes.push({ RevokeMembership: { role: draft.name, member } });
   // Only roles that use Solana carry it: older vaults do not know this change.
   if (solana.length > 0) changes.push({ SetSolanaPermissions: { role: draft.name, permissions: solana } });
+  else if (draft.clearSolanaPermissions) changes.push({ SetSolanaPermissions: { role: draft.name, permissions: [] } });
   // Same for NEAR tokens. The vault registers on each token first, so it can hold it.
   if (near.length > 0) {
     for (const token of new Set(near.map((permission) => permission.token))) changes.push({ NearStorageDeposit: { token } });
@@ -1629,3 +1652,176 @@ export function describeCall(target: Hex, calldata: Hex, value: bigint, context:
   return `call function ${calldata.slice(0, 10)} on ${contract(target)}${value > 0n ? ` with ${formatUnits(value, 18)} ETH` : ""}`;
 }
 
+
+// ---------------------------------------------------------------------------
+// Editing a role: the vault's role -> the draft that compiles to it
+// ---------------------------------------------------------------------------
+
+/** A role as the vault holds it: `get_role`, its budgets (`get_allowance`), NEAR and Solana rights. */
+export type ChainRole = {
+  name: string;
+  config: RoleConfig;
+  /** Budgets by allowance key (0x hex, lowercase): the refill amount and its period. */
+  allowances: Record<string, { refill: string; period_ns: number }>;
+  near?: NearPermission[];
+  solana?: SolanaPermission[];
+  /** The company's shares contract, for a revenue-sharing block. */
+  sharesAccountId?: string | null;
+};
+
+const ROLE_BLOCK_KINDS = ["payments", "swap", "lending", "wrap", "share-revenue", "solana-transfer", "near-transfer"] as const;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(typeof value === "string" ? value.toLowerCase() : value);
+}
+
+const addressOfWord = (word: Hex): Hex => getAddress(`0x${word.slice(-40)}`);
+const wordValue = (word: Hex): bigint => BigInt(word === "0x" ? 0 : word);
+
+/**
+ * Rebuilds the draft of a role from what the vault holds, so it can be edited: each budget key
+ * names its block (allowanceKey(role, "<kind>-<n>")), and each block's rights are read from the
+ * permissions that use it. The draft is returned only when it compiles back to exactly the same
+ * role; null means the role was not made by this editor (or differs) and cannot be edited here.
+ * Members are not part of it: they come from the memberships.
+ */
+export function roleDraftFromChain(role: ChainRole, profile: ChainProfile): RoleDraft | null {
+  try {
+    return decompile(role, profile);
+  } catch {
+    return null;
+  }
+}
+
+function decompile(role: ChainRole, profile: ChainProfile): RoleDraft | null {
+  const permissions = role.config.permissions;
+  const keyOf = (permission: Permission) => permission.conditions.find((condition) => condition.operator === Operator.WithinAllowance)?.compValue.toLowerCase() ?? null;
+  const keys = new Set<string>();
+  for (const permission of permissions) { const key = keyOf(permission); if (key) keys.add(key); }
+  for (const permission of role.near ?? []) keys.add(hexOf(permission.allowance).toLowerCase());
+  for (const permission of role.solana ?? []) keys.add(hexOf(permission.allowance).toLowerCase());
+  // Each key names its block: kind and position.
+  const slots: Array<{ key: string; kind: (typeof ROLE_BLOCK_KINDS)[number]; index: number }> = [];
+  for (const key of keys) {
+    let found: (typeof slots)[number] | null = null;
+    for (let index = 1; index <= 32 && !found; index += 1) {
+      for (const kind of ROLE_BLOCK_KINDS) {
+        if (hexOf(allowanceKey(role.name, `${kind}-${index}`)).toLowerCase() === key) { found = { key, kind, index }; break; }
+      }
+    }
+    if (!found) return null;
+    slots.push(found);
+  }
+  slots.sort((a, b) => a.index - b.index);
+  if (slots.some((slot, position) => slot.index !== position + 1)) return null;
+
+  let suppliersOnly = false;
+  const blocks: RoleBlock[] = slots.map((slot): RoleBlock => {
+    const allowance = role.allowances[slot.key];
+    if (!allowance) throw new Error("budget missing");
+    const periodDays = allowance.period_ns / NS_PER_DAY;
+    const at = permissions.findIndex((permission) => keyOf(permission) === slot.key);
+    const permission = permissions[at];
+    const budgetIn = (decimals: number) => ({ amount: formatUnits(BigInt(allowance.refill), decimals), periodDays });
+    const words = (items: ConditionFlat[]) => items.filter((condition) => condition.operator === Operator.EqualTo && condition.paramType === Encoding.Static).map((condition) => addressOfWord(condition.compValue));
+    const approvalBefore = () => {
+      const approve = permissions[at - 1];
+      if (!approve || hexOf(approve.selector ?? []).toLowerCase() !== SELECTORS.approve.toLowerCase()) throw new Error("approval missing");
+      const limit = approve.conditions.find((condition) => condition.operator === Operator.LessThan);
+      return { token: getAddress(hexOf(approve.target)), max: wordValue(limit!.compValue) - 1n };
+    };
+    switch (slot.kind) {
+      case "payments": {
+        const token = tokenOf(profile, getAddress(hexOf(permission!.target)));
+        if (permission!.conditions.some((condition) => condition.operator === Operator.InAddressList)) {
+          suppliersOnly = true;
+          return { kind: "payments", token: token.address, recipients: [], budget: budgetIn(token.decimals) };
+        }
+        return { kind: "payments", token: token.address, recipients: words(permission!.conditions.slice(1)).map((address) => ({ address, label: "" })), budget: budgetIn(token.decimals) };
+      }
+      case "swap": {
+        const { token: tokenIn, max } = approvalBefore();
+        const token = tokenOf(profile, tokenIn);
+        const sheets = permissions.filter((item) => keyOf(item) === slot.key);
+        const protocols = (Object.keys(profile.protocols) as ProtocolId[]).filter((id) => sheets.some((item) => getAddress(hexOf(item.target)) === getAddress(profile.protocols[id].router)));
+        const v3 = sheets.find((item) => hexOf(item.selector ?? []).toLowerCase() === SELECTORS.exactInputSingle.toLowerCase());
+        const tokensOut = v3
+          ? words(v3.conditions.slice(3)).filter((address) => address.toLowerCase() !== tokenIn.toLowerCase())
+          : profile.tokens.map((item) => item.address).filter((address) => address.toLowerCase() !== tokenIn.toLowerCase()
+            && sheets.some((item) => item.conditions.some((condition) => condition.compValue.toLowerCase() === routeHash([tokenIn, address]).toLowerCase())));
+        return { kind: "swap", tokenIn, tokensOut, protocols, budget: budgetIn(token.decimals), maxApproval: formatUnits(max, token.decimals) };
+      }
+      case "lending": {
+        const { token: asset, max } = approvalBefore();
+        const token = tokenOf(profile, asset);
+        const pool = getAddress(hexOf(permission!.target));
+        const protocol = (Object.keys(profile.lending ?? {}) as LendingId[]).find((id) => getAddress(profile.lending![id]!.pool) === pool);
+        if (!protocol) throw new Error("unknown pool");
+        return { kind: "lending", protocol, token: token.address, budget: budgetIn(token.decimals), maxApproval: formatUnits(max, token.decimals) };
+      }
+      case "wrap":
+        return { kind: "wrap", budget: budgetIn(18) };
+      case "share-revenue":
+        if (!role.sharesAccountId) throw new Error("shares account unknown");
+        return { kind: "share-revenue", sharesAccountId: role.sharesAccountId, budget: budgetIn(18) };
+      case "near-transfer": {
+        const near = (role.near ?? []).find((item) => hexOf(item.allowance).toLowerCase() === slot.key)!;
+        const ft = NEAR_TESTNET_TOKENS.find((item) => item.accountId === near.token);
+        if (!ft) throw new Error("unknown NEAR token");
+        const budget = budgetIn(ft.decimals);
+        const amount = BigInt(allowance.refill);
+        const max = BigInt(near.max_per_transfer);
+        const floor = amount / NEAR_DEFAULT_TRANSFERS_PER_PERIOD;
+        const defaultMin = floor < 1n ? 1n : floor > max ? max : floor;
+        return {
+          kind: "near-transfer", token: ft.symbol, receivers: near.receivers.map((accountId) => ({ accountId, label: "" })), budget,
+          maxPerTransfer: formatUnits(max, ft.decimals),
+          ...(BigInt(near.min_per_transfer) === defaultMin ? {} : { minPerTransfer: formatUnits(BigInt(near.min_per_transfer), ft.decimals) }),
+        };
+      }
+      case "solana-transfer": {
+        const sol = (role.solana ?? []).find((item) => hexOf(item.allowance).toLowerCase() === slot.key)!;
+        const mint = sol.asset === "Sol" ? null : base58Encode(sol.asset.Spl.mint);
+        const token = solanaTokenOf(SOLANA_DEVNET, mint);
+        return { kind: "solana-transfer", token: token.mint ? token.symbol : null, recipients: sol.recipients.map((address) => ({ address: base58Encode(address), label: "" })), budget: budgetIn(token.decimals) };
+      }
+    }
+  });
+
+  const config = role.config;
+  const draft: RoleDraft = {
+    name: role.name,
+    guardRequired: config.guard_required ?? false,
+    suppliersOnly,
+    blocks,
+    members: [],
+    gas: { gas_limit: config.gas_limit, max_fee_per_gas: config.max_fee_per_gas, max_priority_fee_per_gas: config.max_priority_fee_per_gas, max_total_fee: config.max_total_fee },
+  };
+  // Only what compiles back to the very same role is an edit of it.
+  const compiled = compileRole(draft, profile);
+  const setRole = compiled.find((change): change is Extract<RuleChange, { SetRole: unknown }> => "SetRole" in change)!;
+  if (canonicalJson(setRole.SetRole.config) !== canonicalJson({ ...config, guard_required: config.guard_required ?? false })) return null;
+  for (const change of compiled) {
+    if ("SetAllowance" in change) {
+      const onChain = role.allowances[hexOf(change.SetAllowance.key).toLowerCase()];
+      if (!onChain || onChain.refill !== change.SetAllowance.refill || onChain.period_ns !== change.SetAllowance.period_ns) return null;
+    }
+  }
+  const near = compiled.find((change): change is Extract<RuleChange, { SetNearPermissions: unknown }> => "SetNearPermissions" in change)?.SetNearPermissions.permissions ?? [];
+  const solana = compiled.find((change): change is Extract<RuleChange, { SetSolanaPermissions: unknown }> => "SetSolanaPermissions" in change)?.SetSolanaPermissions.permissions ?? [];
+  if (canonicalJson(near) !== canonicalJson(role.near ?? []) || canonicalJson(solana) !== canonicalJson(role.solana ?? [])) return null;
+  return draft;
+}
+
+/** The budgets a block keeps when editing: its key, if it still has the same amount and period. */
+export function unchangedBudgets(before: RoleDraft, after: RoleDraft, profile: ChainProfile): Hex[] {
+  const budgets = (draft: RoleDraft) => new Map(compileRole({ ...draft, members: [], keepBudgets: [], revokeMembers: [] }, profile)
+    .filter((change): change is Extract<RuleChange, { SetAllowance: unknown }> => "SetAllowance" in change)
+    .map((change) => [hexOf(change.SetAllowance.key).toLowerCase(), `${change.SetAllowance.refill}/${change.SetAllowance.period_ns}`]));
+  const old = budgets(before);
+  return [...budgets(after)].filter(([key, value]) => old.get(key) === value).map(([key]) => key as Hex);
+}
