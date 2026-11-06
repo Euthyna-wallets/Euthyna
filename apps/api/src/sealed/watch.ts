@@ -4,7 +4,7 @@
  *   pnpm --filter @euthyna/api sealed new --vault <vault> --dao <dao> --price 2000 --cap 50 --days 7 [--fee 3000] > order.json
  *     A new order (USDC → WETH on Base Sepolia, filled at `price` USDC per WETH or better, at most
  *     `cap` USDC): prints the order file (keep it secret) and, on stderr, the commitment to seal.
- *   pnpm --filter @euthyna/api sealed watch order.json --key watcher.json [--chunk 5] [--every 60] [--once]
+ *   pnpm --filter @euthyna/api sealed watch order.json --key watcher.json [--chunk 5] [--every 60] [--settle-minutes 40] [--once]
  *     Watches the market and fills when it meets the hidden limit: proves, sends `fill`, then
  *     broadcasts the signed swap to Base and settles it on the vault. `--key`: a NEAR credentials file
  *     ({account_id, private_key}) for any account with a little NEAR; it only pays gas.
@@ -33,7 +33,7 @@ import { fillOutcome, tick } from "./watcher.js";
 
 const NEAR_RPC = process.env.NEAR_RPC_URL ?? "https://rpc.testnet.fastnear.com";
 const BASE_RPC = process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
-const SEALED = process.env.SEALED_ORDERS_ACCOUNT_ID ?? "sealed-orders.euthyna.testnet";
+const SEALED = process.env.SEALED_ORDERS_ACCOUNT_ID ?? "euthyna-sealed-orders.testnet";
 const FILL_GAS = "300000000000000";
 
 function flag(args: string[], name: string): string | undefined {
@@ -83,6 +83,7 @@ async function watch(args: string[]) {
   const client = new OnchainAgentClient(vault, publicRpc(BASE_RPC));
   const chunk = flag(args, "chunk") ? parseUnits(flag(args, "chunk")!, 6) : undefined;
   const every = Number(flag(args, "every") ?? 60) * 1000;
+  const settleMinutes = Number(flag(args, "settle-minutes") ?? 40);
 
   const deps = {
     now: () => Math.floor(Date.now() / 1000),
@@ -120,11 +121,16 @@ async function watch(args: string[]) {
       const opId = operationIdHex(result.opId) as Hex;
       console.log(`${stamp} filled ${result.amountIn} at rate ${result.rate}: NEAR tx ${result.transaction}, operation ${opId}`);
       // Broadcast the signed swap to Base and settle it on the vault (MPC checks the receipt).
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        const status = await client.status(opId);
-        if (status.state !== "PossiblySigned") { console.log(`${stamp} operation ${opId}: ${String(status.state)}`); break; }
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      // The vault settles only on a finalized Base block (about 20 minutes on Base Sepolia).
+      const deadline = Date.now() + settleMinutes * 60_000;
+      let state = "PossiblySigned";
+      while (state === "PossiblySigned" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        state = String((await client.status(opId)).state);
       }
+      console.log(state === "PossiblySigned"
+        ? `${new Date().toISOString()} operation ${opId}: swap sent, Base block not final yet; it settles on the next run`
+        : `${new Date().toISOString()} operation ${opId}: ${state}`);
     } else if (result.status === "waiting") {
       // Printed on this machine only: the limit never leaves it.
       console.log(`${stamp} waiting: market rate ${result.marketRate} under the limit`);
