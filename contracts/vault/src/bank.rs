@@ -465,6 +465,7 @@ impl Vault {
         ));
 
         // What the signer gets: the payout the vault just authorised, nothing it could widen.
+        // The partner's nonce is at most 36 characters: the first 128 bits of the payout id.
         let input = format!(
             "{{\"op\":\"payout\",\"vault\":{},\"customer_id\":{},\"iban\":{},\"holder_name\":{},\"holder_type\":{},\"reference\":{},\"crypto_amount\":{},\"source_address\":{},\"network\":{},\"crypto\":{},\"nonce\":{},\"expiry\":{}}}",
             json_string(env::current_account_id().as_str()),
@@ -477,7 +478,7 @@ impl Vault {
             json_string(&format!("0x{}", hex::encode(source))),
             json_string(&config.network),
             json_string(&config.crypto),
-            json_string(&hex::encode(op_id)),
+            json_string(&hex::encode(&op_id[..16])),
             json_string(&rfc3339(expires_at_ns)),
         );
         let args = format!(

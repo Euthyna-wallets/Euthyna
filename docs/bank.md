@@ -72,7 +72,7 @@ agent ──request_bank_payout──▶ vault (NEAR) ──request_execution─
 | Signer WASM | sha256 `528edf86677845ff9baf5bcd2d25f17564f8b047d33ba2bc1c1a15cb71eb01a4`, on FastFS `https://test.fastfs.io/euthyna-ops.testnet/outlayer.testnet/528edf86…01a4.wasm` (uploaded by `euthyna-ops.testnet`) |
 | Secrets | profile `noah` of `euthyna-ops.testnet`, bound to that hash; access `And[Predecessor{Or[AccountPattern vaults, …]}, WasmHash]` (NEAR `BffY2J6J…`); `PROTECTED_NOAH_SEED` generated in the enclave, never exported |
 | Signer public key | obtained through the vault (DAO proposal #14 of sealedprod1106, OutLayer worker `G94JrfzY…`): `MFkw…cw==` (P-256), attached to the Noah sandbox API key |
-| Vault version | `EkNBLjdMetqegPZgmZXL3QBs57tg1cQHicWHLkdYJYpt` (`contracts/res/vault.wasm`, sha256 `cc43d9e7a212700762975d6e594fc283b9f4963a8341f4da5cc1c4c036dca88d`), published on `euthyna-nomos.testnet` (NEAR `84VmD25JECLyWNDcFaCZf46vTVnVfb5rdwMkPdRazFCC`) |
+| Vault version | `C1DXjLVBDLGgx3Hdmro83zwAXM3RiEkiLsq6VJtG9Nfr` (`contracts/res/vault.wasm`, sha256 `a37eb9450a95edc4e2c4b9b887b54469afed09d95847f13e1011f67603ab2611`), published on `euthyna-nomos.testnet` (NEAR `H7ZrufmZaYycJzoML9HT6bv3cWrFwTXdsoHy3rL8fXk8`); `sealedprod1106` moved its code source to that Nomos by vote (`SetCodeSource`, proposal #15) and upgraded (proposals #16, #18) |
 | Console env | `BANK_SIGNER_URL`, `BANK_SIGNER_HASH`, `BANK_SIGNER_SECRETS_OWNER`, `BANK_SIGNER_SECRETS_PROFILE` (`env.example`) |
 
 ## Limits
