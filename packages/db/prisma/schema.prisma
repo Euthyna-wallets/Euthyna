@@ -106,6 +106,7 @@ model Organization {
   recoveryEnrollments RecoveryEnrollment[]
   seatRecoveries      SeatRecovery[]
   bankAccounts        BankAccount[]
+  invoices            Invoice[]
 
   @@unique([slug])
   @@map("organization")
@@ -734,4 +735,35 @@ model BankAccount {
 
   @@unique([organizationId, provider])
   @@map("bank_account")
+}
+
+/// An invoice the company issues: paid by SEPA transfer to its euro IBAN, with a creditor
+/// reference (ISO 11649) the bank partner reports on the deposit; matched here, then "paid" once
+/// the euros have reached the company wallet as EURC.
+model Invoice {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  number         String
+  /// RFxx…: what the payer's bank sends back; unique across companies.
+  reference      String       @unique
+  customerName   String
+  customerEmail  String?
+  description    String
+  amountCents    Int
+  currency       String       @default("EUR")
+  dueDate        DateTime
+  /// open | paid | cancelled
+  status         String       @default("open")
+  /// The partner's fiat deposit that pays it, once known (webhook or sandbox simulation).
+  depositId      String?      @unique
+  payerName      String?
+  paidCents      Int?
+  paidAt         DateTime?
+  txHash         String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, number])
+  @@index([organizationId, createdAt])
+  @@map("invoice")
 }

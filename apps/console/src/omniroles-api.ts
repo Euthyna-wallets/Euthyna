@@ -220,6 +220,20 @@ export type BankPolicy = {
   payouts: Array<{ opId: string; at: string; actor: string; role: string; beneficiary: { id: number; label: string }; amount: string; fiatAmount: string | null; reference: string; state: "Requested" | "Transferring" | "Failed"; ruleId: string | null; transferOpId: string | null; error: string | null }>;
 };
 
+export type InvoiceView = {
+  id: string; number: string; reference: string; customerName: string; customerEmail: string | null; description: string;
+  amount: string; currency: string; dueDate: string; status: "open" | "paid" | "cancelled" | string; paidAt: string | null; paidAmount: string | null;
+  payerName: string | null; txHash: string | null; createdAt: string; qr: string | null;
+};
+
+export const invoicesApi = {
+  list: () => api<{ invoices: InvoiceView[]; account: { iban: string; bic: string; holder: string } | null }>("/v1/console/invoices"),
+  create: (input: { customerName: string; customerEmail?: string; description: string; amount: string; dueInDays: number }) =>
+    api<InvoiceView>("/v1/console/invoices", { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string) => api<InvoiceView>(`/v1/console/invoices/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" }),
+  simulate: (id: string) => api<InvoiceView>(`/v1/console/invoices/${encodeURIComponent(id)}/simulate`, { method: "POST", body: "{}" }),
+};
+
 export const bankApi = {
   policy: () => api<BankPolicy>("/v1/console/omniroles/bank"),
   beneficiaryProposal: (input: { label: string; commitment: string; sealedForSigner: string; sealedForMembers: string } | { remove: number }) =>

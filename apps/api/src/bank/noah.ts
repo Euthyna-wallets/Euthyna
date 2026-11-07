@@ -118,8 +118,8 @@ export class NoahClient {
   }
 
   /** Sandbox only: an incoming SEPA transfer on the IBAN. */
-  simulateDeposit(paymentMethodId: string, amount: string): Promise<{ FiatDepositID: string }> {
+  simulateDeposit(paymentMethodId: string, amount: string, reference?: string): Promise<{ FiatDepositID: string }> {
     if (!this.sandbox) throw new NoahError(400, "deposits can be simulated only in Noah's sandbox");
-    return this.call("POST", "/sandbox/fiat-deposit/simulate", { PaymentMethodID: paymentMethodId, FiatAmount: amount, FiatCurrency: "EUR" });
+    return this.call("POST", "/sandbox/fiat-deposit/simulate", { PaymentMethodID: paymentMethodId, FiatAmount: amount, FiatCurrency: "EUR", ...(reference ? { Reference: reference } : {}) });
   }
 }

@@ -82,6 +82,27 @@ personal data) and that beneficiary #1 was paid. Past states stay on archival no
 on testnet before this change (`FR76 3000 6000 0112 3456 7890 189`, the standard example IBAN) is in
 that history.
 
+### Invoices
+
+The company issues an invoice (Treasury → Invoices): a number (`INV-2026-0001`), a creditor reference
+(ISO 11649, `RF…`, unique across companies) and a SEPA QR code (EPC069-12, the "GiroCode") that any
+European banking app scans to fill the IBAN, the amount and the reference. Print it as PDF from the
+console. The customer pays by SEPA; the bank partner reports the reference with the deposit (its
+`FiatDeposit` webhook, signed with ECDSA P-384 and verified with the partner's key: anything unsigned
+or forged is refused, and a reference only counts on the invoice's own company account). The
+invoice turns **paid** once the euros are in the company wallet as EURC, with the Base hash: the
+partner's transfer to the wallet carries the deposit as its orchestration (`RuleExecutionID`). A
+partial payment leaves it open. CSV export for the accountant. Invoices live in our database
+(`invoice`), not on chain.
+
+Set up once: in the Noah dashboard (API → Webhooks → Create), URL `https://euthyna.io/v1/webhooks/noah`,
+event `FiatDeposit`. In the sandbox, "Simulate payment" pays an invoice with its reference.
+
+| Step (Noah sandbox, sealedprod1106, 2026-11-07) | Result | Proof |
+| --- | --- | --- |
+| Issue `INV-2026-0002`, 18 EUR | reference `RF21INV2026000246EF79`, SEPA QR `BCD/002/1/SCT/CFTEMTM1XXX/…/MT04CFTE19870000000090010358482/EUR18.00//RF21INV2026000246EF79/` | `scripts/invoice-sandbox-e2e.ts` |
+| The customer pays it by SEPA with the reference | paid in about 15 s: **17.66 EURC** in the company wallet (`0x8b22…9de6`), the invoice shows the hash | Base Sepolia `0x5ac9127b430b3f6988a615c5d5d8070128937487d04be5e342b721daace0c280` |
+
 ### Payroll and remittances
 
 **Any rail.** A beneficiary can be on any payout rail of the partner, still sealed: SEPA (EUR),

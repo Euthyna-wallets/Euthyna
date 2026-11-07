@@ -22,6 +22,7 @@ import { RobService } from "./rob/service.js";
 import { attachRugOClock, rugOClockLlm, scheduleRugOClock } from "./rob/rugoclock.js";
 import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
+import { InvoiceService, NOAH_WEBHOOK_KEYS } from "./bank/invoices.js";
 import { NoahClient } from "./bank/noah.js";
 import { BankService } from "./bank/service.js";
 
@@ -172,9 +173,12 @@ const recovery = recoveryContractId
   : undefined;
 
 // The company's euro account (Noah): deposits on its IBAN settle into the company wallet only.
-const bank = env.NOAH_API_KEY
-  ? new BankService({ prisma, noah: new NoahClient({ apiUrl: env.NOAH_API_URL, apiKey: env.NOAH_API_KEY }), companyWallet: (organizationId) => omniroles.companyWallet(organizationId) })
+const noah = env.NOAH_API_KEY ? new NoahClient({ apiUrl: env.NOAH_API_URL, apiKey: env.NOAH_API_KEY }) : undefined;
+const bank = noah
+  ? new BankService({ prisma, noah, companyWallet: (organizationId) => omniroles.companyWallet(organizationId) })
   : undefined;
+// Invoices paid to that IBAN, matched by the partner's signed FiatDeposit webhook.
+const invoices = noah ? new InvoiceService({ prisma, noah }) : undefined;
 
 const app = createApp({
   near,
@@ -193,6 +197,8 @@ const app = createApp({
   marketTrustProxy: env.MARKET_TRUST_PROXY,
   recovery,
   bank,
+  invoices,
+  noahWebhookKey: noah ? (noah.sandbox ? NOAH_WEBHOOK_KEYS.sandbox : NOAH_WEBHOOK_KEYS.production) : undefined,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
