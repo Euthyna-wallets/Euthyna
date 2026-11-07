@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Treasury · invoices</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0D1730}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.78),rgba(255,255,255,.5)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.paper{background:#FFFFFF;box-shadow:18px 22px 50px rgba(13,23,48,.2),0 0 0 1px rgba(13,23,48,.08)}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.carved{color:#7A705F;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto;font:800 7px Cinzel,serif;letter-spacing:.06em;color:#3A2208}
+.seal-r{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFC9B5 0%,#D9573B 35%,#A8381E 70%,#5A1708 100%);box-shadow:inset 0 0 0 3px rgba(255,220,200,.3),inset 0 -4px 8px rgba(40,8,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto;font:800 6.5px Cinzel,serif;letter-spacing:.04em;color:#FFF3EC}
+.wax{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#E9E3D6 0%,#B9AE98 40%,#7C715C 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.3),inset 0 -4px 8px rgba(40,30,10,.35),0 6px 14px rgba(0,0,0,.18);flex:0 0 auto;font:800 6.5px Cinzel,serif;letter-spacing:.04em;color:#2E2718}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.mono{font-family:'JetBrains Mono',monospace}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#8C9CC2;width:26px}
+.inp{box-sizing:border-box;width:100%;min-height:44px;padding:10px 12px;border:1px solid rgba(13,23,48,.22);background:rgba(255,255,255,.82);font:14px 'Plus Jakarta Sans',sans-serif;color:#0D1730}
+.lab{display:block;font:600 12px 'Plus Jakarta Sans',sans-serif;color:#4A5675;margin-bottom:6px}
+.line{min-height:44px;padding:8px 14px;border:1px solid rgba(13,23,48,.25);background:rgba(255,255,255,.6);font:700 11px Cinzel,serif;letter-spacing:.14em;color:#0D1730;cursor:pointer}
+.new{display:inline-block;padding:2px 7px;background:#FCF0D4;border:1px solid #8A5A00;font:700 10.5px 'Plus Jakarta Sans',sans-serif;color:#6B4600;letter-spacing:.04em}
+.row{display:grid;grid-template-columns:44px minmax(0,1.3fr) minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 0;border-top:1px solid rgba(13,23,48,.14)}
+</style>
+
+<div class="ground" style="min-height: 1240px; display: flex; flex-wrap: wrap; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="flex: 1 1 268px; max-width: 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"></circle><rect x="297" y="461" width="430" height="102" fill="#C9890C"></rect><rect x="41" y="461" width="72" height="102" fill="#C9890C"></rect><rect x="911" y="461" width="72" height="102" fill="#C9890C"></rect></svg>EUTHYNA</div>
+    <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.85)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><span style="font-size: 12.5px; color: #A9B6D3">On Atlantis · testnet</span></span>
+    </div>
+    <nav class="nav" aria-label="Console" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a><a href="#"><b>II</b>Agents</a><a href="#"><b>III</b>Rules</a><a href="#"><b>IV</b>Activity</a>
+      <a href="#" aria-current="page" style="background: #F3EFE7; color: #0D1730"><b style="color: #8A5A00">V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes</a><a href="#"><b>VII</b>Owners</a><a href="#"><b>VIII</b>Market</a><a href="#"><b>IX</b>Settings</a>
+    </nav>
+  </aside>
+
+  <main style="flex: 999 1 640px; min-width: 0; box-sizing: border-box; padding: 32px 40px 56px; display: flex; flex-direction: column; gap: 24px">
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span style="font: 600 13px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Pixel Forge · treasury</span>
+        <h1 class="carved" style="margin: 0; font: 900 52px Cinzel, serif; letter-spacing: .1em">INVOICES</h1>
+        <p style="margin: 0; font-size: 15px; color: #4A5675; max-width: 700px">Your customers pay by SEPA transfer to the company's IBAN. The reference settles the invoice; it turns paid once the euros are in the company wallet.</p>
+      </div>
+      <button type="button" class="line">EXPORT CSV</button>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+
+      <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+        <section class="slab" aria-labelledby="list" style="box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column">
+          <h2 id="list" class="kick" style="margin: 0 0 10px; color: #8A5A00">Invoices · paid by SEPA</h2>
+
+          <div class="row" style="background: rgba(252,240,212,.55); margin: 0 -12px; padding: 14px 12px">
+            <span class="wax" style="width: 40px; height: 40px">OPEN</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">INV-2026-0004</b> · Studio Nova</span>
+              <span style="font-size: 12px; color: #4A5675">Logo animations · due Dec 7</span>
+            </div>
+            <span style="display: flex; flex-direction: column; gap: 2px"><b class="mono">1,200.00 EUR</b><span style="font-size: 12px; color: #4A5675">nothing received yet</span></span>
+            <span style="font-size: 12px; color: #8A5A00; font-weight: 700">shown on the right</span>
+          </div>
+
+          <div class="row">
+            <span class="wax" style="width: 40px; height: 40px">PARTIAL</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">INV-2026-0003</b> · Kestrel Labs</span>
+              <span style="font-size: 12px; color: #4A5675">Audit report · due Nov 30</span>
+            </div>
+            <span style="display: flex; flex-direction: column; gap: 2px"><b class="mono">450.00 EUR</b><span style="font-size: 12px; color: #4A5675">300.00 received in 2 transfers · 150.00 left</span></span>
+            <span class="new">PROPOSED</span>
+          </div>
+
+          <div class="row">
+            <span class="seal" style="width: 40px; height: 40px">PAID</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">INV-2026-0002</b> · Sandbox payer</span>
+              <span style="font-size: 12px; color: #4A5675">Paid Nov 7 · in about 15 s</span>
+            </div>
+            <span style="display: flex; flex-direction: column; gap: 2px"><b class="mono">18.00 EUR</b><span style="font-size: 12px; color: #4A5675">received · <b class="mono" style="color: #0D1730">17.66 EURC</b> after the partner's fee</span></span>
+            <a href="#" class="mono" style="font-size: 12px">0x5ac9…c280</a>
+          </div>
+
+          <div class="row">
+            <span class="seal-r" style="width: 40px; height: 40px">LATE</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">INV-2026-0001</b> · Orbit Café</span>
+              <span style="font-size: 12px; color: #A8381E">Due Nov 1 · 6 days late</span>
+            </div>
+            <span style="display: flex; flex-direction: column; gap: 2px"><b class="mono">90.00 EUR</b><span style="font-size: 12px; color: #4A5675">nothing received yet</span></span>
+            <button type="button" class="line" style="min-height: 36px; padding: 6px 10px; font-size: 10px">PDF · QR</button>
+          </div>
+        </section>
+
+        <section class="slab" aria-labelledby="newinv" style="box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column; gap: 16px">
+          <h2 id="newinv" class="kick" style="margin: 0; color: #8A5A00">New invoice</h2>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+            <div><label class="lab" for="cust">Customer</label><input id="cust" class="inp" placeholder="Customer"></div>
+            <div><label class="lab" for="mail">Email (optional)</label><input id="mail" class="inp" placeholder="billing@…"></div>
+            <div><label class="lab" for="due">Due in</label>
+              <select id="due" class="inp"><option>30 days</option><option>15 days</option><option>Due now</option></select></div>
+            <div style="grid-column: span 2"><label class="lab" for="what">Description</label><input id="what" class="inp" placeholder="What for"></div>
+            <div><label class="lab" for="eur">Amount (EUR)</label><input id="eur" class="inp mono" placeholder="0.00"></div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding-top: 14px; border-top: 1px solid rgba(13,23,48,.12)">
+            <span style="flex: 1 1 280px; font-size: 12.5px; color: #4A5675">Invoices are business records, kept in our database, not on chain. Payees stay sealed; customers on an invoice do not.</span>
+            <button type="button" class="ori" style="min-height: 44px; padding: 11px 20px; border: 0; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03; cursor: pointer">NEW INVOICE</button>
+          </div>
+        </section>
+      </div>
+
+      <article class="paper" aria-label="Invoice INV-2026-0004" style="flex: 1 1 380px; max-width: 460px; min-width: 0; box-sizing: border-box; padding: 34px 34px 30px; display: flex; flex-direction: column; gap: 20px">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <b style="font: 800 18px Cinzel, serif; letter-spacing: .12em">PIXEL FORGE</b>
+            <span style="font-size: 12px; color: #4A5675">Invoice <span class="mono" style="color: #0D1730">INV-2026-0004</span></span>
+            <span style="font-size: 12px; color: #4A5675">Issued Nov 7, 2026 · due Dec 7, 2026</span>
+          </div>
+          <svg width="30" height="30" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#0D1730" stroke-width="102"></circle><rect x="297" y="461" width="430" height="102" fill="#C9890C"></rect></svg>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 2px; font-size: 13.5px">
+          <span class="lab" style="margin: 0">Bill to</span>
+          <b>Studio Nova</b>
+          <span style="color: #4A5675">billing@studionova.example</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 0; border-top: 1px solid #E5DFD2; border-bottom: 1px solid #E5DFD2; font-size: 14px">
+          <span>Logo animations</span><span class="mono">1,200.00 EUR</span>
+          <b>Total due</b><b class="mono">1,200.00 EUR</b>
+        </div>
+
+        <div style="display: flex; gap: 18px; align-items: flex-start">
+          <svg width="132" height="132" viewBox="-2 -2 33 33" role="img" aria-label="SEPA QR code (illustration)" style="flex: 0 0 auto; background: #FFFFFF"><path fill="#0D1730" d="M0 0h1v1h-1zM0 1h1v1h-1zM0 2h1v1h-1zM0 3h1v1h-1zM0 4h1v1h-1zM0 5h1v1h-1zM0 6h1v1h-1zM0 8h1v1h-1zM0 9h1v1h-1zM0 11h1v1h-1zM0 13h1v1h-1zM0 14h1v1h-1zM0 16h1v1h-1zM0 17h1v1h-1zM0 18h1v1h-1zM0 19h1v1h-1zM0 20h1v1h-1zM0 22h1v1h-1zM0 23h1v1h-1zM0 24h1v1h-1zM0 25h1v1h-1zM0 26h1v1h-1zM0 27h1v1h-1zM0 28h1v1h-1zM1 0h1v1h-1zM1 6h1v1h-1zM1 9h1v1h-1zM1 10h1v1h-1zM1 14h1v1h-1zM1 16h1v1h-1zM1 18h1v1h-1zM1 19h1v1h-1zM1 20h1v1h-1zM1 22h1v1h-1zM1 28h1v1h-1zM2 0h1v1h-1zM2 2h1v1h-1zM2 3h1v1h-1zM2 4h1v1h-1zM2 6h1v1h-1zM2 8h1v1h-1zM2 10h1v1h-1zM2 13h1v1h-1zM2 15h1v1h-1zM2 16h1v1h-1zM2 17h1v1h-1zM2 19h1v1h-1zM2 20h1v1h-1zM2 22h1v1h-1zM2 24h1v1h-1zM2 25h1v1h-1zM2 26h1v1h-1zM2 28h1v1h-1zM3 0h1v1h-1zM3 2h1v1h-1zM3 3h1v1h-1zM3 4h1v1h-1zM3 6h1v1h-1zM3 9h1v1h-1zM3 10h1v1h-1zM3 13h1v1h-1zM3 18h1v1h-1zM3 20h1v1h-1zM3 22h1v1h-1zM3 24h1v1h-1zM3 25h1v1h-1zM3 26h1v1h-1zM3 28h1v1h-1zM4 0h1v1h-1zM4 2h1v1h-1zM4 3h1v1h-1zM4 4h1v1h-1zM4 6h1v1h-1zM4 8h1v1h-1zM4 10h1v1h-1zM4 12h1v1h-1zM4 17h1v1h-1zM4 22h1v1h-1zM4 24h1v1h-1zM4 25h1v1h-1zM4 26h1v1h-1zM4 28h1v1h-1zM5 0h1v1h-1zM5 6h1v1h-1zM5 8h1v1h-1zM5 11h1v1h-1zM5 13h1v1h-1zM5 18h1v1h-1zM5 19h1v1h-1zM5 22h1v1h-1zM5 28h1v1h-1zM6 0h1v1h-1zM6 1h1v1h-1zM6 2h1v1h-1zM6 3h1v1h-1zM6 4h1v1h-1zM6 5h1v1h-1zM6 6h1v1h-1zM6 8h1v1h-1zM6 9h1v1h-1zM6 10h1v1h-1zM6 11h1v1h-1zM6 12h1v1h-1zM6 14h1v1h-1zM6 15h1v1h-1zM6 16h1v1h-1zM6 18h1v1h-1zM6 19h1v1h-1zM6 22h1v1h-1zM6 23h1v1h-1zM6 24h1v1h-1zM6 25h1v1h-1zM6 26h1v1h-1zM6 27h1v1h-1zM6 28h1v1h-1zM7 11h1v1h-1zM7 12h1v1h-1zM7 13h1v1h-1zM7 16h1v1h-1zM7 17h1v1h-1zM7 18h1v1h-1zM7 19h1v1h-1zM8 1h1v1h-1zM8 2h1v1h-1zM8 3h1v1h-1zM8 4h1v1h-1zM8 11h1v1h-1zM8 16h1v1h-1zM8 17h1v1h-1zM8 18h1v1h-1zM8 20h1v1h-1zM8 21h1v1h-1zM8 22h1v1h-1zM8 23h1v1h-1zM8 24h1v1h-1zM8 25h1v1h-1zM8 26h1v1h-1zM8 27h1v1h-1zM8 28h1v1h-1zM9 0h1v1h-1zM9 1h1v1h-1zM9 4h1v1h-1zM9 5h1v1h-1zM9 6h1v1h-1zM9 7h1v1h-1zM9 8h1v1h-1zM9 11h1v1h-1zM9 13h1v1h-1zM9 14h1v1h-1zM9 15h1v1h-1zM9 16h1v1h-1zM9 18h1v1h-1zM9 19h1v1h-1zM9 22h1v1h-1zM9 24h1v1h-1zM10 0h1v1h-1zM10 1h1v1h-1zM10 2h1v1h-1zM10 6h1v1h-1zM10 7h1v1h-1zM10 14h1v1h-1zM10 16h1v1h-1zM10 17h1v1h-1zM10 18h1v1h-1zM10 19h1v1h-1zM10 20h1v1h-1zM10 23h1v1h-1zM10 27h1v1h-1zM10 28h1v1h-1zM11 0h1v1h-1zM11 1h1v1h-1zM11 2h1v1h-1zM11 6h1v1h-1zM11 9h1v1h-1zM11 14h1v1h-1zM11 15h1v1h-1zM11 17h1v1h-1zM11 20h1v1h-1zM11 21h1v1h-1zM11 24h1v1h-1zM11 25h1v1h-1zM11 26h1v1h-1zM12 0h1v1h-1zM12 4h1v1h-1zM12 6h1v1h-1zM12 7h1v1h-1zM12 12h1v1h-1zM12 15h1v1h-1zM12 16h1v1h-1zM12 17h1v1h-1zM12 18h1v1h-1zM12 20h1v1h-1zM12 21h1v1h-1zM12 22h1v1h-1zM12 24h1v1h-1zM12 25h1v1h-1zM12 28h1v1h-1zM13 4h1v1h-1zM13 5h1v1h-1zM13 6h1v1h-1zM13 7h1v1h-1zM13 9h1v1h-1zM13 10h1v1h-1zM13 13h1v1h-1zM13 17h1v1h-1zM13 19h1v1h-1zM13 20h1v1h-1zM13 26h1v1h-1zM14 2h1v1h-1zM14 4h1v1h-1zM14 9h1v1h-1zM14 13h1v1h-1zM14 14h1v1h-1zM14 15h1v1h-1zM14 16h1v1h-1zM14 17h1v1h-1zM14 18h1v1h-1zM14 22h1v1h-1zM14 25h1v1h-1zM14 28h1v1h-1zM15 1h1v1h-1zM15 5h1v1h-1zM15 6h1v1h-1zM15 8h1v1h-1zM15 9h1v1h-1zM15 10h1v1h-1zM15 12h1v1h-1zM15 14h1v1h-1zM15 15h1v1h-1zM15 16h1v1h-1zM15 19h1v1h-1zM15 23h1v1h-1zM15 24h1v1h-1zM15 25h1v1h-1zM15 27h1v1h-1zM15 28h1v1h-1zM16 0h1v1h-1zM16 3h1v1h-1zM16 4h1v1h-1zM16 8h1v1h-1zM16 9h1v1h-1zM16 11h1v1h-1zM16 12h1v1h-1zM16 16h1v1h-1zM16 18h1v1h-1zM16 20h1v1h-1zM16 21h1v1h-1zM16 24h1v1h-1zM16 25h1v1h-1zM16 27h1v1h-1zM16 28h1v1h-1zM17 0h1v1h-1zM17 1h1v1h-1zM17 2h1v1h-1zM17 3h1v1h-1zM17 4h1v1h-1zM17 6h1v1h-1zM17 8h1v1h-1zM17 9h1v1h-1zM17 10h1v1h-1zM17 11h1v1h-1zM17 12h1v1h-1zM17 15h1v1h-1zM17 16h1v1h-1zM17 18h1v1h-1zM17 20h1v1h-1zM17 23h1v1h-1zM17 27h1v1h-1zM18 2h1v1h-1zM18 3h1v1h-1zM18 4h1v1h-1zM18 5h1v1h-1zM18 6h1v1h-1zM18 8h1v1h-1zM18 9h1v1h-1zM18 10h1v1h-1zM18 14h1v1h-1zM18 15h1v1h-1zM18 16h1v1h-1zM18 17h1v1h-1zM18 18h1v1h-1zM18 19h1v1h-1zM18 20h1v1h-1zM18 24h1v1h-1zM18 26h1v1h-1zM18 27h1v1h-1zM18 28h1v1h-1zM19 0h1v1h-1zM19 1h1v1h-1zM19 3h1v1h-1zM19 5h1v1h-1zM19 6h1v1h-1zM19 7h1v1h-1zM19 8h1v1h-1zM19 9h1v1h-1zM19 10h1v1h-1zM19 11h1v1h-1zM19 12h1v1h-1zM19 19h1v1h-1zM19 20h1v1h-1zM19 22h1v1h-1zM19 25h1v1h-1zM20 2h1v1h-1zM20 12h1v1h-1zM20 13h1v1h-1zM20 14h1v1h-1zM20 15h1v1h-1zM20 16h1v1h-1zM20 23h1v1h-1zM21 8h1v1h-1zM21 10h1v1h-1zM21 11h1v1h-1zM21 12h1v1h-1zM21 14h1v1h-1zM21 18h1v1h-1zM21 19h1v1h-1zM21 24h1v1h-1zM21 25h1v1h-1zM21 26h1v1h-1zM21 28h1v1h-1zM22 0h1v1h-1zM22 1h1v1h-1zM22 2h1v1h-1zM22 3h1v1h-1zM22 4h1v1h-1zM22 5h1v1h-1zM22 6h1v1h-1zM22 9h1v1h-1zM22 10h1v1h-1zM22 11h1v1h-1zM22 15h1v1h-1zM22 17h1v1h-1zM22 18h1v1h-1zM22 19h1v1h-1zM22 21h1v1h-1zM22 24h1v1h-1zM22 25h1v1h-1zM22 28h1v1h-1zM23 0h1v1h-1zM23 6h1v1h-1zM23 8h1v1h-1zM23 9h1v1h-1zM23 11h1v1h-1zM23 13h1v1h-1zM23 16h1v1h-1zM23 21h1v1h-1zM23 24h1v1h-1zM23 25h1v1h-1zM23 27h1v1h-1zM23 28h1v1h-1zM24 0h1v1h-1zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h1v1h-1zM24 6h1v1h-1zM24 8h1v1h-1zM24 9h1v1h-1zM24 10h1v1h-1zM24 12h1v1h-1zM24 15h1v1h-1zM24 19h1v1h-1zM24 20h1v1h-1zM24 21h1v1h-1zM24 24h1v1h-1zM24 25h1v1h-1zM24 26h1v1h-1zM24 27h1v1h-1zM24 28h1v1h-1zM25 0h1v1h-1zM25 2h1v1h-1zM25 3h1v1h-1zM25 4h1v1h-1zM25 6h1v1h-1zM25 9h1v1h-1zM25 11h1v1h-1zM25 12h1v1h-1zM25 14h1v1h-1zM25 15h1v1h-1zM25 24h1v1h-1zM25 26h1v1h-1zM26 0h1v1h-1zM26 2h1v1h-1zM26 3h1v1h-1zM26 4h1v1h-1zM26 6h1v1h-1zM26 8h1v1h-1zM26 9h1v1h-1zM26 11h1v1h-1zM26 12h1v1h-1zM26 13h1v1h-1zM26 14h1v1h-1zM26 17h1v1h-1zM26 19h1v1h-1zM26 21h1v1h-1zM26 22h1v1h-1zM26 23h1v1h-1zM26 24h1v1h-1zM26 27h1v1h-1zM27 0h1v1h-1zM27 6h1v1h-1zM27 9h1v1h-1zM27 10h1v1h-1zM27 11h1v1h-1zM27 12h1v1h-1zM27 13h1v1h-1zM27 14h1v1h-1zM27 15h1v1h-1zM27 16h1v1h-1zM27 20h1v1h-1zM27 21h1v1h-1zM27 23h1v1h-1zM27 24h1v1h-1zM27 25h1v1h-1zM27 26h1v1h-1zM27 28h1v1h-1zM28 0h1v1h-1zM28 1h1v1h-1zM28 2h1v1h-1zM28 3h1v1h-1zM28 4h1v1h-1zM28 5h1v1h-1zM28 6h1v1h-1zM28 11h1v1h-1zM28 12h1v1h-1zM28 13h1v1h-1zM28 14h1v1h-1zM28 15h1v1h-1zM28 19h1v1h-1zM28 20h1v1h-1zM28 23h1v1h-1zM28 25h1v1h-1zM28 26h1v1h-1z"></path></svg>
+          <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12.5px">
+            <b style="font: 700 11px Cinzel, serif; letter-spacing: .2em; color: #8A5A00">PAY BY SEPA TRANSFER</b>
+            <span><span style="color: #4A5675">IBAN</span> <span class="mono">MT04 CFTE 1987 0000 0000 9001 0358 482</span></span>
+            <span><span style="color: #4A5675">BIC</span> <span class="mono">CFTEMTM1XXX</span></span>
+            <span><span style="color: #4A5675">Reference</span> <b class="mono">RF57 INV2 0260 0047 ACD1</b></span>
+          </div>
+        </div>
+        <p style="margin: 0; font-size: 12.5px; color: #4A5675; line-height: 1.5">Scan the code in your banking app: the IBAN, the amount and the reference are filled in. Keep the reference: it settles this invoice.</p>
+
+        <div style="display: flex; gap: 10px; padding-top: 6px; border-top: 1px solid #E5DFD2">
+          <button type="button" class="ori" style="flex: 1 1 0; min-height: 44px; border: 0; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03; cursor: pointer">PDF · QR</button>
+          <button type="button" class="line" style="flex: 1 1 0">CANCEL</button>
+        </div>
+      </article>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>

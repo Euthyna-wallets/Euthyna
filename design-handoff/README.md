@@ -77,6 +77,10 @@ Les sources HTML ne se copient pas telles quelles. Elles servent de référence 
 | 06 market | `/selling` | `routes/MarketConsolePage.tsx` |
 | 10 settings-recovery-planned | `/settings` | `routes/SettingsPage.tsx` |
 | 15 suppliers | `/suppliers` | `routes/SuppliersPage.tsx` |
+| 18 suppliers-any-channel | `/suppliers` (ajout d'un bénéficiaire SEPA, Pix, ACH, UK) | `routes/SuppliersPage.tsx` |
+| 19 treasury-payouts | `/wallet` (paiements bancaires) | `routes/WalletPage.tsx`, `BankAccountCard.tsx` |
+| 20 treasury-payroll | `/wallet` (ordres permanents) | `routes/WalletPage.tsx`, `BankAccountCard.tsx` |
+| 21 treasury-invoices | `/wallet` (factures) | `routes/WalletPage.tsx`, `InvoicesCard.tsx` |
 | 12 hq-mobile · 13 activity-mobile | toutes, en 390 px | — |
 
 Pour le site public, voir `site/00-consignes-site.md`. Le React est sur main, dans `apps/console/src/routes/public/`. La structure et les textes sont bons ; au 31 octobre, il a encore l'ancien style.

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Treasury · payroll</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0D1730}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.78),rgba(255,255,255,.5)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.night{background-color:#0A1D47;background-image:linear-gradient(rgba(6,20,51,.88),rgba(6,20,51,.92)),url(../assets/textures/marble-night.jpg);background-size:cover,600px}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.carved{color:#7A705F;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto;font:800 7px Cinzel,serif;letter-spacing:.06em;color:#3A2208}
+.wax{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#E9E3D6 0%,#B9AE98 40%,#7C715C 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.3),inset 0 -4px 8px rgba(40,30,10,.35),0 6px 14px rgba(0,0,0,.18);flex:0 0 auto;font:800 6.5px Cinzel,serif;letter-spacing:.04em;color:#2E2718}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.mono{font-family:'JetBrains Mono',monospace}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#8C9CC2;width:26px}
+.inp{box-sizing:border-box;width:100%;min-height:44px;padding:10px 12px;border:1px solid rgba(13,23,48,.22);background:rgba(255,255,255,.82);font:14px 'Plus Jakarta Sans',sans-serif;color:#0D1730}
+.lab{display:block;font:600 12px 'Plus Jakarta Sans',sans-serif;color:#4A5675;margin-bottom:6px}
+.line{min-height:44px;padding:8px 14px;border:1px solid rgba(13,23,48,.25);background:rgba(255,255,255,.6);font:700 11px Cinzel,serif;letter-spacing:.14em;color:#0D1730;cursor:pointer}
+.av{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 12px 'Plus Jakarta Sans',sans-serif;flex:0 0 auto}
+.pip{display:block;flex:1 1 0;height:8px;border-radius:4px;background:#E2DBCD;box-shadow:inset 0 1px 2px rgba(13,23,48,.25)}
+.pip-on{display:block;flex:1 1 0;height:8px;border-radius:4px;background:linear-gradient(180deg,#FFE2A8,#C9890C)}
+</style>
+
+<div class="ground" style="min-height: 1240px; display: flex; flex-wrap: wrap; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="flex: 1 1 268px; max-width: 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"></circle><rect x="297" y="461" width="430" height="102" fill="#C9890C"></rect><rect x="41" y="461" width="72" height="102" fill="#C9890C"></rect><rect x="911" y="461" width="72" height="102" fill="#C9890C"></rect></svg>EUTHYNA</div>
+    <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.85)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><span style="font-size: 12.5px; color: #A9B6D3">On Atlantis · testnet</span></span>
+    </div>
+    <nav class="nav" aria-label="Console" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a><a href="#"><b>II</b>Agents</a><a href="#"><b>III</b>Rules</a><a href="#"><b>IV</b>Activity</a>
+      <a href="#" aria-current="page" style="background: #F3EFE7; color: #0D1730"><b style="color: #8A5A00">V</b>Treasury</a>
+      <a href="#"><b>VI</b>Votes</a><a href="#"><b>VII</b>Owners</a><a href="#"><b>VIII</b>Market</a><a href="#"><b>IX</b>Settings</a>
+    </nav>
+  </aside>
+
+  <main style="flex: 999 1 640px; min-width: 0; box-sizing: border-box; padding: 32px 40px 56px; display: flex; flex-direction: column; gap: 24px">
+    <header style="display: flex; flex-direction: column; gap: 6px">
+      <span style="font: 600 13px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Pixel Forge · treasury</span>
+      <h1 class="carved" style="margin: 0; font: 900 52px Cinzel, serif; letter-spacing: .1em">PAYROLL</h1>
+      <p style="margin: 0; font-size: 15px; color: #4A5675; max-width: 780px">Members vote once: who, how much, how often. On each date the vault pays the sealed account in its own currency, from the company's euros, without another vote and without an agent.</p>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+
+      <div style="flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+        <section class="slab" aria-labelledby="orders" style="box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column; gap: 4px">
+          <h2 id="orders" class="kick" style="margin: 0 0 8px; color: #8A5A00">Standing orders</h2>
+
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+            <span class="seal" style="width: 40px; height: 40px">VOTED</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">2,400.00 EUR</b> to #4 · Employee UK · every month · salary</span>
+              <span style="font-size: 12px; color: #4A5675">Next Nov 28, 09:00 UTC · paid 0 times · 12 left · paid in GBP by Faster Payments</span>
+            </div>
+            <button type="button" class="line">STOP</button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+            <span class="seal" style="width: 40px; height: 40px">VOTED</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span><b class="mono">800.00 EUR</b> to #3 · Contractor BR · every 2 weeks</span>
+              <span style="font-size: 12px; color: #4A5675">Next Nov 21, 09:00 UTC · paid 1 time · until stopped · paid in BRL by Pix</span>
+            </div>
+            <button type="button" class="line">STOP</button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+            <span class="wax" style="width: 40px; height: 40px">DONE</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+              <span style="color: #4A5675"><b class="mono" style="color: #0D1730">3.00 EUR</b> to #2 · Supplier A · every 10 minutes (demo)</span>
+              <span style="font-size: 12px; color: #4A5675">Paid 2 of 2 · 2.87 EUR by SEPA each time · finished Nov 7</span>
+            </div>
+            <span style="font-size: 12px; color: #4A5675">ended</span>
+          </div>
+        </section>
+
+        <section class="slab" aria-labelledby="new" style="box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column; gap: 16px">
+          <h2 id="new" class="kick" style="margin: 0; color: #8A5A00">Propose a standing order</h2>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+            <div><label class="lab" for="who">Pay</label>
+              <select id="who" class="inp mono"><option>#3 · Contractor BR</option><option>#2 · Supplier A</option><option>#4 · Employee UK</option></select></div>
+            <div><label class="lab" for="amt">Amount (EUR)</label><input id="amt" class="inp mono" value="800.00"></div>
+            <div><label class="lab" for="freq">How often</label>
+              <select id="freq" class="inp"><option>Every 2 weeks</option><option>Every month (30 days)</option><option>Every week</option></select></div>
+            <div><label class="lab" for="first">First payment (UTC)</label><input id="first" class="inp mono" value="2026-11-21 09:00"></div>
+            <div><label class="lab" for="times">How many times</label><input id="times" class="inp mono" placeholder="until stopped"></div>
+            <div><label class="lab" for="plabel">Public label</label><input id="plabel" class="inp" value="design work"></div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding-top: 14px; border-top: 1px solid rgba(13,23,48,.12)">
+            <span style="flex: 1 1 280px; font-size: 12.5px; color: #4A5675">On chain: the number, the amount, the dates and the label. Never who is paid, their account or their name.</span>
+            <button type="button" class="ori" style="min-height: 44px; padding: 11px 20px; border: 0; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03; cursor: pointer">PROPOSE</button>
+          </div>
+        </section>
+      </div>
+
+      <div style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+        <section class="slab" aria-labelledby="vote" style="box-sizing: border-box; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px">
+            <h2 id="vote" class="kick" style="margin: 0; color: #8A5A00">Awaiting votes</h2>
+            <span class="mono" style="font-size: 12px; color: #4A5675">proposal #31</span>
+          </div>
+          <p style="margin: 0; font-size: 15px; line-height: 1.45"><b class="mono">800.00 EUR</b> to #3 · Contractor BR, every 2 weeks from Nov 21, until stopped.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 10px">
+              <span class="av" style="background: #F2B544; color: #3A2208">AL</span>
+              <span style="flex: 1 1 auto; font-size: 13.5px">alex.testnet</span>
+              <span style="font: 700 12px 'Plus Jakarta Sans', sans-serif; color: #0B6E86">For</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px">
+              <span class="av" style="background: #E5DFD2; color: #4A5675">KO</span>
+              <span style="flex: 1 1 auto; font-size: 13.5px">koplo.testnet</span>
+              <span style="font-size: 12px; color: #4A5675">not yet</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px">
+              <span class="av" style="background: #E5DFD2; color: #4A5675">ME</span>
+              <span style="flex: 1 1 auto; font-size: 13.5px">you</span>
+              <span style="font-size: 12px; color: #4A5675">not yet</span>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div role="img" aria-label="1 of 2 votes needed" style="display: flex; gap: 6px"><span class="pip-on"></span><span class="pip"></span></div>
+            <span style="font-size: 12.5px; color: #4A5675">1 of 2 votes needed · then a 5-minute veto window</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+            <button type="button" class="ori" style="min-height: 44px; border: 0; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03; cursor: pointer">VOTE FOR</button>
+            <button type="button" class="line">AGAINST</button>
+          </div>
+        </section>
+
+        <section class="night" aria-labelledby="how" style="box-sizing: border-box; padding: 24px 26px; color: #E7ECF6; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="how" class="kick" style="margin: 0; color: #F2B544">How a run works</h2>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 9px; font-size: 13.5px; line-height: 1.45">
+            <li>On the date, anyone may start it; our keeper does. The vault pays exactly that beneficiary and amount.</li>
+            <li>No agent and no role budget: the members' vote is the authorisation.</li>
+            <li>The enclave opens the sealed account and the partner pays it in its own currency.</li>
+            <li>A failed run goes back to its date. Removing the beneficiary cancels its orders.</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>

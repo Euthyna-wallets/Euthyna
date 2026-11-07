@@ -118,3 +118,22 @@ Voir les écrans 12 et 13.
 
 - La récupération d'accès : passkey, ZKPassport, ZK Email, contact de confiance.
 - Les chaînes Bitcoin, Tron, Arbitrum, BSC et Plasma.
+
+## Paiements internationaux (écrans 18 à 21, validés par Alex le 8 novembre)
+
+Ces écrans habillent la PR #148 (bénéficiaires sur 4 canaux, ordres permanents, factures). Les montants des preuves testnet sont les vrais : 8 EUR → 74,92 BRL par Pix, 3 EUR → 2,87 EUR par SEPA, facture `INV-2026-0002` (18 EUR → 17,66 EURC, `0x5ac9…c280`). Les noms, les autres montants et la référence RF de l'aperçu sont des exemples ; le QR dessiné est une illustration.
+
+| Écran | Ce qu'on voit | D'où viennent les données |
+| --- | --- | --- |
+| 18 suppliers-any-channel | La liste des bénéficiaires scellés (ouverts avec la clé de lecture du membre), puis l'ajout : choix du canal (SEPA, Pix, ACH, UK), champs du formulaire du partenaire, label public, encadré « ce que le vote met sur la chaîne » | `RAILS` du SDK (`bank-private.ts`), formulaire du canal, enveloppes scellées du vault |
+| 19 treasury-payouts | Qui peut payer (rôle, plafond, budget EURC, bénéficiaires), l'historique des paiements avec le montant reçu dans la devise du bénéficiaire, les refus, le déroulé d'un paiement Pix | permissions du vault, paiements bancaires de l'API |
+| 20 treasury-payroll | Les ordres permanents (montant, bénéficiaire, fréquence, prochaine date, compteur), le formulaire « Propose a standing order », la carte de vote en cours (membres, jauge, deux boutons) | ordres du vault, proposition DAO |
+| 21 treasury-invoices | Les factures avec leur statut (Open, Partial, Paid, Late), « reçu · EURC après frais », le formulaire, l'aperçu imprimable avec QR SEPA et référence RF | `InvoicesCard.tsx`, API `invoices` |
+
+**Marqué PROPOSED à l'écran, absent de la PR #148 : à coder seulement si Valentin et Alex le décident.**
+- Le plafond de frais (« Max fee ») vérifié dans l'enclave contre la quote du partenaire, et le refus correspondant dans l'historique.
+- L'encadré des conditions du canal (frais, minimum, délai, taux) dans l'ajout d'un bénéficiaire.
+- Le cumul des paiements partiels d'une facture (aujourd'hui, chaque virement remplace le précédent dans `onFiatDeposit`).
+- L'affichage « reçu · EURC après frais » sur une facture payée et dans l'export CSV.
+
+Les étiquettes PROPOSED ne s'affichent pas en production : si l'élément n'est pas codé, on ne l'affiche pas.
