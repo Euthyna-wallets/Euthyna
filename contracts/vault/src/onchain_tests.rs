@@ -1005,6 +1005,71 @@ fn an_upgrade_cannot_be_burned_with_little_gas() {
     drop(v.execute_rule_change(queued.queue_id));
 }
 
+fn execute_as_stranger(v: &mut Vault, queue_id: QueueId) {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id("vault.testnet".parse().unwrap())
+            .predecessor_account_id("stranger.testnet".parse().unwrap())
+            .block_timestamp(50)
+            .prepaid_gas(Gas::from_tgas(300))
+            .build()
+    );
+    drop(v.execute_rule_change(queue_id));
+}
+
+#[test]
+fn the_dao_moves_the_code_source_and_upgrades_fetch_from_it() {
+    let (mut v, _) = fixture(false, false);
+    context("owner.testnet", 3);
+    let moved = v.queue_rule_change(RuleChange::SetCodeSource {
+        account_id: "nomos-v2.testnet".parse().unwrap(),
+    });
+    execute_as_stranger(&mut v, moved.queue_id);
+    assert_eq!(v.code_source().as_str(), "nomos-v2.testnet");
+    context("owner.testnet", 4);
+    let upgrade = v.queue_rule_change(RuleChange::Upgrade {
+        code_hash: [1; 32].into(),
+    });
+    execute_as_stranger(&mut v, upgrade.queue_id);
+    let fetched_from = near_sdk::test_utils::get_created_receipts()
+        .into_iter()
+        .filter(|receipt| {
+            receipt.actions.iter().any(|action| matches!(action, near_sdk::mock::MockAction::FunctionCallWeight { method_name, .. } if method_name == b"code_of"))
+        })
+        .map(|receipt| receipt.receiver_id.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(fetched_from, vec!["nomos-v2.testnet".to_string()]);
+}
+#[test]
+#[should_panic(expected = "ERR_RULE_DELAY")]
+fn the_code_source_moves_only_after_the_rule_delay() {
+    let (mut v, _) = fixture(false, false);
+    context("owner.testnet", 3);
+    let moved = v.queue_rule_change(RuleChange::SetCodeSource {
+        account_id: "nomos-v2.testnet".parse().unwrap(),
+    });
+    context("stranger.testnet", 4);
+    drop(v.execute_rule_change(moved.queue_id));
+}
+#[test]
+#[should_panic(expected = "ERR_OWNER_ONLY")]
+fn only_the_dao_moves_the_code_source() {
+    let (mut v, _) = fixture(false, false);
+    context("factory.testnet", 3);
+    v.queue_rule_change(RuleChange::SetCodeSource {
+        account_id: "evil.testnet".parse().unwrap(),
+    });
+}
+#[test]
+#[should_panic(expected = "ERR_CODE_SOURCE_SELF")]
+fn the_vault_is_not_its_own_code_source() {
+    let (mut v, _) = fixture(false, false);
+    context("owner.testnet", 3);
+    v.queue_rule_change(RuleChange::SetCodeSource {
+        account_id: "vault.testnet".parse().unwrap(),
+    });
+}
+
 fn revoke_agent(v: &mut Vault) {
     v.apply_rule_change(
         RuleChange::RevokeMembership {
