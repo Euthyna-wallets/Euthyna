@@ -11,9 +11,15 @@
 //! 3. this code refuses any run whose caller is not such a vault (the enclave itself).
 //!
 //! Input (stdin, JSON): `{"op":"pubkey"}` or
-//! `{"op":"payout","vault":…,"customer_id":…,"iban":…,"holder_name":…,"holder_type":"Business"|"Individual",
-//!   "reference":…,"crypto_amount":"5.000000","source_address":"0x…","network":"BaseTestSepolia",
-//!   "crypto":"EURC_TEST","nonce":…,"expiry":"2026-11-08T10:00:00Z"}`.
+//! `{"op":"payout","vault":…,"customer_id":…,"commitment":"<hex>","sealed":"<base64>","reference":…,
+//!   "crypto_amount":"5","source_address":"0x…","network":"BaseTestSepolia","crypto":"EURC_TEST",
+//!   "nonce":…,"expiry":"2026-11-08T10:00:00Z"}`.
+//!
+//! The IBAN never appears on chain. The members voted a commitment (sha256 of the vault, the IBAN,
+//! the holder and a salt) and an envelope sealed to this enclave's X25519 key; the vault forwards
+//! both. The enclave opens the envelope, recomputes the commitment and refuses any mismatch, so
+//! only the voted IBAN can be paid, and nothing it outputs names the IBAN or the holder (the
+//! input and the output of an OutLayer run are public on NEAR).
 //! Output (stdout, JSON, under 900 bytes): `{"ok":true,…}` or `{"ok":false,"error":…}`.
 //!
 //! Environment (OutLayer): `OUTLAYER_EXECUTION_TYPE`, `NEAR_PREDECESSOR_ID`; secrets `NOAH_API_KEY`,
@@ -51,11 +57,9 @@ struct Input {
     #[serde(default)]
     customer_id: String,
     #[serde(default)]
-    iban: String,
+    commitment: String,
     #[serde(default)]
-    holder_name: String,
-    #[serde(default = "business")]
-    holder_type: String,
+    sealed: String,
     #[serde(default)]
     reference: String,
     #[serde(default)]
@@ -72,8 +76,22 @@ struct Input {
     expiry: String,
 }
 
-fn business() -> String {
-    "Business".into()
+/// What the members sealed for the enclave when they voted the beneficiary.
+#[derive(Deserialize)]
+struct Beneficiary {
+    vault: String,
+    iban: String,
+    name: String,
+    holder_type: String,
+    salt: String,
+}
+
+#[derive(Deserialize)]
+struct Envelope {
+    v: u8,
+    epk: String,
+    iv: String,
+    ct: String,
 }
 
 #[derive(Serialize)]
@@ -118,18 +136,66 @@ fn refuse(error: &str) {
 // The key: derived from the enclave-generated seed, never written anywhere.
 // ---------------------------------------------------------------------------
 
-fn signing_key() -> Result<SigningKey, String> {
+/// 32 bytes for one purpose, from the enclave-generated seed (HKDF: one seed, keys that never meet).
+fn derived(purpose: &[u8]) -> Result<[u8; 32], String> {
     let seed_hex = std::env::var("PROTECTED_NOAH_SEED").map_err(|_| "no PROTECTED_NOAH_SEED in this run".to_string())?;
     let seed = hex::decode(seed_hex.trim()).map_err(|_| "PROTECTED_NOAH_SEED is not hex".to_string())?;
     if seed.len() < 32 {
         return Err("PROTECTED_NOAH_SEED is too short".into());
     }
-    // HKDF with a fixed purpose: the same seed could never serve another use.
     let hk = hkdf::Hkdf::<Sha256>::new(Some(b"euthyna-bank-signer"), &seed);
     let mut okm = [0u8; 32];
-    hk.expand(b"noah request signing key v1", &mut okm).map_err(|_| "hkdf".to_string())?;
+    hk.expand(purpose, &mut okm).map_err(|_| "hkdf".to_string())?;
+    Ok(okm)
+}
+
+fn signing_key() -> Result<SigningKey, String> {
     // A 32-byte scalar outside the curve order is astronomically unlikely; refuse rather than wrap.
-    SigningKey::from_slice(&okm).map_err(|_| "derived scalar unusable".to_string())
+    SigningKey::from_slice(&derived(b"noah request signing key v1")?).map_err(|_| "derived scalar unusable".to_string())
+}
+
+/// The X25519 key beneficiaries are sealed to.
+fn box_key() -> Result<x25519_dalek::StaticSecret, String> {
+    Ok(x25519_dalek::StaticSecret::from(derived(b"beneficiary box key v1")?))
+}
+
+/// sha256("euthyna-bank-beneficiary-v1" 0 vault 0 IBAN 0 holder 0 holder type 0 salt), hex.
+/// The salt (32 random bytes, hex) keeps an IBAN from being found by trying candidates.
+pub fn commitment_of(vault: &str, iban: &str, name: &str, holder_type: &str, salt: &str) -> String {
+    let mut hasher = Sha256::new();
+    for (index, part) in ["euthyna-bank-beneficiary-v1", vault, iban, name, holder_type, salt].iter().enumerate() {
+        if index > 0 {
+            hasher.update([0u8]);
+        }
+        hasher.update(part.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// Opens an envelope sealed to `secret`: AES-256-GCM under sha256(X25519(secret, epk) ‖ epk ‖ our
+/// public key), the vault's account as associated data (an envelope copied to another vault fails).
+fn open(sealed: &str, secret: &x25519_dalek::StaticSecret, vault: &str) -> Result<Vec<u8>, String> {
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    let std = base64::engine::general_purpose::STANDARD;
+    let envelope: Envelope = serde_json::from_slice(&std.decode(sealed.trim()).map_err(|_| "sealed: not base64".to_string())?)
+        .map_err(|_| "sealed: not an envelope".to_string())?;
+    if envelope.v != 1 {
+        return Err("sealed: unknown version".into());
+    }
+    let epk: [u8; 32] = std.decode(&envelope.epk).ok().and_then(|bytes| bytes.try_into().ok()).ok_or("sealed: bad key")?;
+    let iv: [u8; 12] = std.decode(&envelope.iv).ok().and_then(|bytes| bytes.try_into().ok()).ok_or("sealed: bad iv")?;
+    let ct = std.decode(&envelope.ct).map_err(|_| "sealed: bad ciphertext".to_string())?;
+    let ours = x25519_dalek::PublicKey::from(secret);
+    let shared = secret.diffie_hellman(&x25519_dalek::PublicKey::from(epk));
+    let mut hasher = Sha256::new();
+    hasher.update(shared.as_bytes());
+    hasher.update(epk);
+    hasher.update(ours.as_bytes());
+    let key: [u8; 32] = hasher.finalize().into();
+    let cipher = aes_gcm::Aes256Gcm::new(&key.into());
+    cipher
+        .decrypt(&iv.into(), Payload { msg: &ct, aad: vault.as_bytes() })
+        .map_err(|_| "sealed: cannot open (not for this enclave or this vault)".to_string())
 }
 
 fn pubkey() -> Result<Value, String> {
@@ -137,11 +203,13 @@ fn pubkey() -> Result<Value, String> {
     let verifying = key.verifying_key();
     let pem = verifying.to_public_key_pem(p256::pkcs8::LineEnding::LF).map_err(|_| "pem".to_string())?;
     let sec1 = verifying.to_sec1_bytes();
+    let boxed = x25519_dalek::PublicKey::from(&box_key()?);
     Ok(json!({
         "ok": true,
         "alg": "ES256",
         "public_key_pem": pem,
         "public_key_sec1_hex": hex::encode(sec1),
+        "box_public_key_hex": hex::encode(boxed.as_bytes()),
     }))
 }
 
@@ -267,34 +335,47 @@ fn payout(input: &Input) -> Result<Value, String> {
     if input.customer_id != customer_id_of(&input.vault) {
         return Err("the customer is not this vault's".into());
     }
-    if !valid_iban(&input.iban) {
-        return Err("invalid IBAN".into());
-    }
-    if input.holder_name.trim().is_empty() || input.holder_name.len() > 255 {
-        return Err("invalid holder name".into());
-    }
-    if !matches!(input.holder_type.as_str(), "Business" | "Individual") {
-        return Err("holder_type must be Business or Individual".into());
-    }
     if input.crypto_amount.parse::<f64>().map(|v| v <= 0.0).unwrap_or(true) {
         return Err("invalid amount".into());
     }
     if input.source_address.len() != 42 || !input.source_address.starts_with("0x") {
         return Err("invalid source address".into());
     }
-    if input.customer_id.is_empty() || input.network.is_empty() || input.crypto.is_empty() || input.nonce.is_empty() || input.expiry.is_empty() {
+    if input.network.is_empty() || input.crypto.is_empty() || input.nonce.is_empty() || input.expiry.is_empty() || input.commitment.len() != 64 {
         return Err("missing field".into());
     }
+    // The beneficiary the members voted: opened here, checked against their commitment.
+    let plain = open(&input.sealed, &box_key()?, &input.vault)?;
+    let beneficiary: Beneficiary = serde_json::from_slice(&plain).map_err(|_| "sealed: not a beneficiary".to_string())?;
+    let iban: String = beneficiary.iban.chars().filter(|c| !c.is_whitespace()).map(|c| c.to_ascii_uppercase()).collect();
+    if beneficiary.vault != input.vault
+        || commitment_of(&input.vault, &iban, &beneficiary.name, &beneficiary.holder_type, &beneficiary.salt) != input.commitment.to_ascii_lowercase()
+    {
+        return Err("the beneficiary is not the one the members voted".into());
+    }
+    if !valid_iban(&iban) {
+        return Err("invalid IBAN".into());
+    }
+    if beneficiary.name.trim().is_empty() || beneficiary.name.len() > 255 {
+        return Err("invalid holder name".into());
+    }
+    if !matches!(beneficiary.holder_type.as_str(), "Business" | "Individual") {
+        return Err("holder_type must be Business or Individual".into());
+    }
+    // Errors leave the enclave in public: no IBAN, no holder name in them.
+    payout_to(input, &iban, &beneficiary.name, &beneficiary.holder_type).map_err(|error| error.replace(&iban, "<iban>").replace(&beneficiary.name, "<holder>"))
+}
+
+fn payout_to(input: &Input, iban: &str, holder_name: &str, holder_type: &str) -> Result<Value, String> {
     let noah = Noah::from_env()?;
     let channel = std::env::var("NOAH_SEPA_CHANNEL_ID").map_err(|_| "no NOAH_SEPA_CHANNEL_ID in this run".to_string())?;
-    let iban: String = input.iban.chars().filter(|c| !c.is_whitespace()).map(|c| c.to_ascii_uppercase()).collect();
     // SEPA references: A-Z a-z 0-9 + - / ? . : , ( ) ' and spaces, 2 to 140 characters.
     let reference: String = input.reference.chars().filter(|c| c.is_ascii_alphanumeric() || " +-/?.:,()'".contains(*c)).take(140).collect::<String>().trim().to_string();
     let reference = if reference.len() < 2 { "Euthyna".to_string() } else { reference };
-    let holder = if input.holder_type == "Business" {
-        json!({ "AccountHolderType": "Business", "Name": input.holder_name })
+    let holder = if holder_type == "Business" {
+        json!({ "AccountHolderType": "Business", "Name": holder_name })
     } else {
-        let mut parts = input.holder_name.trim().splitn(2, ' ');
+        let mut parts = holder_name.trim().splitn(2, ' ');
         let first = parts.next().unwrap_or("").to_string();
         let last = parts.next().unwrap_or("-").to_string();
         json!({ "AccountHolderType": "Individual", "Name": { "FirstName": first, "LastName": last } })
@@ -334,7 +415,6 @@ fn payout(input: &Input) -> Result<Value, String> {
         "crypto_amount": input.crypto_amount,
         "fiat_amount": fiat_amount,
         "expiry": input.expiry,
-        "iban_hash": hex::encode(Sha256::digest(iban.as_bytes())),
     }))
 }
 
@@ -349,6 +429,53 @@ mod tests {
     }
 
     use super::*;
+
+    /// What a member's browser does (packages/sdk/src/bank-private.ts), here for the tests.
+    pub(super) fn seal(plain: &[u8], to: &x25519_dalek::PublicKey, vault: &str, ephemeral: [u8; 32], iv: [u8; 12]) -> String {
+        use aes_gcm::aead::{Aead, KeyInit, Payload};
+        let std = base64::engine::general_purpose::STANDARD;
+        let secret = x25519_dalek::StaticSecret::from(ephemeral);
+        let epk = x25519_dalek::PublicKey::from(&secret);
+        let shared = secret.diffie_hellman(to);
+        let mut hasher = Sha256::new();
+        hasher.update(shared.as_bytes());
+        hasher.update(epk.as_bytes());
+        hasher.update(to.as_bytes());
+        let key: [u8; 32] = hasher.finalize().into();
+        let ct = aes_gcm::Aes256Gcm::new(&key.into()).encrypt(&iv.into(), Payload { msg: plain, aad: vault.as_bytes() }).unwrap();
+        std.encode(json!({ "v": 1, "epk": std.encode(epk.as_bytes()), "iv": std.encode(iv), "ct": std.encode(ct) }).to_string())
+    }
+
+    #[test]
+    fn only_the_voted_beneficiary_opens() {
+        std::env::set_var("PROTECTED_NOAH_SEED", "11".repeat(32));
+        let ours = x25519_dalek::PublicKey::from(&box_key().unwrap());
+        let vault = "acme.euthyna-nomos.testnet";
+        let plain = json!({ "vault": vault, "iban": "FR7630006000011234567890189", "name": "Atelier Dupont SAS", "holder_type": "Business", "salt": "ab".repeat(32) }).to_string();
+        let sealed = seal(plain.as_bytes(), &ours, vault, [7; 32], [9; 12]);
+        assert_eq!(open(&sealed, &box_key().unwrap(), vault).unwrap(), plain.as_bytes());
+        // Copied to another vault: the associated data differs, it does not open.
+        assert!(open(&sealed, &box_key().unwrap(), "other.euthyna-nomos.testnet").is_err());
+        // Sealed to another key: does not open.
+        let elsewhere = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from([5u8; 32]));
+        assert!(open(&seal(plain.as_bytes(), &elsewhere, vault, [7; 32], [9; 12]), &box_key().unwrap(), vault).is_err());
+        // The commitment the members voted, and a substituted IBAN that does not match it.
+        let voted = commitment_of(vault, "FR7630006000011234567890189", "Atelier Dupont SAS", "Business", &"ab".repeat(32));
+        assert_ne!(voted, commitment_of(vault, "DE89370400440532013000", "Atelier Dupont SAS", "Business", &"ab".repeat(32)));
+        assert_ne!(voted, commitment_of(vault, "FR7630006000011234567890189", "Atelier Dupont SAS", "Business", &"cd".repeat(32)));
+    }
+
+    /// Sealed by packages/sdk (a member's browser), opened here: the two sides agree byte for byte.
+    #[test]
+    fn opens_what_the_console_seals() {
+        std::env::set_var("PROTECTED_NOAH_SEED", "11".repeat(32));
+        let vector: Value = serde_json::from_str(include_str!("../../packages/sdk/src/fixtures/bank-sealed.json")).unwrap();
+        let vault = vector["vault"].as_str().unwrap();
+        let plain = open(vector["sealed"].as_str().unwrap(), &box_key().unwrap(), vault).unwrap();
+        assert_eq!(String::from_utf8(plain.clone()).unwrap(), vector["plaintext"].as_str().unwrap());
+        let beneficiary: Beneficiary = serde_json::from_slice(&plain).unwrap();
+        assert_eq!(commitment_of(vault, &beneficiary.iban, &beneficiary.name, &beneficiary.holder_type, &beneficiary.salt), vector["commitment"].as_str().unwrap());
+    }
 
     #[test]
     fn iban_checksum() {
@@ -378,7 +505,7 @@ mod tests {
 
     #[test]
     fn same_seed_same_key() {
-        std::env::set_var("PROTECTED_NOAH_SEED", "22".repeat(32));
+        std::env::set_var("PROTECTED_NOAH_SEED", "11".repeat(32));
         let a = pubkey().unwrap();
         let b = pubkey().unwrap();
         assert_eq!(a["public_key_pem"], b["public_key_pem"]);

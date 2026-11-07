@@ -80,7 +80,12 @@ export type RuleChange =
   | { SetBankConfig: { config: BankConfig | null } }
   | { AddBankBeneficiary: { beneficiary: BankBeneficiary } }
   | { RemoveBankBeneficiary: { iban: string } }
-  | { SetBankPermission: { role: string; permission: BankPermission | null } };
+  | { SetBankPermission: { role: string; permission: BankPermission | null } }
+  /** The bank signer enclave's X25519 key (hex), which beneficiaries are sealed to. */
+  | { SetBankBoxKey: { key: string | null } }
+  /** A beneficiary without its IBAN: commitment and envelopes (bank-private.ts). `label` is public. */
+  | { AddSealedBankBeneficiary: { label: string; commitment: string; sealed_for_signer: string; sealed_for_members: string } }
+  | { RemoveSealedBankBeneficiary: { id: number } };
 
 export type BankConfig = {
   outlayer_id: string;
@@ -98,7 +103,9 @@ export type BankConfig = {
   max_fee_per_gas: string;
   max_priority_fee_per_gas: string;
 };
+/** The first version's beneficiary in clear: the vault refuses it now (an IBAN would stay public). */
 export type BankBeneficiary = { iban: string; name: string; holder_type: "Business" | "Individual" };
+export type SealedBeneficiary = { id: number; label: string; commitment: string; sealed_for_signer: string; sealed_for_members: string };
 /** Budget charged in the euro token's base units; the ceiling applies to one payout. */
 export type BankPermission = { allowance: number[]; max_per_payout: string };
 /** The budget a role gets for euro payouts when it has no EURC budget yet. */
@@ -108,7 +115,9 @@ export type BankPayout = {
   op_id: number[];
   member: string;
   role: string;
-  beneficiary: BankBeneficiary;
+  beneficiary_id: number;
+  beneficiary_label: string;
+  commitment: string;
   amount: string;
   reference: string;
   state: BankPayoutState;
@@ -1611,11 +1620,22 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     if (!config) return { title: "Disable euro payouts", details: [] };
     return { title: `Pay voted IBANs in euros through the bank signer on ${config.outlayer_id}`, details: [`Signer code ${config.signer_hash.slice(0, 16)}…, secrets ${config.secrets_owner}/${config.secrets_profile}.`, `Settles in ${config.crypto} on ${config.network} from the company wallet.`] };
   }
-  if ("AddBankBeneficiary" in change) {
-    const entry = change.AddBankBeneficiary.beneficiary;
-    return { title: `Allow euro payouts to ${entry.name} (${formatIban(entry.iban)})`, details: [`${entry.holder_type} account. Agents with a bank permission may pay it, within their budget.`] };
+  if ("AddBankBeneficiary" in change) return { title: "Allow euro payouts to an IBAN in clear (refused by the vault)", details: ["An IBAN in clear would stay public on chain: vote a sealed beneficiary instead."] };
+  if ("RemoveBankBeneficiary" in change) return { title: "Remove an IBAN of the first version", details: [] };
+  if ("SetBankBoxKey" in change) {
+    const key = change.SetBankBoxKey.key;
+    return key
+      ? { title: "Seal bank beneficiaries to the bank signer enclave", details: [`Enclave box key ${key.slice(0, 16)}…: only that enclave opens a beneficiary's IBAN. The IBANs of the first version are erased from the vault's state.`] }
+      : { title: "Remove the bank signer's box key", details: [] };
   }
-  if ("RemoveBankBeneficiary" in change) return { title: `Stop euro payouts to ${formatIban(change.RemoveBankBeneficiary.iban)}`, details: [] };
+  if ("AddSealedBankBeneficiary" in change) {
+    const entry = change.AddSealedBankBeneficiary;
+    return {
+      title: `Allow euro payouts to a sealed beneficiary${entry.label ? ` (${entry.label})` : ""}`,
+      details: [`Commitment ${entry.commitment.slice(0, 16)}…: the IBAN and its holder are not on chain. Members read them with their reading key; only the bank signer enclave pays them, and only this IBAN.`],
+    };
+  }
+  if ("RemoveSealedBankBeneficiary" in change) return { title: `Stop euro payouts to beneficiary #${change.RemoveSealedBankBeneficiary.id}`, details: [] };
   if ("SetBankPermission" in change) {
     const permission = change.SetBankPermission.permission;
     if (!permission) return { title: `Remove euro payouts from role ${change.SetBankPermission.role}`, details: [] };

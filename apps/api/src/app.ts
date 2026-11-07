@@ -848,8 +848,17 @@ export function createApp({
     });
     app.get("/v1/console/omniroles/bank", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.bank(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/bank-beneficiary", requireConsole(auth, consoleLimiter), async (context) => {
-      const input = await parseJson(context, z.object({ iban: z.string().min(15).max(42), name: z.string().max(255).default(""), holderType: z.enum(["Business", "Individual"]).default("Business"), remove: z.boolean().optional() }));
-      return context.json(await omniroles.bankBeneficiaryProposal(orgOf(context), input));
+      // Sealed in the member's browser: no IBAN, no holder name reaches this server.
+      const input = await parseJson(context, z.union([
+        z.object({ remove: z.number().int().positive() }),
+        z.object({
+          label: z.string().max(32).regex(/^[ -~]*$/).default(""),
+          commitment: z.string().regex(/^[0-9a-fA-F]{64}$/),
+          sealedForSigner: z.string().min(16).max(2048).regex(/^[A-Za-z0-9+/=]+$/),
+          sealedForMembers: z.string().min(16).max(8192).regex(/^[A-Za-z0-9+/=]+$/),
+        }).strict(),
+      ]));
+      return context.json("remove" in input ? await omniroles.bankBeneficiaryRemoval(orgOf(context), input.remove) : await omniroles.bankBeneficiaryProposal(orgOf(context), input));
     });
     app.post("/v1/console/omniroles/proposals/bank-permission", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({

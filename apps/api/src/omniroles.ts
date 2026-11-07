@@ -54,11 +54,8 @@ import {
   type VaultCall,
   NEAR_TESTNET_TOKENS,
   withSealedOrdersMember,
-  canonicalIban,
   euroPayoutBudgetKey,
-  formatIban,
-  validIban,
-  type BankBeneficiary,
+  type SealedBeneficiary,
   type BankConfig,
   type BankPayout,
   type BankPermission,
@@ -105,6 +102,8 @@ export interface BankSignerDeployment {
   signerHash: string;
   secretsOwner: string;
   secretsProfile: string;
+  /** The enclave's X25519 key (hex), from its `pubkey` output: beneficiaries are sealed to it. */
+  boxKey: string;
 }
 
 /** Fees of the EURC transfer on Base Sepolia (caps; the DAO gas policy bounds them). */
@@ -1768,12 +1767,17 @@ export class OmniRolesService {
       if (/MethodNotFound|MethodResolveError/.test(String(error))) return undefined;
       throw error;
     });
-    if (config === undefined) return { supported: false as const, deployable: Boolean(this.config.bankSigner), config: null, beneficiaries: [], roles: [], payouts: [] };
+    if (config === undefined) return { supported: false as const, deployable: Boolean(this.config.bankSigner), config: null, boxKey: null, readers: [], beneficiaries: [], roles: [], payouts: [] };
     const account = await this.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });
-    const [beneficiaries, count, rolesView] = await Promise.all([
-      this.view<BankBeneficiary[]>(vault, "list_bank_beneficiaries"),
+    const [beneficiaries, count, rolesView, boxKey, readers] = await Promise.all([
+      this.view<SealedBeneficiary[]>(vault, "list_bank_beneficiaries").catch(() => [] as SealedBeneficiary[]),
       this.view<number>(vault, "count_bank_payouts"),
       this.roles(organizationId),
+      this.view<string | null>(vault, "get_bank_box_key").catch(() => null),
+      // The members' reading keys (registered for sealed orders): beneficiaries are sealed to them too.
+      this.config.sealedOrdersId
+        ? this.view<Array<{ account: string; public_key: string }>>(this.config.sealedOrdersId, "readers", { vault }).catch(() => [])
+        : Promise.resolve([] as Array<{ account: string; public_key: string }>),
     ]);
     const payouts = count ? await this.view<BankPayout[]>(vault, "list_bank_payouts", { from_index: Math.max(0, count - 50), limit: 50 }) : [];
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
@@ -1792,14 +1796,18 @@ export class OmniRolesService {
       deployable: Boolean(this.config.bankSigner),
       config: config ? { ...config, token: hexOf(config.token), configured: this.config.bankSigner ? config.signer_hash === this.config.bankSigner.signerHash : null } : null,
       customerId: account?.customerId ?? null,
-      beneficiaries: beneficiaries.map((entry) => ({ iban: formatIban(entry.iban), name: entry.name, holderType: entry.holder_type })),
+      boxKey,
+      readers: readers.map((reader) => ({ account: reader.account, publicKey: reader.public_key })),
+      sealedOrdersId: this.config.sealedOrdersId ?? null,
+      // No IBAN here: the server never sees one. Members open `sealedForMembers` in their browser.
+      beneficiaries: beneficiaries.map((entry) => ({ id: entry.id, label: entry.label, commitment: entry.commitment, sealedForMembers: entry.sealed_for_members })),
       roles,
       payouts: [...payouts].reverse().map((payout) => ({
         opId: hexOf(payout.op_id),
         at: new Date(Number(BigInt(payout.created_at_ns) / NANOS_PER_MS)).toISOString(),
         actor: agentByAccount.get(payout.member) ?? payout.member,
         role: payout.role,
-        beneficiary: { iban: formatIban(payout.beneficiary.iban), name: payout.beneficiary.name },
+        beneficiary: { id: payout.beneficiary_id, label: payout.beneficiary_label },
         amount: payout.amount,
         fiatAmount: payout.fiat_amount,
         reference: payout.reference,
@@ -1811,15 +1819,22 @@ export class OmniRolesService {
     };
   }
 
-  /** Vote an IBAN in (or out) of the beneficiaries any bank-permitted role may pay. */
-  async bankBeneficiaryProposal(organizationId: string, input: { iban: string; name: string; holderType: "Business" | "Individual"; remove?: boolean | undefined }) {
+  /**
+   * Vote a beneficiary in, sealed in the member's browser (packages/sdk/src/bank-private.ts): this
+   * server receives the commitment and the two envelopes, never the IBAN or the holder.
+   */
+  async bankBeneficiaryProposal(organizationId: string, input: { label: string; commitment: string; sealedForSigner: string; sealedForMembers: string }) {
     const treasury = await this.requireTreasury(organizationId);
-    if (!validIban(input.iban)) throw new OmniRolesError(400, "invalid_iban", "This IBAN does not pass the checksum");
-    const iban = canonicalIban(input.iban);
-    if (input.remove) return this.proposal(treasury, "Remove a bank beneficiary", [{ method: "queue_rule_change", change: { RemoveBankBeneficiary: { iban } } }]);
-    const name = input.name.trim();
-    if (!name || name.length > 255 || !/^[ -~]+$/.test(name)) throw new OmniRolesError(400, "invalid_name", "The account holder name must be 1 to 255 printable ASCII characters");
-    return this.proposal(treasury, "Add a bank beneficiary", [{ method: "queue_rule_change", change: { AddBankBeneficiary: { beneficiary: { iban, name, holder_type: input.holderType } } } }]);
+    if (/[A-Z]{2}\d{2}[A-Z0-9]{11,30}/i.test(input.label.replace(/\s+/g, ""))) throw new OmniRolesError(400, "label_is_iban", "The label is public: never an IBAN");
+    return this.proposal(treasury, "Add a sealed bank beneficiary", [{
+      method: "queue_rule_change",
+      change: { AddSealedBankBeneficiary: { label: input.label.trim(), commitment: input.commitment.toLowerCase(), sealed_for_signer: input.sealedForSigner, sealed_for_members: input.sealedForMembers } },
+    }]);
+  }
+
+  async bankBeneficiaryRemoval(organizationId: string, id: number) {
+    const treasury = await this.requireTreasury(organizationId);
+    return this.proposal(treasury, `Remove bank beneficiary #${id}`, [{ method: "queue_rule_change", change: { RemoveSealedBankBeneficiary: { id } } }]);
   }
 
   /**
@@ -1875,7 +1890,11 @@ export class OmniRolesService {
       decimals: token.decimals,
       ...BANK_TRANSFER_GAS,
     };
-    return this.proposal(treasury, "Enable euro payouts through the bank signer", [{ method: "queue_rule_change", change: { SetBankConfig: { config } } }]);
+    return this.proposal(treasury, "Enable euro payouts through the bank signer", [
+      { method: "queue_rule_change", change: { SetBankConfig: { config } } },
+      // Beneficiaries are sealed to this enclave's key; voting it also erases any IBAN kept in clear.
+      { method: "queue_rule_change", change: { SetBankBoxKey: { key: signer.boxKey } } },
+    ]);
   }
 
   async roles(organizationId: string) {
@@ -2151,7 +2170,7 @@ export class OmniRolesService {
           reference: payout.reference,
           chainId: treasury.baseChainId,
           chain: "Bank (SEPA)",
-          summary: `Pay ${euros} EUR to ${payout.beneficiary.name} (${formatIban(payout.beneficiary.iban)}) through the bank partner`,
+          summary: `Pay ${euros} EUR to bank beneficiary #${payout.beneficiary_id}${payout.beneficiary_label ? ` (${payout.beneficiary_label})` : ""} through the bank partner`,
           vaultState: payout.state === "Transferring" ? transfer?.operation.state ?? "Scheduled" : payout.state,
           nonce: transfer?.operation.evm_nonce ?? null,
           evm: transfer?.evmHash ? { hash: transfer.evmHash, status: transfer.receipt?.status ?? "not mined", blockNumber: transfer.receipt?.blockNumber ?? null } : null,

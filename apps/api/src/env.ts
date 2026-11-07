@@ -95,6 +95,8 @@ const schema = z.object({
   /** The bank signer deployed on OutLayer (bank-signer/): its WASM URL and sha256, and the secrets it reads. Unset: no euro payouts. */
   BANK_SIGNER_URL: z.string().url().optional(),
   BANK_SIGNER_HASH: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** The enclave's X25519 box key (hex), from its `pubkey` output: beneficiaries are sealed to it. */
+  BANK_SIGNER_BOX_KEY: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   BANK_SIGNER_SECRETS_OWNER: z.string().min(2).optional(),
   BANK_SIGNER_SECRETS_PROFILE: z.string().min(1).default("noah"),
   BANK_SIGNER_OUTLAYER_ID: z.string().min(2).default("outlayer.testnet"),

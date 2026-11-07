@@ -211,14 +211,18 @@ export type BankPolicy = {
   deployable: boolean;
   config: null | { outlayer_id: string; signer_hash: string; network: string; crypto: string; customer_id: string; decimals: number; configured: boolean | null };
   customerId?: string | null;
-  beneficiaries: Array<{ iban: string; name: string; holderType: string }>;
+  boxKey?: string | null;
+  readers?: Array<{ account: string; publicKey: string }>;
+  sealedOrdersId?: string | null;
+  /** Sealed: no IBAN, no name. Members open `sealedForMembers` with their reading key. */
+  beneficiaries: Array<{ id: number; label: string; commitment: string; sealedForMembers: string }>;
   roles: Array<{ role: string; budgets: Array<{ key: string; label: string; token: string | null; available: string | null }>; permission: null | { budget: string | null; budgetLabel: string | null; maxPerPayout: string } }>;
-  payouts: Array<{ opId: string; at: string; actor: string; role: string; beneficiary: { iban: string; name: string }; amount: string; fiatAmount: string | null; reference: string; state: "Requested" | "Transferring" | "Failed"; ruleId: string | null; transferOpId: string | null; error: string | null }>;
+  payouts: Array<{ opId: string; at: string; actor: string; role: string; beneficiary: { id: number; label: string }; amount: string; fiatAmount: string | null; reference: string; state: "Requested" | "Transferring" | "Failed"; ruleId: string | null; transferOpId: string | null; error: string | null }>;
 };
 
 export const bankApi = {
   policy: () => api<BankPolicy>("/v1/console/omniroles/bank"),
-  beneficiaryProposal: (input: { iban: string; name: string; holderType: "Business" | "Individual"; remove?: boolean }) =>
+  beneficiaryProposal: (input: { label: string; commitment: string; sealedForSigner: string; sealedForMembers: string } | { remove: number }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/bank-beneficiary", { method: "POST", body: JSON.stringify(input) }),
   permissionProposal: (input: { role: string; budget: string | null; maxPerPayout: string | null; newBudget?: { amount: string; periodDays: number } }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/bank-permission", { method: "POST", body: JSON.stringify(input) }),

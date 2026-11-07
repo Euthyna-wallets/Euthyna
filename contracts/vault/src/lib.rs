@@ -1765,7 +1765,10 @@ impl Vault {
             change @ (RuleChange::SetBankConfig { .. }
             | RuleChange::AddBankBeneficiary { .. }
             | RuleChange::RemoveBankBeneficiary { .. }
-            | RuleChange::SetBankPermission { .. }) => {
+            | RuleChange::SetBankPermission { .. }
+            | RuleChange::SetBankBoxKey { .. }
+            | RuleChange::AddSealedBankBeneficiary { .. }
+            | RuleChange::RemoveSealedBankBeneficiary { .. }) => {
                 self.apply_bank_rule(&change);
             }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
@@ -1930,7 +1933,10 @@ impl Vault {
             change @ (RuleChange::SetBankConfig { .. }
             | RuleChange::AddBankBeneficiary { .. }
             | RuleChange::RemoveBankBeneficiary { .. }
-            | RuleChange::SetBankPermission { .. }) => {
+            | RuleChange::SetBankPermission { .. }
+            | RuleChange::SetBankBoxKey { .. }
+            | RuleChange::AddSealedBankBeneficiary { .. }
+            | RuleChange::RemoveSealedBankBeneficiary { .. }) => {
                 Self::validate_bank_rule(change);
             }
             RuleChange::SetSolanaPermissions { role, permissions } => {

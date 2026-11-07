@@ -51,6 +51,10 @@
       "types": "./dist/tx-check.d.ts",
       "default": "./dist/tx-check.js"
     },
+    "./bank-private": {
+      "types": "./dist/bank-private.d.ts",
+      "default": "./dist/bank-private.js"
+    },
     "./sealed-orders": {
       "types": "./dist/sealed-orders.d.ts",
       "default": "./dist/sealed-orders.js"
