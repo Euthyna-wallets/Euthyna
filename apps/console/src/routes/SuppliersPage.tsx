@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type CSSProperties } from "react";
 import { bytesToHex, hexToBytes } from "viem";
-import { beneficiaryVote, readBeneficiary, type PrivateBeneficiary } from "@euthyna/sdk/bank-private";
-import { decodeVaultCalls, formatIban, validIban, type RuleChange } from "@euthyna/sdk/roles";
+import { payeeVote, RAILS, readPayee, type RailId, type ReadPayee } from "@euthyna/sdk/bank-private";
+import { decodeVaultCalls, type RuleChange } from "@euthyna/sdk/roles";
 import { api } from "../api.js";
 import { Kicker, NightPanel, PageTitle, Seal, Slab } from "../components/design.js";
 import { PageState } from "../components/ui.js";
@@ -36,11 +36,13 @@ export function SuppliersPage() {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const bank = useQuery({ queryKey: ["bank-policy"], queryFn: bankApi.policy, refetchInterval: 10_000 });
-  const [holder, setHolder] = useState("");
-  const [iban, setIban] = useState("");
+  const rails = useQuery({ queryKey: ["bank-rails"], queryFn: bankApi.rails, staleTime: 300_000 });
+  const [rail, setRail] = useState<RailId>("sepa");
+  const [values, setValues] = useState<Record<string, string>>({});
   const [label, setLabel] = useState("");
-  const [holderType, setHolderType] = useState<"Business" | "Individual">("Business");
-  const [opened, setOpened] = useState<Record<number, PrivateBeneficiary | null>>({});
+  const [opened, setOpened] = useState<Record<number, ReadPayee | null>>({});
+  const railSpec = RAILS.find((item) => item.id === rail)!;
+  const channelId = rails.data?.rails.find((item) => item.id === rail)?.channelId ?? null;
   const beneficiary = useMutation({
     mutationFn: async (remove: number | null) => {
       const treasury = status.data?.treasury;
@@ -55,15 +57,15 @@ export function SuppliersPage() {
         // Sealed here, in this browser: the server and the chain get a commitment and two envelopes.
         if (!policy.boxKey) throw new Error("Euro payouts are not enabled yet: the members vote the bank signer first (Treasury → Euro payouts).");
         if (!policy.readers?.length) throw new Error("No member has a reading key yet: register yours (Treasury → Sealed orders) so the members can read the IBANs they vote.");
-        const vote = await beneficiaryVote({ vault: treasury.vaultAccountId, iban, name: holder, holderType, boxKeyHex: policy.boxKey, readers: policy.readers });
+        if (!channelId) throw new Error("The bank partner offers no payout channel for this country right now.");
+        const vote = await payeeVote({ vault: treasury.vaultAccountId, rail, channelId, values, boxKeyHex: policy.boxKey, readers: policy.readers });
         expected = { AddSealedBankBeneficiary: { label: label.trim(), commitment: vote.commitment, sealed_for_signer: vote.sealedForSigner, sealed_for_members: vote.sealedForMembers } };
         draft = await bankApi.beneficiaryProposal({ label: label.trim(), commitment: vote.commitment, sealedForSigner: vote.sealedForSigner, sealedForMembers: vote.sealedForMembers });
       }
       const decoded = decodeVaultCalls(draft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], treasury.vaultAccountId);
       if (draft.receiverId !== treasury.daoAccountId || JSON.stringify(decoded) !== JSON.stringify([{ method: "queue_rule_change", change: expected }])) throw new Error("Beneficiary proposal does not match what was typed in this browser");
       await signDaoProposal(wallets.nearAccountId, draft);
-      setIban("");
-      setHolder("");
+      setValues({});
       setLabel("");
     },
     onSuccess: async () => { await client.invalidateQueries({ queryKey: ["omni-governance"] }); },
@@ -95,9 +97,9 @@ export function SuppliersPage() {
       const treasury = status.data?.treasury;
       if (!treasury || !wallets.nearAccountId) throw new Error("Connect your NEAR wallet first");
       const key = await readerKey(treasury.vaultAccountId);
-      const result: Record<number, PrivateBeneficiary | null> = {};
+      const result: Record<number, ReadPayee | null> = {};
       for (const entry of beneficiaries) {
-        result[entry.id] = await readBeneficiary(entry.sealedForMembers, entry.commitment, wallets.nearAccountId, key.privateKey).catch(() => null);
+        result[entry.id] = await readPayee(entry.sealedForMembers, entry.commitment, wallets.nearAccountId, key.privateKey).catch(() => null);
       }
       setOpened(result);
     },
@@ -168,10 +170,10 @@ export function SuppliersPage() {
                       {open ? open.name.toUpperCase() : `BENEFICIARY #${entry.id}${entry.label ? ` · ${entry.label.toUpperCase()}` : ""}`}
                     </b>
                     <span style={{ font: "12.5px var(--font-mono)", color: "#4A5675", overflowWrap: "anywhere" }}>
-                      {open ? `${formatIban(open.iban)} · EUR by bank transfer` : `sealed · ${entry.commitment.slice(0, 16)}…`}
+                      {open ? `${open.account} · ${open.currency} · ${RAILS.find((item) => item.id === open.rail)?.title ?? open.rail}` : `sealed · ${entry.commitment.slice(0, 16)}…`}
                     </span>
                     <span style={{ fontSize: 11.5, color: "#66718C" }}>
-                      {open ? `${open.holder_type} account · read in this browser only` : open === null ? "Not sealed for your reading key." : "IBAN sealed: not on chain, readable by the members only."}
+                      {open ? "Read in this browser only" : open === null ? "Not sealed for your reading key." : "Account sealed: not on chain, readable by the members only."}
                     </span>
                   </div>
                   <button className="btn-line" style={{ fontSize: 10 }} disabled={beneficiary.isPending} onClick={() => beneficiary.mutate(entry.id)} title="Propose removing this beneficiary">REMOVE</button>
@@ -216,29 +218,37 @@ export function SuppliersPage() {
 
             {bank.data?.supported ? (
               <Slab style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-                <Kicker>Add a bank beneficiary · IBAN</Kicker>
+                <Kicker>Add a bank beneficiary · payroll, suppliers, abroad</Kicker>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <input maxLength={255} aria-label="Account holder" placeholder="Account holder name" value={holder} onChange={(e) => setHolder(e.target.value)} style={{ ...INPUT, flex: "0 0 180px" }} />
-                  <input maxLength={32} aria-label="Public label" placeholder="Public label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} style={{ ...INPUT, flex: "0 0 160px" }} />
-                  <input aria-label="IBAN" placeholder="FR76 …" value={iban} onChange={(e) => setIban(e.target.value)} style={{ ...INPUT, flex: "1 1 220px", fontFamily: "var(--font-mono)" }} />
-                  <select aria-label="Account holder type" value={holderType} onChange={(e) => setHolderType(e.target.value as "Business" | "Individual")} style={{ ...INPUT, flex: "0 0 130px" }}>
-                    <option value="Business">Business</option>
-                    <option value="Individual">Individual</option>
+                  <select aria-label="Country and rail" value={rail} onChange={(e) => { setRail(e.target.value as RailId); setValues({}); }} style={{ ...INPUT, flex: "0 0 240px" }}>
+                    {RAILS.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.currency}</option>)}
                   </select>
+                  <input maxLength={32} aria-label="Public label" placeholder="Public label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} style={{ ...INPUT, flex: "0 0 180px" }} />
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {railSpec.fields.map((field) => field.options ? (
+                    <select key={field.key} aria-label={field.label} value={values[field.key] ?? field.options[0]![0]} onChange={(e) => setValues({ ...values, [field.key]: e.target.value })} style={{ ...INPUT, flex: "0 0 150px" }}>
+                      {field.options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                    </select>
+                  ) : (
+                    <input key={field.key} aria-label={field.label} placeholder={field.placeholder ?? field.label} value={values[field.key] ?? ""} onChange={(e) => setValues({ ...values, [field.key]: e.target.value })} style={{ ...INPUT, flex: "1 1 160px", fontFamily: /iban|account|routing|sort|pix/i.test(field.key) ? "var(--font-mono)" : undefined }} />
+                  ))}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12.5, color: "#66718C" }}>Sealed in this browser: the chain and our servers get a commitment, never the IBAN or the name. The label is public, so never a name. Agents pay it by its number; the enclave pays no other IBAN.</span>
+                  <span style={{ fontSize: 12.5, color: "#66718C" }}>
+                    Sealed in this browser: the chain and our servers get a commitment, never the account or the name. The label is public, so never a name.
+                    Paid in {railSpec.currency} from the company's euros{channelId ? "" : " (no channel from the bank partner right now)"}; the enclave pays no other account.
+                  </span>
                   <button
                     className="btn-ori"
                     style={{ marginLeft: "auto", whiteSpace: "nowrap" }}
-                    disabled={beneficiary.isPending || !holder.trim() || !validIban(iban)}
+                    disabled={beneficiary.isPending || !channelId}
                     onClick={() => beneficiary.mutate(null)}
                     title={bank.data?.boxKey ? "" : "Enable euro payouts first"}
                   >
                     {beneficiary.isPending ? "SIGNING…" : "ADD BENEFICIARY"}
                   </button>
                 </div>
-                {iban.trim() && !validIban(iban) ? <span style={{ fontSize: 12, color: "var(--terra-ink)" }}>This IBAN does not pass the checksum.</span> : null}
                 {unlock.error ? <span style={{ fontSize: 12, color: "var(--terra-ink)" }}>{unlock.error.message}</span> : null}
                 {beneficiary.error ? (
                   <p role="alert" style={{ margin: 0, padding: "10px 12px", background: "#FBE3D6", border: "1px solid rgba(168,56,30,.35)", color: "var(--terra-ink)", fontSize: 13 }}>

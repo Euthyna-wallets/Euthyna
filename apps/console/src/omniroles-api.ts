@@ -227,6 +227,10 @@ export const bankApi = {
   permissionProposal: (input: { role: string; budget: string | null; maxPerPayout: string | null; newBudget?: { amount: string; periodDays: number } }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/bank-permission", { method: "POST", body: JSON.stringify(input) }),
   configProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/bank-config", { method: "POST", body: "{}" }),
+  rails: () => api<{ rails: Array<{ id: string; channelId: string | null; method: string; minimum: string | null; maximum: string | null; seconds: number | null; rate: string | null }> }>("/v1/console/bank/rails"),
+  standingOrders: () => api<{ orders: Array<{ id: number; beneficiaryId: number; amount: string; label: string; runs: number; remaining: number | null; nextAt: string; periodDays: number }> }>("/v1/console/omniroles/standing-orders"),
+  standingOrderProposal: (input: { beneficiaryId: number; amount: string; firstAt: string; periodDays: number; count: number | null; label: string } | { beneficiaryId: number; remove: number }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/standing-order", { method: "POST", body: JSON.stringify(input) }),
   view: () => api<BankView>("/v1/console/bank"),
   open: (input: BankBusiness) => api<BankView>("/v1/console/bank", { method: "POST", body: JSON.stringify(input) }),
   simulate: (amount: string) => api<{ depositId: string }>("/v1/console/bank/simulate", { method: "POST", body: JSON.stringify({ amount }) }),

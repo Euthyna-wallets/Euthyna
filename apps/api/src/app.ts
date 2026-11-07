@@ -856,6 +856,19 @@ export function createApp({
       ]));
       return context.json("remove" in input ? await omniroles.bankBeneficiaryRemoval(orgOf(context), input.remove) : await omniroles.bankBeneficiaryProposal(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/standing-orders", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.standingOrders(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/standing-order", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        beneficiaryId: z.number().int().positive(),
+        amount: z.string().regex(/^\d+$/).default("0"),
+        firstAt: z.string().default(""),
+        periodDays: z.number().min(0.001).max(366).default(30),
+        count: z.number().int().positive().nullable().default(null),
+        label: z.string().max(32).regex(/^[ -~]*$/).default(""),
+        remove: z.number().int().positive().optional(),
+      }));
+      return context.json(await omniroles.standingOrderProposal(orgOf(context), input));
+    });
     app.post("/v1/console/omniroles/proposals/bank-permission", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({
         role: z.string().min(1).max(64),
@@ -1103,6 +1116,10 @@ export function createApp({
     const view = await bank.open(console.organizationId, input);
     await auth.recordAudit({ organizationId: console.organizationId, actorType: "console", actorId: console.userId, action: "bank.account.opened", targetType: "bank_account", targetId: view.account?.iban ?? "", metadata: { destination: view.account?.destinationAddress, network: view.account?.network } });
     return context.json({ configured: true, ...view }, 201);
+  });
+  app.get("/v1/console/bank/rails", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!bank) return context.json({ rails: [] });
+    return context.json(await bank.rails(context.get("console").organizationId));
   });
   app.post("/v1/console/bank/simulate", requireConsole(auth, consoleLimiter), async (context) => {
     if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });

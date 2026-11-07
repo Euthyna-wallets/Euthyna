@@ -138,6 +138,21 @@ export class BankService {
     return this.view(organizationId);
   }
 
+  /**
+   * The payout rails the company can pay (payroll, suppliers, remittances), with the partner's
+   * channel for each: the console seals a beneficiary for that channel. No beneficiary data here.
+   */
+  async rails(organizationId: string): Promise<{ rails: Array<{ id: string; channelId: string | null; method: string; minimum: string | null; maximum: string | null; seconds: number | null; rate: string | null }> }> {
+    const account = await this.deps.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });
+    const crypto = account?.cryptoCurrency ?? (this.deps.noah.sandbox ? "EURC_TEST" : "EURC");
+    const wanted = [["sepa", "FR", "EUR", "BankSepa"], ["pix", "BR", "BRL", "IdentifierPix"], ["ach", "US", "USD", "BankAch"], ["uk", "GB", "GBP", "BankLocal"]] as const;
+    const rails = await Promise.all(wanted.map(async ([id, country, fiatCurrency, method]) => {
+      const channel = (await this.deps.noah.sellChannels({ country, fiatCurrency, cryptoCurrency: crypto }).catch(() => ({ Items: [] }))).Items?.find((item) => item.PaymentMethodType === method);
+      return { id, channelId: channel?.ID ?? null, method, minimum: channel?.Limits?.MinLimit ?? null, maximum: channel?.Limits?.MaxLimit ?? null, seconds: channel?.ProcessingSeconds ?? null, rate: channel?.Rate ?? null };
+    }));
+    return { rails };
+  }
+
   /** Sandbox only: a SEPA transfer arrives on the IBAN. */
   async simulateDeposit(organizationId: string, amount: string): Promise<{ depositId: string }> {
     const account = await this.deps.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });

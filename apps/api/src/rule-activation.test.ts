@@ -22,11 +22,13 @@ function world(now: { ms: number }) {
   };
   const reads: string[] = [];
   const executed: string[] = [];
+  const standing: Record<string, Array<{ id: number; next_at_ns: string }>> = {};
   const lanes: string[] = [];
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
       if (method === "list_dao_transactions") return [];
+      if (method === "list_standing_orders") return standing[account] ?? [];
       reads.push(account);
       if (account === "broken.nomos.testnet") throw new Error("CodeDoesNotExist");
       return rules[account] ?? [];
@@ -49,7 +51,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules };
+  return { service, reads, executed, lanes, rules, standing };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -88,6 +90,20 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 23_500);
     await service.activateAllReadyRules();
     expect(executed).toContain("later.nomos.testnet:execute_rule_change");
+  });
+
+  it("runs a payroll order once its date has come, and comes back for it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, standing } = world(now);
+    standing["idle.nomos.testnet"] = [{ id: 7, next_at_ns: ns(now.ms + 10_000) }];
+    await service.activateAllReadyRules();
+    expect(executed).not.toContain("idle.nomos.testnet:run_standing_order");
+    // Read again just after its date (plus the margin for the chain's clock), not a minute later.
+    vi.setSystemTime(now.ms + 13_500);
+    await service.activateAllReadyRules();
+    expect(executed).toContain("idle.nomos.testnet:run_standing_order");
   });
 
   it("never runs two passes at once", async () => {

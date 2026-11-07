@@ -112,6 +112,11 @@ export class NoahClient {
     return this.call("GET", `/transactions?CustomerID=${encodeURIComponent(customerId)}&PageSize=${pageSize}&SortDirection=DESC`);
   }
 
+  /** Payout channels for a country and currency (SEPA, Pix, ACH, local rails…). */
+  sellChannels(input: { country: string; fiatCurrency: string; cryptoCurrency: string }): Promise<{ Items?: Array<{ ID: string; PaymentMethodType: string; Limits?: { MinLimit?: string; MaxLimit?: string }; ProcessingSeconds?: number; Rate?: string }> }> {
+    return this.call("GET", `/channels/sell?Country=${encodeURIComponent(input.country)}&FiatCurrency=${encodeURIComponent(input.fiatCurrency)}&CryptoCurrency=${encodeURIComponent(input.cryptoCurrency)}`);
+  }
+
   /** Sandbox only: an incoming SEPA transfer on the IBAN. */
   simulateDeposit(paymentMethodId: string, amount: string): Promise<{ FiatDepositID: string }> {
     if (!this.sandbox) throw new NoahError(400, "deposits can be simulated only in Noah's sandbox");
