@@ -7,7 +7,7 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
 import { authClient } from "../auth.js";
@@ -17,8 +17,8 @@ import { SigningInbox } from "../components/SigningInbox.js";
 import { WalletBar } from "../components/WalletBar.js";
 import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
 import { useWallets, WalletProvider } from "../lib/wallet-context.js";
+import { rememberSetupLater } from "../lib/setup-later.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
-import { disconnectNearWallet } from "../wallets.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
 import { NewAgent, RunYourAgent, type AgentReady } from "./AgentSetup.js";
 import { forkedLawOf, lawForCompany, rememberPendingLaw, roleBuilderPath, type ForkedLaw } from "./onboarding-law.js";
@@ -77,6 +77,7 @@ const writeFlag = (key: string, value: boolean) => {
 
 export function OnboardingPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const organizations = useQuery({
     queryKey: ["organizations"],
     queryFn: async () => ((await authClient.organization.list()).data ?? []) as Organization[],
@@ -225,7 +226,7 @@ export function OnboardingPage() {
         <button
           type="button"
           title="Sign out, then sign in with another founder's wallet"
-          onClick={() => void authClient.signOut().then(disconnectNearWallet).then(() => window.location.assign("/"))}
+          onClick={() => void authClient.signOut().then(() => window.location.assign("/"))}
           style={{ background: "none", border: "1px solid currentColor", borderRadius: 2, padding: "6px 12px", font: "700 11px var(--font-brand)", letterSpacing: ".14em", color: "var(--onb-mute)", cursor: "pointer" }}
         >
           SIGN OUT
@@ -261,6 +262,19 @@ export function OnboardingPage() {
               {TITLES[stage]}
             </PageTitle>
             <p style={{ margin: 0, fontSize: 15.5, color: "var(--onb-soft)" }}>{waitingFor[stage]}</p>
+            {/* Past the wallet the company exists: hiring and roles can wait, from Agents and Rules. */}
+            {(stage === "agent" || stage === "role") && active && !newAgent ? (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--onb-soft)" }}>
+                <button
+                  type="button"
+                  onClick={() => { rememberSetupLater(active.id); navigate("/overview"); }}
+                  style={{ background: "none", border: 0, padding: 0, font: "700 12px var(--font-brand)", letterSpacing: ".14em", color: "var(--onb-gold)", textDecoration: "underline", cursor: "pointer" }}
+                >
+                  SKIP FOR NOW
+                </button>{" "}
+                · hire agents and vote their roles later, from Agents and Rules.
+              </p>
+            ) : null}
           </div>
 
           {stage === "company" ? (
