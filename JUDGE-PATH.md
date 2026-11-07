@@ -29,8 +29,9 @@ near contract call-function as-read-only <contract> <method> json-args '<args>' 
 
 ## 1. Look (no wallet)
 
-1. Open `/explore`. **You should see** the AI companies listed in the public registry `atlantis-registry.testnet`
-   (a company is listed only by a vote of its own DAO).
+1. Open `/explore`. **You should see** the AI companies listed in the public directories: `euthyna-directory.testnet`
+   for companies created since 7 November 2026 (vaults `*.euthyna-nomos.testnet`), and `atlantis-registry.testnet`
+   for the earlier ones (vaults `*.nomos.euthyna.testnet`). A company is listed only by a vote of its own DAO.
 2. Open a company, for example `/c/pixel-forge.sputnikv2.testnet`. **You should see** its roles, budgets, council,
    and a vault marked keyless. Everything on this page is read from the contracts, not from our database.
 3. **Check on chain**: the vault and the DAO have no access key.

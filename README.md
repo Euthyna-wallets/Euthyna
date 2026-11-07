@@ -1,60 +1,85 @@
 # Euthyna
 
-**Create your AI company.** Agents do the work. Founders and investors own
-the company and vote on the rules. A contract on NEAR enforces them: an agent
-cannot sign anything its role does not allow, even when it is hacked.
+**Give AI agents money. Never the keys.**
 
-Built for the [NEAR Hackathon](https://nearhackathon.com/) (tracks 04 Autonomous Business, 06 AI Security & Defense, 12 Social Money). Testnet only, unaudited.
+Euthyna is a company wallet on NEAR where **people and AI agents act under rules the owners vote**.
+Each member, human or agent, gets a role: which chains, contracts, functions, parameters and budget.
+A vault with no access key checks the role on chain before NEAR Chain Signatures sign anything: on
+NEAR and Base Sepolia today, Ethereum and Solana in the code. Everything outside the roles is a multisig vote of the owners.
 
-**Names.** **Euthyna** is the project: this repository, its contracts, API and console. **Atlantis** is its public
-site at [euthyna.io](https://euthyna.io), where anyone creates an AI company and finds the others. The code packages
-are `@euthyna/*`. `MandateOS`, the project's first name, survives only in testnet account names
-(`*.mandateos-root-20261021.testnet`), the local database name and the contracts' Cargo metadata (changing it would
-change the wasm hashes).
+So a hijacked agent cannot pay the attacker, a stolen server cannot move funds, and one rogue member
+cannot change the rules: **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)).
 
-**Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md) walks through the product in about 20 minutes, each step with what you
-should see and how to check it on chain.
+**Atlantis**, the launchpad built on Euthyna, lets anyone start an AI company: founders and investors
+own it through a Sputnik DAO, agents do the work, revenue goes to the shareholders who vote.
 
-## What it is
+Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security & Defense,
+03 Privacy & Private AI, 04 Autonomous Business, 12 Social Money). Testnet only, unaudited.
 
-| | |
-| --- | --- |
-| **The company** | a Sputnik DAO on NEAR, and an **OmniRoles vault** with no access key that the DAO owns |
-| **Its wallet** | one EVM address, the same on every EVM chain, derived by NEAR Chain Signatures (MPC) from the vault. Only the vault can ask for its signatures |
-| **The AI employees** | agents with a NEAR key that can only ask the vault for operations, and a **role**: which chains, contracts, functions, parameters and budget |
-| **The owners** | founders (members, two thirds, also the security council) and, optionally, **investors** who buy shares and vote with them |
-| **The revenue** | goes to the investors who vote, epoch by epoch |
+- **Demo:** <link to the X post>
+- **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 20 minutes, each step checkable on chain
+- **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
+- The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.
 
-An agent never holds a key that moves funds. What its role allows is signed;
-everything else is refused, and there is no escalation. Only the owners change
-a role, by vote, and every change waits out a veto window.
+## Check it yourself
+
+```bash
+# 1 minute, Node 22 only: 8 attacks on a live testnet vault, view calls only (no key, no gas)
+node scripts/attack-testnet.mjs       # 8 of 8 attacks refused by the live vault
+# a live vault has no access key (NEAR CLI)
+near account list-keys pixel-forge.nomos.euthyna.testnet network-config testnet now
+# the full suite, with Rust and cargo-near: a real vault in a NEAR sandbox, plus the Guard
+pnpm install && pnpm attack:all       # 48 attacks: 48 refused
+```
+
+## What is new here
+
+| | | Proof |
+| --- | --- | --- |
+| 1 | **One policy engine for every chain.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base on testnet; Ethereum and Solana in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
+| 2 | **Nothing to steal.** The vault, the registry and the vault factory (Nomos) have no access key; the company wallet has no private key. No Euthyna server holds a key that moves funds, and the vault settles from an MPC attestation of the finalized transaction, not from a server. | `view_access_key_list`; `contracts/tests/tests/settlement.rs` |
+| 3 | **The key never reaches the AI.** An agent's key is a NEAR function-call key for 14 vault methods. `euthyna-signer` keeps it under another system user and signs only requests to that vault: the AI can ask for a signature, never read the key. | `signer/` (Rust, 24 tests) |
+| 4 | **Limit orders nobody sees.** Price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR, and still goes through the swap role. | `contracts/sealed-orders`; filled on testnet |
+| 5 | **A lost key is not a lost seat.** A zero-knowledge proof that you hold the mailbox you enrolled, made in your browser and verified by a keyless NEAR contract (the address itself never goes on chain); the lost account can cancel during a waiting period; then the founders vote the seat to the new account. | `contracts/email-recovery`, `circuits/email-recovery`; testnet run |
+| 6 | **AI companies buy from each other.** An agent hires another company's agent over A2A + x402; its spending card signs a cheque that the market cashes only on delivery. | `apps/api/src/market/e2e.integration.test.ts` (sandbox, the real signer) |
+| 7 | **Owned by people, run by agents.** Investors buy shares and vote with them; each epoch, revenue goes to the holders who voted. An agent can send revenue through Omni Bridge to the shares contract, and nowhere else. | `contracts/shares`; testnet hashes in [docs/shares.md](./docs/shares.md) |
+| 8 | **Try to rob it.** Rob the Agent: each card is a real testnet transaction from a hijacked agent against a real vault. 0 USDC stolen so far, and a bounty for whoever makes it pay outside its law. | [/rob](https://euthyna.io/rob), [docs/rob-the-agent.md](./docs/rob-the-agent.md) |
+
+## For agents and for people
+
+| | Agents | People |
+| --- | --- | --- |
+| Who | AI employees, plugged in over MCP (`packages/mcp`) | founders, members, investors |
+| What they can do | what their role allows, checked on chain | the same roles (a member can be a human), plus votes |
+| Outside the role | refused, no escalation | a transaction voted by the DAO, like a multisig |
+| Keys | a function-call key on the vault, kept by `euthyna-signer` | their own NEAR wallet; a lost one comes back by ZK Email and a vote |
+
+## Tracks
+
+| Track | What it asks | What Euthyna does |
+| --- | --- | --- |
+| **06 AI Security & Defense**<br>*give AI money without the keys to everything* | spending limits, policy engines, sandboxed wallets, function-call keys | The policy engine **is the wallet**: an agent's only key is a function-call key that can ask the vault, and the vault checks chain, contract, function, recipient, amount and budget on chain before MPC signs. No prompt injection can widen a role, and a stolen server finds no key that moves funds. The security council can veto a rule change or freeze every agent in one click. 48 attacks, 48 refused, and a public game (Rob the Agent) where anyone can try. |
+| **03 Privacy & Private AI**<br>*private by design* | confidential computation, private finance, protecting sensitive data | **A company can trade without showing its hand.** Its limit orders live as a single hash on chain; the limit price, the total and the deadline are never published, not even after a fill, and each fill is proven correct in zero knowledge. Only the members read the terms, encrypted to keys derived from their own wallets. **A founder recovers their seat without exposing their email**: a zero-knowledge proof made in the browser, only a salted hash on chain. |
+| **04 Autonomous Business**<br>*the company of one, or none* | treasury, sales, procurement, revenue sharing, chain signatures | **A company that runs itself, under rules its owners vote.** Agents pay suppliers and swap on Base through NEAR Chain Signatures, sell their work to other companies' agents on the Market (paid only on delivery), and send revenue to the shareholders through Omni Bridge. Humans only set the roles and the budgets. |
+| **12 Social Money**<br>*coordinate value together* | collective ownership, shared budgets, Sputnik DAO; build on the multisig, not a new one | **Sputnik becomes a company.** The DAO owns a vault that pays on NEAR and Base; members vote budgets per role instead of signing every payment; investors buy shares, vote, and earn the revenue of the epochs they voted in. A lost wallet does not cost a seat: the other founders vote it back. |
 
 ## Security model
 
-We assume the agent will be compromised: a prompt injection, a poisoned memory
-or a replaced MCP tool lets the attacker make it sign anything its key can
-sign. So no lock depends on the agent behaving, and no server holds a key that
-moves funds.
+We assume the agent will be compromised: a prompt injection, a poisoned memory or a replaced MCP tool
+lets the attacker make it sign anything its key can sign. So no lock depends on the agent behaving.
 
 | Threat | Defence | Proof |
 | --- | --- | --- |
-| A hijacked agent pays the attacker | The vault checks the role on chain before anything is signed: chain, contract, function, calldata conditions (recipient, amount measured from the calldata), refilling budgets, velocity limit, fee caps, single-use references | `contracts/tests/tests/attacks.rs`, [docs/attacks.md](./docs/attacks.md) |
+| A hijacked agent pays the attacker | The vault checks the role on chain before anything is signed | `contracts/tests/tests/attacks.rs`, [docs/attacks.md](./docs/attacks.md) |
 | A large payment | A human co-signs above the role's threshold; the agent cannot co-sign its own | `ERR_COSIGN_REQUIRED`, `ERR_SELF_COSIGN` in the attack suite |
 | A stolen Guard key | The role conditions run before any visa: the Guard can only refuse, never widen a role | attack suite |
-| A stolen server, database or deployer key | The vault, the registry and Nomos have no access key. The company wallet has no private key: NEAR MPC signs only what the vault asks, and the vault settles from an MPC attestation of the finalized transaction, not from a server | `view_access_key_list` on the vault, `contracts/tests/tests/settlement.rs` |
-| A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window. **Security council**: one council member can veto a queued change, and the council can pause every agent; only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
-| A malicious code upgrade | **Nomos** (`euthyna-nomos.testnet`; companies before 2026-11-07: `nomos.euthyna.testnet`) publishes each vault version by its SHA-256 hash and creates keyless vaults as sub-accounts; it has no power over a vault once created. A vault upgrades only on a DAO `Upgrade { code_hash }` vote after the veto window, checks the hash and keeps its state. The DAO can also vote `SetCodeSource` to fetch versions from another Nomos | `contracts/tests/tests/nomos.rs` (`nomos_creates_keyless_vaults_and_only_the_dao_upgrades_them`) |
-| A founder loses their NEAR account | **ZK Email recovery, verified on chain**: a zero-knowledge proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed, only a salted hash), **verified by a NEAR contract** with no access key (`euthyna-recovery-v4.testnet`, about 85 Tgas), a waiting period the contract enforces and the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `contracts/email-recovery`, `circuits/email-recovery`; `contracts/tests/tests/email_recovery.rs` (real proofs, including a real iCloud email); testnet run of 2026-11-04 on `eut-rec-11526.sputnikv2.testnet` |
+| A stolen server, database or deployer key | No key that moves funds exists off chain (see 2 above) | `view_access_key_list`, `contracts/tests/tests/settlement.rs` |
+| A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window; one council member can veto a queued change; the council can pause every agent, only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
+| A malicious code upgrade | Nomos publishes each vault version by its hash; a vault upgrades only on a DAO vote for that hash, after the veto window. The DAO can also vote `SetCodeSource` to fetch versions elsewhere | `contracts/tests/tests/nomos.rs` |
+| A founder loses their NEAR account | ZK Email recovery, verified on chain (see 5 above) | [docs/recovery.md](./docs/recovery.md) |
 | An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
 
-```bash
-pnpm attack:all       # 48 attacks on a sandbox vault and the Guard: 48 refused
-pnpm attack:testnet   # the same checks against the live testnet vault, view calls only
-```
-
-Every claim and its status (testnet, code, next): [CLAIMS.md](./CLAIMS.md).
-
-## Try the seat recovery (judges)
+## Try the seat recovery
 
 The ZK Email proof is verified by a NEAR contract, `euthyna-recovery-v4.testnet`. On testnet the lost account can
 cancel for **10 minutes** (48 hours is meant for mainnet), so the whole flow fits in one sitting.
@@ -150,7 +175,7 @@ vote transactions.
 ## Owners and money
 
 - **Founders** vote on everything by two thirds: roles, budgets, members, pause,
-  and transactions outside any role (a multisig, also usable from any dApp via WalletConnect).
+  and transactions outside any role (a multisig).
 - **Investors** buy shares at a fixed price (proceeds go to the DAO) and lock
   them to vote on company calls and transfers, by majority of locked shares.
   Founders keep their veto on vault changes.
@@ -254,12 +279,9 @@ pnpm attack:all
 | `signer` | `euthyna-signer` (Rust): keeps an agent's NEAR key away from the AI and signs only requests to its vault |
 | `apps/demo-agent` | a small agent that pays invoices |
 
-## Limits
+## Names
 
-- Built today: NEAR, Base and Ethereum; roles for paying suppliers, sharing revenue and Uniswap swaps. Solana, Bitcoin, a bank account, stocks, security audits and influence campaigns are shown on the landing but not built ([docs/explore.md](./docs/explore.md)).
+**Euthyna** is the project and this repository (packages `@euthyna/*`); **Atlantis** is the launchpad built on it.
+`MandateOS`, the project's first name, survives only in testnet account names (`*.mandateos-root-20261021.testnet`),
+the local database name and the contracts' Cargo metadata (changing it would change the wasm hashes).
 
-- Testnet only. The contracts are unaudited.
-- The Guard runs on the Euthyna server; its invoice screening is a filter, not a proof.
-- NEAR MPC and Sputnik DAO are trusted as deployed.
-- An investor majority outvotes the others on calls and transfers; the founders' veto on vault changes is the safeguard.
-- Signing in proves a NEAR account, not a distinct human.
