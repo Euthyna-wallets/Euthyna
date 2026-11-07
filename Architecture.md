@@ -52,7 +52,7 @@ The Borsh layout changes for the vault, role configuration and operations. This 
 
 Agent keys are function-call keys on the vault, for the 14 methods of `AGENT_FUNCTION_CALL_METHODS` (`packages/sdk/src/index.ts`): `prepare`, `authorize`, `cancel_nonce`, `settle`, `settle_cancellation`, `release_unconfirmed`, `execute_queued_operation`, `cancel_prepared`, `renounce_role`, `execute_solana`, `settle_solana`, `release_solana_unconfirmed`, `execute_near`, `release_near_unconfirmed`. None of them can pay outside the role: `prepare`, `authorize`, `execute_solana` and `execute_near` check the agent's membership and role on chain; the settle, release and cancel methods only finish or undo an operation the role already allowed (some, like `cancel_nonce` after its delay, are open to anyone). The key has no gas allowance cap (`allowance: null`): gas comes from the agent's own account, never from the vault. Keys made before NEAR transfers lack `execute_near` and `release_near_unconfirmed`. Views require no signing permission. Existing keys and signer agent records must be updated explicitly; changing defaults does not modify previously provisioned keys.
 
-The signer daemon is maintained separately in `joindefi/euthyna-signer`; its `DEFAULT_METHODS` must match this method list. No contract or UI rename is part of this change.
+The signer daemon lives in `signer/` (`euthyna-signer`, Rust); its `DEFAULT_METHODS` must match this method list, which `packages/sdk/src/signer-methods.test.ts` checks. No contract or UI rename is part of this change.
 
 
 ## Build and sandbox

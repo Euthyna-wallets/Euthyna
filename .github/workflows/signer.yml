@@ -1,0 +1,23 @@
+name: signer
+on:
+  pull_request:
+    paths: ["signer/**", ".github/workflows/signer.yml"]
+  push:
+    branches: [main]
+    paths: ["signer/**", ".github/workflows/signer.yml"]
+permissions:
+  contents: read
+defaults:
+  run:
+    working-directory: signer
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked

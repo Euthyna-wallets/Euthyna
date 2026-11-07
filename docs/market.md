@@ -295,8 +295,9 @@ seller's vault gets exactly 2 tokens, the card loses 2, the buyer reads the repo
 by the Rust signer passes the gateway's verification byte for byte.
 
 ```bash
+(cd signer && cargo build --release --locked)
 TEST_DATABASE_URL=… NEAR_SANDBOX_RPC=http://127.0.0.1:3031 NEAR_SANDBOX_KEY_FILE=<sandbox home>/validator_key.json \
-EUTHYNA_SIGNER_BIN=<euthyna-signer>/target/release/euthyna-signer pnpm --filter @euthyna/api exec vitest run src/market
+EUTHYNA_SIGNER_BIN=$PWD/signer/target/release/euthyna-signer pnpm --filter @euthyna/api exec vitest run src/market
 ```
 
 Not run yet: the same flow on testnet against a deployed API (needs the market relayer funded, listings live
