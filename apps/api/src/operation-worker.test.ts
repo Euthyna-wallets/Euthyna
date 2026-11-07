@@ -494,7 +494,7 @@ describe("OperationWorker", () => {
   it("does no work while another process holds the lease", async () => {
     const test = harness();
     test.store.leased = false;
-    await expect(test.createWorker().tick()).resolves.toEqual({ leased: false, processed: 0 });
+    await expect(test.createWorker().tick()).resolves.toEqual({ leased: false, processed: 0, adopted: 0 });
     expect(test.base.broadcasts).toEqual([]);
   });
 
@@ -522,4 +522,103 @@ it("waits for cancellation finality before asking MPC", async () => {
   await test.createWorker().tick();expect(test.near.settlements).toBe(0);
   expect(test.store.operation.lastError).toBe("waiting for foreign-chain finality");
   test.base.finalized=100n;test.advance(1_000);await test.createWorker().tick();expect(test.near.settlements).toBe(1);
+});
+
+/** A store that also lists vaults: the worker scans them for signed operations it has no record of. */
+class ScanningStore extends FakeStore {
+  vaultCalls = 0;
+  adopted: string[] = [];
+  failingVaults = new Set<string>();
+
+  constructor(readonly vaults: Array<{ organizationId: string; vaultAccountId: string; chainIds: number[] }>, readonly known = new Set<string>()) {
+    // No record yet: listReady returns what adopt creates.
+    super(record({ state: "Confirmed", nextAttemptAt: new Date("2999-01-01T00:00:00.000Z") }));
+  }
+
+  listVaults() {
+    this.vaultCalls += 1;
+    return Promise.resolve(this.vaults);
+  }
+
+  tracked(_organizationId: string, opIds: string[]) {
+    return Promise.resolve(new Set(opIds.filter((id) => this.known.has(id))));
+  }
+
+  adopt(operation: { organizationId: string; vaultAccountId: string; opId: string; reference: string }, now: Date) {
+    if (this.failingVaults.has(operation.vaultAccountId)) return Promise.reject(new Error("db down"));
+    this.adopted.push(`${operation.vaultAccountId}:${operation.opId}`);
+    this.known.add(operation.opId);
+    Object.assign(this.operation, record({ organizationId: operation.organizationId, opId: operation.opId, vaultAccountId: operation.vaultAccountId, agentId: null, agentNearAccountId: null, reference: operation.reference, nextAttemptAt: now }));
+    return Promise.resolve(true);
+  }
+}
+
+function scanning(vaults = [{ organizationId: "org-1", vaultAccountId: "vault.testnet", chainIds: [84532] }], known = new Set<string>()) {
+  const store = new ScanningStore(vaults, known);
+  const near = new FakeNear(operation());
+  near.walletState = { address: Array(20).fill(0x11), in_flight: [Array(32).fill(1)] };
+  const base = new FakeBase();
+  const guard = { confirmationReport: vi.fn(), failureReport: vi.fn() };
+  let now = new Date(nowStart);
+  return {
+    store, near, base,
+    worker: new OperationWorker(store, near, base, guard as never, { ...config, discoverIntervalMs: 60_000 }, () => now),
+    advance(milliseconds: number) { now = new Date(now.getTime() + milliseconds); },
+  };
+}
+
+describe("operations an agent signed but never settled", () => {
+  it("are found in the vault's queue, adopted and settled once final on Base", async () => {
+    const test = scanning();
+    test.base.receipts.set(originalHash, { status: "success", blockNumber: 99n });
+    const result = await test.worker.tick();
+    expect(result.adopted).toBe(1);
+    expect(test.store.adopted).toEqual([`vault.testnet:${opId}`]);
+    expect(test.near.settlements).toBe(1);
+    expect(test.store.operation.state).toBe("Confirmed");
+  });
+
+  it("leave alone what the worker already follows", async () => {
+    const test = scanning(undefined, new Set([opId]));
+    const result = await test.worker.tick();
+    expect(result.adopted).toBe(0);
+    expect(test.store.adopted).toEqual([]);
+  });
+
+  it("skip an operation that is no longer in flight on the vault", async () => {
+    const test = scanning();
+    test.near.operation = { ...test.near.operation, state: "Confirmed" };
+    expect((await test.worker.tick()).adopted).toBe(0);
+  });
+
+  it("are released after the window when the Base transaction reverted", async () => {
+    const test = scanning();
+    test.base.receipts.set(originalHash, { status: "reverted", blockNumber: 99n });
+    test.near.timestampNs = 10_000_000_000n + 21_600_000_000_000n;
+    await test.worker.tick();
+    expect(test.near.operation.state).toBe("Unconfirmed");
+  });
+
+  it("are scanned at most once per interval", async () => {
+    const test = scanning();
+    await test.worker.tick();
+    await test.worker.tick();
+    expect(test.store.vaultCalls).toBe(1);
+    test.advance(60_000);
+    await test.worker.tick();
+    expect(test.store.vaultCalls).toBe(2);
+  });
+
+  it("do not stop the scan when one vault fails", async () => {
+    const test = scanning([
+      { organizationId: "org-1", vaultAccountId: "broken.testnet", chainIds: [84532] },
+      { organizationId: "org-2", vaultAccountId: "vault.testnet", chainIds: [84532] },
+    ]);
+    test.store.failingVaults.add("broken.testnet");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await test.worker.tick();
+    errors.mockRestore();
+    expect(result.adopted).toBe(1);
+    expect(test.store.adopted).toEqual([`vault.testnet:${opId}`]);
+  });
 });
