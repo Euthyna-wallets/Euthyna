@@ -21,7 +21,7 @@ export { newSalt, recoverySubject } from "@euthyna/sdk/email-proof";
 export const PUBLIC_INBOX_DOMAINS = ["yopmail.com"];
 
 /** The recovery contract: it verifies the proofs, keeps the enrollments, runs the waiting period. */
-export const RECOVERY_CONTRACT_ID: string = import.meta.env.VITE_EUTHYNA_RECOVERY_ID ?? "euthyna-recovery.testnet";
+export const RECOVERY_CONTRACT_ID: string = import.meta.env.VITE_EUTHYNA_RECOVERY_ID ?? "euthyna-recovery-v4.testnet";
 
 export type ChainEnrollment = { account_id: string; salt: string; identity: string; domain: string; enrolled_at_ns: string };
 /** What a contract call takes: the proof and its public inputs, base64. */
