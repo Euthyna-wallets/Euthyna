@@ -135,7 +135,7 @@ Company wallets cannot be lost: they have no private key and are re-derived from
 | Factor | How it is checked | Notes |
 | --- | --- | --- |
 | Passkey | `p256_verify` on NEAR | Primary key; synced passkeys already cover most losses. |
-| ZK Email | Zero-knowledge UltraHonk (Noir) proof of a DKIM-signed email, verified on NEAR with the `alt_bn128` host functions | Live on testnet for founder seats (`euthyna-recovery.testnet`, about 85 Tgas per proof); DKIM key registry kept by a keeper; email takeover is the main risk. |
+| ZK Email | Zero-knowledge UltraHonk (Noir) proof of a DKIM-signed email, verified on NEAR with the `alt_bn128` host functions | Live on testnet for founder seats (`euthyna-recovery-v4.testnet`, about 85 Tgas per proof); DKIM key registry kept by a keeper; email takeover is the main risk. |
 | ZKPassport | Proof from a passport or ID card chip, verified by the ZKPassport contract on EVM and attested to NEAR by MPC | Same document as at enrollment, via a stable per-app identifier. |
 | Trusted contact | Another NEAR account's signature | Social recovery. |
 

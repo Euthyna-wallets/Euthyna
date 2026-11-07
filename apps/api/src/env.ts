@@ -132,7 +132,7 @@ const schema = z.object({
   MARKET_SETTLEMENT_MARGIN_SECONDS: z.coerce.number().int().min(60).default(600),
   /**
    * Founder seat recovery: the recovery contract (contracts/email-recovery) that verifies the
-   * ZK Email proofs and runs the waiting period. Default on testnet: euthyna-recovery.testnet.
+   * ZK Email proofs and runs the waiting period. Default on testnet: euthyna-recovery-v4.testnet.
    */
   RECOVERY_CONTRACT_ID: z.string().optional(),
   /** contracts/sealed-orders; unset turns sealed orders off in the console. */

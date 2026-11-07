@@ -125,7 +125,7 @@ Activity.
 
 ## 7. Recover a founder seat
 
-Proved with ZK Email and **verified by a NEAR contract** (`euthyna-recovery.testnet`, no access key); no Euthyna
+Proved with ZK Email and **verified by a NEAR contract** (`euthyna-recovery-v4.testnet`, no access key); no Euthyna
 server is in the path. How it works and what is public: [docs/recovery.md](./docs/recovery.md).
 
 1. **Settings → Seat recovery**, signed in as a founder. Send yourself an email with the subject shown, paste its
@@ -144,8 +144,8 @@ server is in the path. How it works and what is public: [docs/recovery.md](./doc
 5. **Check on chain**:
 
    ```sh
-   near contract call-function as-read-only euthyna-recovery.testnet recovery json-args '{"dao_id":"<dao>","lost_account_id":"<lost>"}' network-config testnet now
-   near account list-keys euthyna-recovery.testnet network-config testnet now   # no keys
+   near contract call-function as-read-only euthyna-recovery-v4.testnet recovery json-args '{"dao_id":"<dao>","lost_account_id":"<lost>"}' network-config testnet now
+   near account list-keys euthyna-recovery-v4.testnet network-config testnet now   # no keys
    ```
 
    A request with another mailbox fails with `ERR_DIFFERENT_MAILBOX`; before the delay is over, **Submit the vote** is

@@ -44,7 +44,7 @@ moves funds.
 | A stolen server, database or deployer key | The vault, the registry and Nomos have no access key. The company wallet has no private key: NEAR MPC signs only what the vault asks, and the vault settles from an MPC attestation of the finalized transaction, not from a server | `view_access_key_list` on the vault, `contracts/tests/tests/settlement.rs` |
 | A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window. **Security council**: one council member can veto a queued change, and the council can pause every agent; only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
 | A malicious code upgrade | **Nomos** (`euthyna-nomos.testnet`; companies before 2026-11-07: `nomos.euthyna.testnet`) publishes each vault version by its SHA-256 hash and creates keyless vaults as sub-accounts; it has no power over a vault once created. A vault upgrades only on a DAO `Upgrade { code_hash }` vote after the veto window, checks the hash and keeps its state. The DAO can also vote `SetCodeSource` to fetch versions from another Nomos | `contracts/tests/tests/nomos.rs` (`nomos_creates_keyless_vaults_and_only_the_dao_upgrades_them`) |
-| A founder loses their NEAR account | **ZK Email recovery, verified on chain**: a zero-knowledge proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed, only a salted hash), **verified by a NEAR contract** with no access key (`euthyna-recovery.testnet`, about 85 Tgas), a waiting period the contract enforces and the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `contracts/email-recovery`, `circuits/email-recovery`; `contracts/tests/tests/email_recovery.rs` (real proofs, including a real iCloud email); testnet run of 2026-11-04 on `eut-rec-11526.sputnikv2.testnet` |
+| A founder loses their NEAR account | **ZK Email recovery, verified on chain**: a zero-knowledge proof of the enrolled mailbox (DKIM, proved in the browser, the address is never revealed, only a salted hash), **verified by a NEAR contract** with no access key (`euthyna-recovery-v4.testnet`, about 85 Tgas), a waiting period the contract enforces and the lost account can cancel, then the founders' vote gives the seat back in the DAO and the vault council | [docs/recovery.md](./docs/recovery.md), `contracts/email-recovery`, `circuits/email-recovery`; `contracts/tests/tests/email_recovery.rs` (real proofs, including a real iCloud email); testnet run of 2026-11-04 on `eut-rec-11526.sputnikv2.testnet` |
 | An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
 
 ```bash
@@ -56,18 +56,18 @@ Every claim and its status (testnet, code, next): [CLAIMS.md](./CLAIMS.md).
 
 ## Try the seat recovery (judges)
 
-The ZK Email proof is verified by a NEAR contract, `euthyna-recovery.testnet`. On testnet the lost account can
+The ZK Email proof is verified by a NEAR contract, `euthyna-recovery-v4.testnet`. On testnet the lost account can
 cancel for **10 minutes** (48 hours is meant for mainnet), so the whole flow fits in one sitting.
 
 **1. Check the contract, read-only (1 minute, no wallet).** [near CLI](https://github.com/near/near-cli-rs):
 
 ```bash
-near account list-keys euthyna-recovery.testnet network-config testnet now
+near account list-keys euthyna-recovery-v4.testnet network-config testnet now
 #   → no access key: nobody can change or upgrade it
-near contract call-function as-read-only euthyna-recovery.testnet dkim_keys json-args '{"domain":"gmail.com"}' network-config testnet now
+near contract call-function as-read-only euthyna-recovery-v4.testnet dkim_keys json-args '{"domain":"gmail.com"}' network-config testnet now
 #   → the DKIM keys it accepts for Gmail (sha256 of the key as the circuit takes it)
 near contract call-function as-read-only euthyna-recovery.testnet recoveries_of json-args '{"dao_id":"eut-rec-11526.sputnikv2.testnet"}' network-config testnet now
-#   → the demo DAO's history: one recovery cancelled by the founder, then one left to run past its delay
+#   → the demo DAO's history on the first contract (euthyna-recovery.testnet): one recovery cancelled by the founder, then one left to run past its delay
 #     (ready: true), after which the founders voted the seat to the new account
 near contract call-function as-read-only eut-rec-11526.sputnikv2.testnet get_policy json-args '{}' network-config testnet now
 #   → council: dave, carol, bob (bob replaced alice, the founder who "lost" her account)
