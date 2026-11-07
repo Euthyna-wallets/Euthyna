@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PrismaClient } from "@euthyna/db";
 
 import { type NoahBusiness, type NoahClient, NoahError } from "./noah.js";
@@ -18,7 +19,9 @@ export type BankDeps = {
   prisma: PrismaClient;
   noah: NoahClient;
   /** The company wallet the vault controls (read from the vault on NEAR), or null before it exists. */
-  companyWallet: (organizationId: string) => Promise<{ address: string; chainId: number } | null>;
+  companyWallet: (organizationId: string) => Promise<{ address: string; chainId: number; vaultAccountId: string } | null>;
+  /** Wait between attempts while the partner approves a new business (tests: 0). */
+  retryDelayMs?: number;
 };
 
 export type BankView = {
@@ -37,7 +40,12 @@ export type BankView = {
   transfers: Array<{ id: string; created: string; status: string; direction: "in" | "out"; amount: string; currency: string; network: string; txHash: string | null; explorer: string | null }>;
 };
 
-const customerIdOf = (organizationId: string) => `euthyna-${organizationId}`.slice(0, 64);
+/**
+ * The partner's customer of a vault, derived from the vault's account exactly as the bank signer
+ * derives it (bank-signer/src/main.rs, customer_id_of): the enclave pays out only for this id, so a
+ * vault can never act under another company's KYB. 42 characters, the partner's maximum.
+ */
+export const customerIdOf = (vaultAccountId: string) => `eut-${createHash("sha256").update(vaultAccountId).digest("hex").slice(0, 38)}`;
 
 /**
  * A company's euro account. Its deposits can only settle into the company wallet: the address is
@@ -88,10 +96,19 @@ export class BankService {
     if (!wallet) throw new BankError(409, "wallet_missing", "open the company wallet first: deposits settle into it");
     const settlement = SETTLEMENT[wallet.chainId]?.[this.deps.noah.sandbox ? "sandbox" : "production"];
     if (!settlement) throw new BankError(409, "chain_unsupported", `euro deposits cannot settle on chain ${wallet.chainId} here`);
-    const customerId = customerIdOf(organizationId);
+    const customerId = customerIdOf(wallet.vaultAccountId);
     try {
       await this.deps.noah.upsertBusiness(customerId, business);
-      const account = await this.deps.noah.bankDepositToAddress({ customerId, ...settlement, address: wallet.address });
+      // The partner approves a new business a few seconds after the KYB is sent: until then it has no channel.
+      let account: Awaited<ReturnType<NoahClient["bankDepositToAddress"]>> | undefined;
+      for (let attempt = 0; !account; attempt += 1) {
+        try {
+          account = await this.deps.noah.bankDepositToAddress({ customerId, ...settlement, address: wallet.address });
+        } catch (error) {
+          if (!(error instanceof NoahError) || error.status !== 403 || attempt >= 5) throw error;
+          await new Promise((resolve) => setTimeout(resolve, this.deps.retryDelayMs ?? 3_000));
+        }
+      }
       if (account.DestinationAddress.Address.toLowerCase() !== wallet.address.toLowerCase()) {
         throw new BankError(502, "destination_mismatch", "the partner returned another settlement address; nothing was saved");
       }

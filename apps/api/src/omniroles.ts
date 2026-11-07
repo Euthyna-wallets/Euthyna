@@ -1001,11 +1001,11 @@ export class OmniRolesService {
   // -------------------------------------------------------------------------
 
   /** The company wallet on its main chain, read from the vault; null before the wallet exists. */
-  async companyWallet(organizationId: string): Promise<{ address: string; chainId: number } | null> {
+  async companyWallet(organizationId: string): Promise<{ address: string; chainId: number; vaultAccountId: string } | null> {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return null;
     const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId });
-    return wallet?.address ? { address: getAddress(hexOf(wallet.address)), chainId: treasury.baseChainId } : null;
+    return wallet?.address ? { address: getAddress(hexOf(wallet.address)), chainId: treasury.baseChainId, vaultAccountId: treasury.vaultAccountId } : null;
   }
 
   async status(organizationId: string) {
