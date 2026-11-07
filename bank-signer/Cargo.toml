@@ -1,0 +1,32 @@
+[package]
+name = "euthyna-bank-signer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Euthyna's bank signer: a WASI program run inside OutLayer's TEE; the only holder of the Noah signing key, and it signs only the payouts a vault has already authorised"
+publish = false
+
+[[bin]]
+name = "euthyna-bank-signer"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wasi-http-client = "0.2.1"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "pem", "std"] }
+hkdf = "0.13"
+sha2 = "0.11"
+base64 = "0.22"
+hex = "0.4"
+
+[features]
+# Local tests against a sandbox API key that has no signing key attached: the Api-Signature header is
+# left out. Never in a release build: the deployed binary always signs.
+dev-unsigned = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1

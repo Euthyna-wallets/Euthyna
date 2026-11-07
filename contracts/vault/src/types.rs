@@ -395,6 +395,22 @@ pub enum RuleChange {
     SetCodeSource {
         account_id: AccountId,
     },
+    /// Bank payouts (euros to voted IBANs through the bank signer): where they run and settle.
+    SetBankConfig {
+        config: Option<crate::bank::BankConfig>,
+    },
+    /// An IBAN the company may pay; voted like a supplier address.
+    AddBankBeneficiary {
+        beneficiary: crate::bank::BankBeneficiary,
+    },
+    RemoveBankBeneficiary {
+        iban: String,
+    },
+    /// What the role may pay to the voted IBANs (replaces the role's bank permission).
+    SetBankPermission {
+        role: String,
+        permission: Option<crate::bank::BankPermission>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

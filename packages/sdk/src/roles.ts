@@ -75,7 +75,68 @@ export type RuleChange =
   /** Register the vault on a NEP-141 token (NEP-145), so it can hold it. */
   | { NearStorageDeposit: { token: string } }
   /** Fetch future versions from another Nomos; upgrades are still checked by hash. */
-  | { SetCodeSource: { account_id: string } };
+  | { SetCodeSource: { account_id: string } }
+  /** Euro payouts to voted IBANs: where the bank signer runs and how the transfer settles. */
+  | { SetBankConfig: { config: BankConfig | null } }
+  | { AddBankBeneficiary: { beneficiary: BankBeneficiary } }
+  | { RemoveBankBeneficiary: { iban: string } }
+  | { SetBankPermission: { role: string; permission: BankPermission | null } };
+
+export type BankConfig = {
+  outlayer_id: string;
+  signer_url: string;
+  signer_hash: string;
+  secrets_owner: string;
+  secrets_profile: string;
+  customer_id: string;
+  network: string;
+  crypto: string;
+  chain_id: number;
+  token: number[];
+  decimals: number;
+  gas_limit: string;
+  max_fee_per_gas: string;
+  max_priority_fee_per_gas: string;
+};
+export type BankBeneficiary = { iban: string; name: string; holder_type: "Business" | "Individual" };
+/** Budget charged in the euro token's base units; the ceiling applies to one payout. */
+export type BankPermission = { allowance: number[]; max_per_payout: string };
+export type BankPayoutState = "Requested" | "Transferring" | "Failed";
+export type BankPayout = {
+  op_id: number[];
+  member: string;
+  role: string;
+  beneficiary: BankBeneficiary;
+  amount: string;
+  reference: string;
+  state: BankPayoutState;
+  created_at_ns: string;
+  expires_at_ns: string;
+  rule_id: string | null;
+  deposit_address: number[] | null;
+  fiat_amount: string | null;
+  transfer_op_id: number[] | null;
+  error: string | null;
+};
+/** IBANs compare without spaces, in upper case. */
+export function canonicalIban(iban: string): string {
+  return iban.replace(/\s+/g, "").toUpperCase();
+}
+/** ISO 7064 mod 97-10, as the vault checks it before a vote. */
+export function validIban(iban: string): boolean {
+  const compact = canonicalIban(iban);
+  if (compact.length < 15 || compact.length > 34 || !/^[A-Z0-9]+$/.test(compact)) return false;
+  const rotated = compact.slice(4) + compact.slice(0, 4);
+  let remainder = 0;
+  for (const c of rotated) {
+    const value = c >= "A" ? c.charCodeAt(0) - 55 : Number(c);
+    for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
+  }
+  return remainder === 1;
+}
+export function formatIban(iban: string): string {
+  return canonicalIban(iban).replace(/(.{4})/g, "$1 ").trim();
+}
 
 export type SolanaPermission = { asset: "Sol" | { Spl: { mint: number[] } }; recipients: number[][]; allowance: number[] };
 export type NearPermission = { token: string; receivers: string[]; allowance: number[]; min_per_transfer: string; max_per_transfer: string };
@@ -1533,6 +1594,21 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
   }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
   if ("SetCodeSource" in change) return { title: `Fetch future versions from ${change.SetCodeSource.account_id}`, details: ["An upgrade still deploys only code with the hash the DAO votes for."] };
+  if ("SetBankConfig" in change) {
+    const config = change.SetBankConfig.config;
+    if (!config) return { title: "Disable euro payouts", details: [] };
+    return { title: `Pay voted IBANs in euros through the bank signer on ${config.outlayer_id}`, details: [`Signer code ${config.signer_hash.slice(0, 16)}…, secrets ${config.secrets_owner}/${config.secrets_profile}.`, `Settles in ${config.crypto} on ${config.network} from the company wallet.`] };
+  }
+  if ("AddBankBeneficiary" in change) {
+    const entry = change.AddBankBeneficiary.beneficiary;
+    return { title: `Allow euro payouts to ${entry.name} (${formatIban(entry.iban)})`, details: [`${entry.holder_type} account. Agents with a bank permission may pay it, within their budget.`] };
+  }
+  if ("RemoveBankBeneficiary" in change) return { title: `Stop euro payouts to ${formatIban(change.RemoveBankBeneficiary.iban)}`, details: [] };
+  if ("SetBankPermission" in change) {
+    const permission = change.SetBankPermission.permission;
+    if (!permission) return { title: `Remove euro payouts from role ${change.SetBankPermission.role}`, details: [] };
+    return { title: `Let role ${change.SetBankPermission.role} pay voted IBANs in euros`, details: [`Up to ${amountText(BigInt(permission.max_per_payout), context.budgets?.[hexOf(permission.allowance).toLowerCase()]?.token)} per payout, charged to the ${budgetName(hexOf(permission.allowance), context)} budget.`] };
+  }
   return { title: `Set policy version ${change.SetVersions.policy_version}, registry version ${change.SetVersions.registry_version}`, details: [] };
 }
 

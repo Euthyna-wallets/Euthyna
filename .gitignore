@@ -4,6 +4,7 @@ dist/
 .mandateos/
 .env.*
 contracts/target/
+bank-signer/target/
 packages/deployer/out/
 packages/deployer/cache/
 *.log
