@@ -101,6 +101,8 @@ export type BankConfig = {
 export type BankBeneficiary = { iban: string; name: string; holder_type: "Business" | "Individual" };
 /** Budget charged in the euro token's base units; the ceiling applies to one payout. */
 export type BankPermission = { allowance: number[]; max_per_payout: string };
+/** The budget a role gets for euro payouts when it has no EURC budget yet. */
+export const euroPayoutBudgetKey = (role: string): number[] => allowanceKey(role, "euro-payouts");
 export type BankPayoutState = "Requested" | "Transferring" | "Failed";
 export type BankPayout = {
   op_id: number[];
@@ -1380,6 +1382,16 @@ export function budgetsOf(changes: RuleChange[], profile: ChainProfile): Record<
         result[hexOf(permission.allowance).toLowerCase()] = {
           token: ft ? { address: NATIVE_ETH.address, symbol: ft.symbol, decimals: ft.decimals } : undefined,
           label: `${change.SetNearPermissions.role} NEAR transfers`,
+        };
+      }
+      continue;
+    }
+    if ("SetBankPermission" in change) {
+      const permission = change.SetBankPermission.permission;
+      if (permission) {
+        result[hexOf(permission.allowance).toLowerCase()] = {
+          token: profile.tokens.find((item) => item.symbol === "EURC"),
+          label: `${change.SetBankPermission.role} euro payouts`,
         };
       }
       continue;

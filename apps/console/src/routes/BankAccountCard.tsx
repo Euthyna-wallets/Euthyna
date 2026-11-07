@@ -148,6 +148,7 @@ export function EuroPayoutsCard() {
   const [role, setRole] = useState("");
   const [budget, setBudget] = useState("");
   const [ceiling, setCeiling] = useState("500");
+  const [daily, setDaily] = useState("1000");
   const sign = useMutation({
     mutationFn: async (draft: Promise<ProposalDraft>) => {
       if (!wallets.nearAccountId) throw new Error("Connect your NEAR wallet first");
@@ -161,7 +162,9 @@ export function EuroPayoutsCard() {
   const chosen = roles.find((item) => item.role === role) ?? roles[0];
   const euroBudgets = chosen?.budgets.filter((item) => item.token === "EURC") ?? [];
   const chosenBudget = euroBudgets.find((item) => item.key === budget) ?? euroBudgets[0];
-  const ceilingUnits = /^\d{1,7}(\.\d{1,2})?$/.test(ceiling) ? String(Math.round(Number(ceiling) * 1_000_000)) : null;
+  const units = (text: string) => (/^\d{1,7}(\.\d{1,2})?$/.test(text) ? String(Math.round(Number(text) * 1_000_000)) : null);
+  const ceilingUnits = units(ceiling);
+  const dailyUnits = units(daily);
   const explorer = status.data?.treasury?.vaultAccountId ? `https://testnet.nearblocks.io/address/${status.data.treasury.vaultAccountId}` : null;
 
   return (
@@ -207,20 +210,31 @@ export function EuroPayoutsCard() {
                   {roles.map((item) => <option key={item.role} value={item.role}>{item.role}</option>)}
                 </select>
                 <span style={{ fontSize: 13, color: "var(--ink-2)" }}>pay IBANs from</span>
-                <select aria-label="Budget" value={chosenBudget?.key ?? ""} onChange={(event) => setBudget(event.target.value)} disabled={sign.isPending || !euroBudgets.length} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
-                  {euroBudgets.length ? euroBudgets.map((item) => <option key={item.key} value={item.key}>{item.label} ({item.available ?? "?"} EURC left)</option>) : <option value="">no EURC budget on this role</option>}
-                </select>
+                {euroBudgets.length ? (
+                  <select aria-label="Budget" value={chosenBudget?.key ?? ""} onChange={(event) => setBudget(event.target.value)} disabled={sign.isPending} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
+                    {euroBudgets.map((item) => <option key={item.key} value={item.key}>{item.label} ({item.available ?? "?"} EURC left)</option>)}
+                  </select>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 13, color: "var(--ink-2)" }}>a new euro budget of</span>
+                    <input aria-label="Euro budget per day" value={daily} onChange={(event) => setDaily(event.target.value)} disabled={sign.isPending}
+                      style={{ width: 80, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
+                    <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR a day,</span>
+                  </>
+                )}
                 <span style={{ fontSize: 13, color: "var(--ink-2)" }}>up to</span>
                 <input aria-label="Ceiling per payout in EUR" value={ceiling} onChange={(event) => setCeiling(event.target.value)} disabled={sign.isPending}
                   style={{ width: 80, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
                 <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR each</span>
-                <button type="button" className="btn-ori" style={{ padding: "10px 16px", marginLeft: "auto" }} disabled={sign.isPending || !chosen || !chosenBudget || !ceilingUnits}
-                  onClick={() => chosen && chosenBudget && ceilingUnits && sign.mutate(bankApi.permissionProposal({ role: chosen.role, budget: chosenBudget.key, maxPerPayout: ceilingUnits }))}>
+                <button type="button" className="btn-ori" style={{ padding: "10px 16px", marginLeft: "auto" }} disabled={sign.isPending || !chosen || !ceilingUnits || (!chosenBudget && !dailyUnits)}
+                  onClick={() => chosen && ceilingUnits && sign.mutate(bankApi.permissionProposal(chosenBudget
+                    ? { role: chosen.role, budget: chosenBudget.key, maxPerPayout: ceilingUnits }
+                    : { role: chosen.role, budget: null, maxPerPayout: ceilingUnits, newBudget: { amount: dailyUnits!, periodDays: 1 } }))}>
                   {sign.isPending ? "SIGNING…" : "PROPOSE"}
                 </button>
               </div>
             ) : null}
-            {!euroBudgets.length && chosen ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Give the role an EURC budget first (Roles): euro payouts are charged to it.</span> : null}
+            {!euroBudgets.length && chosen ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}>The role has no EURC budget: the vote creates one, refilled daily, that only euro payouts draw on.</span> : null}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>

@@ -55,6 +55,7 @@ import {
   NEAR_TESTNET_TOKENS,
   withSealedOrdersMember,
   canonicalIban,
+  euroPayoutBudgetKey,
   formatIban,
   validIban,
   type BankBeneficiary,
@@ -1821,24 +1822,34 @@ export class OmniRolesService {
     return this.proposal(treasury, "Add a bank beneficiary", [{ method: "queue_rule_change", change: { AddBankBeneficiary: { beneficiary: { iban, name, holder_type: input.holderType } } } }]);
   }
 
-  /** Let a role pay the voted IBANs from one of its budgets, up to a ceiling per payout. */
-  async bankPermissionProposal(organizationId: string, input: { role: string; budget: string | null; maxPerPayout: string | null }) {
+  /**
+   * Let a role pay the voted IBANs from one of its EURC budgets, up to a ceiling per payout; or,
+   * with `newBudget`, from a euro budget created for it (so much per period, refilled).
+   */
+  async bankPermissionProposal(organizationId: string, input: { role: string; budget: string | null; maxPerPayout: string | null; newBudget?: { amount: string; periodDays: number } | undefined }) {
     const treasury = await this.requireTreasury(organizationId);
     const roles = await this.roles(organizationId);
     const role = roles.roles.find((item) => item.name === input.role);
     if (!role) throw new OmniRolesError(404, "unknown_role", "No such role");
-    const { budget: budgetKey, maxPerPayout } = input;
-    if (!budgetKey || !maxPerPayout) {
+    const { maxPerPayout } = input;
+    if (!maxPerPayout) {
       return this.proposal(treasury, `Remove euro payouts from ${input.role}`, [{ method: "queue_rule_change", change: { SetBankPermission: { role: input.role, permission: null } } }], {});
     }
-    const budget = role.budgets.find((item) => item.key === budgetKey.toLowerCase());
-    if (!budget) throw new OmniRolesError(400, "unknown_budget", "Choose one of the role's budgets");
-    if (budget.token !== "EURC") throw new OmniRolesError(400, "budget_token", "Euro payouts are charged to an EURC budget");
     if (!/^\d+$/.test(maxPerPayout) || BigInt(maxPerPayout) === 0n) throw new OmniRolesError(400, "invalid_ceiling", "The ceiling per payout must be a positive amount");
-    return this.proposal(treasury, `Let ${input.role} pay voted IBANs in euros`, [{
-      method: "queue_rule_change",
-      change: { SetBankPermission: { role: input.role, permission: { allowance: Array.from(hexToBytes(budgetKey as Hex)), max_per_payout: maxPerPayout } } },
-    }]);
+    const calls: VaultCall[] = [];
+    let allowance: number[];
+    if (input.newBudget) {
+      if (!/^\d+$/.test(input.newBudget.amount) || BigInt(input.newBudget.amount) === 0n) throw new OmniRolesError(400, "invalid_budget", "The euro budget must be a positive amount");
+      allowance = euroPayoutBudgetKey(input.role);
+      calls.push({ method: "queue_rule_change", change: { SetAllowance: { key: allowance, balance: input.newBudget.amount, refill: input.newBudget.amount, max_refill: input.newBudget.amount, period_ns: Math.max(0, Math.round(input.newBudget.periodDays * 86_400_000_000_000)) } } });
+    } else {
+      const budget = input.budget ? role.budgets.find((item) => item.key === input.budget!.toLowerCase()) : undefined;
+      if (!budget) throw new OmniRolesError(400, "unknown_budget", "Choose one of the role's budgets");
+      if (budget.token !== "EURC") throw new OmniRolesError(400, "budget_token", "Euro payouts are charged to an EURC budget");
+      allowance = Array.from(hexToBytes(budget.key as Hex));
+    }
+    calls.push({ method: "queue_rule_change", change: { SetBankPermission: { role: input.role, permission: { allowance, max_per_payout: maxPerPayout } } } });
+    return this.proposal(treasury, `Let ${input.role} pay voted IBANs in euros`, calls);
   }
 
   /** Point the vault at the deployed bank signer and the company's account at the partner. */
@@ -1898,11 +1909,12 @@ export class OmniRolesService {
       let removedAt = -1;
       executed.forEach((change, index) => { if ("RemoveRole" in change && change.RemoveRole.role === name) removedAt = index; });
       const sinceRemoval = executed.slice(removedAt + 1);
-      const latest = <K extends "SetSolanaPermissions" | "SetNearPermissions">(kind: K) =>
+      const latest = <K extends "SetSolanaPermissions" | "SetNearPermissions" | "SetBankPermission">(kind: K) =>
         [...sinceRemoval].reverse().find((change) => kind in change && (change as Record<K, { role: string }>)[kind].role === name) as Extract<RuleChange, Record<K, unknown>> | undefined;
       const solanaChange = latest("SetSolanaPermissions");
       const nearChange = latest("SetNearPermissions");
-      const extra = [solanaChange, nearChange].filter((change): change is NonNullable<typeof change> => Boolean(change));
+      const bankChange = latest("SetBankPermission");
+      const extra = [solanaChange, nearChange, bankChange].filter((change): change is NonNullable<typeof change> => Boolean(change));
       const description = base ? { ...base, details: [...base.details, ...extra.flatMap((change) => describeVaultCall({ method: "queue_rule_change", change }, context).details)] } : null;
       const keys = new Set<string>();
       for (const permission of setRole?.SetRole.config.permissions ?? []) {
@@ -1913,6 +1925,7 @@ export class OmniRolesService {
       for (const permission of [...(solanaChange?.SetSolanaPermissions.permissions ?? []), ...(nearChange?.SetNearPermissions.permissions ?? [])]) {
         keys.add(hexOf(permission.allowance).toLowerCase());
       }
+      if (bankChange?.SetBankPermission.permission) keys.add(hexOf(bankChange.SetBankPermission.permission.allowance).toLowerCase());
       const budgetsView = await Promise.all([...keys].map(async (key) => {
         const allowance = await this.view<{ balance: string; reserved: string; max_refill: string; period_ns: number } | null>(
           treasury.vaultAccountId,
