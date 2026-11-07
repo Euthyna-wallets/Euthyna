@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "../api.js";
+import { NightPanel } from "../components/design.js";
 import { Card, Status } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { newSalt, proveEmailFile, PUBLIC_INBOX_DOMAINS, RECOVERY_CONTRACT_ID, recoverySubject } from "../lib/email-proof.js";
@@ -39,12 +40,13 @@ export function EmailProofStep({ subject, busy, onFile }: { subject: string; bus
   return (
     <ol className="stack small">
       <li>
-        From the mailbox you will recover with (Gmail, Outlook, iCloud…), send an email to yourself with exactly this subject:{" "}
+        From the mailbox you will recover with (Gmail, Outlook, iCloud…), send an email to <b>another address you can open</b> with exactly this subject{" "}
+        (Gmail does not sign an email you send to yourself):{" "}
         <code className="mono">{subject}</code>{" "}
         <button className="btn-line" style={{ padding: "6px 12px" }} onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
       </li>
       <li>
-        Open it and copy its source. Gmail: ⋮ → <b>Show original</b> → <b>Copy to clipboard</b>. Outlook: … → View → <b>View message source</b>.
+        Open it in the mailbox that received it (not in Sent) and copy its source. Gmail: ⋮ → <b>Show original</b> → <b>Copy to clipboard</b>. Outlook: … → View → <b>View message source</b>.
         Apple Mail: View → Message → <b>Raw Source</b>.
       </li>
       <li>
@@ -59,6 +61,71 @@ export function EmailProofStep({ subject, busy, onFile }: { subject: string; bus
   );
 }
 
+/**
+ * Over every console page while a request for a seat is open: the founder it targets has a waiting
+ * period to cancel, and must not have to find it in Settings. Everyone sees it; the founder gets
+ * the cancel button.
+ */
+export function RecoveryAlert() {
+  const queryClient = useQueryClient();
+  const wallets = useWallets();
+  const view = useQuery({ queryKey: ["recovery"], queryFn: recoveryApi.list, refetchInterval: 20_000, retry: false });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const me = wallets.nearAccountId;
+  const dao = view.data?.daoAccountId;
+  const open = (view.data?.recoveries ?? []).filter((recovery) => recovery.state === "waiting" && !recovery.ready);
+  if (!open.length && !message) return null;
+  const cancel = () => {
+    if (!dao || !me) return;
+    setBusy(true);
+    setMessage(null);
+    void signContractCall(me, RECOVERY_CONTRACT_ID, "cancel", { dao_id: dao })
+      .then(() => setMessage("Recovery cancelled on chain: your seat stays yours. Enroll another mailbox in Settings if this one is no longer safe."), (cause: unknown) => setMessage(recoveryErrorText(cause)))
+      .finally(() => { setBusy(false); void queryClient.invalidateQueries({ queryKey: ["recovery"] }); });
+  };
+  return (
+    <NightPanel style={{ padding: "14px 18px", borderLeft: "3px solid var(--terra)", fontSize: 14, color: "#F4C9BC", display: "flex", flexDirection: "column", gap: 10 }}>
+      {open.map((recovery) => {
+        const mine = me === recovery.lostAccountId;
+        const until = new Date(recovery.notBefore).toLocaleString();
+        return (
+          <div key={`${recovery.lostAccountId}-${recovery.requestedAt}`} role="alert" style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 320px" }}>
+              <b style={{ color: "#fff" }}>{mine ? "Someone is asking for your seat." : `${recovery.lostAccountId}'s seat is being recovered.`}</b>{" "}
+              <span className="mono">{recovery.newAccountId}</span> proved the mailbox at {recovery.domain} that {mine ? "you" : recovery.lostAccountId} enrolled.{" "}
+              {mine ? `If this is not you, cancel before ${until}: after that, the members can vote to give it the seat.` : `${recovery.lostAccountId} can cancel until ${until}; then the members vote.`}
+            </span>
+            {mine && dao ? (
+              <button type="button" className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy} onClick={cancel}>{busy ? "Cancelling…" : "This is not me: cancel"}</button>
+            ) : (
+              <a href="/settings" style={{ color: "#fff", fontWeight: 700 }}>Review in Settings →</a>
+            )}
+          </div>
+        );
+      })}
+      {message ? <span role="status">{message}</span> : null}
+    </NightPanel>
+  );
+}
+
+/** A proof made in the browser, waiting for its transaction. */
+export type ProvedCall = { what: string; sign: () => Promise<string> };
+
+/**
+ * The wallet opens on its own click. Proving takes about 40 s, and a browser lets a page open a
+ * window only right after a click: a wallet opened at the end of the proof (Meteor, MyNearWallet…)
+ * is blocked. The proof stays here, so a closed or blocked window costs a click, not a new proof.
+ */
+export function SignProvedStep({ proved, busy, onSign }: { proved: ProvedCall; busy: boolean; onSign: () => void }) {
+  return (
+    <div className="row" style={{ alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy} onClick={onSign}>Sign with my wallet</button>
+      <span className="small">{proved.what}: proof ready. If the wallet window closes, sign again here: no need to prove again.</span>
+    </div>
+  );
+}
+
 /** Founders enroll their mailbox once; a lost seat comes back by a vote, never by itself. */
 export function RecoveryCard() {
   const queryClient = useQueryClient();
@@ -66,6 +133,7 @@ export function RecoveryCard() {
   const view = useQuery({ queryKey: ["recovery"], queryFn: recoveryApi.list, refetchInterval: 20_000 });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [proved, setProved] = useState<ProvedCall | null>(null);
   const me = wallets.nearAccountId;
   const dao = view.data?.daoAccountId;
   const enrolled = view.data?.enrollments.find((item) => item.nearAccountId === me);
@@ -80,7 +148,7 @@ export function RecoveryCard() {
   return (
     <Card title="Seat recovery" action={<Status value={enrolled ? "active" : "pending"} />}>
       <p className="muted">
-        Lost your NEAR account? Enroll your mailbox once, with a zero-knowledge proof of an email you send yourself
+        Lost your NEAR account? Enroll your mailbox once, with a zero-knowledge proof of an email you send from it
         (ZK Email). The recovery contract <a className="mono" href={`${EXPLORER}/address/${RECOVERY_CONTRACT_ID}`} target="_blank" rel="noreferrer">{RECOVERY_CONTRACT_ID}</a> verifies
         the proof on NEAR and keeps only a salted hash of your address. A new account that proves the same mailbox can ask for your seat:
         you can cancel for {windowText(view.data?.cancelWindowSeconds ?? 172_800)}, then the other founders vote.
@@ -88,15 +156,23 @@ export function RecoveryCard() {
       {enrolled ? <p className="small">Enrolled with a mailbox at <strong>{enrolled.domain}</strong>. Enroll again to change it.</p> : null}
       {me && dao ? (
         <EmailProofStep subject={recoverySubject("enroll", me)} busy={busy} onFile={(file) => run(async () => {
+          setProved(null);
           const { proof, domain } = await proveEmailFile(file, newSalt(), setMessage);
-          setMessage("Sign the enrollment in your wallet: the contract checks the proof…");
-          const tx = await signContractCall(me, RECOVERY_CONTRACT_ID, "enroll", { dao_id: dao, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
-          const warning = PUBLIC_INBOX_DOMAINS.includes(domain)
-            ? ` Testnet only: anyone who knows a ${domain} address can open its inbox, so it does not protect your seat. Use a mailbox with a password for real.`
-            : "";
-          return `Enrolled on chain (${tx.slice(0, 8)}…): a mailbox at ${domain} can recover your seat.${warning}`;
+          setProved({
+            what: `Enrollment of a mailbox at ${domain}`,
+            sign: async () => {
+              const tx = await signContractCall(me, RECOVERY_CONTRACT_ID, "enroll", { dao_id: dao, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
+              setProved(null);
+              const warning = PUBLIC_INBOX_DOMAINS.includes(domain)
+                ? ` Testnet only: anyone who knows a ${domain} address can open its inbox, so it does not protect your seat. Use a mailbox with a password for real.`
+                : "";
+              return `Enrolled on chain (${tx.slice(0, 8)}…): a mailbox at ${domain} can recover your seat.${warning}`;
+            },
+          });
+          return "Proof ready. Sign the enrollment in your wallet: the contract checks the proof.";
         })} />
       ) : <p className="small">Connect your NEAR wallet to enroll.</p>}
+      {proved ? <SignProvedStep proved={proved} busy={busy} onSign={() => run(proved.sign)} /> : null}
       {view.data?.enrollments.length ? <p className="small">Founders enrolled: {view.data.enrollments.map((item) => item.nearAccountId).join(", ")}</p> : null}
       {(view.data?.recoveries ?? []).map((recovery) => <RecoveryRow key={`${recovery.lostAccountId}-${recovery.requestedAt}`} recovery={recovery} dao={dao} me={me} busy={busy} run={run} />)}
       {message ? <p className="small" role="status">{message}</p> : null}

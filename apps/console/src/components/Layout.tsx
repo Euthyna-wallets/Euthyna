@@ -13,6 +13,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { authClient } from "../auth.js";
 import { omni } from "../omniroles-api.js";
+import { RecoveryAlert } from "../routes/RecoveryCard.js";
 import { SigningInbox } from "./SigningInbox.js";
 import { WalletBar } from "./WalletBar.js";
 import { Kicker, NightPanel } from "./design.js";
@@ -224,6 +225,7 @@ export function Layout() {
                 <b style={{ color: "#fff" }}>Operations are paused.</b> No money can move until members vote to resume.
               </NightPanel>
             ) : null}
+            <RecoveryAlert />
             <Outlet />
           </main>
         </div>

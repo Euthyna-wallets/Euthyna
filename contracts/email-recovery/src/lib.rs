@@ -76,6 +76,9 @@ pub struct Recovery {
     /// The lost account can cancel until then; after it, the members can vote.
     pub not_before_ns: U64,
     pub state: RecoveryState,
+    /// When the lost account cancelled it. No new request for that seat until a full waiting
+    /// period has passed since.
+    pub cancelled_at_ns: Option<U64>,
 }
 
 #[near(serializers = [json])]
@@ -254,6 +257,16 @@ impl EmailRecovery {
                 && now < item.not_before_ns.0 + STALE_AFTER_NS
         });
         require!(!open, "ERR_RECOVERY_OPEN");
+        // Someone who holds the mailbox could otherwise ask again as soon as the founder
+        // cancels, and again, until one request goes unnoticed: after a cancel, the seat
+        // rests for a waiting period (time to enroll another mailbox).
+        let resting = list.iter().any(|item| {
+            item.lost_account_id == lost_account_id
+                && item
+                    .cancelled_at_ns
+                    .is_some_and(|at| now < at.0.saturating_add(self.delay_ns))
+        });
+        require!(!resting, "ERR_RECOVERY_COOLDOWN");
         let recovery = Recovery {
             lost_account_id: lost_account_id.clone(),
             new_account_id: account.clone(),
@@ -261,10 +274,20 @@ impl EmailRecovery {
             requested_at_ns: U64(now),
             not_before_ns: U64(now + self.delay_ns),
             state: RecoveryState::Waiting,
+            cancelled_at_ns: None,
         };
         list.push(recovery.clone());
         if list.len() > MAX_HISTORY {
-            list.remove(0);
+            // Drop the oldest entry that neither waits nor rests a seat, so a full history
+            // cannot erase a cooldown.
+            let delay_ns = self.delay_ns;
+            let old = list.iter().position(|item| {
+                item.state != RecoveryState::Waiting
+                    && item
+                        .cancelled_at_ns
+                        .is_none_or(|at| now >= at.0.saturating_add(delay_ns))
+            });
+            list.remove(old.unwrap_or(0));
         }
         event(
             "recovery_requested",
@@ -280,6 +303,7 @@ impl EmailRecovery {
     /// The lost account still works: its holder stops a recovery of their seat.
     pub fn cancel(&mut self, dao_id: AccountId) {
         let account = env::predecessor_account_id();
+        let now = env::block_timestamp();
         let list = self
             .recoveries
             .get_mut(&dao_id)
@@ -288,6 +312,7 @@ impl EmailRecovery {
         for item in list.iter_mut() {
             if item.lost_account_id == account && item.state == RecoveryState::Waiting {
                 item.state = RecoveryState::Cancelled;
+                item.cancelled_at_ns = Some(U64(now));
                 cancelled = true;
             }
         }

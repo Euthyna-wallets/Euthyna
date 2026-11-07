@@ -304,6 +304,25 @@ async fn a_new_account_asks_and_the_lost_one_can_cancel_until_the_delay() -> Res
         .json()?;
     assert!(open.is_none());
 
+    // Right after a cancel the seat rests a full waiting period: whoever holds the mailbox
+    // cannot ask again and again until one request goes unnoticed.
+    let history: Vec<Value> = s
+        .recovery
+        .view("recoveries_of")
+        .args_json(json!({ "dao_id": s.dao.id() }))
+        .await?
+        .json()?;
+    let cancelled_at: u64 = history[0]["cancelled_at_ns"].as_str().unwrap().parse()?;
+    let resting = request(&s, &s.bob, &s.alice, "recovery_bob").await?;
+    assert!(
+        failure(&resting).contains("ERR_RECOVERY_COOLDOWN"),
+        "{}",
+        failure(&resting)
+    );
+    while s.worker.view_block().await?.timestamp() < cancelled_at + DELAY_SECONDS * 1_000_000_000 {
+        s.worker.fast_forward(50).await?;
+    }
+
     // Asked again, and nobody cancels: after the delay, the members can vote.
     request(&s, &s.bob, &s.alice, "recovery_bob")
         .await?
