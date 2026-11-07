@@ -125,13 +125,17 @@ export class NearClient {
 
 
   private async callView<T>(accountId: string, methodName: string, args: Record<string, unknown>): Promise<T> {
-    const result = await this.rpc<{ result: number[] }>("query", {
+    const result = await this.rpc<{ result?: number[]; error?: string }>("query", {
       request_type: "call_function",
       finality: "final",
       account_id: accountId,
       method_name: methodName,
       args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
     });
+    // A method the contract does not have (an older vault version) comes back as `error`, not as a throw.
+    // Callers branch on the message (e.g. "MethodResolveError" → "this vault cannot do it yet"), so it must survive.
+    if (result.error) throw new Error(`${accountId}.${methodName}: ${result.error}`);
+    if (!result.result) throw new Error(`${accountId}.${methodName}: no result`);
     return JSON.parse(Buffer.from(result.result).toString("utf8")) as T;
   }
 
