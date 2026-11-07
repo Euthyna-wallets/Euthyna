@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AGENT_FUNCTION_CALL_METHODS, NEAR_AGENT_METHODS } from "@euthyna/sdk";
+import { AGENT_FUNCTION_CALL_METHODS, BANK_AGENT_METHODS, NEAR_AGENT_METHODS } from "@euthyna/sdk";
 
 import { attestAgentAccessKeys } from "./agent-provisioning.js";
 
@@ -60,9 +60,11 @@ describe("attestAgentAccessKeys", () => {
   });
 
   it("keeps keys made before NEAR transfers valid, flagged as outdated", () => {
-    const legacy = AGENT_FUNCTION_CALL_METHODS.filter((method) => !(NEAR_AGENT_METHODS as readonly string[]).includes(method));
+    const beforeBank = AGENT_FUNCTION_CALL_METHODS.filter((method) => !(BANK_AGENT_METHODS as readonly string[]).includes(method));
+    const legacy = beforeBank.filter((method) => !(NEAR_AGENT_METHODS as readonly string[]).includes(method));
     const key = (methods: string[]) => ({ ...restrictedKey, access_key: { permission: { FunctionCall: { ...restrictedKey.access_key.permission.FunctionCall, method_names: methods } } } });
     expect(attestAgentAccessKeys([key(legacy)], expected)).toMatchObject({ valid: true, outdated: true });
+    expect(attestAgentAccessKeys([key(beforeBank)], expected)).toMatchObject({ valid: true, outdated: true });
     expect(attestAgentAccessKeys([restrictedKey], expected)).toMatchObject({ valid: true, outdated: false });
     // Any other list stays refused, more or fewer methods alike.
     expect(attestAgentAccessKeys([key(legacy.slice(1))], expected).valid).toBe(false);

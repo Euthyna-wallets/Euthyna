@@ -24,6 +24,7 @@ const KEY_BENEFICIARIES: &[u8] = b"bank:b";
 const KEY_PERMISSION: &[u8] = b"bank:p:";
 const KEY_PAYOUT: &[u8] = b"bank:o:";
 const KEY_PENDING: &[u8] = b"bank:pending";
+const KEY_INDEX: &[u8] = b"bank:i";
 const MAX_BENEFICIARIES: usize = 64;
 const MAX_REFERENCE_CHARS: usize = 140;
 /// Attached to OutLayer for the run; what it does not use comes back to the vault.
@@ -170,6 +171,9 @@ fn payout(op_id: &OperationId) -> BankPayout {
 fn store(payout: &BankPayout) {
     write(&key(KEY_PAYOUT, &payout.op_id), payout);
 }
+fn index() -> Vec<OperationId> {
+    read(KEY_INDEX).unwrap_or_default()
+}
 fn pending() -> Option<OperationId> {
     read(KEY_PENDING)
 }
@@ -314,6 +318,25 @@ impl Vault {
         read(&key(KEY_PAYOUT, &op_id))
     }
 
+    /// Payouts, oldest first.
+    pub fn list_bank_payouts(
+        &self,
+        from_index: Option<u64>,
+        limit: Option<u64>,
+    ) -> Vec<BankPayout> {
+        let ids = index();
+        let from = from_index.unwrap_or(0) as usize;
+        ids.iter()
+            .skip(from)
+            .take(limit.unwrap_or(50).min(100) as usize)
+            .map(payout)
+            .collect()
+    }
+
+    pub fn count_bank_payouts(&self) -> u64 {
+        index().len() as u64
+    }
+
     /// The payout an agent started with this reference, if any.
     pub fn get_bank_payout_by_reference(
         &self,
@@ -433,6 +456,9 @@ impl Vault {
             error: None,
         });
         set_pending(Some(op_id));
+        let mut ids = index();
+        ids.push(op_id);
+        write(KEY_INDEX, &ids);
         env::log_str(&format!(
             "OMNIROLES_BANK_PAYOUT_REQUESTED:{}",
             hex::encode(op_id)

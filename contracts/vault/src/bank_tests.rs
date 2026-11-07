@@ -279,6 +279,9 @@ fn request_reserves_and_callback_queues_the_euro_transfer() {
         1_234_500
     );
     assert_eq!(v.dao_queue, vec![transfer_id]);
+    assert_eq!(v.count_bank_payouts(), 1);
+    assert_eq!(v.list_bank_payouts(None, None)[0].op_id, payout.op_id);
+    assert!(v.list_bank_payouts(Some(1), None).is_empty());
     assert_eq!(
         v.allowances[&[5; 32]].reserved.0, 1_234_500,
         "the budget stays reserved until the transfer settles"
