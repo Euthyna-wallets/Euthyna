@@ -171,6 +171,9 @@
   .ground h3{font-size:17px !important}
   .ground .page-title{font-size:28px}
 }
+/* /recover: the broken seal (R7) behind the text, darker on phones where the text sits on it */
+.r7-aside{background-color:#061433;background-image:linear-gradient(180deg,rgba(3,9,24,.35) 0%,rgba(3,9,24,0) 20%,rgba(3,9,24,0) 42%,rgba(3,9,24,.85) 62%,rgba(3,9,24,.97) 80%),url(/media/renders/R7-recovery-seal.jpg);background-size:cover,cover;background-position:0 0,center 18%}
+@media (max-width:900px){.r7-aside{background-image:linear-gradient(180deg,rgba(3,9,24,.6) 0%,rgba(3,9,24,.84) 45%,rgba(3,9,24,.95) 100%),url(/media/renders/R7-recovery-seal.jpg);background-position:0 0,center 30%}}
 .r8{background-color:#061433;background-image:linear-gradient(90deg,rgba(3,9,24,.15) 0%,rgba(3,9,24,0) 40%,rgba(3,9,24,.55) 100%),linear-gradient(180deg,rgba(3,9,24,.4) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,.15) 40%,rgba(3,9,24,.82) 58%,rgba(3,9,24,.97) 74%),url(/media/renders/R8-column.jpg);background-size:cover,cover,cover;background-position:0 0,0 0,center 30%}
 @media (max-width:900px){.r8{background-image:linear-gradient(180deg,rgba(3,9,24,.6) 0%,rgba(3,9,24,.82) 45%,rgba(3,9,24,.95) 100%),url(/media/renders/R8-column.jpg);background-size:cover,cover;background-position:0 0,center 30%}}
 

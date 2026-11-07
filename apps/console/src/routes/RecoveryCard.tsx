@@ -34,28 +34,53 @@ function windowText(seconds: number): string {
 }
 
 /** How to make the email, and where to give it: its source pasted, or the .eml file. Proved in the browser. */
-export function EmailProofStep({ subject, busy, onFile }: { subject: string; busy: boolean; onFile: (email: File | string) => void }) {
+export function EmailProofStep({ subject, busy, onFile, domain }: { subject: string; busy: boolean; onFile: (email: File | string) => void; domain?: string | undefined }) {
   const [copied, setCopied] = useState(false);
   const [source, setSource] = useState("");
+  const item = { display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", gap: 8, fontSize: 14, lineHeight: 1.55, color: "var(--ink-2)" } as const;
+  const num = { font: "700 12px var(--font-brand)", color: "var(--gold-ink)", paddingTop: 2 } as const;
   return (
-    <ol className="stack small">
-      <li>
-        From the mailbox you will recover with (Gmail, Outlook, iCloud…), send an email to <b>another address you can open</b> with exactly this subject{" "}
-        (Gmail does not sign an email you send to yourself):{" "}
-        <code className="mono">{subject}</code>{" "}
-        <button className="btn-line" style={{ padding: "6px 12px" }} onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
+    <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 14 }}>
+      <li style={item}>
+        <span style={num}>1</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+          <span>
+            From {domain ? <>your <b>{domain}</b> mailbox</> : <>the mailbox you will recover with (Gmail, Outlook, iCloud…)</>}, send an email to <b>another address you can open</b>, with exactly this subject. Gmail does not sign an email you send to yourself.
+          </span>
+          <span style={{ display: "flex", alignItems: "stretch", border: "1px solid rgba(13,23,48,.2)", background: "#fff" }}>
+            <code style={{ flex: 1, minWidth: 0, padding: "9px 12px", font: "600 13px var(--font-mono)", color: "var(--ink)", overflowWrap: "anywhere" }}>{subject}</code>
+            <button type="button" onClick={() => void navigator.clipboard.writeText(subject).then(() => setCopied(true))}
+              style={{ border: 0, borderLeft: "1px solid rgba(13,23,48,.2)", background: "rgba(13,23,48,.04)", padding: "0 14px", font: "700 11px var(--font-brand)", letterSpacing: ".14em", color: "var(--ink)", cursor: "pointer" }}>
+              {copied ? "COPIED" : "COPY"}
+            </button>
+          </span>
+        </div>
       </li>
-      <li>
-        Open it in the mailbox that received it (not in Sent) and copy its source. Gmail: ⋮ → <b>Show original</b> → <b>Copy to clipboard</b>. Outlook: … → View → <b>View message source</b>.
-        Apple Mail: View → Message → <b>Raw Source</b>.
+      <li style={item}>
+        <span style={num}>2</span>
+        <span>
+          Open it in the mailbox that <b>received</b> it (not in Sent) and copy its source. Gmail: ⋮ → <b>Show original</b> → <b>Copy to clipboard</b>.
+          Outlook: … → View → <b>View message source</b>. Apple Mail: View → Message → <b>Raw Source</b>.
+        </span>
       </li>
-      <li>
-        Paste it here. Your browser proves your provider signed it; the email itself is never uploaded.
-        <textarea aria-label="Original message" rows={4} value={source} disabled={busy} onChange={(event) => setSource(event.target.value)}
-          placeholder="Delivered-To: …&#10;Received: …&#10;DKIM-Signature: …" style={{ width: "100%", font: "12px var(--font-mono, monospace)" }} />
-        <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy || !source.trim()} onClick={() => onFile(source)}>Prove</button>{" "}
-        <span className="small">or a downloaded <span className="mono">.eml</span> file:</span>{" "}
-        <input type="file" accept=".eml,message/rfc822" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} />
+      <li style={item}>
+        <span style={num}>3</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+          <span>Paste it here. Your browser proves that your provider signed it; the email itself is never uploaded.</span>
+          <div className="field-app">
+            <textarea aria-label="Original message" rows={5} value={source} disabled={busy} onChange={(event) => setSource(event.target.value)}
+              placeholder={"Delivered-To: …\nReceived: …\nDKIM-Signature: …"} style={{ font: "12px var(--font-mono)", resize: "vertical" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <button type="button" className="btn-ori" disabled={busy || !source.trim()} onClick={() => onFile(source)}>{busy ? "PROVING…" : "PROVE"}</button>
+            <label style={{ display: "inline", margin: 0, fontSize: 13, color: "var(--ink-2)", cursor: busy ? "not-allowed" : "pointer" }}>
+              or a downloaded <span style={{ fontFamily: "var(--font-mono)" }}>.eml</span> file:{" "}
+              <span style={{ textDecoration: "underline" }}>choose</span>
+              <input type="file" accept=".eml,message/rfc822" disabled={busy} style={{ display: "none" }}
+                onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} />
+            </label>
+          </div>
+        </div>
       </li>
     </ol>
   );
@@ -119,9 +144,9 @@ export type ProvedCall = { what: string; sign: () => Promise<string> };
  */
 export function SignProvedStep({ proved, busy, onSign }: { proved: ProvedCall; busy: boolean; onSign: () => void }) {
   return (
-    <div className="row" style={{ alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-      <button className="btn-ori" style={{ padding: "8px 14px" }} disabled={busy} onClick={onSign}>Sign with my wallet</button>
-      <span className="small">{proved.what}: proof ready. If the wallet window closes, sign again here: no need to prove again.</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <button type="button" className="btn-ori" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={onSign}>{busy ? "CONFIRM IN YOUR WALLET…" : "SIGN WITH MY WALLET"}</button>
+      <span style={{ fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>{proved.what}: proof ready. If the wallet window closes, sign again here: no need to prove again.</span>
     </div>
   );
 }
