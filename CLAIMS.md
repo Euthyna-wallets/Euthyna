@@ -37,6 +37,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | An agent pays suppliers in EURC within a role's EURC budget | Code | EURC is a Base Sepolia token of the payment roles (`packages/sdk/src/roles.ts`); the same role pays USDC on testnet |
 | Activity exports a CSV of the entries shown, with each transaction hash, formulas neutralised | Code | `apps/console/src/lib/activity-csv.test.ts` |
 | An agent pays a supplier's IBAN in euros under a vault rule: IBAN in the voted list, amount within the role's EURC budget and ceiling, reference used once; the partner's API key lives in an OutLayer enclave that answers only the vault | Code | `contracts/vault/src/bank.rs` and `bank_tests.rs` (unknown IBAN refused, ceiling, budget reserved and released, callback queues the exact EURC transfer, the signer cannot change the amount); `bank-signer/` (manifest and code refuse any caller but a vault); [docs/bank.md](./docs/bank.md#euros-out-an-agent-pays-a-voted-iban) |
+| The IBAN and the holder are never on chain: a salted commitment and two envelopes (the enclave's, the members'); the agent pays a beneficiary by number and the enclave pays only the committed IBAN | Testnet | `packages/sdk/src/bank-private.ts` (vector opened by `bank-signer` tests), `contracts/vault/src/bank_tests.rs`; [docs/bank.md](./docs/bank.md#the-iban-is-not-public) (state, proposal and transactions searched) |
 
 ## Sealed orders (private limit orders)
 
