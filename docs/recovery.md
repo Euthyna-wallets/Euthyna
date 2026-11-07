@@ -7,7 +7,7 @@ a seat by itself: the DAO's vote does.
 
 | | |
 | --- | --- |
-| Contract | [`contracts/email-recovery`](../contracts/email-recovery), deployed at `euthyna-recovery.testnet` with **no access key** |
+| Contract | [`contracts/email-recovery`](../contracts/email-recovery), deployed at `euthyna-recovery-v4.testnet` with **no access key** (keeper `mandateos.testnet`, 600 s); the first deployment, `euthyna-recovery.testnet` (no cooldown after a cancel), is no longer used |
 | Circuit | [`circuits/email-recovery`](../circuits/email-recovery) (Noir 1.0.0-beta.26, bb.js 5.3.0, zero-knowledge proofs) |
 | Verifier | zkVerify's UltraHonk verifier v0.4.0 ([`contracts/vendor/ultrahonk-no-std`](../contracts/vendor)), on NEAR's BN254 host functions |
 | Cost | about **85 Tgas** per enrollment or request (proof verified in the call), a few seconds to prove in Node, about 40 s in a browser on one thread |
@@ -82,6 +82,11 @@ no upgrade (the contract has no upgrade method and no access key).
   proving.
 
 ## On testnet
+
+The table below is the first deployment, `euthyna-recovery.testnet`. The API and the console now use
+`euthyna-recovery-v4.testnet` (code hash `23BJWfFWycL71niKjgvhcMbrXGeH3QPGxroao3FTuZVm`, the current
+`contracts/res/email_recovery.wasm`), unless `RECOVERY_CONTRACT_ID` says otherwise. Enrollments do not carry
+over: a founder enrolled on the first contract enrolls again.
 
 | Step | Result | Transaction |
 | --- | --- | --- |
