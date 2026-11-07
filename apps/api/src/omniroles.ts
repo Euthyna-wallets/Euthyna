@@ -978,6 +978,14 @@ export class OmniRolesService {
   // Status
   // -------------------------------------------------------------------------
 
+  /** The company wallet on its main chain, read from the vault; null before the wallet exists. */
+  async companyWallet(organizationId: string): Promise<{ address: string; chainId: number } | null> {
+    const treasury = await this.treasury(organizationId);
+    if (!treasury) return null;
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId });
+    return wallet?.address ? { address: getAddress(hexOf(wallet.address)), chainId: treasury.baseChainId } : null;
+  }
+
   async status(organizationId: string) {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };

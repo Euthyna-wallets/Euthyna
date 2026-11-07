@@ -22,6 +22,8 @@ import { RobService } from "./rob/service.js";
 import { attachRugOClock, rugOClockLlm, scheduleRugOClock } from "./rob/rugoclock.js";
 import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
+import { NoahClient } from "./bank/noah.js";
+import { BankService } from "./bank/service.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -166,6 +168,11 @@ const recovery = recoveryContractId
   }, dkimKeys({ testKeys: testDkimKeys }))
   : undefined;
 
+// The company's euro account (Noah): deposits on its IBAN settle into the company wallet only.
+const bank = env.NOAH_API_KEY
+  ? new BankService({ prisma, noah: new NoahClient({ apiUrl: env.NOAH_API_URL, apiKey: env.NOAH_API_KEY }), companyWallet: (organizationId) => omniroles.companyWallet(organizationId) })
+  : undefined;
+
 const app = createApp({
   near,
   auth,
@@ -182,6 +189,7 @@ const app = createApp({
   publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
   marketTrustProxy: env.MARKET_TRUST_PROXY,
   recovery,
+  bank,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

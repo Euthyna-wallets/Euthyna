@@ -28,6 +28,16 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Euthyna Market: companies sell agent work, buyers pay with a card; the payment is held until delivery | Code | [docs/market.md](./docs/market.md), `apps/api/src/market/e2e.integration.test.ts` |
 | Rob the Agent, Hire him: the player buys Ruggy's tx-check for 1 TestUSDC from the throwaway key, the cheque held and cashed on delivery, no gas paid | Code | [docs/rob-the-agent.md](./docs/rob-the-agent.md#hire-him-ruggys-service-on-the-market), `apps/api/src/rob/hire.test.ts`; not run on testnet yet: add the settlement hash |
 
+## Euro bank account
+
+| Claim | Status | Proof |
+| --- | --- | --- |
+| A company opens a euro IBAN (Noah); a SEPA transfer arrives as EURC in the company wallet, and only there (the address is read from the vault) | Testnet (Noah sandbox) | [docs/bank.md](./docs/bank.md), `apps/api/src/bank/service.test.ts` |
+| Those euros leave by a members' vote, signed by the vault through NEAR MPC | Testnet (Noah sandbox) | [docs/bank.md](./docs/bank.md) |
+| An agent pays suppliers in EURC within a role's EURC budget | Code | EURC is a Base Sepolia token of the payment roles (`packages/sdk/src/roles.ts`); the same role pays USDC on testnet |
+| Activity exports a CSV of the entries shown, with each transaction hash, formulas neutralised | Code | `apps/console/src/lib/activity-csv.test.ts` |
+| Euros back to a bank account (off-ramp) | NEXT | Not built. |
+
 ## Sealed orders (private limit orders)
 
 | Claim | Status | Proof |

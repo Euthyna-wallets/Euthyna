@@ -158,6 +158,8 @@ export const BASE_SEPOLIA: ChainProfile = {
     { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", decimals: 18 },
     // Aave's own test USDC on Base Sepolia (not Circle's): the asset its USDC reserve uses.
     { address: "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f", symbol: "USDC (Aave test)", decimals: 6 },
+    // Noah's sandbox euro (symbol EURC_TEST on chain, 6 decimals): what the company's EUR IBAN settles into.
+    { address: "0x623ef90571256F905B2Fde947dC33098BdD8F4d8", symbol: "EURC", decimals: 6 },
   ],
   lending: {
     // Pool read on chain: getReservesList() lists WETH and the test USDC above, both active.

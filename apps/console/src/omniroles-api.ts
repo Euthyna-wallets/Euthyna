@@ -194,6 +194,24 @@ export type SharesDraft = {
 export type CouncilMember = { id: string; nearAccountId: string | null; name: string | null; role: string; signedIn: boolean };
 type Members = { locked: boolean; members: CouncilMember[]; me?: string | null };
 
+export type BankView = {
+  configured: boolean;
+  sandbox?: boolean;
+  account?: null | { iban: string; bic: string; bankName: string; accountHolder: string; currency: "EUR"; settlesAs: string; network: string; destinationAddress: string; createdAt: string };
+  transfers?: Array<{ id: string; created: string; status: string; direction: "in" | "out"; amount: string; currency: string; network: string; txHash: string | null; explorer: string | null }>;
+};
+
+export type BankBusiness = {
+  registeredName: string; registrationNumber: string; entityType: string; country: string; street: string; city: string;
+  postCode: string; state: string; incorporationDate: string; taxId: string; email?: string;
+};
+
+export const bankApi = {
+  view: () => api<BankView>("/v1/console/bank"),
+  open: (input: BankBusiness) => api<BankView>("/v1/console/bank", { method: "POST", body: JSON.stringify(input) }),
+  simulate: (amount: string) => api<{ depositId: string }>("/v1/console/bank/simulate", { method: "POST", body: JSON.stringify({ amount }) }),
+};
+
 export const omni = {
   members: () => api<Members>("/v1/console/omniroles/members"),
   addMember: (input: { nearAccountId: string; name?: string }) => api<Members>("/v1/console/omniroles/members", { method: "POST", body: JSON.stringify(input) }),

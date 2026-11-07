@@ -171,3 +171,21 @@ export function dayLabel(at: string): string {
 export function timeOf(at: string): string {
   return new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
+
+/** One cell: quoted, and text that a spreadsheet would run as a formula is neutralised. */
+function csvCell(value: string | null | undefined): string {
+  let text = value ?? "";
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+/** What the company paid, received and was refused, for the accountant: one row per entry, with the transaction to check it. */
+export function activityCsv(entries: Entry[], nameOf: (actor: string) => string = (actor) => actor): string {
+  const header = ["date_utc", "who", "role", "what", "outcome", "chain", "reference", "transaction", "reason"];
+  const rows = entries.map((entry) => {
+    const operation = entry.operation;
+    const transaction = operation?.evm?.hash ?? operation?.near?.txHash ?? operation?.solana?.signature ?? "";
+    return [entry.at, nameOf(entry.actor), entry.role ?? "", entry.text, entry.outcome, entry.chain ?? "", operation?.reference ?? "", transaction, entry.reason ?? ""].map(csvCell).join(",");
+  });
+  return [header.join(","), ...rows].join("\r\n") + "\r\n";
+}
