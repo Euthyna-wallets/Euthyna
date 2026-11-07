@@ -279,6 +279,12 @@ fn request_reserves_and_callback_queues_the_euro_transfer() {
         1_234_500
     );
     assert_eq!(v.dao_queue, vec![transfer_id]);
+    assert_eq!(
+        v.get_bank_payout_by_reference("payments".into(), "inv-1".into())
+            .map(|p| p.op_id),
+        Some(payout.op_id),
+        "found through the transfer too"
+    );
     assert_eq!(v.count_bank_payouts(), 1);
     assert_eq!(v.list_bank_payouts(None, None)[0].op_id, payout.op_id);
     assert!(v.list_bank_payouts(Some(1), None).is_empty());
@@ -290,6 +296,22 @@ fn request_reserves_and_callback_queues_the_euro_transfer() {
         refused(&v, IBAN, 1, "inv-1").as_deref(),
         Some("ERR_MEMBERSHIP_UNAVAILABLE"),
         "the membership use is spent"
+    );
+
+    assert_eq!(
+        v.list_dao_transactions(None, None)[0].op_id,
+        transfer_id,
+        "the keeper sees it with the voted transactions"
+    );
+    // Before signing, the vault rechecks the payout, not the role's EVM permissions.
+    v.recheck_bank_transfer(&payout.op_id, transfer);
+    v.apply_rule_change(RuleChange::RemoveBankBeneficiary { iban: IBAN.into() }, 3);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || v.recheck_bank_transfer(&payout.op_id, v.operations.get(&transfer_id).unwrap())
+        ))
+        .is_err(),
+        "a removed beneficiary stops the transfer"
     );
 
     // The transfer settles like any operation: the budget is charged and the role freed.

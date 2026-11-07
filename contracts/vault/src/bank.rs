@@ -25,6 +25,7 @@ const KEY_PERMISSION: &[u8] = b"bank:p:";
 const KEY_PAYOUT: &[u8] = b"bank:o:";
 const KEY_PENDING: &[u8] = b"bank:pending";
 const KEY_INDEX: &[u8] = b"bank:i";
+const KEY_TRANSFER: &[u8] = b"bank:t:";
 const MAX_BENEFICIARIES: usize = 64;
 const MAX_REFERENCE_CHARS: usize = 140;
 /// Attached to OutLayer for the run; what it does not use comes back to the vault.
@@ -173,6 +174,18 @@ fn store(payout: &BankPayout) {
 }
 fn index() -> Vec<OperationId> {
     read(KEY_INDEX).unwrap_or_default()
+}
+/// The payout behind a queued EURC transfer, if the operation is one.
+pub(crate) fn payout_of_transfer(transfer_id: &OperationId) -> Option<OperationId> {
+    read(&key(KEY_TRANSFER, transfer_id)).or_else(|| {
+        // Payouts queued by the first version, before the link was stored.
+        index()
+            .iter()
+            .rev()
+            .map(payout)
+            .find(|payout| payout.transfer_op_id.as_ref() == Some(transfer_id))
+            .map(|payout| payout.op_id)
+    })
 }
 fn pending() -> Option<OperationId> {
     read(KEY_PENDING)
@@ -343,9 +356,15 @@ impl Vault {
         role: String,
         reference: String,
     ) -> Option<BankPayout> {
-        self.references
-            .get(&ReferenceKey { role, reference })
-            .and_then(|op_id| read(&key(KEY_PAYOUT, op_id)))
+        // Once the transfer is queued, the reference names the transfer; the payout record keeps the link.
+        let id = *self.references.get(&ReferenceKey { role, reference })?;
+        read(&key(KEY_PAYOUT, &id)).or_else(|| {
+            index()
+                .iter()
+                .rev()
+                .map(payout)
+                .find(|payout| payout.transfer_op_id == Some(id))
+        })
     }
 
     /// Dry run: would `request_bank_payout` accept this from `member`?
@@ -618,6 +637,10 @@ impl Vault {
             transfer_id,
         );
         self.dao_queue.push(transfer_id);
+        // Listed with the voted transactions: the same keeper starts, broadcasts and settles it.
+        self.dao_sequence = self.dao_sequence.saturating_add(1);
+        self.dao_transactions.insert(self.dao_sequence, transfer_id);
+        write(&key(KEY_TRANSFER, &transfer_id), &op_id);
         payout.rule_id = answer["rule_id"].as_str().map(str::to_owned);
         payout.deposit_address = Some(deposit);
         payout.fiat_amount = answer["fiat_amount"].as_str().map(str::to_owned);
@@ -706,6 +729,41 @@ impl Vault {
             return Err("ERR_ALLOWANCE_EXCEEDED");
         }
         Ok((config, beneficiary, permission.allowance))
+    }
+
+    /// Before the transfer is signed: the payout still stands under the rules of the moment.
+    pub(crate) fn recheck_bank_transfer(&self, payout_id: &OperationId, operation: &Operation) {
+        let payout = payout(payout_id);
+        require!(
+            payout.state == BankPayoutState::Transferring,
+            "ERR_CONDITIONS_CHANGED"
+        );
+        let config = config().unwrap_or_else(|| env::panic_str("ERR_CONDITIONS_CHANGED"));
+        require!(
+            config.chain_id == operation.request.chain_id
+                && config.token == operation.request.target,
+            "ERR_CONDITIONS_CHANGED"
+        );
+        let wanted = canonical_iban(&payout.beneficiary.iban);
+        require!(
+            beneficiaries()
+                .iter()
+                .any(|entry| canonical_iban(&entry.iban) == wanted),
+            "ERR_CONDITIONS_CHANGED"
+        );
+        let permission =
+            permission_of(&payout.role).unwrap_or_else(|| env::panic_str("ERR_CONDITIONS_CHANGED"));
+        require!(
+            permission.allowance == payout.consumption.key
+                && payout.amount.0 <= permission.max_per_payout.0,
+            "ERR_CONDITIONS_CHANGED"
+        );
+        require!(
+            self.roles
+                .get(&payout.role)
+                .is_some_and(|state| state.config.enabled),
+            "ERR_ROLE_DISABLED"
+        );
     }
 
     /// Nothing left the company: give back the budget, the membership use and the reference.

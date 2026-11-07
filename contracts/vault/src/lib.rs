@@ -1345,7 +1345,11 @@ impl Vault {
                 "ERR_MEMBERSHIP_EXPIRED"
             );
         }
-        if operation.role != DAO_ROLE {
+        if let Some(payout_id) = bank::payout_of_transfer(&op_id) {
+            // A euro payout's transfer: the voted IBAN, the config and the role are rechecked, not
+            // the role's EVM permissions (the partner's deposit address is not a supplier).
+            self.recheck_bank_transfer(&payout_id, &operation);
+        } else if operation.role != DAO_ROLE {
             let permission = &self
                 .roles
                 .get(&operation.role)
