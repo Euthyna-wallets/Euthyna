@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { authClient } from "../auth.js";
 import { displayAccount, short } from "./ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni } from "../omniroles-api.js";
@@ -18,9 +19,15 @@ export function WalletBar() {
         <span className="wallet-network">NEAR</span>
         <strong className="mono">{wallets.nearAccountId ? short(wallets.nearAccountId, 14) : me ? short(me, 14) : "Not connected"}</strong>
         {mismatch ? (
-          <button className="ghost compact" disabled={wallets.connecting} onClick={() => void switchNearWallet().then(() => wallets.refresh())}>
-            Switch to {short(me ?? "", 10)}
-          </button>
+          <>
+            <button className="ghost compact" disabled={wallets.connecting} onClick={() => void switchNearWallet().then(() => wallets.refresh())}>
+              Switch to {short(me ?? "", 10)}
+            </button>
+            {/* Another founder on the same browser: end this session, the wallet stays connected for their sign-in. */}
+            <button className="ghost compact" disabled={wallets.connecting} onClick={() => void authClient.signOut().then(() => window.location.assign("/overview"))}>
+              Sign in as {short(wallets.nearAccountId ?? "", 10)}
+            </button>
+          </>
         ) : !wallets.nearConnected ? (
           <button className="ghost compact" disabled={wallets.connecting} onClick={() => void wallets.connectNear()}>
             Connect wallet
