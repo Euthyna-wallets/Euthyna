@@ -1004,3 +1004,94 @@ fn an_upgrade_cannot_be_burned_with_little_gas() {
     );
     drop(v.execute_rule_change(queued.queue_id));
 }
+
+fn revoke_agent(v: &mut Vault) {
+    v.apply_rule_change(
+        RuleChange::RevokeMembership {
+            role: "payments".into(),
+            member: "agent.testnet".parse().unwrap(),
+        },
+        3,
+    );
+}
+fn agent_membership(v: &Vault) -> &Membership {
+    v.memberships
+        .get(&MembershipKey {
+            role: "payments".into(),
+            member: "agent.testnet".parse().unwrap(),
+        })
+        .unwrap()
+}
+
+#[test]
+fn agent_with_a_signed_operation_in_flight_is_revoked_at_once() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    assert_eq!(agent_membership(&v).reserved_uses, 1);
+    revoke_agent(&mut v);
+    assert!(!agent_membership(&v).active);
+    // The signed transaction still settles and frees its reservation.
+    verify(&mut v, id, false, true);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Confirmed
+    );
+    assert_eq!(agent_membership(&v).reserved_uses, 0);
+    assert!(!agent_membership(&v).active);
+}
+
+#[test]
+fn unconfirmed_operation_of_a_revoked_agent_still_times_out() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    revoke_agent(&mut v);
+    let after = 2 + v.settlement_config.unconfirmed_after_ns.0;
+    context("stranger.testnet", after);
+    v.release_unconfirmed(id);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Unconfirmed
+    );
+    assert_eq!(agent_membership(&v).reserved_uses, 0);
+}
+
+#[test]
+#[should_panic(expected = "ERR_MEMBERSHIP_REVOKED")]
+fn prepared_operation_of_a_revoked_agent_is_never_signed() {
+    let (mut v, id) = fixture(false, false);
+    revoke_agent(&mut v);
+    context("agent.testnet", 3);
+    let _ = v.authorize(id, None);
+}
+
+#[test]
+fn council_cancels_what_a_revoked_agent_left_prepared() {
+    let (mut v, id) = fixture(false, false);
+    revoke_agent(&mut v);
+    context("council.testnet", 3);
+    v.cancel_prepared(id);
+    assert_eq!(
+        v.operations.get(&id).unwrap().state,
+        OperationState::Cancelled
+    );
+    assert_eq!(agent_membership(&v).reserved_uses, 0);
+}
+
+#[test]
+#[should_panic(expected = "ERR_MEMBERSHIP_IN_USE")]
+fn re_granting_waits_for_the_operations_in_flight() {
+    let (mut v, id) = fixture(false, false);
+    signed(&mut v, id);
+    revoke_agent(&mut v);
+    v.apply_rule_change(
+        RuleChange::GrantMembership {
+            role: "payments".into(),
+            member: "agent.testnet".parse().unwrap(),
+            kind: MembershipKind::Agent,
+            starts_at_ns: U64(0),
+            ends_at_ns: None,
+            max_uses: Some(1),
+        },
+        3,
+    );
+}

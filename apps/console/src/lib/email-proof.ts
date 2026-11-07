@@ -10,6 +10,7 @@ import {
 
 import { API_BASE } from "../api.js";
 import { viewContract } from "../wallets.js";
+import { HOSTED_G1_POINTS, openProver } from "./crs.js";
 
 export { newSalt, recoverySubject } from "@euthyna/sdk/email-proof";
 
@@ -73,7 +74,7 @@ export async function proveEmailFile(input: File | string, salt: string, onStep:
   if (!moduli.length) {
     throw new Error(`The recovery contract does not accept ${dkim.domain}'s DKIM key yet (selector ${dkim.selector}). Use another mailbox (Gmail, Outlook, iCloud…) or ask Euthyna to add it.`);
   }
-  const [{ Noir }, { Barretenberg, UltraHonkBackend }, compiled] = await Promise.all([import("@noir-lang/noir_js"), import("@aztec/bb.js"), loadCircuit()]);
+  const [{ Noir }, { UltraHonkBackend }, compiled] = await Promise.all([import("@noir-lang/noir_js"), import("@aztec/bb.js"), loadCircuit()]);
   onStep("Checking the email's signature…");
   let witness: Uint8Array | null = null;
   for (const modulus of moduli) {
@@ -87,7 +88,8 @@ export async function proveEmailFile(input: File | string, salt: string, onStep:
   }
   if (!witness) throw new Error("No DKIM key of the domain verifies this email");
   onStep("Proving in your browser…");
-  const api = await Barretenberg.new({ threads: threads() });
+  // 2^18 gates: the hosted 2^19 points, as bb.js would take from Aztec.
+  const api = await openProver(threads(), HOSTED_G1_POINTS);
   try {
     const result = await new UltraHonkBackend(compiled.bytecode, api).generateProof(witness, { verifierTarget: PROOF_TARGET });
     const stated = readPublicInputs(result.publicInputs);

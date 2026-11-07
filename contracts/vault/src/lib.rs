@@ -1826,7 +1826,11 @@ impl Vault {
                     .memberships
                     .get_mut(&MembershipKey { role, member })
                     .expect("ERR_MEMBERSHIP_NOT_FOUND");
-                require!(membership.reserved_uses == 0, "ERR_MEMBERSHIP_IN_USE");
+                // Takes effect at once, even with operations in flight: nothing unsigned is
+                // signed for a revoked member (request_operation_signature), and what is
+                // already signed still settles or times out, releasing its reservation on
+                // the entry kept here. Refusing instead let an agent block its own removal
+                // by always keeping one operation open.
                 membership.active = false;
             }
             RuleChange::SetAllowance {
