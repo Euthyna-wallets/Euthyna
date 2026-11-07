@@ -18,6 +18,7 @@ import { WalletBar } from "../components/WalletBar.js";
 import { JOBS, rememberJob, rememberedJob, type Job } from "../lib/jobs.js";
 import { useWallets, WalletProvider } from "../lib/wallet-context.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
+import { disconnectNearWallet } from "../wallets.js";
 import { omni, type CouncilMember } from "../omniroles-api.js";
 import { NewAgent, RunYourAgent, type AgentReady } from "./AgentSetup.js";
 import { forkedLawOf, lawForCompany, rememberPendingLaw, roleBuilderPath, type ForkedLaw } from "./onboarding-law.js";
@@ -221,6 +222,14 @@ export function OnboardingPage() {
         </span>
         <SigningInbox />
         <WalletBar />
+        <button
+          type="button"
+          title="Sign out, then sign in with another founder's wallet"
+          onClick={() => void authClient.signOut().then(disconnectNearWallet).then(() => window.location.assign("/"))}
+          style={{ background: "none", border: "1px solid currentColor", borderRadius: 2, padding: "6px 12px", font: "700 11px var(--font-brand)", letterSpacing: ".14em", color: "var(--onb-mute)", cursor: "pointer" }}
+        >
+          SIGN OUT
+        </button>
       </header>
 
       {error ? (
