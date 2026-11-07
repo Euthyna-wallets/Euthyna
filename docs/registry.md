@@ -10,7 +10,7 @@ Euthyna API for that.
 | --- | --- |
 | Who lists | the company's DAO calls `register`, so a vote of its members decides it |
 | Which DAOs | only `<name>.<factory>`, the accounts one DAO factory creates (`sputnikv2.testnet` on testnet) |
-| Which vaults | when a vault factory is set, only `<name>.<vault factory>`: the keyless vaults Nomos creates (`nomos.euthyna.testnet`) |
+| Which vaults | when a vault factory is set, only `<name>.<vault factory>`: the keyless vaults Nomos creates (`euthyna-nomos.testnet`) |
 | What is checked | `owner_id` of the vault must be the DAO; `info().dao_id` of the shares contract (if any) must be the DAO |
 | What is stored | DAO, vault, shares contract, name (64 characters), one line of description (280) |
 | Leaving | the DAO calls `unregister`; its storage deposit comes back |
@@ -42,7 +42,32 @@ then the wallet signs. Members approve it in **Decisions**. The API needs
 
 ## On testnet
 
-### Current: `atlantis-registry.testnet` (2026-11-01)
+### Current: `euthyna-directory.testnet` and Nomos `euthyna-nomos.testnet` (2026-11-07)
+
+The owner key of `euthyna.testnet` was lost, so `nomos.euthyna.testnet` can no
+longer publish a version, and its vaults fetch versions only from it: they stay
+on their code (without the B6 fix). Vault versions now carry `SetCodeSource`, a
+rule change the DAO votes like the others, so a vault no longer depends on one
+Nomos key: an upgrade still deploys only code with the voted hash.
+
+The new Nomos and directory run the CI builds of `contracts/res/nomos.wasm` and
+`contracts/res/registry.wasm`; both accounts have no access key. The Nomos owner
+is `euthyna-owner.testnet` (it publishes versions, nothing else); its key is
+kept offline, not on the server.
+
+| Step | Result | Transaction |
+| --- | --- | --- |
+| Create `euthyna-owner.testnet`, `euthyna-nomos.testnet`, `euthyna-directory.testnet` (temporary keys) through the testnet registrar | | `4mdccxutw8nbQStRU8F5zqN3mJcgk8x8hcBowp2jsuwj`, `FxS4dcatwdvRgiAeAP6L31TcXZBcEh7PZEdwnyFEuqU5`, `3vC57821uRyUj8kTDmKMaqxfM63zpBHMw1UD4YAedU64` |
+| Nomos: deploy + `new(euthyna-owner.testnet)` + delete the key, in one transaction | 0 access keys; code hash `4m1piZgmebAmqjwDyjtRPPycc3mfUZkG4QHfviWjjxMz` | `6noQ5MUPzDtjcyxPs13sVtQfRM8f9bKcAexNpBCan4kz` |
+| Directory: deploy + `new(sputnikv2.testnet, euthyna-nomos.testnet)` + delete the key, in one transaction | 0 access keys; code hash `GKmygErEviqFHAjsELMrJeJbsseopZp3hNT7wtDN73hk` | `AKx7VZLbrDesAoiGqxq5MDEGt72wKcmDArftF5iMA4mA` |
+| Publish `contracts/res/vault.wasm` (sha256 `f1e1c20f…7a8`) | version `HHCvArrQ1T9GTdN9DTLnPMqVmXHSqUGWYwMdkjHXBnq5` | `DtBWvGDVPi8rwQrintoTrG2yiacon3Lm2auog9L2pyTQ` |
+
+The API and the console use `euthyna-directory.testnet` on testnet and still
+read `atlantis-registry.testnet` (`OMNIROLES_PREVIOUS_REGISTRY_IDS`,
+`VITE_MANDATEOS_PREVIOUS_REGISTRY_IDS`): a company lists in the directory whose
+Nomos made its vault.
+
+### Previous: `atlantis-registry.testnet` (2026-11-01)
 
 Same code and settings as `euthyna-registry.testnet` below (DAO factory
 `sputnikv2.testnet`, vault factory `nomos.euthyna.testnet`), redeployed from the
@@ -60,9 +85,7 @@ repository builds, and the account has no key to replace it. The checked-in
 Companies listed on the previous registry list themselves again here, by a
 vote of their members.
 
-The API and the console use `atlantis-registry.testnet` on testnet unless
-`OMNIROLES_REGISTRY_ID` (API, and `VITE_MANDATEOS_REGISTRY_ID` at console build)
-says otherwise.
+Companies with a vault from `nomos.euthyna.testnet` stay listed here.
 
 ### Previous: `euthyna-registry.testnet` (2026-10-31)
 

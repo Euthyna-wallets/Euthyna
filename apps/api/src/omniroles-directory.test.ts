@@ -34,6 +34,23 @@ describe("public directory", () => {
     expect(directory.sharesAccountId).toBeNull();
   });
 
+  it("lists a company in the directory of the Nomos that made its vault", async () => {
+    const vault = (vaultAccountId: string) => {
+      const prisma = { treasury: { findUnique: async () => ({ ...treasury, vaultAccountId }) } } as unknown as PrismaClient;
+      const near = {
+        viewFunction: vi.fn(async (accountId: string, method: string) => {
+          if (method === "vault_factory_id") return accountId === "new-directory.testnet" ? "new-nomos.testnet" : "old-nomos.testnet";
+          if (method === "get_company") return null;
+          throw new Error(`unexpected view ${accountId}.${method}`);
+        }),
+      } as unknown as NearClient;
+      const config = { proposalBondYocto: "1", proposalPeriodNs: "1", registryId: "new-directory.testnet", previousRegistryIds: ["old-directory.testnet"] } as OmniRolesConfig;
+      return new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, config).directory("org-1");
+    };
+    expect((await vault("acme.new-nomos.testnet")).registryId).toBe("new-directory.testnet");
+    expect((await vault("acme.old-nomos.testnet")).registryId).toBe("old-directory.testnet");
+  });
+
   it("refuses when no directory is configured", async () => {
     await expect(service(undefined).registryProposal("org-1", { name: "Acme", description: "" })).rejects.toMatchObject({ code: "registry_disabled" });
   });

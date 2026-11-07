@@ -64,7 +64,7 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 
 1. **Company**: a name. **Founders**: add the two other accounts (**Add member**), then **Continue**.
 2. **Incorporate**: **Create treasury**.
-   **You should see** a DAO `<name>.sputnikv2.testnet` and a vault `<name>.nomos.euthyna.testnet` created (we pay
+   **You should see** a DAO `<name>.sputnikv2.testnet` and a vault `<name>.euthyna-nomos.testnet` created (we pay
    the deposits on testnet).
 3. **Wallet**: click **Propose: create the wallet**. This is the DAO's first proposal (#0); your account pays a
    0.1 NEAR bond, returned when it passes. Proposing is not voting: it starts at 0 of 2 approvals. Approve it with two

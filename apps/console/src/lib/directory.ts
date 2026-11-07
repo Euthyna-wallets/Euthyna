@@ -8,7 +8,10 @@ import { baseSepolia, sepolia } from "viem/chains";
 
 import { chainView } from "./chain-view.js";
 
-export const REGISTRY_ID = import.meta.env.VITE_MANDATEOS_REGISTRY_ID ?? "atlantis-registry.testnet";
+export const REGISTRY_ID = import.meta.env.VITE_MANDATEOS_REGISTRY_ID ?? "euthyna-directory.testnet";
+/** Earlier directories, still read: companies whose vault comes from an earlier Nomos are listed there. */
+export const PREVIOUS_REGISTRY_IDS = (import.meta.env.VITE_MANDATEOS_PREVIOUS_REGISTRY_IDS ?? "atlantis-registry.testnet")
+  .split(",").map((id: string) => id.trim()).filter((id: string) => id && id !== REGISTRY_ID);
 const PROFILE = BASE_SEPOLIA;
 
 export type DirectoryEntry = {
@@ -51,13 +54,21 @@ async function rpc<T>(params: Record<string, unknown>): Promise<T> {
   return payload.result;
 }
 
-export async function listCompanies(): Promise<DirectoryEntry[]> {
+async function listOf(registryId: string): Promise<DirectoryEntry[]> {
   const all: DirectoryEntry[] = [];
   for (let from = 0; ; from += 100) {
-    const page = await chainView<DirectoryEntry[]>(REGISTRY_ID, "list_companies", { from_index: from, limit: 100 });
+    const page = await chainView<DirectoryEntry[]>(registryId, "list_companies", { from_index: from, limit: 100 });
     all.push(...page);
     if (page.length < 100) return all;
   }
+}
+
+/** Companies of the current directory, then those only in an earlier one (a DAO appears once). */
+export async function listCompanies(): Promise<DirectoryEntry[]> {
+  const current = await listOf(REGISTRY_ID);
+  const seen = new Set(current.map((entry) => entry.dao_id));
+  const earlier = await Promise.all(PREVIOUS_REGISTRY_IDS.map((id: string) => listOf(id).catch(() => [] as DirectoryEntry[])));
+  return [...current, ...earlier.flat().filter((entry) => !seen.has(entry.dao_id) && seen.add(entry.dao_id))];
 }
 
 type QueuedRule = { change: RuleChange; state: string };

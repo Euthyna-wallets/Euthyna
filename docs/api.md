@@ -145,7 +145,7 @@ stderr; stdout is reserved exclusively for the MCP protocol.
   chain, and whether the vault is paused.
 - `POST /v1/console/omniroles/plan` and `POST /v1/console/omniroles/create`
   (admin): `{ daoName }`. Both deploy the Sputnik DAO (official factory
-  `sputnikv2.testnet`, `DAO_FACTORY_ID`) and its vault (`nomos.euthyna.testnet`).
+  `sputnikv2.testnet`, `DAO_FACTORY_ID`) and its vault (`euthyna-nomos.testnet`, `NOMOS_ID`).
 - `GET /v1/console/omniroles/members`, `POST /v1/console/omniroles/members`
   (`{ nearAccountId, name? }`) and `DELETE /v1/console/omniroles/members/:id`.
   These edit the list of members *before* the DAO exists. Afterwards, members
