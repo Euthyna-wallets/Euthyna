@@ -54,6 +54,14 @@ import {
   type VaultCall,
   NEAR_TESTNET_TOKENS,
   withSealedOrdersMember,
+  canonicalIban,
+  euroPayoutBudgetKey,
+  formatIban,
+  validIban,
+  type BankBeneficiary,
+  type BankConfig,
+  type BankPayout,
+  type BankPermission,
 } from "@euthyna/sdk/roles";
 import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import bs58 from "bs58";
@@ -90,6 +98,18 @@ export async function untilFinal(check: () => Promise<boolean>, attempts = 10, d
   }
 }
 
+/** Where the bank signer runs: what a vault votes into its bank config. */
+export interface BankSignerDeployment {
+  outlayerId: string;
+  signerUrl: string;
+  signerHash: string;
+  secretsOwner: string;
+  secretsProfile: string;
+}
+
+/** Fees of the EURC transfer on Base Sepolia (caps; the DAO gas policy bounds them). */
+const BANK_TRANSFER_GAS = { gas_limit: "120000", max_fee_per_gas: "500000000", max_priority_fee_per_gas: "10000000" };
+
 export interface OmniRolesConfig {
   nearNetwork: string;
   daoFactoryId: string;
@@ -115,6 +135,8 @@ export interface OmniRolesConfig {
   previousRegistryIds?: string[] | undefined;
   /** contracts/sealed-orders; unset turns sealed orders off. */
   sealedOrdersId?: string | undefined;
+  /** The bank signer (bank-signer/) deployed on OutLayer; unset turns euro payouts off. */
+  bankSigner?: BankSignerDeployment | undefined;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
   sharesRevenueToken?: string | null;
   baseRpcUrl: string;
@@ -978,6 +1000,14 @@ export class OmniRolesService {
   // Status
   // -------------------------------------------------------------------------
 
+  /** The company wallet on its main chain, read from the vault; null before the wallet exists. */
+  async companyWallet(organizationId: string): Promise<{ address: string; chainId: number } | null> {
+    const treasury = await this.treasury(organizationId);
+    if (!treasury) return null;
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: treasury.baseChainId });
+    return wallet?.address ? { address: getAddress(hexOf(wallet.address)), chainId: treasury.baseChainId } : null;
+  }
+
   async status(organizationId: string) {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };
@@ -1730,6 +1760,124 @@ export class OmniRolesService {
   // Roles, agents' dry runs and activity
   // -------------------------------------------------------------------------
 
+  /** Euro payouts: the vault's bank config, voted IBANs, each role's permission and the payouts made. */
+  async bank(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const vault = treasury.vaultAccountId;
+    const config = await this.view<BankConfig | null>(vault, "get_bank_config").catch((error: unknown) => {
+      if (/MethodNotFound|MethodResolveError/.test(String(error))) return undefined;
+      throw error;
+    });
+    if (config === undefined) return { supported: false as const, deployable: Boolean(this.config.bankSigner), config: null, beneficiaries: [], roles: [], payouts: [] };
+    const account = await this.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });
+    const [beneficiaries, count, rolesView] = await Promise.all([
+      this.view<BankBeneficiary[]>(vault, "list_bank_beneficiaries"),
+      this.view<number>(vault, "count_bank_payouts"),
+      this.roles(organizationId),
+    ]);
+    const payouts = count ? await this.view<BankPayout[]>(vault, "list_bank_payouts", { from_index: Math.max(0, count - 50), limit: 50 }) : [];
+    const agents = await this.prisma.agent.findMany({ where: { organizationId } });
+    const agentByAccount = new Map(agents.map((agent) => [agent.nearAccountId, agent.name]));
+    const roles = await Promise.all(rolesView.roles.map(async (role) => {
+      const permission = await this.view<BankPermission | null>(vault, "get_bank_permission", { role: role.name });
+      const key = permission ? hexOf(permission.allowance).toLowerCase() : null;
+      return {
+        role: role.name,
+        budgets: role.budgets,
+        permission: permission ? { budget: key, budgetLabel: role.budgets.find((budget) => budget.key === key)?.label ?? null, maxPerPayout: permission.max_per_payout } : null,
+      };
+    }));
+    return {
+      supported: true as const,
+      deployable: Boolean(this.config.bankSigner),
+      config: config ? { ...config, token: hexOf(config.token), configured: this.config.bankSigner ? config.signer_hash === this.config.bankSigner.signerHash : null } : null,
+      customerId: account?.customerId ?? null,
+      beneficiaries: beneficiaries.map((entry) => ({ iban: formatIban(entry.iban), name: entry.name, holderType: entry.holder_type })),
+      roles,
+      payouts: [...payouts].reverse().map((payout) => ({
+        opId: hexOf(payout.op_id),
+        at: new Date(Number(BigInt(payout.created_at_ns) / NANOS_PER_MS)).toISOString(),
+        actor: agentByAccount.get(payout.member) ?? payout.member,
+        role: payout.role,
+        beneficiary: { iban: formatIban(payout.beneficiary.iban), name: payout.beneficiary.name },
+        amount: payout.amount,
+        fiatAmount: payout.fiat_amount,
+        reference: payout.reference,
+        state: payout.state,
+        ruleId: payout.rule_id,
+        transferOpId: payout.transfer_op_id ? hexOf(payout.transfer_op_id) : null,
+        error: payout.error,
+      })),
+    };
+  }
+
+  /** Vote an IBAN in (or out) of the beneficiaries any bank-permitted role may pay. */
+  async bankBeneficiaryProposal(organizationId: string, input: { iban: string; name: string; holderType: "Business" | "Individual"; remove?: boolean | undefined }) {
+    const treasury = await this.requireTreasury(organizationId);
+    if (!validIban(input.iban)) throw new OmniRolesError(400, "invalid_iban", "This IBAN does not pass the checksum");
+    const iban = canonicalIban(input.iban);
+    if (input.remove) return this.proposal(treasury, "Remove a bank beneficiary", [{ method: "queue_rule_change", change: { RemoveBankBeneficiary: { iban } } }]);
+    const name = input.name.trim();
+    if (!name || name.length > 255 || !/^[ -~]+$/.test(name)) throw new OmniRolesError(400, "invalid_name", "The account holder name must be 1 to 255 printable ASCII characters");
+    return this.proposal(treasury, "Add a bank beneficiary", [{ method: "queue_rule_change", change: { AddBankBeneficiary: { beneficiary: { iban, name, holder_type: input.holderType } } } }]);
+  }
+
+  /**
+   * Let a role pay the voted IBANs from one of its EURC budgets, up to a ceiling per payout; or,
+   * with `newBudget`, from a euro budget created for it (so much per period, refilled).
+   */
+  async bankPermissionProposal(organizationId: string, input: { role: string; budget: string | null; maxPerPayout: string | null; newBudget?: { amount: string; periodDays: number } | undefined }) {
+    const treasury = await this.requireTreasury(organizationId);
+    const roles = await this.roles(organizationId);
+    const role = roles.roles.find((item) => item.name === input.role);
+    if (!role) throw new OmniRolesError(404, "unknown_role", "No such role");
+    const { maxPerPayout } = input;
+    if (!maxPerPayout) {
+      return this.proposal(treasury, `Remove euro payouts from ${input.role}`, [{ method: "queue_rule_change", change: { SetBankPermission: { role: input.role, permission: null } } }], {});
+    }
+    if (!/^\d+$/.test(maxPerPayout) || BigInt(maxPerPayout) === 0n) throw new OmniRolesError(400, "invalid_ceiling", "The ceiling per payout must be a positive amount");
+    const calls: VaultCall[] = [];
+    let allowance: number[];
+    if (input.newBudget) {
+      if (!/^\d+$/.test(input.newBudget.amount) || BigInt(input.newBudget.amount) === 0n) throw new OmniRolesError(400, "invalid_budget", "The euro budget must be a positive amount");
+      allowance = euroPayoutBudgetKey(input.role);
+      calls.push({ method: "queue_rule_change", change: { SetAllowance: { key: allowance, balance: input.newBudget.amount, refill: input.newBudget.amount, max_refill: input.newBudget.amount, period_ns: Math.max(0, Math.round(input.newBudget.periodDays * 86_400_000_000_000)) } } });
+    } else {
+      const budget = input.budget ? role.budgets.find((item) => item.key === input.budget!.toLowerCase()) : undefined;
+      if (!budget) throw new OmniRolesError(400, "unknown_budget", "Choose one of the role's budgets");
+      if (budget.token !== "EURC") throw new OmniRolesError(400, "budget_token", "Euro payouts are charged to an EURC budget");
+      allowance = Array.from(hexToBytes(budget.key as Hex));
+    }
+    calls.push({ method: "queue_rule_change", change: { SetBankPermission: { role: input.role, permission: { allowance, max_per_payout: maxPerPayout } } } });
+    return this.proposal(treasury, `Let ${input.role} pay voted IBANs in euros`, calls);
+  }
+
+  /** Point the vault at the deployed bank signer and the company's account at the partner. */
+  async bankConfigProposal(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const signer = this.config.bankSigner;
+    if (!signer) throw new OmniRolesError(404, "no_bank_signer", "No bank signer is deployed for this console");
+    const account = await this.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });
+    if (!account) throw new OmniRolesError(409, "no_bank_account", "Open the company's euro account first");
+    const token = PROFILE.tokens.find((item) => item.symbol === "EURC");
+    if (!token || account.chainId !== PROFILE.chainId) throw new OmniRolesError(409, "no_euro_token", "No euro token on this chain");
+    const config: BankConfig = {
+      outlayer_id: signer.outlayerId,
+      signer_url: signer.signerUrl,
+      signer_hash: signer.signerHash,
+      secrets_owner: signer.secretsOwner,
+      secrets_profile: signer.secretsProfile,
+      customer_id: account.customerId,
+      network: account.network,
+      crypto: account.cryptoCurrency,
+      chain_id: account.chainId,
+      token: Array.from(hexToBytes(token.address as Hex)),
+      decimals: token.decimals,
+      ...BANK_TRANSFER_GAS,
+    };
+    return this.proposal(treasury, "Enable euro payouts through the bank signer", [{ method: "queue_rule_change", change: { SetBankConfig: { config } } }]);
+  }
+
   async roles(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     const labels = await this.labels(organizationId);
@@ -1761,11 +1909,12 @@ export class OmniRolesService {
       let removedAt = -1;
       executed.forEach((change, index) => { if ("RemoveRole" in change && change.RemoveRole.role === name) removedAt = index; });
       const sinceRemoval = executed.slice(removedAt + 1);
-      const latest = <K extends "SetSolanaPermissions" | "SetNearPermissions">(kind: K) =>
+      const latest = <K extends "SetSolanaPermissions" | "SetNearPermissions" | "SetBankPermission">(kind: K) =>
         [...sinceRemoval].reverse().find((change) => kind in change && (change as Record<K, { role: string }>)[kind].role === name) as Extract<RuleChange, Record<K, unknown>> | undefined;
       const solanaChange = latest("SetSolanaPermissions");
       const nearChange = latest("SetNearPermissions");
-      const extra = [solanaChange, nearChange].filter((change): change is NonNullable<typeof change> => Boolean(change));
+      const bankChange = latest("SetBankPermission");
+      const extra = [solanaChange, nearChange, bankChange].filter((change): change is NonNullable<typeof change> => Boolean(change));
       const description = base ? { ...base, details: [...base.details, ...extra.flatMap((change) => describeVaultCall({ method: "queue_rule_change", change }, context).details)] } : null;
       const keys = new Set<string>();
       for (const permission of setRole?.SetRole.config.permissions ?? []) {
@@ -1776,6 +1925,7 @@ export class OmniRolesService {
       for (const permission of [...(solanaChange?.SetSolanaPermissions.permissions ?? []), ...(nearChange?.SetNearPermissions.permissions ?? [])]) {
         keys.add(hexOf(permission.allowance).toLowerCase());
       }
+      if (bankChange?.SetBankPermission.permission) keys.add(hexOf(bankChange.SetBankPermission.permission.allowance).toLowerCase());
       const budgetsView = await Promise.all([...keys].map(async (key) => {
         const allowance = await this.view<{ balance: string; reserved: string; max_refill: string; period_ns: number } | null>(
           treasury.vaultAccountId,
@@ -1978,8 +2128,39 @@ export class OmniRolesService {
     const logs = this.config.txIndexerUrl
       ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId)).catch(() => [])
       : [];
+    // A euro payout is one row: its EURC transfer to the partner is part of it, not a second line.
+    const payouts = new Map<string, BankPayout>();
     for (const log of logs) {
-      if (seen.has(log.opId)) continue;
+      if (log.kind !== "bank") continue;
+      const payout = await this.near.viewFunction<BankPayout | null>(treasury.vaultAccountId, "get_bank_payout", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
+      if (payout) payouts.set(log.opId, payout);
+    }
+    const transferOf = new Map([...payouts.values()].filter((payout) => payout.transfer_op_id).map((payout) => [hexOf(payout.transfer_op_id!).toLowerCase(), payout]));
+    for (const log of logs) {
+      if (seen.has(log.opId) || transferOf.has(log.opId)) continue;
+      if (log.kind === "bank") {
+        const payout = payouts.get(log.opId);
+        if (!payout) continue;
+        const transfer = payout.transfer_op_id ? await this.ledgerEntry(treasury.vaultAccountId, hexOf(payout.transfer_op_id)).catch(() => null) : null;
+        const euros = formatUnits(BigInt(payout.amount), 6);
+        operations.push({
+          opId: log.opId,
+          at: log.at,
+          actor: agentByAccount.get(payout.member) ?? payout.member,
+          role: payout.role,
+          reference: payout.reference,
+          chainId: treasury.baseChainId,
+          chain: "Bank (SEPA)",
+          summary: `Pay ${euros} EUR to ${payout.beneficiary.name} (${formatIban(payout.beneficiary.iban)}) through the bank partner`,
+          vaultState: payout.state === "Transferring" ? transfer?.operation.state ?? "Scheduled" : payout.state,
+          nonce: transfer?.operation.evm_nonce ?? null,
+          evm: transfer?.evmHash ? { hash: transfer.evmHash, status: transfer.receipt?.status ?? "not mined", blockNumber: transfer.receipt?.blockNumber ?? null } : null,
+          bank: { state: payout.state, ruleId: payout.rule_id, fiatAmount: payout.fiat_amount, error: payout.error, transferOpId: payout.transfer_op_id ? hexOf(payout.transfer_op_id) : null },
+          nearAuthorizationTxHash: log.txHash,
+          vaultAccountId: treasury.vaultAccountId,
+        });
+        continue;
+      }
       if (log.kind === "solana") {
         const op = await this.near.viewFunction<SolanaOperationView | null>(treasury.vaultAccountId, "get_solana_operation", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
         if (!op) continue;

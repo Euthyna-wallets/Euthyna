@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+pub mod bank;
 mod conditions;
 mod evm;
 mod foreign;
@@ -1344,7 +1345,11 @@ impl Vault {
                 "ERR_MEMBERSHIP_EXPIRED"
             );
         }
-        if operation.role != DAO_ROLE {
+        if let Some(payout_id) = bank::payout_of_transfer(&op_id) {
+            // A euro payout's transfer: the voted IBAN, the config and the role are rechecked, not
+            // the role's EVM permissions (the partner's deposit address is not a supplier).
+            self.recheck_bank_transfer(&payout_id, &operation);
+        } else if operation.role != DAO_ROLE {
             let permission = &self
                 .roles
                 .get(&operation.role)
@@ -1621,9 +1626,10 @@ impl Vault {
             ),
             "ERR_OPERATION_TERMINAL"
         );
+        // A voted transaction, or a bank transfer queued like one, that ends before it started.
+        self.dao_queue.retain(|queued| *queued != op_id);
         if operation.role == DAO_ROLE {
             // No role, budget or reference behind a DAO transaction.
-            self.dao_queue.retain(|queued| *queued != op_id);
             let wallet = self
                 .wallets
                 .get_mut(&operation.request.chain_id)
@@ -1755,6 +1761,12 @@ impl Vault {
             RuleChange::SetCodeSource { account_id } => {
                 env::log_str(&format!("OMNIROLES_CODE_SOURCE:{account_id}"));
                 self.code_source = account_id;
+            }
+            change @ (RuleChange::SetBankConfig { .. }
+            | RuleChange::AddBankBeneficiary { .. }
+            | RuleChange::RemoveBankBeneficiary { .. }
+            | RuleChange::SetBankPermission { .. }) => {
+                self.apply_bank_rule(&change);
             }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
             RuleChange::SetSolanaPermissions { role, permissions } => {
@@ -1915,6 +1927,12 @@ impl Vault {
                 *account_id != env::current_account_id(),
                 "ERR_CODE_SOURCE_SELF"
             ),
+            change @ (RuleChange::SetBankConfig { .. }
+            | RuleChange::AddBankBeneficiary { .. }
+            | RuleChange::RemoveBankBeneficiary { .. }
+            | RuleChange::SetBankPermission { .. }) => {
+                Self::validate_bank_rule(change);
+            }
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
                 solana::validate_permissions(permissions);
@@ -2244,5 +2262,7 @@ fn signature_matches(
         .is_some_and(|public_key| env::keccak256_array(public_key)[12..] == expected_address[..])
 }
 
+#[cfg(test)]
+mod bank_tests;
 #[cfg(test)]
 mod onchain_tests;

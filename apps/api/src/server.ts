@@ -22,6 +22,8 @@ import { RobService } from "./rob/service.js";
 import { attachRugOClock, rugOClockLlm, scheduleRugOClock } from "./rob/rugoclock.js";
 import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
+import { NoahClient } from "./bank/noah.js";
+import { BankService } from "./bank/service.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -76,6 +78,9 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,
   omniBridgeApi: env.OMNI_BRIDGE_API_URL,
   registryId: env.OMNIROLES_REGISTRY_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "euthyna-directory.testnet" : undefined),
+  bankSigner: env.BANK_SIGNER_URL && env.BANK_SIGNER_HASH && env.BANK_SIGNER_SECRETS_OWNER
+    ? { outlayerId: env.BANK_SIGNER_OUTLAYER_ID, signerUrl: env.BANK_SIGNER_URL, signerHash: env.BANK_SIGNER_HASH, secretsOwner: env.BANK_SIGNER_SECRETS_OWNER, secretsProfile: env.BANK_SIGNER_SECRETS_PROFILE }
+    : undefined,
   previousRegistryIds: (env.OMNIROLES_PREVIOUS_REGISTRY_IDS ?? (env.NEAR_NETWORK_ID === "testnet" ? "atlantis-registry.testnet" : "")).split(",").map((id) => id.trim()).filter(Boolean),
   sealedOrdersId: env.SEALED_ORDERS_ACCOUNT_ID,
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,
@@ -166,6 +171,11 @@ const recovery = recoveryContractId
   }, dkimKeys({ testKeys: testDkimKeys }))
   : undefined;
 
+// The company's euro account (Noah): deposits on its IBAN settle into the company wallet only.
+const bank = env.NOAH_API_KEY
+  ? new BankService({ prisma, noah: new NoahClient({ apiUrl: env.NOAH_API_URL, apiKey: env.NOAH_API_KEY }), companyWallet: (organizationId) => omniroles.companyWallet(organizationId) })
+  : undefined;
+
 const app = createApp({
   near,
   auth,
@@ -182,6 +192,7 @@ const app = createApp({
   publicBaseUrl: env.PUBLIC_API_URL ?? env.BETTER_AUTH_URL,
   marketTrustProxy: env.MARKET_TRUST_PROXY,
   recovery,
+  bank,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

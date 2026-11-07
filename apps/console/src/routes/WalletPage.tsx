@@ -11,6 +11,7 @@ import { useWallets } from "../lib/wallet-context.js";
 import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
 import { formatAmount, omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
+import { BankAccountCard, EuroPayoutsCard } from "./BankAccountCard.js";
 import { HoldingsCard } from "./HoldingsCard.js";
 import { SealedOrdersCard } from "./SealedOrdersCard.js";
 
@@ -213,6 +214,9 @@ export function WalletPage() {
           </div>
 
           {address ? <HoldingsCard /> : null}
+
+          {address ? <BankAccountCard /> : null}
+          {address ? <EuroPayoutsCard /> : null}
 
           {address ? <SealedOrdersCard /> : null}
 

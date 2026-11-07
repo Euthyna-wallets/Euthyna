@@ -24,14 +24,18 @@ export const AGENT_FUNCTION_CALL_METHODS = [
   "release_solana_unconfirmed",
   "execute_near",
   "release_near_unconfirmed",
+  "request_bank_payout",
 ] as const;
 
 /** Methods NEAR-transfer agents add; keys made before them still work for everything else. */
 export const NEAR_AGENT_METHODS = ["execute_near", "release_near_unconfirmed"] as const;
+/** Method euro-payout agents add (bank payouts to voted IBANs). */
+export const BANK_AGENT_METHODS = ["request_bank_payout"] as const;
 /** Agent key method lists accepted on chain, newest first. */
 export const AGENT_METHOD_GENERATIONS: ReadonlyArray<readonly string[]> = [
   AGENT_FUNCTION_CALL_METHODS,
-  AGENT_FUNCTION_CALL_METHODS.filter((method) => !(NEAR_AGENT_METHODS as readonly string[]).includes(method)),
+  AGENT_FUNCTION_CALL_METHODS.filter((method) => !(BANK_AGENT_METHODS as readonly string[]).includes(method)),
+  AGENT_FUNCTION_CALL_METHODS.filter((method) => !(BANK_AGENT_METHODS as readonly string[]).includes(method) && !(NEAR_AGENT_METHODS as readonly string[]).includes(method)),
 ];
 
 export const AGENT_GAS = {

@@ -8,7 +8,7 @@ import { Seal, Slab, PageTitle } from "../components/design.js";
 import { Icon } from "../components/ops.js";
 import { PageState, short } from "../components/ui.js";
 import { marketConsole } from "../lib/market.js";
-import { OUTCOME_LABEL, dayLabel, entriesOf, marketEntriesOf, roleName, timeOf, type Entry, type Outcome } from "../lib/money.js";
+import { OUTCOME_LABEL, activityCsv, dayLabel, entriesOf, marketEntriesOf, roleName, timeOf, type Entry, type Outcome } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type Sentence, type WalletIntegrity } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
@@ -60,6 +60,23 @@ export function ActivityPage() {
         <span style={{ font: "600 12px var(--font-ui)", color: "var(--ink-3)" }}>The record</span>
         <PageTitle style={{ font: "900 40px/1 var(--font-brand)", letterSpacing: ".12em" }}>Activity</PageTitle>
         <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", maxWidth: 760 }}>Every payment, swap and deposit made with company money, every market sale and purchase, and every request the rules refused.</p>
+        <button
+          type="button"
+          className="btn-line"
+          style={{ alignSelf: "flex-start", padding: "8px 14px", fontSize: 11 }}
+          disabled={shown.length === 0}
+          title="The entries shown, with the transaction of each, for your accountant"
+          onClick={() => {
+            const url = URL.createObjectURL(new Blob([activityCsv(shown, nameOf)], { type: "text/csv;charset=utf-8" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `activity-${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
+          EXPORT CSV
+        </button>
       </header>
 
       <Trust items={query.data?.integrity ?? []} />

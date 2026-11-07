@@ -1,0 +1,5 @@
+{
+  "display": { "name": "Euthyna bank signer" },
+  "operations": ["pubkey", "payout"],
+  "callers": { "direct": "deny", "https": "deny", "meta_tx": "deny" }
+}

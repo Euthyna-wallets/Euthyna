@@ -86,7 +86,7 @@ pub(crate) fn signed_transaction(
     })
 }
 
-fn validate_gas(
+pub(crate) fn validate_gas(
     role: &RoleConfig,
     gas_limit: U128,
     max_fee_per_gas: U128,

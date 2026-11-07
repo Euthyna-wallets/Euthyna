@@ -19,7 +19,7 @@ export interface AgentAccessKeyAttestation {
   receiverId: string | null;
   methodNames: string[];
   allowanceYocto: string | null;
-  /** Valid key from before NEAR transfers: works, but cannot call execute_near (pair again). */
+  /** Valid key from an earlier generation: works, but cannot call the newer methods (NEAR transfers, euro payouts): pair again. */
   outdated: boolean;
   expected: AgentAccessKeyExpectation;
 }

@@ -1,6 +1,6 @@
 import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaRpc, solanaTokenOf, type SolanaProfile } from "./solana.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, getAddress, hexToBytes, type Hex } from "viem";
-import { NEAR_TESTNET_TOKENS, Operator } from "./roles.js";
+import { canonicalIban, formatIban, NEAR_TESTNET_TOKENS, Operator, type BankBeneficiary, type BankConfig, type BankPayout, type BankPermission } from "./roles.js";
 import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
 
 export interface DirectVault {
@@ -21,6 +21,8 @@ type NearPermissionView = { token: string; receivers: string[]; allowance: numbe
 type NearOperationView = { op_id: number[]; state: string; created_at_ns: string; request: { token: string; receiver_id: string; amount: string; memo: string | null; reference: string } };
 /** execute_near: 30 Tgas for ft_transfer, 10 for the callback, 10 for itself, plus margin. */
 const NEAR_TRANSFER_GAS = "100000000000000";
+/** OutLayer run (120 Tgas) + callback (40) + the vault's own checks. */
+const BANK_PAYOUT_GAS = "200000000000000";
 type SolanaOperationView = { op_id: number[]; state: string; signature: number[] | null; signed_transaction: number[] | null };
 export function publicRpc(url: string): Rpc {
   return async <T>(method: string, params: unknown[]): Promise<T> => {
@@ -56,7 +58,7 @@ export class OnchainAgentClient {
   constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
-    const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions, nearPermissions] = await Promise.all([
+    const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions, nearPermissions, bankPermission, bankBeneficiaries, bankConfig] = await Promise.all([
       this.vault.view("get_role", { role }), this.vault.view("get_membership", { role, member }),
       this.vault.view("get_address_list", { list: "suppliers" }), this.vault.view("get_wallet", { chain_id }),
       // Vaults older than the Solana version do not have these views.
@@ -64,6 +66,10 @@ export class OnchainAgentClient {
       this.vault.view<Array<{ asset: unknown; recipients: number[][]; allowance: number[] }>>("get_solana_permissions", { role }).catch(() => []),
       // Vaults older than the NEAR-transfer version do not have this view.
       this.vault.view<NearPermissionView[]>("get_near_permissions", { role }).catch(() => []),
+      // Vaults older than the euro-payout version do not have these views.
+      this.vault.view<BankPermission | null>("get_bank_permission", { role }).catch(() => null),
+      this.vault.view<BankBeneficiary[]>("list_bank_beneficiaries").catch(() => []),
+      this.vault.view<BankConfig | null>("get_bank_config").catch(() => null),
     ]);
     const permissions = (config as { config?: { permissions?: Array<{ conditions: Array<{ operator: number; compValue: Hex }> }> } } | null)?.config?.permissions ?? [];
     const keys = [...new Set(permissions.flatMap((p) => p.conditions.filter((c) => c.operator === 28 || c.operator === 30).map((c) => c.compValue)))];
@@ -89,7 +95,56 @@ export class OnchainAgentClient {
         budget: bytesToHex(Uint8Array.from(permission.allowance)),
       })),
     } : null;
-    return { config, membership, suppliers, payees: payeesOf(config), wallet, allowances: [...allowances, ...solanaAllowances, ...nearAllowances], solana, near };
+    const bankAllowance = bankPermission && bankConfig ? [{ key: bytesToHex(Uint8Array.from(bankPermission.allowance)), allowance: await this.vault.view("get_allowance", { key: bankPermission.allowance }) }] : [];
+    const bank = bankPermission && bankConfig ? {
+      currency: "EUR",
+      settlesAs: bankConfig.crypto,
+      decimals: bankConfig.decimals,
+      maxPerPayout: bankPermission.max_per_payout,
+      budget: bytesToHex(Uint8Array.from(bankPermission.allowance)),
+      beneficiaries: bankBeneficiaries.map((entry) => ({ iban: formatIban(entry.iban), name: entry.name, holderType: entry.holder_type })),
+    } : null;
+    return { config, membership, suppliers, payees: payeesOf(config), wallet, allowances: [...allowances, ...solanaAllowances, ...nearAllowances, ...bankAllowance], solana, near, bank };
+  }
+
+  /**
+   * Pay a voted IBAN in euros, under the role's bank permission. The vault checks the
+   * beneficiary, the amount and the budget, asks the bank signer (an OutLayer enclave)
+   * for the partner's single-use rule, then queues the EURC transfer it signs itself.
+   * Amount in the euro token's base units (6 decimals: 1 EUR = 1000000).
+   */
+  async bankPayout(input: { iban: string; amount: string; reference: string }) {
+    const { role, member } = this.vault.identity();
+    const iban = canonicalIban(input.iban);
+    const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_bank_payout", { role, member, iban, amount: input.amount, reference: input.reference }).catch((error: unknown) => {
+      if (/MethodNotFound|MethodResolveError/.test(String(error))) return { allowed: false, reason: "the vault does not support euro payouts yet (upgrade by vote)" };
+      throw error;
+    });
+    if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    if (await this.vault.view("get_bank_payout_by_reference", { role, reference: input.reference })) {
+      return { outcome: "refused" as const, reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" as const };
+    }
+    let nearTransactionHash: string;
+    try {
+      nearTransactionHash = await this.vault.action("request_bank_payout", { role, iban, amount: input.amount, reference: input.reference }, BANK_PAYOUT_GAS);
+    } catch (error) {
+      if (/MethodNameMismatch|method_name/i.test(String(error))) {
+        return { outcome: "refused" as const, reason: "this agent's key predates euro payouts: pair the agent again", refusedBy: "key" as const };
+      }
+      throw error;
+    }
+    return { outcome: "sent" as const, nearTransactionHash, ...(await this.bankStatus(input.reference)) };
+  }
+
+  /** Where a euro payout stands: the signer's answer, then the EURC transfer's state. */
+  async bankStatus(reference: string): Promise<{ state: string; opId?: Hex; iban?: string; amount?: string; fiatAmount?: string | null; transfer?: { opId: Hex; state: string } | null; error?: string | null }> {
+    const { role } = this.vault.identity();
+    const payout = await this.vault.view<BankPayout | null>("get_bank_payout_by_reference", { role, reference });
+    if (!payout) return { state: "unknown" };
+    const transfer = payout.transfer_op_id
+      ? await this.vault.view<{ state: string } | null>("get_operation", { op_id: payout.transfer_op_id }).then((op) => (op ? { opId: bytesToHex(Uint8Array.from(payout.transfer_op_id!)), state: op.state } : null)).catch(() => null)
+      : null;
+    return { state: payout.state, opId: bytesToHex(Uint8Array.from(payout.op_id)), iban: formatIban(payout.beneficiary.iban), amount: payout.amount, fiatAmount: payout.fiat_amount, transfer, error: payout.error };
   }
   async pay(intent: PaymentRequest, _invoice?: InvoiceContext) {
     const { chain_id } = this.vault.identity();

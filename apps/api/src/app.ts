@@ -7,6 +7,7 @@ import { RobError, type RobService } from "./rob/service.js";
 import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
+import { BankError, type BankService } from "./bank/service.js";
 import { cardAccountIdOf } from "@euthyna/sdk";
 
 import { proposedAgentAccountId } from "@euthyna/sdk";
@@ -125,6 +126,8 @@ export interface AppDependencies {
   marketTrustProxy?: boolean;
   /** Founder seat recovery with ZK Email; absent when not configured. */
   recovery?: RecoveryService | undefined;
+  /** The company's euro account (Noah); absent when not configured. */
+  bank?: BankService | undefined;
 }
 
 /** A role draft from the console's role editor (`/proposals/role`). */
@@ -298,6 +301,7 @@ export function createApp({
   publicBaseUrl,
   marketTrustProxy,
   recovery,
+  bank,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -838,6 +842,21 @@ export function createApp({
       const input = await parseJson(context, z.object({ entries: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(64) })).max(256), migrate: z.boolean().optional() }));
       return context.json(await omniroles.suppliersProposal(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/bank", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.bank(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/bank-beneficiary", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ iban: z.string().min(15).max(42), name: z.string().max(255).default(""), holderType: z.enum(["Business", "Individual"]).default("Business"), remove: z.boolean().optional() }));
+      return context.json(await omniroles.bankBeneficiaryProposal(orgOf(context), input));
+    });
+    app.post("/v1/console/omniroles/proposals/bank-permission", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        role: z.string().min(1).max(64),
+        budget: z.string().regex(/^0x[0-9a-fA-F]{64}$/).nullable(),
+        maxPerPayout: z.string().regex(/^\d+$/).nullable(),
+        newBudget: z.object({ amount: z.string().regex(/^\d+$/), periodDays: z.number().min(0).max(366) }).optional(),
+      }));
+      return context.json(await omniroles.bankPermissionProposal(orgOf(context), input));
+    });
+    app.post("/v1/console/omniroles/proposals/bank-config", requireConsoleAdmin(auth, consoleLimiter), async (context) => context.json(await omniroles.bankConfigProposal(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, roleDraftSchema);
       return context.json(await omniroles.roleProposal(orgOf(context), input.draft as RoleDraft));
@@ -1050,9 +1069,44 @@ export function createApp({
     });
   }
 
+  // The company's euro account: any member reads it; an admin opens it; deposits are simulated in the sandbox.
+  app.get("/v1/console/bank", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!bank) return context.json({ configured: false });
+    return context.json({ configured: true, ...(await bank.view(context.get("console").organizationId)) });
+  });
+  app.post("/v1/console/bank", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });
+    const text = (max: number) => z.string().trim().min(1).max(max).regex(/^[\x20-\x7E]+$/, "printable ASCII only");
+    const input = await parseJson(context, z.object({
+      registeredName: text(120),
+      registrationNumber: text(64),
+      entityType: z.enum(["LimitedLiabilityCompany", "PublicCompany", "SoleProprietorship", "Partnership", "Corporation", "Trust", "PrivateFoundation", "Charity", "NonProfitOrganization", "PublicAgency"]),
+      country: z.string().regex(/^[A-Z]{2}$/),
+      street: text(120),
+      city: text(80),
+      postCode: text(20),
+      state: text(80),
+      incorporationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      taxId: text(64),
+      email: z.string().email().max(160).optional(),
+    }));
+    const console = context.get("console");
+    const view = await bank.open(console.organizationId, input);
+    await auth.recordAudit({ organizationId: console.organizationId, actorType: "console", actorId: console.userId, action: "bank.account.opened", targetType: "bank_account", targetId: view.account?.iban ?? "", metadata: { destination: view.account?.destinationAddress, network: view.account?.network } });
+    return context.json({ configured: true, ...view }, 201);
+  });
+  app.post("/v1/console/bank/simulate", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });
+    const input = await parseJson(context, z.object({ amount: z.string().regex(/^\d{1,4}(\.\d{1,2})?$/).refine((value) => Number(value) > 0 && Number(value) <= 1000, "between 0.01 and 1000 EUR") }));
+    return context.json(await bank.simulateDeposit(context.get("console").organizationId, input.amount));
+  });
+
   app.onError((error, context) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof RecoveryError) {
+      return context.json({ error: error.code, message: error.message }, error.status);
+    }
+    if (error instanceof BankError) {
       return context.json({ error: error.code, message: error.message }, error.status);
     }
     if (error instanceof CardError) {

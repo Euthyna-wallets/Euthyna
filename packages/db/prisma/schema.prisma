@@ -105,6 +105,7 @@ model Organization {
   marketListings      MarketListing[]
   recoveryEnrollments RecoveryEnrollment[]
   seatRecoveries      SeatRecovery[]
+  bankAccounts        BankAccount[]
 
   @@unique([slug])
   @@map("organization")
@@ -707,4 +708,30 @@ model RobHireTopup {
 
   @@index([createdAt])
   @@map("rob_hire_topup")
+}
+
+/// The company's euro account at a regulated partner (Noah): deposits on the IBAN settle as a
+/// stablecoin into the company wallet the vault controls, never anywhere else.
+model BankAccount {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider           String       @default("noah")
+  sandbox            Boolean
+  customerId         String
+  virtualAccountId   String
+  paymentMethodId    String
+  iban               String
+  bic                String
+  bankName           String
+  accountHolder      String
+  fiatCurrency       String
+  cryptoCurrency     String
+  network            String
+  destinationAddress String
+  chainId            Int
+  createdAt          DateTime     @default(now())
+
+  @@unique([organizationId, provider])
+  @@map("bank_account")
 }

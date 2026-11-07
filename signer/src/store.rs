@@ -26,6 +26,7 @@ pub const DEFAULT_METHODS: &[&str] = &[
     "release_solana_unconfirmed",
     "execute_near",
     "release_near_unconfirmed",
+    "request_bank_payout",
 ];
 /// ft_transfer needs ~5 Tgas; the market requires 10 to 30.
 pub const CARD_MAX_GAS: u64 = 30_000_000_000_000;
