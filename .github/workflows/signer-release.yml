@@ -1,9 +1,12 @@
-name: release
+name: signer-release
 on:
   push:
-    tags: ["v*"]
+    tags: ["signer-v*"]
 permissions:
   contents: write
+defaults:
+  run:
+    working-directory: signer
 jobs:
   build:
     strategy:
@@ -37,5 +40,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "euthyna-signer $TAG" || true
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "euthyna-signer ${TAG#signer-}" || true
           gh release upload "$TAG" euthyna-signer-${{ matrix.target }}.tar.gz euthyna-signer-${{ matrix.target }}.tar.gz.sha256 --clobber

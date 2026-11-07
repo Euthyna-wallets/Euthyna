@@ -2,7 +2,7 @@
  * The whole buyer path against the real euthyna-signer binary: MarketBuyer
  * asks the signer's card to sign, and the gateway's own cheque verification
  * accepts the result (signature, canonical args, key). EUTHYNA_SIGNER_BIN
- * points at a built signer (cargo build in euthyna-signer).
+ * points at a built signer (`cargo build --release` in signer/).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";

@@ -183,7 +183,15 @@ sudo euthyna-signer promote naomi-agent.euthyna.testnet
 
 ## Develop
 
+The signer lives in `signer/` of the Euthyna repository (it was the separate
+`euthyna-signer` repository until 2026-11-07; its history came along). CI:
+`.github/workflows/signer.yml`; a `signer-v*` tag builds the release binaries
+(`.github/workflows/signer-release.yml`). The install script still downloads
+the binaries published on `github.com/joindefi/euthyna-signer` (now
+`Euthyna-wallets/euthyna-signer`) until the Euthyna repository is public.
+
 ```bash
+cd signer
 cargo test          # policy, decoder against near-api-js bytes, socket UID check
 cargo clippy --all-targets -- -D warnings
 ```

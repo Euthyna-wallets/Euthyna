@@ -251,6 +251,7 @@ pnpm attack:all
 | `apps/api` | sign-in, Guard, supplier registry, proposals, worker |
 | `apps/console` | the console and the public pages (`/`, `/c/<dao>`) |
 | `packages/sdk`, `packages/mcp` | the agent side: SDK and MCP server |
+| `signer` | `euthyna-signer` (Rust): keeps an agent's NEAR key away from the AI and signs only requests to its vault |
 | `apps/demo-agent` | a small agent that pays invoices |
 
 ## Limits
