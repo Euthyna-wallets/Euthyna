@@ -106,6 +106,7 @@ Not public: who is paid, their account, their name.
 | **Remittance**: the agent pays beneficiary #3 8 EUR | the enclave opens the Pix payee; the partner pays **74.92 BRL by Pix** | NEAR `55asfnwkUuYhSpVHUAz6vfNfAi1VwcNxxm8knFQUX5wz`, Base Sepolia `0x52c92ea608e46dbf81a20b6ffac8015fe60941c14cb252e31a79e23900e4fd38` |
 | A payroll order to #4 (UK) runs | the partner refuses: its UK channel is not open for this sandbox customer (`channel policy denied`); nothing leaves, the order goes back to its date | NEAR `AhEAMQ8w8QujufmzgUCvR3wnr8syeXmKia2aiwcSqgXf` |
 | **Payroll**: the members vote "beneficiary #2, 3 EUR every 10 minutes, twice" (proposal #30); on its date anyone runs it | the vault pays without an agent or a new vote; the partner pays **2.87 EUR by SEPA**; the order moves to its next date | NEAR `DoqJPecfqL17M79cTynbo8CfKZ2b9fdZ25Q6Lf3GyVgR`, Base Sepolia `0xac6cee06e326fcf1dde882e259c7b9c83703a3999265d5c61c08263c532c282c` |
+| Ten minutes later, its second and last run | paid again (2.87 EUR by SEPA); the order is done and leaves the list | NEAR `7LVAzz4b1cuzMPuwqbnYkQDXJQXiQSuRc8eyMXBptDd9`, Base Sepolia `0x5d129ca66caa25066fad9650e3361aab80995a2e7474ec689465cd0399a28005` |
 
 ### What the vault guarantees, and what it does not
 
