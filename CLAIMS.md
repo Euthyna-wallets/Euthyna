@@ -36,7 +36,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Those euros leave by a members' vote, signed by the vault through NEAR MPC | Testnet (Noah sandbox) | [docs/bank.md](./docs/bank.md) |
 | An agent pays suppliers in EURC within a role's EURC budget | Code | EURC is a Base Sepolia token of the payment roles (`packages/sdk/src/roles.ts`); the same role pays USDC on testnet |
 | Activity exports a CSV of the entries shown, with each transaction hash, formulas neutralised | Code | `apps/console/src/lib/activity-csv.test.ts` |
-| Euros back to a bank account (off-ramp) | NEXT | Not built. |
+| Paying a supplier's IBAN under a vault rule | NEXT | Not built: needs a payout order signed by the vault, IBAN in the signed message ([docs/bank.md](./docs/bank.md#limits)). |
 
 ## Sealed orders (private limit orders)
 
