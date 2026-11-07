@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { API_BASE } from "../api.js";
 import { Kicker, PageTitle, Slab } from "../components/design.js";
@@ -25,8 +25,10 @@ const INTRO_LINES = [
 
 const NUMERALS = ["I", "II", "III"];
 
+type SignInCopy = { aside?: ReactNode; kicker?: string; intro?: string; footer?: ReactNode };
+
 /** The console identity is a NEAR account: the one the person votes with in the company DAO. */
-export function SignIn() {
+export function SignIn({ aside, kicker = "Enter the assembly", intro = "With the NEAR account you vote with. You sign a message: it is free and sends no transaction.", footer }: SignInCopy = {}) {
   const [account, setAccount] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +76,7 @@ export function SignIn() {
       }}
     >
       {/* R8: the marble column at night, as in design-handoff/app/screens/00-sign-in. */}
+      {aside ?? (
       <aside
         className="r8"
         style={{
@@ -149,6 +152,7 @@ export function SignIn() {
           </a>
         </div>
       </aside>
+      )}
 
       <main
         style={{
@@ -181,7 +185,7 @@ export function SignIn() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Kicker>Enter the assembly</Kicker>
+              <Kicker>{kicker}</Kicker>
               {demo ? (
                 <span
                   title="UAT demo mode: test-only private keys are stored in this browser."
@@ -200,7 +204,7 @@ export function SignIn() {
             </div>
             <PageTitle style={{ fontSize: 46 }}>SIGN IN</PageTitle>
             <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "var(--ink-2)" }}>
-              With the NEAR account you vote with. You sign a message: it is free and sends no transaction.
+              {intro}
             </p>
           </div>
 
@@ -290,7 +294,7 @@ export function SignIn() {
           ) : null}
 
           <p style={{ margin: 0, paddingTop: 18, borderTop: "1px solid rgba(13,23,48,.12)", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
-            New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account.
+            {footer ?? "New company? Sign in, then create it. Joining one? Ask the founder to add your NEAR account."}
           </p>
         </Slab>
       </main>
