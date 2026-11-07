@@ -2,7 +2,7 @@ import type { PrismaClient } from "@euthyna/db";
 import { describe, expect, it, vi } from "vitest";
 
 import { NoahClient } from "./noah.js";
-import { BankService } from "./service.js";
+import { BankService, customerIdOf } from "./service.js";
 
 const WALLET = "0x9435c2d547099D9cd9c82e29290753b590a8aF1e";
 const business = {
@@ -10,13 +10,18 @@ const business = {
   street: "1 Rue", city: "Nantes", postCode: "44000", state: "Loire-Atlantique", incorporationDate: "2026-11-01", taxId: "FR1",
 };
 
-function setup(options: { returned?: string; wallet?: { address: string; chainId: number } | null; apiUrl?: string } = {}) {
+function setup(options: { returned?: string; wallet?: { address: string; chainId: number; vaultAccountId: string } | null; apiUrl?: string; pendingKyb?: number } = {}) {
+  let pending = options.pendingKyb ?? 0;
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url).replace(/^https:\/\/[^/]+\/v1/, "");
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method: init?.method ?? "GET", path, body });
     if (path.startsWith("/workflows/")) {
+      if (pending > 0) {
+        pending -= 1;
+        return new Response(JSON.stringify({ Detail: "no allowed channels for currency and payment method type" }), { status: 403 });
+      }
       return new Response(JSON.stringify({
         AccountHolderName: "Acme AI", AccountNumber: "MT49CFTE1987", BankCode: "CFTEMTM1XXX", BankName: "OpenPayd",
         PaymentMethodID: "Bank/Sepa/EUR/x", VirtualAccountID: "va1", CryptoCurrency: "EURC_TEST", Network: "BaseTestSepolia",
@@ -35,16 +40,23 @@ function setup(options: { returned?: string; wallet?: { address: string; chainId
     },
   } as unknown as PrismaClient;
   const noah = new NoahClient({ apiUrl: options.apiUrl ?? "https://api.sandbox.noah.com/v1", apiKey: "k", fetch: fetchMock as unknown as typeof fetch });
-  const service = new BankService({ prisma, noah, companyWallet: async () => (options.wallet === undefined ? { address: WALLET, chainId: 84532 } : options.wallet) });
+  const service = new BankService({ prisma, noah, retryDelayMs: 0, companyWallet: async () => (options.wallet === undefined ? { address: WALLET, chainId: 84532, vaultAccountId: "acme.euthyna-nomos.testnet" } : options.wallet) });
   return { service, calls, saved: () => saved };
 }
 
 describe("company euro account", () => {
+  it("waits while the partner approves a new business", async () => {
+    const { service, calls } = setup({ pendingKyb: 2 });
+    const view = await service.open("org-1", business);
+    expect(calls.filter((call) => call.path.startsWith("/workflows/"))).toHaveLength(3);
+    expect(view.account?.iban).toBe("MT49CFTE1987");
+  });
+
   it("opens an IBAN that settles EURC into the company wallet read from the vault", async () => {
     const { service, calls } = setup();
     const view = await service.open("org-1", business);
     const workflow = calls.find((call) => call.path.startsWith("/workflows/"))!;
-    expect(workflow.body).toEqual({ CustomerID: "euthyna-org-1", FiatCurrency: "EUR", CryptoCurrency: "EURC_TEST", Network: "BaseTestSepolia", DestinationAddress: { Address: WALLET } });
+    expect(workflow.body).toEqual({ CustomerID: "eut-55224819f1567e5824ca896851c47b66d121d4", FiatCurrency: "EUR", CryptoCurrency: "EURC_TEST", Network: "BaseTestSepolia", DestinationAddress: { Address: WALLET } });
     expect(view.account).toMatchObject({ iban: "MT49CFTE1987", destinationAddress: WALLET, settlesAs: "EURC_TEST" });
     expect(view.transfers[0]).toMatchObject({ direction: "out", amount: "24.94", explorer: `https://sepolia.basescan.org/tx/0x${"ab".repeat(32)}` });
   });
@@ -71,7 +83,16 @@ describe("company euro account", () => {
     const sandbox = setup();
     await sandbox.service.open("org-1", business);
     await expect(sandbox.service.simulateDeposit("org-1", "25")).resolves.toEqual({ depositId: "dep1" });
-    const production = setup({ apiUrl: "https://api.noah.com/v1", wallet: { address: WALLET, chainId: 84532 } });
+    const production = setup({ apiUrl: "https://api.noah.com/v1", wallet: { address: WALLET, chainId: 84532, vaultAccountId: "acme.euthyna-nomos.testnet" } });
     await expect(production.service.open("org-1", business)).rejects.toMatchObject({ code: "chain_unsupported" });
+  });
+});
+
+describe("customerIdOf", () => {
+  it("matches the bank signer's derivation and fits the partner's 42 characters", () => {
+    const id = customerIdOf("sealedprod1106.nomos.euthyna.testnet");
+    expect(id).toMatch(/^eut-[0-9a-f]{38}$/);
+    expect(id).toBe(`eut-${"d643a2f69e4c0f5dd50f8d9fd11f1df05196e0"}`);
+    expect(id).not.toBe(customerIdOf("attacker.euthyna-nomos.testnet"));
   });
 });

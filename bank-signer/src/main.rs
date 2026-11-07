@@ -206,11 +206,11 @@ impl Noah {
             // Noah's error names the invalid fields; it never contains our secrets.
             let detail = serde_json::from_str::<Value>(&text)
                 .ok()
-                .and_then(|value| {
+                .map(|value| {
                     let fields = value["RequestExtension"]["Body"].as_array().map(|items| {
                         items.iter().map(|item| format!("{}: {}", item["Field"].as_str().unwrap_or(""), item["Description"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("; ")
                     });
-                    Some(format!("{}{}", value["Detail"].as_str().unwrap_or("error"), fields.map(|f| format!(": {f}")).unwrap_or_default()))
+                    format!("{}{}", value["Detail"].as_str().unwrap_or("error"), fields.map(|f| format!(": {f}")).unwrap_or_default())
                 })
                 .unwrap_or_else(|| text.chars().take(160).collect());
             return Err(format!("noah {status} on {path}: {detail}"));
@@ -237,6 +237,14 @@ fn caller_is_vault(input: &Input) -> Result<(), String> {
     Ok(())
 }
 
+/// The partner's customer of a vault: derived from the vault's account, so a vault can only ever
+/// act for its own company (another company's KYB cannot be borrowed by voting its customer id).
+/// "eut-" + 38 hex characters of sha256(vault) = 42, the partner's maximum.
+pub fn customer_id_of(vault: &str) -> String {
+    let digest = Sha256::digest(vault.as_bytes());
+    format!("eut-{}", &hex::encode(digest)[..38])
+}
+
 fn valid_iban(iban: &str) -> bool {
     let compact: String = iban.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.len() < 15 || compact.len() > 34 || !compact.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -256,6 +264,9 @@ fn valid_iban(iban: &str) -> bool {
 
 fn payout(input: &Input) -> Result<Value, String> {
     caller_is_vault(input)?;
+    if input.customer_id != customer_id_of(&input.vault) {
+        return Err("the customer is not this vault's".into());
+    }
     if !valid_iban(&input.iban) {
         return Err("invalid IBAN".into());
     }
@@ -329,6 +340,14 @@ fn payout(input: &Input) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn customer_is_bound_to_the_vault() {
+        let id = customer_id_of("sealedprod1106.nomos.euthyna.testnet");
+        assert_eq!(id.len(), 42);
+        assert!(id.starts_with("eut-"));
+        assert_ne!(id, customer_id_of("attacker.euthyna-nomos.testnet"));
+    }
+
     use super::*;
 
     #[test]
@@ -378,5 +397,8 @@ mod tests {
         assert!(caller_is_vault(&input).is_err());
         std::env::set_var("NEAR_PREDECESSOR_ID", "acme.euthyna-nomos.testnet");
         assert!(caller_is_vault(&input).is_ok());
+        // The right vault, voting another company's customer: refused before any request.
+        let borrowed = Input { customer_id: customer_id_of("victim.euthyna-nomos.testnet"), ..input };
+        assert_eq!(payout(&borrowed).unwrap_err(), "the customer is not this vault's");
     }
 }

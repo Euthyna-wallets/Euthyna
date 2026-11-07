@@ -41,8 +41,10 @@ if (!address) throw new Error(`${vault} has no Base Sepolia wallet`);
 
 const organizationId = `bank-e2e-${vault.split(".")[0]}`;
 await prisma.organization.upsert({ where: { id: organizationId }, create: { id: organizationId, name: `${vault.split(".")[0]} (bank e2e)`, slug: organizationId, createdAt: new Date() }, update: {} });
-const bank = new BankService({ prisma, noah: new NoahClient({ apiUrl: process.env.NOAH_API_URL ?? "https://api.sandbox.noah.com/v1", apiKey }), companyWallet: async () => ({ address, chainId: 84532 }) });
+const bank = new BankService({ prisma, noah: new NoahClient({ apiUrl: process.env.NOAH_API_URL ?? "https://api.sandbox.noah.com/v1", apiKey }), companyWallet: async () => ({ address, chainId: 84532, vaultAccountId: vault }) });
 
+// REOPEN=1: forget the local row (an account opened before the customer was derived from the vault).
+if (process.env.REOPEN === "1") await prisma.bankAccount.deleteMany({ where: { organizationId, provider: "noah" } });
 let view = await bank.view(organizationId);
 if (!view.account) {
   view = await bank.open(organizationId, {
