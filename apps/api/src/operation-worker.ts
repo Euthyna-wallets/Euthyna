@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@euthyna/db";
-import { hexToBytes, type Hex } from "viem";
+import { bytesToHex, hexToBytes, type Hex } from "viem";
 
 import { onChainWalletEvmAddress } from "./agent-chain.js";
 import type { Guard } from "./guard.js";
@@ -61,8 +61,32 @@ export interface WorkerOperationUpdate {
   lastError?: string | null;
 }
 
+/** A company vault the worker watches, and the chains its wallets act on. */
+export interface WorkerVault {
+  organizationId: string;
+  vaultAccountId: string;
+  chainIds: number[];
+}
+
+/** An operation signed on chain that the worker had no record of (an agent that called the vault itself). */
+export interface AdoptedOperation {
+  organizationId: string;
+  vaultAccountId: string;
+  opId: string;
+  reference: string;
+  txDigest: string;
+  evmNonce: bigint;
+  amount: string;
+}
+
 export interface WorkerStore {
   acquireLease(now: Date, leaseMs: number): Promise<boolean>;
+  /** Vaults to scan for signed operations nobody recorded. Optional: without it, the worker only follows its records. */
+  listVaults?(): Promise<WorkerVault[]>;
+  /** Which of these operations already have a record. */
+  tracked?(organizationId: string, opIds: string[]): Promise<Set<string>>;
+  /** Records an operation found on chain; false when another worker recorded it first. */
+  adopt?(operation: AdoptedOperation, now: Date): Promise<boolean>;
   listReady(now: Date): Promise<WorkerOperationRecord[]>;
   update(operation: WorkerOperationRecord, data: WorkerOperationUpdate): Promise<void>;
   releaseReference(operation: WorkerOperationRecord, terminalState: "Cancelled" | "Expired" | "Failed" | "Vetoed"): Promise<void>;
@@ -103,6 +127,8 @@ export interface WorkerConfig {
   retryMaxMs: number;
   cancellationSenderAccountId: string;
   agentGasLowYocto: string;
+  /** How often to scan the vaults for signed operations without a record (default one minute). */
+  discoverIntervalMs?: number;
 }
 
 function opBytes(opId: string): number[] {
@@ -148,6 +174,49 @@ export class PrismaWorkerStore implements WorkerStore {
       ) {
         return false;
       }
+      throw error;
+    }
+  }
+
+  async listVaults(): Promise<WorkerVault[]> {
+    const treasuries = await this.prisma.treasury.findMany({
+      where: { status: "active" },
+      select: { organizationId: true, vaultAccountId: true, baseChainId: true },
+    });
+    return treasuries.map((treasury) => ({
+      organizationId: treasury.organizationId,
+      vaultAccountId: treasury.vaultAccountId,
+      chainIds: [treasury.baseChainId],
+    }));
+  }
+
+  async tracked(organizationId: string, opIds: string[]): Promise<Set<string>> {
+    const rows = await this.prisma.operation.findMany({
+      where: { organizationId, opId: { in: opIds } },
+      select: { opId: true },
+    });
+    return new Set(rows.map((row) => row.opId));
+  }
+
+  async adopt(operation: AdoptedOperation, now: Date): Promise<boolean> {
+    try {
+      await this.prisma.operation.create({
+        data: {
+          organizationId: operation.organizationId,
+          opId: operation.opId,
+          agentId: null,
+          vaultAccountId: operation.vaultAccountId,
+          reference: operation.reference,
+          state: "PossiblySigned",
+          txDigest: operation.txDigest,
+          evmNonce: operation.evmNonce,
+          amount: operation.amount,
+          nextAttemptAt: now,
+        },
+      });
+      return true;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") return false;
       throw error;
     }
   }
@@ -252,11 +321,12 @@ export class OperationWorker {
     this.base = defaultChain;
   }
 
-  async tick(): Promise<{ leased: boolean; processed: number }> {
+  async tick(): Promise<{ leased: boolean; processed: number; adopted: number }> {
     const now = this.now();
     if (!(await this.store.acquireLease(now, this.config.leaseMs))) {
-      return { leased: false, processed: 0 };
+      return { leased: false, processed: 0, adopted: 0 };
     }
+    const adopted = await this.discover(now);
     const operations = await this.store.listReady(now);
     let processed = 0;
     if (operations.length > 0) {
@@ -278,7 +348,55 @@ export class OperationWorker {
         processed += 1;
       }
     }
-    return { leased: true, processed };
+    return { leased: true, processed, adopted };
+  }
+
+  private lastDiscoveryAt = Number.NEGATIVE_INFINITY;
+
+  /**
+   * Agents sign through the vault themselves; nothing guarantees they come back to settle. An
+   * operation left signed keeps its budget reserved and a place in the wallet's queue (8 at most,
+   * shared by every agent), and blocks the votes that touch its role. So the worker reads what each
+   * vault holds in flight and takes over what it has no record of; `process` then settles it,
+   * releases it or cancels its nonce like any other.
+   */
+  private async discover(now: Date): Promise<number> {
+    const { listVaults, tracked, adopt } = this.store;
+    if (!listVaults || !tracked || !adopt) return 0;
+    if (now.getTime() - this.lastDiscoveryAt < (this.config.discoverIntervalMs ?? 60_000)) return 0;
+    this.lastDiscoveryAt = now.getTime();
+    let adopted = 0;
+    for (const vault of await listVaults.call(this.store)) {
+      try {
+        const chainIds = [...new Set([...vault.chainIds, ...Object.keys(this.chains).map(Number)])];
+        for (const chainId of chainIds) {
+          const wallet = await this.near.viewFunction<{ in_flight?: number[][] } | null>(vault.vaultAccountId, "get_wallet", { chain_id: chainId });
+          const ids = (wallet?.in_flight ?? []).map((id) => bytesToHex(Uint8Array.from(id)));
+          if (!ids.length) continue;
+          const known = await tracked.call(this.store, vault.organizationId, ids);
+          for (const opId of ids.filter((id) => !known.has(id))) {
+            const operation = await this.near.getOperation(vault.vaultAccountId, opBytes(opId));
+            if (operation.state !== "PossiblySigned") continue;
+            const created = await adopt.call(this.store, {
+              organizationId: vault.organizationId,
+              vaultAccountId: vault.vaultAccountId,
+              opId,
+              reference: operation.request.reference,
+              txDigest: bytesToHex(Uint8Array.from(operation.tx_digest)),
+              evmNonce: BigInt(operation.evm_nonce),
+              amount: operation.request.allowance_amount,
+            }, now);
+            if (created) {
+              adopted += 1;
+              console.log(JSON.stringify({ event: "worker.adopted", vault: vault.vaultAccountId, opId, member: operation.member, reference: operation.request.reference }));
+            }
+          }
+        }
+      } catch (error) {
+        console.error(JSON.stringify({ event: "worker.discover_failed", vault: vault.vaultAccountId, message: error instanceof Error ? error.message : String(error) }));
+      }
+    }
+    return adopted;
   }
 
   private async process(record: WorkerOperationRecord, blockTimestampNs: bigint): Promise<void> {

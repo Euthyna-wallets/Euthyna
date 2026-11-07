@@ -49,7 +49,7 @@ try {
   do {
     try {
       const result = await worker.tick();
-      if (result.processed > 0) console.log(JSON.stringify({ event: "worker.tick", ...result }));
+      if (result.processed > 0 || result.adopted > 0) console.log(JSON.stringify({ event: "worker.tick", ...result }));
     } catch (error) {
       console.error(JSON.stringify({
         event: "worker.tick_failed",
