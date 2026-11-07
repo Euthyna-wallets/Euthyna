@@ -15,3 +15,6 @@ packages/sdk/.mandateos/
 
 # Agent keys created by the SDK or the MCP server
 *-key.json
+
+# CRS prefix fetched and hash-checked at build (apps/console/scripts/fetch-crs.mjs)
+apps/console/public/crs/

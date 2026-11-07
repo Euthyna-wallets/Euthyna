@@ -11,6 +11,7 @@ import { fillOutcome, tick, type Tick } from "@euthyna/sdk/sealed-watcher";
 import circuitUrl from "@euthyna/sdk/circuits/sealed_order.json?url";
 
 import { nearRpcMethod, signContractCall, viewContract } from "../wallets.js";
+import { openProver } from "./crs.js";
 import { sendSealedApprovals } from "./sealed-approval.js";
 
 const base = createPublicClient({ chain: baseSepolia, transport: http(import.meta.env.VITE_BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org") });
@@ -45,7 +46,8 @@ export async function fillNow(input: { me: string; sealedId: string; id: number;
     },
     allowance: () => base.readContract({ address: U.usdc, abi: erc20Abi, functionName: "allowance", args: [wallet, U.router] }),
     balance: () => base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [wallet] }),
-    prove: async (fill) => proveSealedFill(await loadCircuit(), order, fill),
+    // 4,096 gates: 2^13 points from this site.
+    prove: async (fill) => proveSealedFill(await loadCircuit(), order, fill, () => openProver(1, 2 ** 13)),
     fill: async (proved) => {
       const gasPrice = await base.getGasPrice();
       fillTransaction = await signContractCall(me, sealedId, "fill", {

@@ -10,7 +10,8 @@ const bytes32 = (value: bigint) => {
 
 export async function commitmentOf(order: SealedOrder): Promise<`0x${string}`> {
   const { Barretenberg } = await import("@aztec/bb.js");
-  const api = await Barretenberg.new({ threads: 1 });
+  // A Poseidon2 hash needs no CRS: nothing to download.
+  const api = await Barretenberg.new({ threads: 1, skipSrsInit: true });
   try {
     const { hash } = await api.poseidon2Hash({ inputs: commitmentInputs(order).map(bytes32) });
     return `0x${Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;

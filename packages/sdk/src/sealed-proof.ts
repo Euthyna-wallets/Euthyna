@@ -25,8 +25,13 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** Opens a Barretenberg ready to prove. The default loads bb.js's own CRS; a browser passes one that loads it from its own site. */
+export type OpenProver = () => Promise<Barretenberg>;
+const defaultProver: OpenProver = () => Barretenberg.new({ threads: 1 });
+
 export async function sealedCommitment(order: SealedOrder, api?: Barretenberg): Promise<string> {
-  const own = api ?? (await Barretenberg.new({ threads: 1 }));
+  // A Poseidon2 hash needs no CRS: nothing to download.
+  const own = api ?? (await Barretenberg.new({ threads: 1, skipSrsInit: true }));
   try {
     const { hash } = await own.poseidon2Hash({ inputs: commitmentInputs(order).map(bytes32) });
     return toHex(hash);
@@ -39,8 +44,8 @@ export async function sealedCommitment(order: SealedOrder, api?: Barretenberg): 
  * Proves a fill. Throws (from the circuit) when the fill breaks a hidden term: a rate below the limit,
  * more than the cap, or after the deadline.
  */
-export async function proveSealedFill(circuit: SealedCircuit, order: SealedOrder, fill: Fill): Promise<FillProof> {
-  const api = await Barretenberg.new({ threads: 1 });
+export async function proveSealedFill(circuit: SealedCircuit, order: SealedOrder, fill: Fill, open: OpenProver = defaultProver): Promise<FillProof> {
+  const api = await open();
   try {
     const commitment = await sealedCommitment(order, api);
     const inputs = {
