@@ -280,7 +280,11 @@ async function parseJson<T>(context: AppContext, schema: z.ZodType<T>): Promise<
   }
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    throw new HTTPException(400, { message: parsed.error.message });
+    // A readable message: the console shows body.message, a raw zod issue list shows nothing.
+    const detail = parsed.error.issues
+      .map((issue) => `${issue.path.length ? issue.path.join(".") : "body"}: ${issue.message}`)
+      .join("; ");
+    throw new HTTPException(400, { message: `invalid request, ${detail}` });
   }
   return parsed.data;
 }
