@@ -174,7 +174,8 @@ export function EuroPayoutsCard() {
         right={data.config ? <span style={{ font: "700 10px var(--font-brand)", letterSpacing: ".14em", border: "1px solid rgba(13,23,48,.2)", padding: "3px 8px", color: "var(--ink-2)" }}>{data.config.configured === false ? "SIGNER OUTDATED" : "ENABLED"}</span> : null}
       />
       <span style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>
-        An agent pays a voted IBAN (Settings · suppliers) within its role's euro budget. The vault checks the beneficiary, the amount
+        An agent pays a voted beneficiary (Settings · suppliers) within its role's euro budget. IBANs are sealed: only a commitment
+        is on chain, the members read them with their reading key and only the enclave can pay them. The vault checks the beneficiary, the amount
         and the budget on chain, then a bank signer running in an enclave asks the partner for a single-use payout and the vault
         sends the EURC itself. No other IBAN can be paid.
       </span>
@@ -245,7 +246,7 @@ export function EuroPayoutsCard() {
               <div key={payout.opId} style={{ ...ROW, gridTemplateColumns: "44px minmax(0, 1fr) auto" }}>
                 <Seal word={STATE_WORD[payout.state] ?? payout.state} size={36} tone={payout.state === "Failed" ? "refused" : undefined} />
                 <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                  <span><b className="mono">{(Number(payout.amount) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2 })} EUR</b> to {payout.beneficiary.name} · <span className="mono" style={{ fontSize: 12 }}>{payout.beneficiary.iban}</span></span>
+                  <span><b className="mono">{(Number(payout.amount) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2 })} EUR</b> to beneficiary #{payout.beneficiary.id}{payout.beneficiary.label ? ` · ${payout.beneficiary.label}` : ""}</span>
                   <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{new Date(payout.at).toLocaleString()} · {payout.actor} ({payout.role}) · ref {payout.reference}{payout.fiatAmount ? ` · partner pays ${payout.fiatAmount} EUR` : ""}{payout.error ? ` · ${payout.error}` : ""}</span>
                 </span>
                 {explorer ? <a href={explorer} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--aegean-ink)" }}>vault ↗</a> : <span />}

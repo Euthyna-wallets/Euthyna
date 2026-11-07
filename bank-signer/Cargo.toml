@@ -19,6 +19,8 @@ hkdf = "0.13"
 sha2 = "0.11"
 base64 = "0.22"
 hex = "0.4"
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
+aes-gcm = "0.11.1"
 
 [features]
 # Local tests against a sandbox API key that has no signing key attached: the Api-Signature header is

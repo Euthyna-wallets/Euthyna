@@ -1,0 +1,6 @@
+{
+  "vault": "acme.euthyna-nomos.testnet",
+  "sealed": "eyJ2IjoxLCJlcGsiOiJFNzVQNnVyeUJNZjlNMWo4bkFCeUdJSFJkQ2VCS0NKK3huVHpmMy9wZTIwPSIsIml2IjoiQ1FrSkNRa0pDUWtKQ1FrSiIsImN0IjoicXFTekhRbjdBY2pmZzdBMEhUOVVObWE2SjNjUVJvVURGd3BwNkpuZWpBODJiUTEybEhydUxnblNIM1VUY0pIN0xkOERTbGsyU1ZRSE44ZXg1M3R4dnU1SUhGU3hXMktmS3lWejdzZGgycWFCS0szSU9RNCtZZDZQZkg3QVh2WWNQcmdYcVpZT2ZVRHMrRzRWaE53MTJwbUkrWExNYnVzR01qczlHWjN0cDdLellDSHdqUFBIZUM0WEpoSTNNTHB3VFJIYlNSdm85bmRxcEM0eFBReW9KMGlpZUJ1MDZzR2RKa2xFYTZCVXNLcStPdDNaWWlMNjFzcWQ4U3IrTDZQWjJ1WTZQdFpuRE1WZEZSSDRqR0p0U2RsamhQN0VVMVc4cVRRPSJ9",
+  "commitment": "30549e58779af7ab6a1a1b0084f0d820463be0372058fe7db20f18e8de522dc5",
+  "plaintext": "{\"vault\":\"acme.euthyna-nomos.testnet\",\"iban\":\"FR7630006000011234567890189\",\"name\":\"Atelier Dupont SAS\",\"holder_type\":\"Business\",\"salt\":\"abababababababababababababababababababababababababababababababab\"}"
+}

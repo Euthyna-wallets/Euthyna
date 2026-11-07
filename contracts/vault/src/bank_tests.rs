@@ -1,10 +1,22 @@
 use super::*;
 use crate::bank::{BankBeneficiary, BankConfig, BankPayoutState, BankPermission};
+
+const COMMITMENT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 use near_sdk::serde_json::json;
 use near_sdk::{test_utils::VMContextBuilder, testing_env};
 
-const IBAN: &str = "FR76 3000 6000 0112 3456 7890 189";
-const OTHER_IBAN: &str = "DE89370400440532013000";
+/// Beneficiary 1, voted sealed; 2 was never voted.
+const IBAN: u32 = 1;
+const OTHER_IBAN: u32 = 2;
+
+fn sealed(commitment: &str) -> RuleChange {
+    RuleChange::AddSealedBankBeneficiary {
+        label: "Supplier A".into(),
+        commitment: commitment.into(),
+        sealed_for_signer: "eyJ2IjoxfQ==".into(),
+        sealed_for_members: "eyJ2IjoxfQ==".into(),
+    }
+}
 
 fn context(caller: &str, now: u64) {
     testing_env!(
@@ -92,13 +104,7 @@ fn fixture() -> Vault {
         RuleChange::SetBankConfig {
             config: Some(config()),
         },
-        RuleChange::AddBankBeneficiary {
-            beneficiary: BankBeneficiary {
-                iban: IBAN.into(),
-                name: "Vendor SAS".into(),
-                holder_type: "Business".into(),
-            },
-        },
+        sealed(COMMITMENT),
         RuleChange::SetBankPermission {
             role: "payments".into(),
             permission: Some(BankPermission {
@@ -114,11 +120,11 @@ fn fixture() -> Vault {
     v
 }
 
-fn refused(v: &Vault, iban: &str, amount: u128, reference: &str) -> Option<String> {
+fn refused(v: &Vault, iban: u32, amount: u128, reference: &str) -> Option<String> {
     v.check_bank_payout(
         "payments".into(),
         "agent.testnet".parse().unwrap(),
-        iban.into(),
+        iban,
         U128(amount),
         reference.into(),
     )
@@ -129,11 +135,6 @@ fn refused(v: &Vault, iban: &str, amount: u128, reference: &str) -> Option<Strin
 fn only_voted_ibans_within_budget() {
     let v = fixture();
     assert_eq!(refused(&v, IBAN, 5_000_000, "inv-1"), None);
-    assert_eq!(
-        refused(&v, "fr7630006000011234567890189", 1, "inv-1"),
-        None,
-        "spaces and case do not matter"
-    );
     assert_eq!(
         refused(&v, OTHER_IBAN, 1, "inv-1").as_deref(),
         Some("BeneficiaryNotAllowed")
@@ -154,7 +155,7 @@ fn only_voted_ibans_within_budget() {
         v.check_bank_payout(
             "payments".into(),
             "stranger.testnet".parse().unwrap(),
-            IBAN.into(),
+            IBAN,
             U128(1),
             "x".into()
         )
@@ -166,7 +167,7 @@ fn only_voted_ibans_within_budget() {
         v.check_bank_payout(
             "dao".into(),
             "agent.testnet".parse().unwrap(),
-            IBAN.into(),
+            IBAN,
             U128(1),
             "x".into()
         )
@@ -179,26 +180,18 @@ fn only_voted_ibans_within_budget() {
 #[test]
 fn removed_beneficiary_is_refused_and_role_without_permission_too() {
     let mut v = fixture();
-    v.apply_rule_change(
-        RuleChange::RemoveBankBeneficiary {
-            iban: "fr76 30006000011234567890189".into(),
-        },
-        1,
-    );
+    v.apply_rule_change(RuleChange::RemoveSealedBankBeneficiary { id: IBAN }, 1);
     assert!(v.list_bank_beneficiaries().is_empty());
     assert_eq!(
         refused(&v, IBAN, 1, "inv-1").as_deref(),
         Some("BeneficiaryNotAllowed")
     );
-    v.apply_rule_change(
-        RuleChange::AddBankBeneficiary {
-            beneficiary: BankBeneficiary {
-                iban: IBAN.into(),
-                name: "Vendor SAS".into(),
-                holder_type: "Business".into(),
-            },
-        },
-        1,
+    // Voted again, it gets a new number: the old number stays refused.
+    v.apply_rule_change(sealed(&"22".repeat(32)), 1);
+    assert_eq!(v.list_bank_beneficiaries()[0].id, 2);
+    assert_eq!(
+        refused(&v, IBAN, 1, "inv-1").as_deref(),
+        Some("BeneficiaryNotAllowed")
     );
     v.apply_rule_change(
         RuleChange::SetBankPermission {
@@ -208,18 +201,18 @@ fn removed_beneficiary_is_refused_and_role_without_permission_too() {
         1,
     );
     assert_eq!(
-        refused(&v, IBAN, 1, "inv-1").as_deref(),
+        refused(&v, 2, 1, "inv-1").as_deref(),
         Some("FunctionNotAllowed")
     );
 }
 
 #[test]
-#[should_panic(expected = "ERR_BANK_IBAN")]
-fn bad_checksum_cannot_be_voted() {
+#[should_panic(expected = "ERR_BANK_CLEARTEXT_IBAN")]
+fn an_iban_in_clear_cannot_be_voted() {
     let _v = fixture();
     Vault::validate_rule_change(&RuleChange::AddBankBeneficiary {
         beneficiary: BankBeneficiary {
-            iban: "FR7630006000011234567890180".into(),
+            iban: "FR7630006000011234567890189".into(),
             name: "X".into(),
             holder_type: "Business".into(),
         },
@@ -227,14 +220,89 @@ fn bad_checksum_cannot_be_voted() {
 }
 
 #[test]
+#[should_panic(expected = "ERR_BANK_COMMITMENT")]
+fn a_sealed_beneficiary_needs_a_commitment() {
+    let _v = fixture();
+    Vault::validate_rule_change(&sealed("FR7630006000011234567890189"));
+}
+
+#[test]
+fn the_first_version_clear_ibans_are_erased_from_state() {
+    let mut v = fixture();
+    let legacy = vec![BankBeneficiary {
+        iban: "FR7630006000011234567890189".into(),
+        name: "Vendor SAS".into(),
+        holder_type: "Business".into(),
+    }];
+    env::storage_write(b"bank:b", &borsh::to_vec(&legacy).unwrap());
+    env::storage_write(b"bank:o:xx", b"payout in clear");
+    env::storage_write(
+        b"bank:i",
+        &borsh::to_vec(&vec![{
+            let mut id = [0u8; 32];
+            id[..4].copy_from_slice(b"xx\0\0");
+            id
+        }])
+        .unwrap(),
+    );
+    v.apply_rule_change(
+        RuleChange::SetBankBoxKey {
+            key: Some("ab".repeat(32)),
+        },
+        1,
+    );
+    assert!(env::storage_read(b"bank:b").is_none());
+    assert!(env::storage_read(b"bank:i").is_none());
+    assert_eq!(
+        v.get_bank_box_key().as_deref(),
+        Some("ab".repeat(32).as_str())
+    );
+}
+
+#[test]
+fn the_enclave_gets_the_sealed_envelope_and_the_commitment_never_the_iban() {
+    let mut v = fixture();
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_000_000), "inv-1".into());
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let call: String = receipts
+        .iter()
+        .flat_map(|receipt| receipt.actions.iter())
+        .map(|action| match action {
+            near_sdk::mock::MockAction::FunctionCallWeight {
+                method_name, args, ..
+            } => {
+                format!(
+                    "{} {}",
+                    String::from_utf8_lossy(method_name),
+                    String::from_utf8_lossy(args)
+                )
+            }
+            other => format!("{other:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(call.contains("request_execution"));
+    assert!(
+        call.contains(COMMITMENT),
+        "the commitment goes to the enclave"
+    );
+    assert!(
+        call.contains("eyJ2IjoxfQ=="),
+        "with the envelope the members sealed for it"
+    );
+    let payout = v
+        .get_bank_payout_by_reference("payments".into(), "inv-1".into())
+        .unwrap();
+    assert_eq!(
+        (payout.beneficiary_id, payout.commitment.as_str()),
+        (IBAN, COMMITMENT)
+    );
+}
+
+#[test]
 fn request_reserves_and_callback_queues_the_euro_transfer() {
     let mut v = fixture();
-    let _ = v.request_bank_payout(
-        "payments".into(),
-        IBAN.into(),
-        U128(1_234_500),
-        "inv-1".into(),
-    );
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_234_500), "inv-1".into());
     let payout = v
         .get_bank_payout_by_reference("payments".into(), "inv-1".into())
         .expect("payout stored");
@@ -305,7 +373,7 @@ fn request_reserves_and_callback_queues_the_euro_transfer() {
     );
     // Before signing, the vault rechecks the payout, not the role's EVM permissions.
     v.recheck_bank_transfer(&payout.op_id, transfer);
-    v.apply_rule_change(RuleChange::RemoveBankBeneficiary { iban: IBAN.into() }, 3);
+    v.apply_rule_change(RuleChange::RemoveSealedBankBeneficiary { id: IBAN }, 3);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || v.recheck_bank_transfer(&payout.op_id, v.operations.get(&transfer_id).unwrap())
@@ -325,12 +393,7 @@ fn request_reserves_and_callback_queues_the_euro_transfer() {
 #[test]
 fn signer_failure_gives_everything_back() {
     let mut v = fixture();
-    let _ = v.request_bank_payout(
-        "payments".into(),
-        IBAN.into(),
-        U128(1_000_000),
-        "inv-1".into(),
-    );
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_000_000), "inv-1".into());
     let payout = v
         .get_bank_payout_by_reference("payments".into(), "inv-1".into())
         .unwrap();
@@ -362,12 +425,7 @@ fn signer_failure_gives_everything_back() {
 #[test]
 fn signer_cannot_change_the_amount() {
     let mut v = fixture();
-    let _ = v.request_bank_payout(
-        "payments".into(),
-        IBAN.into(),
-        U128(1_000_000),
-        "inv-1".into(),
-    );
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_000_000), "inv-1".into());
     let payout = v
         .get_bank_payout_by_reference("payments".into(), "inv-1".into())
         .unwrap();
@@ -380,12 +438,7 @@ fn signer_cannot_change_the_amount() {
     assert_eq!(v.allowances[&[5; 32]].reserved.0, 0);
     let refused_answer = json!({"ok": false, "error": "rule rejected"});
     context("agent.testnet", 4);
-    let _ = v.request_bank_payout(
-        "payments".into(),
-        IBAN.into(),
-        U128(1_000_000),
-        "inv-2".into(),
-    );
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_000_000), "inv-2".into());
     let payout = v
         .get_bank_payout_by_reference("payments".into(), "inv-2".into())
         .unwrap();
@@ -404,10 +457,5 @@ fn signer_cannot_change_the_amount() {
 #[should_panic(expected = "BeneficiaryNotAllowed")]
 fn request_to_unknown_iban_panics() {
     let mut v = fixture();
-    let _ = v.request_bank_payout(
-        "payments".into(),
-        OTHER_IBAN.into(),
-        U128(1),
-        "inv-1".into(),
-    );
+    let _ = v.request_bank_payout("payments".into(), OTHER_IBAN, U128(1), "inv-1".into());
 }

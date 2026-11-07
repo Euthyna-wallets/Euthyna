@@ -18,8 +18,6 @@ import {
   randomSalt,
   rateFromPrice,
   RATE_SCALE,
-  readerKeyFromSignature,
-  readerMessage,
   approveArgs,
   sealArgs,
   SEALED_DEPOSIT_YOCTO,
@@ -32,9 +30,10 @@ import { Kicker, Slab } from "../components/design.js";
 import { commitmentOf, downloadOrderFile } from "../lib/sealed-order.js";
 import { pendingSettlements, recordSettlements, sendSealedApprovals } from "../lib/sealed-approval.js";
 import { baseGasPrice, fillNow } from "../lib/sealed-fill.js";
+import { readerKey } from "../lib/reader-key.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type SealedView } from "../omniroles-api.js";
-import { signContractCall, signDaoProposal, signNearMessage } from "../wallets.js";
+import { signContractCall, signDaoProposal } from "../wallets.js";
 
 const SLIPPAGE_BPS = 50;
 const label: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6 };
@@ -54,12 +53,6 @@ function checkDraft(draft: ProposalDraft, view: SealedView, expected: unknown) {
   }
 }
 
-async function readerKey(vault: string) {
-  const message = readerMessage(vault);
-  const signed = await signNearMessage({ message: message.message, recipient: message.recipient, nonceBase64: btoa(String.fromCharCode(...message.nonce)) });
-  const signature = Uint8Array.from(atob(String(signed.signature)), (char) => char.charCodeAt(0));
-  return readerKeyFromSignature(signature);
-}
 
 export function SealedOrdersCard() {
   const wallets = useWallets();

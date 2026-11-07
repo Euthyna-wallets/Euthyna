@@ -13,6 +13,12 @@
 //!    queued like a voted transaction (the same worker broadcasts and settles it);
 //! 3. the partner sees the deposit, matches the rule, and pays the IBAN.
 //!
+//! The IBAN is never on chain. The members vote a sealed beneficiary: a salted commitment to the
+//! IBAN and its holder, an envelope only the enclave can open (it recomputes the commitment and
+//! refuses any other IBAN) and an envelope for the members' reading keys. The agent names the
+//! beneficiary by its number; the vault forwards the enclave's envelope. Proposals, transactions,
+//! the OutLayer input and output, and the payout records carry the number and the commitment only.
+//!
 //! Stored under raw keys (not new struct fields), so the vault's state layout is unchanged and
 //! existing vaults move to this version by a DAO upgrade.
 use crate::types::EvmAddress;
@@ -20,13 +26,23 @@ use crate::*;
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 
 const KEY_CONFIG: &[u8] = b"bank:c";
-const KEY_BENEFICIARIES: &[u8] = b"bank:b";
 const KEY_PERMISSION: &[u8] = b"bank:p:";
-const KEY_PAYOUT: &[u8] = b"bank:o:";
 const KEY_PENDING: &[u8] = b"bank:pending";
-const KEY_INDEX: &[u8] = b"bank:i";
-const KEY_TRANSFER: &[u8] = b"bank:t:";
+const KEY_SEALED: &[u8] = b"bank:s";
+const KEY_SEALED_SEQUENCE: &[u8] = b"bank:sn";
+const KEY_BOX: &[u8] = b"bank:k";
+const KEY_PAYOUT: &[u8] = b"bank:q:";
+const KEY_INDEX: &[u8] = b"bank:qi";
+const KEY_TRANSFER: &[u8] = b"bank:qt:";
+/// The first version kept IBANs in clear; erased from state when a sealed beneficiary or the box
+/// key is voted (the chain's history still has them: archival nodes keep every past state).
+const LEGACY_BENEFICIARIES: &[u8] = b"bank:b";
+const LEGACY_PAYOUT: &[u8] = b"bank:o:";
+const LEGACY_INDEX: &[u8] = b"bank:i";
 const MAX_BENEFICIARIES: usize = 64;
+const MAX_LABEL_CHARS: usize = 32;
+const MAX_SEALED_FOR_SIGNER: usize = 2_048;
+const MAX_SEALED_FOR_MEMBERS: usize = 8_192;
 const MAX_REFERENCE_CHARS: usize = 140;
 /// Attached to OutLayer for the run; what it does not use comes back to the vault.
 const OUTLAYER_DEPOSIT: NearToken = NearToken::from_millinear(20);
@@ -64,6 +80,7 @@ pub struct BankConfig {
     pub max_priority_fee_per_gas: U128,
 }
 
+/// The first version's beneficiary, in clear: still decoded for rules queued before, never stored.
 #[derive(Clone, Debug)]
 #[near(serializers = [borsh, json])]
 pub struct BankBeneficiary {
@@ -71,6 +88,21 @@ pub struct BankBeneficiary {
     pub name: String,
     /// "Business" or "Individual".
     pub holder_type: String,
+}
+
+/// A beneficiary the members voted, without its IBAN.
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct SealedBeneficiary {
+    pub id: u32,
+    /// Public, chosen by the members (never a name): what agents and the activity show.
+    pub label: String,
+    /// sha256("euthyna-bank-beneficiary-v1" 0 vault 0 IBAN 0 holder 0 type 0 salt), hex.
+    pub commitment: String,
+    /// Base64; opened only by the bank signer enclave, and only for this vault.
+    pub sealed_for_signer: String,
+    /// Base64; opened by the members' reading keys.
+    pub sealed_for_members: String,
 }
 
 /// What a role may pay to the voted IBANs.
@@ -99,7 +131,9 @@ pub struct BankPayout {
     pub op_id: OperationId,
     pub member: AccountId,
     pub role: String,
-    pub beneficiary: BankBeneficiary,
+    pub beneficiary_id: u32,
+    pub beneficiary_label: String,
+    pub commitment: String,
     pub amount: U128,
     pub reference: String,
     pub consumption: AllowanceConsumption,
@@ -144,15 +178,38 @@ pub(crate) fn set_config(config: Option<BankConfig>) {
         }
     }
 }
-pub(crate) fn beneficiaries() -> Vec<BankBeneficiary> {
-    read(KEY_BENEFICIARIES).unwrap_or_default()
+pub(crate) fn beneficiaries() -> Vec<SealedBeneficiary> {
+    read(KEY_SEALED).unwrap_or_default()
 }
-fn set_beneficiaries(entries: &[BankBeneficiary]) {
+fn set_beneficiaries(entries: &[SealedBeneficiary]) {
     if entries.is_empty() {
-        env::storage_remove(KEY_BENEFICIARIES);
+        env::storage_remove(KEY_SEALED);
     } else {
-        write(KEY_BENEFICIARIES, &entries.to_vec());
+        write(KEY_SEALED, &entries.to_vec());
     }
+}
+fn beneficiary(id: u32) -> Option<SealedBeneficiary> {
+    beneficiaries().into_iter().find(|entry| entry.id == id)
+}
+pub(crate) fn box_key() -> Option<String> {
+    read(KEY_BOX)
+}
+fn legacy_beneficiaries() -> Vec<BankBeneficiary> {
+    read(LEGACY_BENEFICIARIES).unwrap_or_default()
+}
+/// Erases the first version's clear IBANs and payout records from state.
+fn erase_cleartext() {
+    env::storage_remove(LEGACY_BENEFICIARIES);
+    if let Some(ids) = env::storage_read(LEGACY_INDEX) {
+        let ids: Vec<OperationId> = BorshDeserialize::try_from_slice(&ids).unwrap_or_default();
+        for id in ids.iter().take(500) {
+            env::storage_remove(&key(LEGACY_PAYOUT, id));
+        }
+        env::storage_remove(LEGACY_INDEX);
+    }
+}
+fn hex64(text: &str) -> bool {
+    text.len() == 64 && text.chars().all(|c| c.is_ascii_hexdigit())
 }
 pub(crate) fn permission_of(role: &str) -> Option<BankPermission> {
     read(&key(KEY_PERMISSION, role.as_bytes()))
@@ -177,15 +234,7 @@ fn index() -> Vec<OperationId> {
 }
 /// The payout behind a queued EURC transfer, if the operation is one.
 pub(crate) fn payout_of_transfer(transfer_id: &OperationId) -> Option<OperationId> {
-    read(&key(KEY_TRANSFER, transfer_id)).or_else(|| {
-        // Payouts queued by the first version, before the link was stored.
-        index()
-            .iter()
-            .rev()
-            .map(payout)
-            .find(|payout| payout.transfer_op_id.as_ref() == Some(transfer_id))
-            .map(|payout| payout.op_id)
-    })
+    read(&key(KEY_TRANSFER, transfer_id))
 }
 fn pending() -> Option<OperationId> {
     read(KEY_PENDING)
@@ -207,42 +256,30 @@ pub(crate) fn canonical_iban(iban: &str) -> String {
         .collect()
 }
 
-/// ISO 7064 mod 97-10, as banks check it.
-pub(crate) fn valid_iban(iban: &str) -> bool {
-    let compact = canonical_iban(iban);
-    if compact.len() < 15
-        || compact.len() > 34
-        || !compact.chars().all(|c| c.is_ascii_alphanumeric())
-    {
-        return false;
-    }
-    let rotated = format!("{}{}", &compact[4..], &compact[..4]);
-    let mut remainder: u32 = 0;
-    for c in rotated.chars() {
-        let value = if c.is_ascii_digit() {
-            c as u32 - '0' as u32
-        } else {
-            c as u32 - 'A' as u32 + 10
-        };
-        let digits = if value >= 10 { 2 } else { 1 };
-        for position in (0..digits).rev() {
-            let digit = (value / 10u32.pow(position)) % 10;
-            remainder = (remainder * 10 + digit) % 97;
-        }
-    }
-    remainder == 1
-}
-
-pub(crate) fn validate_beneficiary(entry: &BankBeneficiary) {
-    require!(valid_iban(&entry.iban), "ERR_BANK_IBAN");
-    let name_chars = entry.name.chars().count();
+pub(crate) fn validate_sealed(
+    label: &str,
+    commitment: &str,
+    sealed_for_signer: &str,
+    sealed_for_members: &str,
+) {
     require!(
-        name_chars > 0 && name_chars <= 255 && entry.name.chars().all(|c| (' '..='~').contains(&c)),
-        "ERR_BANK_HOLDER_NAME"
+        label.chars().count() <= MAX_LABEL_CHARS && label.chars().all(|c| (' '..='~').contains(&c)),
+        "ERR_BANK_LABEL"
+    );
+    require!(hex64(commitment), "ERR_BANK_COMMITMENT");
+    let base64 = |text: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+    };
+    require!(
+        base64(sealed_for_signer) && sealed_for_signer.len() <= MAX_SEALED_FOR_SIGNER,
+        "ERR_BANK_SEALED"
     );
     require!(
-        entry.holder_type == "Business" || entry.holder_type == "Individual",
-        "ERR_BANK_HOLDER_TYPE"
+        base64(sealed_for_members) && sealed_for_members.len() <= MAX_SEALED_FOR_MEMBERS,
+        "ERR_BANK_SEALED"
     );
 }
 
@@ -319,8 +356,13 @@ impl Vault {
         config()
     }
 
-    pub fn list_bank_beneficiaries(&self) -> Vec<BankBeneficiary> {
+    pub fn list_bank_beneficiaries(&self) -> Vec<SealedBeneficiary> {
         beneficiaries()
+    }
+
+    /// The enclave's X25519 key beneficiaries are sealed to (hex), as the members voted it.
+    pub fn get_bank_box_key(&self) -> Option<String> {
+        box_key()
     }
 
     pub fn get_bank_permission(&self, role: String) -> Option<BankPermission> {
@@ -372,14 +414,14 @@ impl Vault {
         &self,
         role: String,
         member: AccountId,
-        iban: String,
+        beneficiary: u32,
         amount: U128,
         reference: String,
     ) -> BankCheck {
         match self.bank_permission(
             &role,
             &member,
-            &iban,
+            beneficiary,
             amount.0,
             &reference,
             env::block_timestamp(),
@@ -401,7 +443,7 @@ impl Vault {
     pub fn request_bank_payout(
         &mut self,
         role: String,
-        iban: String,
+        beneficiary: u32,
         amount: U128,
         reference: String,
     ) -> Promise {
@@ -415,8 +457,8 @@ impl Vault {
         );
         let member = env::predecessor_account_id();
         let now = env::block_timestamp();
-        let (config, beneficiary, allowance) = self
-            .bank_permission(&role, &member, &iban, amount.0, &reference, now)
+        let (config, entry, allowance) = self
+            .bank_permission(&role, &member, beneficiary, amount.0, &reference, now)
             .unwrap_or_else(|reason| env::panic_str(&format!("ERR_PERMISSION_DENIED:{reason}")));
         let wallet = self
             .wallets
@@ -457,7 +499,9 @@ impl Vault {
             op_id,
             member,
             role,
-            beneficiary: beneficiary.clone(),
+            beneficiary_id: entry.id,
+            beneficiary_label: entry.label.clone(),
+            commitment: entry.commitment.clone(),
             amount,
             reference: reference.clone(),
             consumption: AllowanceConsumption {
@@ -486,12 +530,11 @@ impl Vault {
         // What the signer gets: the payout the vault just authorised, nothing it could widen.
         // The partner's nonce is at most 36 characters: the first 128 bits of the payout id.
         let input = format!(
-            "{{\"op\":\"payout\",\"vault\":{},\"customer_id\":{},\"iban\":{},\"holder_name\":{},\"holder_type\":{},\"reference\":{},\"crypto_amount\":{},\"source_address\":{},\"network\":{},\"crypto\":{},\"nonce\":{},\"expiry\":{}}}",
+            "{{\"op\":\"payout\",\"vault\":{},\"customer_id\":{},\"commitment\":{},\"sealed\":{},\"reference\":{},\"crypto_amount\":{},\"source_address\":{},\"network\":{},\"crypto\":{},\"nonce\":{},\"expiry\":{}}}",
             json_string(env::current_account_id().as_str()),
             json_string(&config.customer_id),
-            json_string(&canonical_iban(&beneficiary.iban)),
-            json_string(&beneficiary.name),
-            json_string(&beneficiary.holder_type),
+            json_string(&entry.commitment),
+            json_string(&entry.sealed_for_signer),
             json_string(&reference),
             json_string(&decimal_string(amount.0, config.decimals)),
             json_string(&format!("0x{}", hex::encode(source))),
@@ -666,11 +709,11 @@ impl Vault {
         &self,
         role: &str,
         member: &AccountId,
-        iban: &str,
+        beneficiary_id: u32,
         amount: u128,
         reference: &str,
         now: u64,
-    ) -> Result<(BankConfig, BankBeneficiary, AllowanceKey), &'static str> {
+    ) -> Result<(BankConfig, SealedBeneficiary, AllowanceKey), &'static str> {
         if self.paused {
             return Err("ERR_PAUSED");
         }
@@ -710,11 +753,7 @@ impl Vault {
         if amount == 0 {
             return Err("ERR_ZERO_AMOUNT");
         }
-        let wanted = canonical_iban(iban);
-        let beneficiary = beneficiaries()
-            .into_iter()
-            .find(|entry| canonical_iban(&entry.iban) == wanted)
-            .ok_or("BeneficiaryNotAllowed")?;
+        let beneficiary = beneficiary(beneficiary_id).ok_or("BeneficiaryNotAllowed")?;
         let permission = permission_of(role).ok_or("FunctionNotAllowed")?;
         if amount > permission.max_per_payout.0 {
             return Err("ERR_MAX_PER_PAYOUT");
@@ -744,11 +783,9 @@ impl Vault {
                 && config.token == operation.request.target,
             "ERR_CONDITIONS_CHANGED"
         );
-        let wanted = canonical_iban(&payout.beneficiary.iban);
         require!(
-            beneficiaries()
-                .iter()
-                .any(|entry| canonical_iban(&entry.iban) == wanted),
+            beneficiary(payout.beneficiary_id)
+                .is_some_and(|entry| entry.commitment == payout.commitment),
             "ERR_CONDITIONS_CHANGED"
         );
         let permission =
@@ -808,29 +845,66 @@ impl Vault {
     pub(crate) fn apply_bank_rule(&mut self, change: &RuleChange) -> bool {
         match change {
             RuleChange::SetBankConfig { config } => set_config(config.clone()),
-            RuleChange::AddBankBeneficiary { beneficiary } => {
-                let mut entries = beneficiaries();
-                let wanted = canonical_iban(&beneficiary.iban);
-                match entries
-                    .iter_mut()
-                    .find(|entry| canonical_iban(&entry.iban) == wanted)
-                {
-                    Some(entry) => *entry = beneficiary.clone(),
-                    None => {
-                        require!(
-                            entries.len() < MAX_BENEFICIARIES,
-                            "ERR_BANK_BENEFICIARIES_FULL"
-                        );
-                        entries.push(beneficiary.clone());
-                    }
-                }
-                set_beneficiaries(&entries);
+            // Queued before sealed beneficiaries: an IBAN in clear is not stored any more.
+            RuleChange::AddBankBeneficiary { .. } => {
+                env::log_str("OMNIROLES_BANK_CLEARTEXT_IBAN_IGNORED");
             }
             RuleChange::RemoveBankBeneficiary { iban } => {
                 let wanted = canonical_iban(iban);
-                let entries: Vec<BankBeneficiary> = beneficiaries()
+                let entries: Vec<BankBeneficiary> = legacy_beneficiaries()
                     .into_iter()
                     .filter(|entry| canonical_iban(&entry.iban) != wanted)
+                    .collect();
+                if entries.is_empty() {
+                    env::storage_remove(LEGACY_BENEFICIARIES);
+                } else {
+                    write(LEGACY_BENEFICIARIES, &entries);
+                }
+            }
+            RuleChange::SetBankBoxKey { key } => {
+                erase_cleartext();
+                match key {
+                    Some(key) => write(KEY_BOX, &key.to_ascii_lowercase()),
+                    None => {
+                        env::storage_remove(KEY_BOX);
+                    }
+                }
+            }
+            RuleChange::AddSealedBankBeneficiary {
+                label,
+                commitment,
+                sealed_for_signer,
+                sealed_for_members,
+            } => {
+                erase_cleartext();
+                let mut entries = beneficiaries();
+                require!(
+                    entries.len() < MAX_BENEFICIARIES,
+                    "ERR_BANK_BENEFICIARIES_FULL"
+                );
+                let commitment = commitment.to_ascii_lowercase();
+                require!(
+                    !entries.iter().any(|entry| entry.commitment == commitment),
+                    "ERR_BANK_BENEFICIARY_EXISTS"
+                );
+                let id = read::<u32>(KEY_SEALED_SEQUENCE)
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                write(KEY_SEALED_SEQUENCE, &id);
+                entries.push(SealedBeneficiary {
+                    id,
+                    label: label.clone(),
+                    commitment,
+                    sealed_for_signer: sealed_for_signer.clone(),
+                    sealed_for_members: sealed_for_members.clone(),
+                });
+                set_beneficiaries(&entries);
+                env::log_str(&format!("OMNIROLES_BANK_BENEFICIARY_ADDED:{id}"));
+            }
+            RuleChange::RemoveSealedBankBeneficiary { id } => {
+                let entries: Vec<SealedBeneficiary> = beneficiaries()
+                    .into_iter()
+                    .filter(|entry| entry.id != *id)
                     .collect();
                 set_beneficiaries(&entries);
             }
@@ -849,7 +923,19 @@ impl Vault {
                     validate_config(config);
                 }
             }
-            RuleChange::AddBankBeneficiary { beneficiary } => validate_beneficiary(beneficiary),
+            RuleChange::AddBankBeneficiary { .. } => env::panic_str("ERR_BANK_CLEARTEXT_IBAN"),
+            RuleChange::SetBankBoxKey { key } => {
+                if let Some(key) = key {
+                    require!(hex64(key), "ERR_BANK_BOX_KEY");
+                }
+            }
+            RuleChange::AddSealedBankBeneficiary {
+                label,
+                commitment,
+                sealed_for_signer,
+                sealed_for_members,
+            } => validate_sealed(label, commitment, sealed_for_signer, sealed_for_members),
+            RuleChange::RemoveSealedBankBeneficiary { .. } => {}
             RuleChange::RemoveBankBeneficiary { iban } => {
                 require!(!iban.is_empty(), "ERR_BANK_IBAN")
             }
@@ -868,15 +954,6 @@ impl Vault {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn iban_checksum() {
-        assert!(valid_iban("FR76 3000 6000 0112 3456 7890 189"));
-        assert!(valid_iban("DE89370400440532013000"));
-        assert!(valid_iban("MT22CFTE19870000000090010358449"));
-        assert!(!valid_iban("FR7630006000011234567890180"));
-        assert!(!valid_iban("nope"));
-    }
 
     #[test]
     fn amounts_and_dates_as_the_partner_reads_them() {

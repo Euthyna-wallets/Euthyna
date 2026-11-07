@@ -246,13 +246,18 @@ type Envelope = { v: 1; epk: string; iv: string; ct: string; keys: Record<string
  * reader with a key from X25519(ephemeral, reader) hashed with both public keys.
  */
 export async function encryptTerms(terms: SealedOrder, readers: Array<{ account: string; publicKey: string }>): Promise<string> {
+  return encryptForReaders(serializeOrder(terms), readers);
+}
+
+/** Any JSON value, encrypted for the members' reading keys (the scheme of `encryptTerms`). */
+export async function encryptForReaders(value: unknown, readers: Array<{ account: string; publicKey: string }>): Promise<string> {
   if (!readers.length) throw new Error("no member has registered a reading key yet");
   const random = (size: number) => globalThis.crypto.getRandomValues(new Uint8Array(size));
   const contentKey = random(32);
   const ephemeral = random(32);
   const epk = x25519.getPublicKey(ephemeral);
   const iv = random(12);
-  const plaintext = new TextEncoder().encode(JSON.stringify(serializeOrder(terms)));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
   const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aes(contentKey, "encrypt"), plaintext));
   const keys: Envelope["keys"] = {};
   for (const reader of readers) {
@@ -268,6 +273,12 @@ export async function encryptTerms(terms: SealedOrder, readers: Array<{ account:
 
 /** The terms, for a reader holding their private key; null when the order was not encrypted to them. */
 export async function decryptTerms(terms: string, account: string, privateKey: Uint8Array): Promise<SealedOrder | null> {
+  const value = await decryptForReader(terms, account, privateKey);
+  return value === null ? null : parseOrder(value as Record<string, unknown>);
+}
+
+/** The value of `encryptForReaders`, for a reader holding their private key; null when not encrypted to them. */
+export async function decryptForReader(terms: string, account: string, privateKey: Uint8Array): Promise<unknown> {
   const envelope = JSON.parse(atob(terms)) as Envelope;
   const mine = envelope.keys[account];
   if (envelope.v !== 1 || !mine) return null;
@@ -275,5 +286,5 @@ export async function decryptTerms(terms: string, account: string, privateKey: U
   const kek = hexToBytes(sha256(concatBytes([x25519.getSharedSecret(privateKey, epk), epk, x25519.getPublicKey(privateKey)])));
   const contentKey = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(mine.iv) }, await aes(kek, "decrypt"), unb64(mine.key)));
   const plaintext = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(envelope.iv) }, await aes(contentKey, "decrypt"), unb64(envelope.ct));
-  return parseOrder(JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>);
+  return JSON.parse(new TextDecoder().decode(plaintext)) as unknown;
 }

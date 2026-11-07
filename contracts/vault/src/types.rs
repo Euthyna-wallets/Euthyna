@@ -399,7 +399,8 @@ pub enum RuleChange {
     SetBankConfig {
         config: Option<crate::bank::BankConfig>,
     },
-    /// An IBAN the company may pay; voted like a supplier address.
+    /// Refused since sealed beneficiaries: an IBAN in clear would stay public on chain. Kept so
+    /// that rules queued before still decode.
     AddBankBeneficiary {
         beneficiary: crate::bank::BankBeneficiary,
     },
@@ -410,6 +411,23 @@ pub enum RuleChange {
     SetBankPermission {
         role: String,
         permission: Option<crate::bank::BankPermission>,
+    },
+    /// The bank signer enclave's X25519 key, which beneficiaries are sealed to (hex, 32 bytes).
+    /// Voted with the signer's code hash: read from the enclave's own output.
+    SetBankBoxKey {
+        key: Option<String>,
+    },
+    /// An IBAN the company may pay, without the IBAN: a salted commitment, an envelope only the
+    /// enclave opens (it checks the commitment before paying) and one for the members' reading
+    /// keys. `label` is public: never a name.
+    AddSealedBankBeneficiary {
+        label: String,
+        commitment: String,
+        sealed_for_signer: String,
+        sealed_for_members: String,
+    },
+    RemoveSealedBankBeneficiary {
+        id: u32,
     },
 }
 
