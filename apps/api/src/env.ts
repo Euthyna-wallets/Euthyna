@@ -92,6 +92,12 @@ const schema = z.object({
   NOAH_API_KEY: z.string().min(1).optional(),
   /** https://api.sandbox.noah.com/v1 (default) or https://api.noah.com/v1. */
   NOAH_API_URL: z.string().url().default("https://api.sandbox.noah.com/v1"),
+  /** The bank signer deployed on OutLayer (bank-signer/): its WASM URL and sha256, and the secrets it reads. Unset: no euro payouts. */
+  BANK_SIGNER_URL: z.string().url().optional(),
+  BANK_SIGNER_HASH: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  BANK_SIGNER_SECRETS_OWNER: z.string().min(2).optional(),
+  BANK_SIGNER_SECRETS_PROFILE: z.string().min(1).default("noah"),
+  BANK_SIGNER_OUTLAYER_ID: z.string().min(2).default("outlayer.testnet"),
   /** Earlier directories, comma-separated: companies whose vault comes from an earlier Nomos list there. */
   OMNIROLES_PREVIOUS_REGISTRY_IDS: z.string().optional(),
   OMNI_BRIDGE_API_URL: z.string().url().default("https://testnet.api.bridge.nearone.org"),

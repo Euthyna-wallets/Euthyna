@@ -1,8 +1,10 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { Kicker, SectionHead, Slab } from "../components/design.js";
-import { bankApi, type BankBusiness } from "../omniroles-api.js";
+import { Kicker, Seal, SectionHead, Slab } from "../components/design.js";
+import { useWallets } from "../lib/wallet-context.js";
+import { bankApi, omni, type BankBusiness, type ProposalDraft } from "../omniroles-api.js";
+import { signDaoProposal } from "../wallets.js";
 
 const ENTITY_TYPES: Array<[string, string]> = [
   ["LimitedLiabilityCompany", "Limited liability company"], ["Corporation", "Corporation"], ["PublicCompany", "Public company"],
@@ -128,6 +130,117 @@ export function BankAccountCard() {
       )}
       {message ? <p role="status" style={{ margin: "4px 0 0", fontSize: 13, color: "var(--aegean-ink)" }}>{message}</p> : null}
       {error ? <div role="alert" style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(217,87,59,.08)", padding: "10px 12px", fontSize: 13, color: "var(--terra-ink)" }}>{error}</div> : null}
+    </Slab>
+  );
+}
+
+const STATE_WORD: Record<string, string> = { Requested: "SIGNER", Transferring: "SENT", Failed: "REFUSED" };
+
+/**
+ * Euro payouts: agents pay voted IBANs under their role's budget. The vault's policy decides;
+ * the bank signer (an enclave) only turns an approved payout into the partner's single-use rule.
+ */
+export function EuroPayoutsCard() {
+  const wallets = useWallets();
+  const client = useQueryClient();
+  const policy = useQuery({ queryKey: ["bank-policy"], queryFn: bankApi.policy, refetchInterval: 15_000 });
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status });
+  const [role, setRole] = useState("");
+  const [budget, setBudget] = useState("");
+  const [ceiling, setCeiling] = useState("500");
+  const sign = useMutation({
+    mutationFn: async (draft: Promise<ProposalDraft>) => {
+      if (!wallets.nearAccountId) throw new Error("Connect your NEAR wallet first");
+      await signDaoProposal(wallets.nearAccountId, await draft);
+    },
+    onSuccess: async () => { await client.invalidateQueries({ queryKey: ["omni-governance"] }); },
+  });
+  const data = policy.data;
+  if (!data || !data.supported) return null;
+  const roles = data.roles;
+  const chosen = roles.find((item) => item.role === role) ?? roles[0];
+  const euroBudgets = chosen?.budgets.filter((item) => item.token === "EURC") ?? [];
+  const chosenBudget = euroBudgets.find((item) => item.key === budget) ?? euroBudgets[0];
+  const ceilingUnits = /^\d{1,7}(\.\d{1,2})?$/.test(ceiling) ? String(Math.round(Number(ceiling) * 1_000_000)) : null;
+  const explorer = status.data?.treasury?.vaultAccountId ? `https://testnet.nearblocks.io/address/${status.data.treasury.vaultAccountId}` : null;
+
+  return (
+    <Slab style={{ padding: "20px 24px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionHead
+        left={<Kicker>Euro payouts · agents pay IBANs</Kicker>}
+        right={data.config ? <span style={{ font: "700 10px var(--font-brand)", letterSpacing: ".14em", border: "1px solid rgba(13,23,48,.2)", padding: "3px 8px", color: "var(--ink-2)" }}>{data.config.configured === false ? "SIGNER OUTDATED" : "ENABLED"}</span> : null}
+      />
+      <span style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>
+        An agent pays a voted IBAN (Settings · suppliers) within its role's euro budget. The vault checks the beneficiary, the amount
+        and the budget on chain, then a bank signer running in an enclave asks the partner for a single-use payout and the vault
+        sends the EURC itself. No other IBAN can be paid.
+      </span>
+
+      {!data.config ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 0 4px", borderTop: "1px solid rgba(13,23,48,.12)" }}>
+          <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
+            {data.deployable ? (data.customerId ? "Members vote once to point the vault at the bank signer." : "Open the euro account first, then members vote to enable payouts.") : "No bank signer is deployed for this console."}
+          </span>
+          <button className="btn-ori" style={{ marginLeft: "auto" }} disabled={!data.deployable || !data.customerId || sign.isPending} onClick={() => sign.mutate(bankApi.configProposal())}>
+            {sign.isPending ? "SIGNING…" : "PROPOSE: ENABLE EURO PAYOUTS"}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div style={ROW}><b style={LABEL}>Signer</b><span>OutLayer enclave on <span className="mono">{data.config.outlayer_id}</span> · code <span className="mono">{data.config.signer_hash.slice(0, 12)}…</span>{data.config.configured === false ? " (this console expects a newer signer: propose again)" : ""}</span>
+            {data.config.configured === false ? <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.configProposal())}>UPDATE</button> : <span />}</div>
+          <div style={ROW}><b style={LABEL}>Settles</b><span>{data.config.crypto.replace(/_TEST$/, "")} on {NETWORKS[data.config.network] ?? data.config.network}, from the company wallet · partner customer <span className="mono">{data.config.customer_id}</span></span><span /></div>
+
+          <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>
+            <b style={{ ...LABEL, padding: "8px 0 4px" }}>Who may pay</b>
+            {roles.length === 0 ? <span style={{ fontSize: 13, color: "var(--ink-3)" }}>No role yet.</span> : roles.map((item) => (
+              <div key={item.role} style={{ ...ROW, gridTemplateColumns: "150px minmax(0, 1fr) auto" }}>
+                <b className="mono" style={{ fontSize: 13 }}>{item.role}</b>
+                <span>{item.permission ? <>up to <b className="mono">{(Number(item.permission.maxPerPayout) / 1_000_000).toLocaleString("en-US")} EUR</b> per payout, from the {item.permission.budgetLabel ?? item.permission.budget?.slice(0, 10)} budget</> : <span style={{ color: "var(--ink-3)" }}>no euro payouts</span>}</span>
+                {item.permission ? <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.permissionProposal({ role: item.role, budget: null, maxPerPayout: null }))}>REMOVE</button> : <span />}
+              </div>
+            ))}
+            {roles.length ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 0 4px", borderTop: "1px solid rgba(13,23,48,.12)" }}>
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Let</span>
+                <select aria-label="Role" value={chosen?.role ?? ""} onChange={(event) => { setRole(event.target.value); setBudget(""); }} disabled={sign.isPending} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
+                  {roles.map((item) => <option key={item.role} value={item.role}>{item.role}</option>)}
+                </select>
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>pay IBANs from</span>
+                <select aria-label="Budget" value={chosenBudget?.key ?? ""} onChange={(event) => setBudget(event.target.value)} disabled={sign.isPending || !euroBudgets.length} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
+                  {euroBudgets.length ? euroBudgets.map((item) => <option key={item.key} value={item.key}>{item.label} ({item.available ?? "?"} EURC left)</option>) : <option value="">no EURC budget on this role</option>}
+                </select>
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>up to</span>
+                <input aria-label="Ceiling per payout in EUR" value={ceiling} onChange={(event) => setCeiling(event.target.value)} disabled={sign.isPending}
+                  style={{ width: 80, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR each</span>
+                <button type="button" className="btn-ori" style={{ padding: "10px 16px", marginLeft: "auto" }} disabled={sign.isPending || !chosen || !chosenBudget || !ceilingUnits}
+                  onClick={() => chosen && chosenBudget && ceilingUnits && sign.mutate(bankApi.permissionProposal({ role: chosen.role, budget: chosenBudget.key, maxPerPayout: ceilingUnits }))}>
+                  {sign.isPending ? "SIGNING…" : "PROPOSE"}
+                </button>
+              </div>
+            ) : null}
+            {!euroBudgets.length && chosen ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Give the role an EURC budget first (Roles): euro payouts are charged to it.</span> : null}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>
+            <b style={{ ...LABEL, padding: "8px 0 4px" }}>Payouts</b>
+            {data.payouts.length === 0 ? (
+              <span style={{ fontSize: 13, color: "var(--ink-3)", padding: "4px 0" }}>No euro payout yet.</span>
+            ) : data.payouts.slice(0, 8).map((payout) => (
+              <div key={payout.opId} style={{ ...ROW, gridTemplateColumns: "44px minmax(0, 1fr) auto" }}>
+                <Seal word={STATE_WORD[payout.state] ?? payout.state} size={36} tone={payout.state === "Failed" ? "refused" : undefined} />
+                <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span><b className="mono">{(Number(payout.amount) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2 })} EUR</b> to {payout.beneficiary.name} · <span className="mono" style={{ fontSize: 12 }}>{payout.beneficiary.iban}</span></span>
+                  <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{new Date(payout.at).toLocaleString()} · {payout.actor} ({payout.role}) · ref {payout.reference}{payout.fiatAmount ? ` · partner pays ${payout.fiatAmount} EUR` : ""}{payout.error ? ` · ${payout.error}` : ""}</span>
+                </span>
+                {explorer ? <a href={explorer} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--aegean-ink)" }}>vault ↗</a> : <span />}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {sign.error ? <div role="alert" style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(217,87,59,.08)", padding: "10px 12px", fontSize: 13, color: "var(--terra-ink)" }}>{sign.error.message}</div> : null}
     </Slab>
   );
 }

@@ -78,6 +78,9 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   sharesRevenueToken: env.OMNIROLES_SHARES_REVENUE_TOKEN || null,
   omniBridgeApi: env.OMNI_BRIDGE_API_URL,
   registryId: env.OMNIROLES_REGISTRY_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "euthyna-directory.testnet" : undefined),
+  bankSigner: env.BANK_SIGNER_URL && env.BANK_SIGNER_HASH && env.BANK_SIGNER_SECRETS_OWNER
+    ? { outlayerId: env.BANK_SIGNER_OUTLAYER_ID, signerUrl: env.BANK_SIGNER_URL, signerHash: env.BANK_SIGNER_HASH, secretsOwner: env.BANK_SIGNER_SECRETS_OWNER, secretsProfile: env.BANK_SIGNER_SECRETS_PROFILE }
+    : undefined,
   previousRegistryIds: (env.OMNIROLES_PREVIOUS_REGISTRY_IDS ?? (env.NEAR_NETWORK_ID === "testnet" ? "atlantis-registry.testnet" : "")).split(",").map((id) => id.trim()).filter(Boolean),
   sealedOrdersId: env.SEALED_ORDERS_ACCOUNT_ID,
   baseRpcUrl: env.BASE_SEPOLIA_RPC_URL,

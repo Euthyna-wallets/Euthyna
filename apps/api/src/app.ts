@@ -842,6 +842,16 @@ export function createApp({
       const input = await parseJson(context, z.object({ entries: z.array(z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/), label: z.string().max(64) })).max(256), migrate: z.boolean().optional() }));
       return context.json(await omniroles.suppliersProposal(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/bank", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.bank(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/bank-beneficiary", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ iban: z.string().min(15).max(42), name: z.string().max(255).default(""), holderType: z.enum(["Business", "Individual"]).default("Business"), remove: z.boolean().optional() }));
+      return context.json(await omniroles.bankBeneficiaryProposal(orgOf(context), input));
+    });
+    app.post("/v1/console/omniroles/proposals/bank-permission", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ role: z.string().min(1).max(64), budget: z.string().regex(/^0x[0-9a-fA-F]{64}$/).nullable(), maxPerPayout: z.string().regex(/^\d+$/).nullable() }));
+      return context.json(await omniroles.bankPermissionProposal(orgOf(context), input));
+    });
+    app.post("/v1/console/omniroles/proposals/bank-config", requireConsoleAdmin(auth, consoleLimiter), async (context) => context.json(await omniroles.bankConfigProposal(orgOf(context))));
     app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, roleDraftSchema);
       return context.json(await omniroles.roleProposal(orgOf(context), input.draft as RoleDraft));

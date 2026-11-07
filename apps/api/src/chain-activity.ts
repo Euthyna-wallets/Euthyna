@@ -5,13 +5,14 @@
  * (FastNEAR) to find the vault's transactions, then reads their receipt logs.
  */
 
-export type VaultLog = { kind: "evm" | "dao" | "solana" | "near"; opId: `0x${string}`; txHash: string; at: string };
+export type VaultLog = { kind: "evm" | "dao" | "solana" | "near" | "bank"; opId: `0x${string}`; txHash: string; at: string };
 
 const PATTERNS: Array<[VaultLog["kind"], RegExp]> = [
   ["evm", /^OMNIROLES_OPERATION_PREPARED:([0-9a-f]{64})$/],
   ["dao", /^OMNIROLES_DAO_TRANSACTION_SCHEDULED:([0-9a-f]{64})$/],
   ["solana", /^OMNIROLES_SOLANA_OPERATION:([0-9a-f]{64})$/],
   ["near", /^OMNIROLES_NEAR_OPERATION:([0-9a-f]{64})$/],
+  ["bank", /^OMNIROLES_BANK_PAYOUT_REQUESTED:([0-9a-f]{64})$/],
 ];
 
 type AccountTx = { transaction_hash: string; tx_block_timestamp: string };

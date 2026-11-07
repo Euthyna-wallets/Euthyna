@@ -206,7 +206,23 @@ export type BankBusiness = {
   postCode: string; state: string; incorporationDate: string; taxId: string; email?: string;
 };
 
+export type BankPolicy = {
+  supported: boolean;
+  deployable: boolean;
+  config: null | { outlayer_id: string; signer_hash: string; network: string; crypto: string; customer_id: string; decimals: number; configured: boolean | null };
+  customerId?: string | null;
+  beneficiaries: Array<{ iban: string; name: string; holderType: string }>;
+  roles: Array<{ role: string; budgets: Array<{ key: string; label: string; token: string | null; available: string | null }>; permission: null | { budget: string | null; budgetLabel: string | null; maxPerPayout: string } }>;
+  payouts: Array<{ opId: string; at: string; actor: string; role: string; beneficiary: { iban: string; name: string }; amount: string; fiatAmount: string | null; reference: string; state: "Requested" | "Transferring" | "Failed"; ruleId: string | null; transferOpId: string | null; error: string | null }>;
+};
+
 export const bankApi = {
+  policy: () => api<BankPolicy>("/v1/console/omniroles/bank"),
+  beneficiaryProposal: (input: { iban: string; name: string; holderType: "Business" | "Individual"; remove?: boolean }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/bank-beneficiary", { method: "POST", body: JSON.stringify(input) }),
+  permissionProposal: (input: { role: string; budget: string | null; maxPerPayout: string | null }) =>
+    api<ProposalDraft>("/v1/console/omniroles/proposals/bank-permission", { method: "POST", body: JSON.stringify(input) }),
+  configProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/bank-config", { method: "POST", body: "{}" }),
   view: () => api<BankView>("/v1/console/bank"),
   open: (input: BankBusiness) => api<BankView>("/v1/console/bank", { method: "POST", body: JSON.stringify(input) }),
   simulate: (amount: string) => api<{ depositId: string }>("/v1/console/bank/simulate", { method: "POST", body: JSON.stringify({ amount }) }),
