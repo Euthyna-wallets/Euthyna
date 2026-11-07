@@ -111,6 +111,8 @@ export interface OmniRolesConfig {
   omniBridgeApi?: string;
   /** Public directory of AI companies; unset disables listing. */
   registryId?: string | undefined;
+  /** Earlier directories, for companies whose vault comes from an earlier Nomos. */
+  previousRegistryIds?: string[] | undefined;
   /** contracts/sealed-orders; unset turns sealed orders off. */
   sealedOrdersId?: string | undefined;
   /** NEP-141 token shared as revenue next to NEAR (for example bridged Base ETH). */
@@ -843,7 +845,7 @@ export class OmniRolesService {
   /** What the public directory knows about this company, read from chain. */
   async directory(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
-    const registryId = this.config.registryId ?? null;
+    const registryId = await this.registryFor(treasury.vaultAccountId);
     const sharesAccountId = this.sharesAccountOf(treasury);
     const shares = await this.view<{ dao_id: string }>(sharesAccountId, "info").catch(() => null);
     const listing = registryId
@@ -856,6 +858,21 @@ export class OmniRolesService {
       sharesAccountId: shares?.dao_id === treasury.daoAccountId ? sharesAccountId : null,
       listing,
     };
+  }
+
+  /**
+   * The directory that accepts this vault: each one takes only vaults made by
+   * its own Nomos, so a company from an earlier Nomos lists in an earlier one.
+   */
+  private async registryFor(vaultAccountId: string): Promise<string | null> {
+    const candidates = [this.config.registryId, ...(this.config.previousRegistryIds ?? [])].filter((id): id is string => Boolean(id));
+    if (candidates.length <= 1) return candidates[0] ?? null;
+    for (const registryId of candidates) {
+      const factory = await this.memo<string | null>(`vault-factory:${registryId}`, 3_600_000, () =>
+        this.near.viewFunction<string | null>(registryId, "vault_factory_id").catch(() => null));
+      if (factory && vaultAccountId.endsWith(`.${factory}`)) return registryId;
+    }
+    return candidates[0]!;
   }
 
   /** A vote that lists the company in the public directory. */
@@ -982,7 +999,8 @@ export class OmniRolesService {
     if (daoMembers.length) await this.syncSeats(organizationId, daoMembers).catch(() => undefined);
     const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const expectedMembers = (plan?.council.map((member) => member.nearAccountId) ?? []).sort();
-    const published = (await this.vaultVersions().catch(() => [])).map((version) => version.codeHash);
+    const codeSource = await this.view<string>(treasury.vaultAccountId, "code_source").catch(() => this.config.nomosId);
+    const published = (await this.vaultVersions(codeSource).catch(() => [])).map((version) => version.codeHash);
     const vaultCode = vaultAccount?.code_hash ?? "missing";
     const visaKey = Buffer.from(await this.visaSigner.publicKey()).toString("base64");
     const statusKey = Buffer.from(await this.statusSigner.publicKey()).toString("base64");
@@ -996,7 +1014,7 @@ export class OmniRolesService {
       check("DAO members are the company members", expectedMembers.join(", "), daoMembers.join(", ")),
       check("DAO has no access key (only votes change it)", 0, daoKeys?.keys.length ?? "unreadable"),
       {
-        label: `Vault code is a version published on ${this.config.nomosId}`,
+        label: `Vault code is a version published on ${codeSource}`,
         expected: published.length ? published.join(" or ") : "a published version",
         actual: vaultCode,
         ok: published.includes(vaultCode),
@@ -1125,20 +1143,22 @@ export class OmniRolesService {
   async versions(organizationId: string) {
     const treasury = await this.requireTreasury(organizationId);
     this.forget(treasury.vaultAccountId);
-    const [account, source, published] = await Promise.all([
+    const [account, source] = await Promise.all([
       this.near.getAccount(treasury.vaultAccountId),
       this.near.viewFunction<string>(treasury.vaultAccountId, "code_source").catch(() => null),
-      this.near.viewFunction<Array<{ code_hash: string; size: number; notes: string; published_at_ns: string }>>(this.config.nomosId, "versions"),
     ]);
+    // Versions come from where this vault fetches them (its Nomos, or another one the DAO voted).
+    const nomosId = source ?? this.config.nomosId;
+    const published = await this.near.viewFunction<Array<{ code_hash: string; size: number; notes: string; published_at_ns: string }>>(nomosId, "versions").catch(() => []);
     const current = account.code_hash;
     const latest = published.at(-1)?.code_hash ?? null;
     return {
       vaultAccountId: treasury.vaultAccountId,
-      nomosId: this.config.nomosId,
+      nomosId,
       current,
       latest,
       // Vaults made before Nomos cannot fetch code: they have no upgrade path.
-      upgradable: source === this.config.nomosId,
+      upgradable: source !== null,
       versions: published.map((version, index) => ({
         index: index + 1,
         codeHash: version.code_hash,
@@ -1159,7 +1179,7 @@ export class OmniRolesService {
     const info = await this.versions(organizationId);
     if (!info.upgradable) throw new OmniRolesError(409, "not_upgradable", "this vault was created before Nomos and cannot be upgraded");
     const target = info.versions.find((version) => version.codeHash === codeHash);
-    if (!target) throw new OmniRolesError(404, "unknown_version", `${codeHash} is not published on ${this.config.nomosId}`);
+    if (!target) throw new OmniRolesError(404, "unknown_version", `${codeHash} is not published on ${info.nomosId}`);
     if (target.current) throw new OmniRolesError(409, "already_current", "the vault already runs this version");
     const account = await this.near.getAccount(treasury.vaultAccountId);
     const currentSize = info.versions.find((version) => version.current)?.size ?? 0;
@@ -1511,7 +1531,7 @@ export class OmniRolesService {
               ? calls.map((call) => describeVaultCall(call, context))
               : (() => {
                 const policyChange = describePolicyChange(proposal.kind);
-                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeProceedsProposal(proposal.kind, companyWallet) ?? describeRegistryProposal(proposal.kind, this.config.registryId ?? null) ?? describeSealedProposal(proposal.kind, this.config.sealedOrdersId ?? null);
+                const sharesChange = describeSharesProposal(proposal.kind, this.sharesAccountOf(treasury)) ?? describeProceedsProposal(proposal.kind, companyWallet) ?? (describeRegistryProposal(proposal.kind, this.config.registryId ?? null) ?? (this.config.previousRegistryIds ?? []).map((id) => describeRegistryProposal(proposal.kind, id)).find(Boolean) ?? null) ?? describeSealedProposal(proposal.kind, this.config.sealedOrdersId ?? null);
                 return policyChange
                   ? [{ title: policyChange.title, details: policyChange.details }]
                   : sharesChange
@@ -2201,9 +2221,9 @@ export class OmniRolesService {
   }
 
   /** Versions published on Nomos, oldest first; code hashes are base58 sha256. */
-  private async vaultVersions(): Promise<Array<{ codeHash: string; sha256: string }>> {
-    const versions = await this.memo<Array<{ code_hash: string }>>(`nomos-versions:${this.config.nomosId}`, 60_000, () =>
-      this.near.viewFunction<Array<{ code_hash: string }>>(this.config.nomosId, "versions"));
+  private async vaultVersions(nomosId = this.config.nomosId): Promise<Array<{ codeHash: string; sha256: string }>> {
+    const versions = await this.memo<Array<{ code_hash: string }>>(`nomos-versions:${nomosId}`, 60_000, () =>
+      this.near.viewFunction<Array<{ code_hash: string }>>(nomosId, "versions"));
     return versions.map((version) => ({ codeHash: version.code_hash, sha256: Buffer.from(bs58.decode(version.code_hash)).toString("hex") }));
   }
 

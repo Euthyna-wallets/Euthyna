@@ -52,12 +52,13 @@ const schema = z.object({
   NEAR_AGENT_GAS_LOW_YOCTO: z.string().regex(/^\d+$/).default("50000000000000000000000"),
   /**
    * Where company DAOs are created: the official Sputnik factory, sputnikv2.testnet on testnet.
-   * The Atlantis directory (atlantis-registry.testnet) lists DAOs from this factory with a Nomos vault.
+   * The Euthyna directory (euthyna-directory.testnet) lists DAOs from this factory with a vault from
+   * euthyna-nomos.testnet; atlantis-registry.testnet keeps those with a vault from nomos.euthyna.testnet.
    * factory-v2.mandateos.testnet DAOs belong to the first directory (registry.mandateos.testnet) only.
    */
   DAO_FACTORY_ID: z.string().min(1).default("sputnikv2.testnet"),
   /** Nomos factory: creates company vaults from published versions. */
-  NOMOS_ID: z.string().min(1).default("nomos.euthyna.testnet"),
+  NOMOS_ID: z.string().min(1).default("euthyna-nomos.testnet"),
   /** Solana RPC for the company's Solana wallet (devnet on testnet). */
   SOLANA_RPC_URL: z.string().url().default("https://api.devnet.solana.com"),
   /** NEAR transaction index used to read the vault's own logs (FastNEAR tx API). Empty disables it. */
@@ -87,6 +88,8 @@ const schema = z.object({
   OMNIROLES_SHARES_REVENUE_TOKEN: z.string().default("base.omnidep.testnet"),
   /** Public directory of AI companies (contracts/registry); empty disables listing. */
   OMNIROLES_REGISTRY_ID: z.string().optional(),
+  /** Earlier directories, comma-separated: companies whose vault comes from an earlier Nomos list there. */
+  OMNIROLES_PREVIOUS_REGISTRY_IDS: z.string().optional(),
   OMNI_BRIDGE_API_URL: z.string().url().default("https://testnet.api.bridge.nearone.org"),
   OMNIROLES_PROPOSAL_BOND_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
   /** Euthyna Market. Enabled when the market relayer is set: a dedicated account, never the company relayer. */

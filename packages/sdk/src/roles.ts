@@ -73,7 +73,9 @@ export type RuleChange =
   /** NEP-141 tokens the role may send from the vault account; replaces the role's list. */
   | { SetNearPermissions: { role: string; permissions: NearPermission[] } }
   /** Register the vault on a NEP-141 token (NEP-145), so it can hold it. */
-  | { NearStorageDeposit: { token: string } };
+  | { NearStorageDeposit: { token: string } }
+  /** Fetch future versions from another Nomos; upgrades are still checked by hash. */
+  | { SetCodeSource: { account_id: string } };
 
 export type SolanaPermission = { asset: "Sol" | { Spl: { mint: number[] } }; recipients: number[][]; allowance: number[] };
 export type NearPermission = { token: string; receivers: string[]; allowance: number[]; min_per_transfer: string; max_per_transfer: string };
@@ -1528,6 +1530,7 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     return { title: `Register the vault on ${ft?.symbol ?? change.NearStorageDeposit.token} (NEAR)`, details: ["Pays the token's storage deposit (about 0.00125 NEAR) from the vault, so it can hold this token."] };
   }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
+  if ("SetCodeSource" in change) return { title: `Fetch future versions from ${change.SetCodeSource.account_id}`, details: ["An upgrade still deploys only code with the hash the DAO votes for."] };
   return { title: `Set policy version ${change.SetVersions.policy_version}, registry version ${change.SetVersions.registry_version}`, details: [] };
 }
 

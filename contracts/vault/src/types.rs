@@ -390,6 +390,11 @@ pub enum RuleChange {
     NearStorageDeposit {
         token: AccountId,
     },
+    /// Fetch future versions from another account. Safe to move: an upgrade
+    /// still deploys only code with the hash the DAO voted for.
+    SetCodeSource {
+        account_id: AccountId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

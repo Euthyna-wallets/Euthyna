@@ -1752,6 +1752,10 @@ impl Vault {
             }
             // Deployed by `execute_rule_change` once the code is fetched.
             RuleChange::Upgrade { .. } => {}
+            RuleChange::SetCodeSource { account_id } => {
+                env::log_str(&format!("OMNIROLES_CODE_SOURCE:{account_id}"));
+                self.code_source = account_id;
+            }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 solana::set_permissions(&role, permissions);
@@ -1907,6 +1911,10 @@ impl Vault {
             RuleChange::RemoveListAddress { list, .. } => Self::validate_list_name(list),
             RuleChange::SetSettlementConfig { config } => Self::validate_settlement_config(config),
             RuleChange::Upgrade { .. } => {}
+            RuleChange::SetCodeSource { account_id } => require!(
+                *account_id != env::current_account_id(),
+                "ERR_CODE_SOURCE_SELF"
+            ),
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
                 solana::validate_permissions(permissions);
