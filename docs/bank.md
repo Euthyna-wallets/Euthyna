@@ -82,6 +82,31 @@ personal data) and that beneficiary #1 was paid. Past states stay on archival no
 on testnet before this change (`FR76 3000 6000 0112 3456 7890 189`, the standard example IBAN) is in
 that history.
 
+### Payroll and remittances
+
+**Any rail.** A beneficiary can be on any payout rail of the partner, still sealed: SEPA (EUR),
+Pix (Brazil, BRL), ACH (US, USD), Faster Payments (UK, GBP). The console fills the partner's payout
+form for that rail (`RAILS` in `bank-private.ts`); the envelope carries the partner's channel and
+that form, and the commitment covers both (v2: sha256 over the vault, the channel, the form as
+canonical JSON and the salt). The enclave sends the form as is and redacts every value from its
+errors. The company pays in EURC; the partner converts to the payee's currency.
+
+**Standing orders.** The members vote once: "beneficiary #2, 2 400 EUR, every 30 days, from the 28th,
+12 times" (`AddStandingOrder`). On each date anyone may call `run_standing_order` (the API's keeper
+does, with the voted transactions); the vault pays exactly that beneficiary and amount, with no agent
+and no role budget: the vote is the authorisation. A failed run goes back to its date; removing the
+beneficiary cancels its orders; `RemoveStandingOrder` stops one. Console: Treasury → Payroll.
+
+What stays public: the amounts (EURC transfers on Base), the dates, the payee's number and label.
+Not public: who is paid, their account, their name.
+
+| Step (sealedprod1106, 2026-11-07) | Result | Proof |
+| --- | --- | --- |
+| Members vote the multi-rail signer and three sealed payees: #2 SEPA (Supplier A), #3 Pix (Contractor BR), #4 UK (Employee UK) (proposal #28) | the vote holds no account, name or Pix key (searched) | NEAR `AtRL56Fr…`, `AxyE2d7L…`, `E9H21SVh…` |
+| **Remittance**: the agent pays beneficiary #3 8 EUR | the enclave opens the Pix payee; the partner pays **74.92 BRL by Pix** | NEAR `55asfnwkUuYhSpVHUAz6vfNfAi1VwcNxxm8knFQUX5wz`, Base Sepolia `0x52c92ea608e46dbf81a20b6ffac8015fe60941c14cb252e31a79e23900e4fd38` |
+| A payroll order to #4 (UK) runs | the partner refuses: its UK channel is not open for this sandbox customer (`channel policy denied`); nothing leaves, the order goes back to its date | NEAR `AhEAMQ8w8QujufmzgUCvR3wnr8syeXmKia2aiwcSqgXf` |
+| **Payroll**: the members vote "beneficiary #2, 3 EUR every 10 minutes, twice" (proposal #30); on its date anyone runs it | the vault pays without an agent or a new vote; the partner pays **2.87 EUR by SEPA**; the order moves to its next date | NEAR `DoqJPecfqL17M79cTynbo8CfKZ2b9fdZ25Q6Lf3GyVgR`, Base Sepolia `0xac6cee06e326fcf1dde882e259c7b9c83703a3999265d5c61c08263c532c282c` |
+
 ### What the vault guarantees, and what it does not
 
 - Guaranteed on chain: no IBAN outside the voted list, no amount above the ceiling or the budget,
@@ -98,12 +123,12 @@ that history.
 
 | | |
 | --- | --- |
-| Signer WASM | sha256 `e263a0e2eae2903d02f5f60e1a67c4ae5d9566b288f6158fe5d8f2f65c1475db`, on FastFS `https://test.fastfs.io/euthyna-ops.testnet/outlayer.testnet/e263a0e2…75db.wasm` (uploaded by `euthyna-ops.testnet`; `cargo build --release --target wasm32-wasip2` in `bank-signer/`) |
-| Box key | `f0a6cacc113fe6c2f6f362e27f2399100a1320e34b88319f1892309c1b80b621` (X25519), from the enclave's `pubkey` output (sealedprod1106 proposal #23, OutLayer request 12660) |
+| Signer WASM | sha256 `40db3075632bf201b5056c5330052eb4e7aefbebb93e66c558293d0c7ed6693c`, on FastFS `https://test.fastfs.io/euthyna-ops.testnet/outlayer.testnet/40db3075…693c.wasm` (uploaded by `euthyna-ops.testnet`; `cargo build --release --target wasm32-wasip2` in `bank-signer/`) |
+| Box key | `c5c6d26b84243488ef3b2f0efef3c05d4d99e45aa530e13e35f09bf06877bc66` (X25519), from the enclave's `pubkey` output (sealedprod1106 proposal #26) |
 | Secrets | profile `noah` of `euthyna-ops.testnet`, bound to that hash; access `And[Predecessor{Or[AccountPattern vaults, Whitelist[sealedprod1106 DAO]]}, WasmHash]` (NEAR `7egpNTpg…`; stored with access restricted to the owner, then narrowed); `PROTECTED_NOAH_SEED` generated in the enclave, never exported. The DAO is admitted only to read the public key: the code pays out for a vault only |
-| Signer public key | read through sealedprod1106's DAO (proposal #23): `MFkw…m6FfBw==` (P-256), attached to a Noah sandbox API key that only this build can use |
-| Earlier builds | `528edf86…` let a vault vote any partner customer id; `05ca8512…` took the IBAN in clear. Their secrets rows are deleted and their Noah keys are to be revoked, so a vault cannot vote those hashes back |
-| Vault version | `7bFN1t7CoweQgV9mwQsxs3PvdNJSRbFok4U76G9AGUx` (`contracts/res/vault.wasm`, sha256 `01b03571e3c2d09bfaa8effac1593be6c30034e521f8d6714da36c9bf55fa6f9`), published on `euthyna-nomos.testnet` (NEAR `2rZcaGKCV4YPiUMGJin1CuBuN5qno7v5x311gykbXXbk`); `sealedprod1106` moved its code source to that Nomos by vote (`SetCodeSource`, proposal #15) and upgraded by vote (proposals #16, #18, #19, #24) |
+| Signer public key | read through sealedprod1106's DAO (proposal #26): `MFkw…3Saag==` (P-256), attached to a Noah sandbox API key that only this build can use |
+| Earlier builds | `528edf86…` let a vault vote any partner customer id; `05ca8512…` took the IBAN in clear; `e263a0e2…` paid SEPA only. Their secrets rows are deleted and their Noah keys revoked, so a vault cannot vote those hashes back |
+| Vault version | `F4BZbfghE6CY6qQDU5pQZyBUspN3vKSAZYob3DLjnGML` (`contracts/res/vault.wasm`, sha256 `d0d44d4ab01edd864b1264dca97e67a13eab1017a1767ea1bc78c62297319c3f`), published on `euthyna-nomos.testnet` (NEAR `CxhAFbNeKvuu4BM48MD76qFHfDJsdHj625QeDwdTZL1R`); `sealedprod1106` moved its code source to that Nomos by vote (`SetCodeSource`, proposal #15) and upgraded by vote (proposals #16, #18, #19, #24, #27) |
 | Console env | `BANK_SIGNER_URL`, `BANK_SIGNER_HASH`, `BANK_SIGNER_BOX_KEY`, `BANK_SIGNER_SECRETS_OWNER`, `BANK_SIGNER_SECRETS_PROFILE` (`env.example`) |
 
 ## Limits
