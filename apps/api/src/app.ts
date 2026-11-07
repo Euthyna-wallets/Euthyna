@@ -8,6 +8,7 @@ import { MarketError, type MarketService } from "./market/service.js";
 import { CardError, createCard } from "./cards.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
 import { BankError, type BankService } from "./bank/service.js";
+import { verifyNoahWebhook, type InvoiceService } from "./bank/invoices.js";
 import { cardAccountIdOf } from "@euthyna/sdk";
 
 import { proposedAgentAccountId } from "@euthyna/sdk";
@@ -128,6 +129,9 @@ export interface AppDependencies {
   recovery?: RecoveryService | undefined;
   /** The company's euro account (Noah); absent when not configured. */
   bank?: BankService | undefined;
+  invoices?: InvoiceService | undefined;
+  /** Noah's webhook public key (sandbox or production): their FiatDeposit events are verified with it. */
+  noahWebhookKey?: string | undefined;
 }
 
 /** A role draft from the console's role editor (`/proposals/role`). */
@@ -306,6 +310,8 @@ export function createApp({
   marketTrustProxy,
   recovery,
   bank,
+  invoices,
+  noahWebhookKey,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
@@ -860,6 +866,19 @@ export function createApp({
       ]));
       return context.json("remove" in input ? await omniroles.bankBeneficiaryRemoval(orgOf(context), input.remove) : await omniroles.bankBeneficiaryProposal(orgOf(context), input));
     });
+    app.get("/v1/console/omniroles/standing-orders", requireConsole(auth, consoleLimiter), async (context) => context.json(await omniroles.standingOrders(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/standing-order", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({
+        beneficiaryId: z.number().int().positive(),
+        amount: z.string().regex(/^\d+$/).default("0"),
+        firstAt: z.string().default(""),
+        periodDays: z.number().min(0.001).max(366).default(30),
+        count: z.number().int().positive().nullable().default(null),
+        label: z.string().max(32).regex(/^[ -~]*$/).default(""),
+        remove: z.number().int().positive().optional(),
+      }));
+      return context.json(await omniroles.standingOrderProposal(orgOf(context), input));
+    });
     app.post("/v1/console/omniroles/proposals/bank-permission", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({
         role: z.string().min(1).max(64),
@@ -1107,6 +1126,53 @@ export function createApp({
     const view = await bank.open(console.organizationId, input);
     await auth.recordAudit({ organizationId: console.organizationId, actorType: "console", actorId: console.userId, action: "bank.account.opened", targetType: "bank_account", targetId: view.account?.iban ?? "", metadata: { destination: view.account?.destinationAddress, network: view.account?.network } });
     return context.json({ configured: true, ...view }, 201);
+  });
+  // Invoices: issued by the company, paid by SEPA to its IBAN, matched by their creditor reference.
+  app.get("/v1/console/invoices", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!invoices) return context.json({ invoices: [], account: null });
+    return context.json(await invoices.list(context.get("console").organizationId));
+  });
+  app.post("/v1/console/invoices", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!invoices) throw new HTTPException(404, { message: "no bank partner is configured" });
+    const input = await parseJson(context, z.object({
+      customerName: z.string().trim().min(1).max(120),
+      customerEmail: z.string().email().max(200).optional(),
+      description: z.string().trim().min(1).max(500),
+      amount: z.string().regex(/^\d{1,7}(\.\d{1,2})?$/),
+      dueInDays: z.number().int().min(0).max(365).default(30),
+    }));
+    const console = context.get("console");
+    const invoice = await invoices.create(console.organizationId, input);
+    await auth.recordAudit({ organizationId: console.organizationId, actorType: "console", actorId: console.userId, action: "invoice.created", targetType: "invoice", targetId: invoice.number, metadata: { amount: invoice.amount } });
+    return context.json(invoice);
+  });
+  app.post("/v1/console/invoices/:id/cancel", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!invoices) throw new HTTPException(404, { message: "no bank partner is configured" });
+    return context.json(await invoices.cancel(context.get("console").organizationId, context.req.param("id") ?? ""));
+  });
+  app.post("/v1/console/invoices/:id/simulate", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!invoices) throw new HTTPException(404, { message: "no bank partner is configured" });
+    return context.json(await invoices.simulatePayment(context.get("console").organizationId, context.req.param("id") ?? ""));
+  });
+  // The bank partner's webhook (register https://<api>/v1/webhooks/noah, event FiatDeposit). Signed
+  // by the partner (ECDSA P-384 over the raw body): anything unsigned or forged is refused.
+  app.post("/v1/webhooks/noah", async (context) => {
+    if (!invoices || !noahWebhookKey) return context.json({ ok: false }, 404);
+    const raw = await context.req.text();
+    if (raw.length > 64_000 || !verifyNoahWebhook(raw, context.req.header("Webhook-Signature"), noahWebhookKey)) return context.json({ ok: false }, 401);
+    let event: unknown;
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      return context.json({ ok: false }, 400);
+    }
+    const result = await invoices.onFiatDeposit(event as Parameters<InvoiceService["onFiatDeposit"]>[0]);
+    if (result.matched) console.log(JSON.stringify({ event: "invoice.deposit_matched", invoice: result.matched }));
+    return context.json({ ok: true });
+  });
+  app.get("/v1/console/bank/rails", requireConsole(auth, consoleLimiter), async (context) => {
+    if (!bank) return context.json({ rails: [] });
+    return context.json(await bank.rails(context.get("console").organizationId));
   });
   app.post("/v1/console/bank/simulate", requireConsole(auth, consoleLimiter), async (context) => {
     if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });

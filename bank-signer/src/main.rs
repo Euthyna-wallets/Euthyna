@@ -80,10 +80,44 @@ struct Input {
 #[derive(Deserialize)]
 struct Beneficiary {
     vault: String,
-    iban: String,
-    name: String,
-    holder_type: String,
     salt: String,
+    // v1: a SEPA account.
+    #[serde(default)]
+    iban: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    holder_type: String,
+    // v2: any payout rail of the partner (SEPA, Pix, ACH, UK…): its channel and the payout form the
+    // members filled in (`Reference`, when present, is left empty: the payout's reference goes there).
+    #[serde(default)]
+    channel_id: String,
+    #[serde(default)]
+    form: Option<Value>,
+}
+
+/// v2: sha256("euthyna-bank-beneficiary-v2" 0 vault 0 channel 0 form 0 salt), the form as compact
+/// JSON with sorted keys (packages/sdk/src/bank-private.ts `canonicalJson`).
+pub fn commitment_v2(vault: &str, channel_id: &str, form: &Value, salt: &str) -> String {
+    let mut hasher = Sha256::new();
+    let form = form.to_string();
+    for (index, part) in ["euthyna-bank-beneficiary-v2", vault, channel_id, &form, salt].iter().enumerate() {
+        if index > 0 {
+            hasher.update([0u8]);
+        }
+        hasher.update(part.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// Every string in a form, to keep them out of public error messages.
+fn strings_of(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) if text.len() >= 3 => out.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| strings_of(item, out)),
+        Value::Object(map) => map.values().for_each(|item| strings_of(item, out)),
+        _ => {}
+    }
 }
 
 #[derive(Deserialize)]
@@ -347,6 +381,26 @@ fn payout(input: &Input) -> Result<Value, String> {
     // The beneficiary the members voted: opened here, checked against their commitment.
     let plain = open(&input.sealed, &box_key()?, &input.vault)?;
     let beneficiary: Beneficiary = serde_json::from_slice(&plain).map_err(|_| "sealed: not a beneficiary".to_string())?;
+    if beneficiary.vault != input.vault {
+        return Err("the beneficiary is not the one the members voted".into());
+    }
+    if let Some(form) = &beneficiary.form {
+        let channel = &beneficiary.channel_id;
+        if channel.len() != 36 || !channel.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || !form.is_object() {
+            return Err("sealed: not a payout form".into());
+        }
+        if commitment_v2(&input.vault, channel, form, &beneficiary.salt) != input.commitment.to_ascii_lowercase() {
+            return Err("the beneficiary is not the one the members voted".into());
+        }
+        let mut form = form.clone();
+        if form.get("Reference").is_some() {
+            form["Reference"] = Value::String(sepa_reference(&input.reference));
+        }
+        let mut secrets = Vec::new();
+        strings_of(&form, &mut secrets);
+        secrets.retain(|text| *text != sepa_reference(&input.reference));
+        return payout_to(input, channel, &form).map_err(|error| secrets.iter().fold(error, |error, text| error.replace(text, "<redacted>")));
+    }
     let iban: String = beneficiary.iban.chars().filter(|c| !c.is_whitespace()).map(|c| c.to_ascii_uppercase()).collect();
     if beneficiary.vault != input.vault
         || commitment_of(&input.vault, &iban, &beneficiary.name, &beneficiary.holder_type, &beneficiary.salt) != input.commitment.to_ascii_lowercase()
@@ -363,15 +417,18 @@ fn payout(input: &Input) -> Result<Value, String> {
         return Err("holder_type must be Business or Individual".into());
     }
     // Errors leave the enclave in public: no IBAN, no holder name in them.
-    payout_to(input, &iban, &beneficiary.name, &beneficiary.holder_type).map_err(|error| error.replace(&iban, "<iban>").replace(&beneficiary.name, "<holder>"))
+    let channel = std::env::var("NOAH_SEPA_CHANNEL_ID").map_err(|_| "no NOAH_SEPA_CHANNEL_ID in this run".to_string())?;
+    let form = sepa_form(&iban, &beneficiary.name, &beneficiary.holder_type, &sepa_reference(&input.reference));
+    payout_to(input, &channel, &form).map_err(|error| error.replace(&iban, "<iban>").replace(&beneficiary.name, "<holder>"))
 }
 
-fn payout_to(input: &Input, iban: &str, holder_name: &str, holder_type: &str) -> Result<Value, String> {
-    let noah = Noah::from_env()?;
-    let channel = std::env::var("NOAH_SEPA_CHANNEL_ID").map_err(|_| "no NOAH_SEPA_CHANNEL_ID in this run".to_string())?;
-    // SEPA references: A-Z a-z 0-9 + - / ? . : , ( ) ' and spaces, 2 to 140 characters.
-    let reference: String = input.reference.chars().filter(|c| c.is_ascii_alphanumeric() || " +-/?.:,()'".contains(*c)).take(140).collect::<String>().trim().to_string();
-    let reference = if reference.len() < 2 { "Euthyna".to_string() } else { reference };
+/// SEPA references: A-Z a-z 0-9 + - / ? . : , ( ) ' and spaces, 2 to 140 characters.
+fn sepa_reference(reference: &str) -> String {
+    let reference: String = reference.chars().filter(|c| c.is_ascii_alphanumeric() || " +-/?.:,()'".contains(*c)).take(140).collect::<String>().trim().to_string();
+    if reference.len() < 2 { "Euthyna".to_string() } else { reference }
+}
+
+fn sepa_form(iban: &str, holder_name: &str, holder_type: &str, reference: &str) -> Value {
     let holder = if holder_type == "Business" {
         json!({ "AccountHolderType": "Business", "Name": holder_name })
     } else {
@@ -380,7 +437,11 @@ fn payout_to(input: &Input, iban: &str, holder_name: &str, holder_type: &str) ->
         let last = parts.next().unwrap_or("-").to_string();
         json!({ "AccountHolderType": "Individual", "Name": { "FirstName": first, "LastName": last } })
     };
+    json!({ "AccountHolderName": holder, "BankDetails": { "AccountNumber": iban }, "Reference": reference })
+}
 
+fn payout_to(input: &Input, channel: &str, form: &Value) -> Result<Value, String> {
+    let noah = Noah::from_env()?;
     // 1. The beneficiary and the amount become a form session.
     let prepared = noah.post("/v1/transactions/sell/prepare", &json!({
         "ChannelID": channel,
@@ -388,7 +449,7 @@ fn payout_to(input: &Input, iban: &str, holder_name: &str, holder_type: &str) ->
         "CustomerID": input.customer_id,
         "CryptoAmount": input.crypto_amount,
         "DelayedSell": true,
-        "Form": { "AccountHolderName": holder, "BankDetails": { "AccountNumber": iban }, "Reference": reference },
+        "Form": form,
     }))?;
     let form_session = prepared["FormSessionID"].as_str().ok_or("noah: no FormSessionID")?.to_string();
     let fiat_amount = prepared["FiatAmount"].as_str().unwrap_or("").to_string();
@@ -475,6 +536,22 @@ mod tests {
         assert_eq!(String::from_utf8(plain.clone()).unwrap(), vector["plaintext"].as_str().unwrap());
         let beneficiary: Beneficiary = serde_json::from_slice(&plain).unwrap();
         assert_eq!(commitment_of(vault, &beneficiary.iban, &beneficiary.name, &beneficiary.holder_type, &beneficiary.salt), vector["commitment"].as_str().unwrap());
+    }
+
+    /// v2 (any rail): a Pix payee sealed by packages/sdk, opened and committed the same way here.
+    #[test]
+    fn opens_a_v2_payee_the_console_seals() {
+        std::env::set_var("PROTECTED_NOAH_SEED", "11".repeat(32));
+        let vector: Value = serde_json::from_str(include_str!("../../packages/sdk/src/fixtures/bank-sealed-v2.json")).unwrap();
+        let vault = vector["vault"].as_str().unwrap();
+        let plain = open(vector["sealed"].as_str().unwrap(), &box_key().unwrap(), vault).unwrap();
+        let beneficiary: Beneficiary = serde_json::from_slice(&plain).unwrap();
+        let form = beneficiary.form.expect("a v2 form");
+        assert_eq!(form.to_string(), vector["form"].as_str().unwrap(), "same canonical JSON on both sides");
+        assert_eq!(commitment_v2(vault, &beneficiary.channel_id, &form, &beneficiary.salt), vector["commitment"].as_str().unwrap());
+        let mut found = Vec::new();
+        strings_of(&form, &mut found);
+        assert!(found.contains(&"ana@example.com".to_string()), "redacted from errors");
     }
 
     #[test]

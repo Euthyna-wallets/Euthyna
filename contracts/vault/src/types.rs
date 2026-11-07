@@ -429,6 +429,19 @@ pub enum RuleChange {
     RemoveSealedBankBeneficiary {
         id: u32,
     },
+    /// Pay a voted beneficiary this amount every period, from `first_at_ns` (payroll, rent). Run by
+    /// anyone once due; the vote is the authorisation. `count`: how many times, or until removed.
+    AddStandingOrder {
+        beneficiary_id: u32,
+        amount: U128,
+        first_at_ns: U64,
+        period_ns: U64,
+        count: Option<u32>,
+        label: String,
+    },
+    RemoveStandingOrder {
+        id: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -259,3 +259,85 @@ export function EuroPayoutsCard() {
     </Slab>
   );
 }
+
+const FREQUENCIES: Array<[string, number]> = [["Every month (30 days)", 30], ["Every 2 weeks", 14], ["Every week", 7], ["Every 10 minutes (demo)", 10 / 1440]];
+
+/**
+ * Payroll and other standing orders: the members vote once "beneficiary #3, 2 400 EUR every month
+ * from the 28th"; the vault pays it on each date without another vote or an agent (the keeper only
+ * starts it), to the sealed account the members voted, in its own currency.
+ */
+export function PayrollCard() {
+  const wallets = useWallets();
+  const client = useQueryClient();
+  const policy = useQuery({ queryKey: ["bank-policy"], queryFn: bankApi.policy, refetchInterval: 15_000 });
+  const orders = useQuery({ queryKey: ["standing-orders"], queryFn: bankApi.standingOrders, refetchInterval: 15_000 });
+  const [beneficiaryId, setBeneficiaryId] = useState("");
+  const [amount, setAmount] = useState("2400");
+  const [firstAt, setFirstAt] = useState(() => new Date(Date.now() + 15 * 60_000).toISOString().slice(0, 16));
+  const [periodDays, setPeriodDays] = useState(30);
+  const [count, setCount] = useState("");
+  const [label, setLabel] = useState("Payroll");
+  const sign = useMutation({
+    mutationFn: async (draft: Promise<ProposalDraft>) => {
+      if (!wallets.nearAccountId) throw new Error("Connect your NEAR wallet first");
+      await signDaoProposal(wallets.nearAccountId, await draft);
+    },
+    onSuccess: async () => { await client.invalidateQueries({ queryKey: ["omni-governance"] }); },
+  });
+  const data = policy.data;
+  if (!data?.supported || !data.config) return null;
+  const beneficiaries = data.beneficiaries;
+  const chosen = Number(beneficiaryId || beneficiaries[0]?.id || 0);
+  const units = /^\d{1,7}(\.\d{1,2})?$/.test(amount) ? String(Math.round(Number(amount) * 1_000_000)) : null;
+  const labelOf = (id: number) => beneficiaries.find((entry) => entry.id === id)?.label || `#${id}`;
+  const every = (days: number) => FREQUENCIES.find(([, value]) => Math.abs(value - days) < 1e-6)?.[0].toLowerCase() ?? `every ${days} days`;
+
+  return (
+    <Slab style={{ padding: "20px 24px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionHead left={<Kicker>Payroll · standing orders</Kicker>} />
+      <span style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>
+        Members vote once: who, how much, how often. On each date the vault pays the sealed account in its own currency (EUR, BRL, USD, GBP)
+        from the company's euros, without another vote and without an agent. Salaries and accounts are never on chain; the amount is.
+      </span>
+
+      <div style={{ display: "flex", flexDirection: "column", marginTop: 4 }}>
+        {(orders.data?.orders ?? []).length === 0 ? (
+          <span style={{ fontSize: 13, color: "var(--ink-3)", padding: "4px 0" }}>No standing order yet.</span>
+        ) : orders.data!.orders.map((order) => (
+          <div key={order.id} style={{ ...ROW, gridTemplateColumns: "44px minmax(0, 1fr) auto" }}>
+            <Seal word="VOTED" size={36} />
+            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <span><b className="mono">{(Number(order.amount) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2 })} EUR</b> to {labelOf(order.beneficiaryId)} · {every(order.periodDays)}{order.label ? ` · ${order.label}` : ""}</span>
+              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Next {new Date(order.nextAt).toLocaleString()} · paid {order.runs} time{order.runs === 1 ? "" : "s"}{order.remaining !== null ? ` · ${order.remaining} left` : ""}</span>
+            </span>
+            <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.standingOrderProposal({ beneficiaryId: order.beneficiaryId, remove: order.id }))}>STOP</button>
+          </div>
+        ))}
+      </div>
+
+      {beneficiaries.length ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 0 4px", borderTop: "1px solid rgba(13,23,48,.12)" }}>
+          <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Pay</span>
+          <select aria-label="Beneficiary" value={chosen} onChange={(event) => setBeneficiaryId(event.target.value)} disabled={sign.isPending} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
+            {beneficiaries.map((entry) => <option key={entry.id} value={entry.id}>#{entry.id}{entry.label ? ` · ${entry.label}` : ""}</option>)}
+          </select>
+          <input aria-label="Amount in EUR" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={sign.isPending} style={{ width: 90, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
+          <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR</span>
+          <select aria-label="Frequency" value={periodDays} onChange={(event) => setPeriodDays(Number(event.target.value))} disabled={sign.isPending} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-ui)" }}>
+            {FREQUENCIES.map(([text, value]) => <option key={text} value={value}>{text}</option>)}
+          </select>
+          <span style={{ fontSize: 13, color: "var(--ink-2)" }}>from</span>
+          <input aria-label="First payment (UTC)" type="datetime-local" value={firstAt} onChange={(event) => setFirstAt(event.target.value)} disabled={sign.isPending} style={{ padding: "7px 8px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }} />
+          <input aria-label="How many times (empty: until stopped)" placeholder="times (∞)" value={count} onChange={(event) => setCount(event.target.value.replace(/\D/g, ""))} disabled={sign.isPending} style={{ width: 80, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }} />
+          <input aria-label="Public label" maxLength={32} value={label} onChange={(event) => setLabel(event.target.value)} disabled={sign.isPending} style={{ width: 110, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-ui)" }} />
+          <button type="button" className="btn-ori" style={{ padding: "10px 16px", marginLeft: "auto" }} disabled={sign.isPending || !units || !chosen}
+            onClick={() => units && sign.mutate(bankApi.standingOrderProposal({ beneficiaryId: chosen, amount: units, firstAt: `${firstAt}:00Z`, periodDays, count: count ? Number(count) : null, label }))}>
+            {sign.isPending ? "SIGNING…" : "PROPOSE"}
+          </button>
+        </div>
+      ) : <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Vote a beneficiary first (Settings · suppliers).</span>}
+      {sign.error ? <div role="alert" style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(217,87,59,.08)", padding: "10px 12px", fontSize: 13, color: "var(--terra-ink)" }}>{sign.error.message}</div> : null}
+    </Slab>
+  );
+}

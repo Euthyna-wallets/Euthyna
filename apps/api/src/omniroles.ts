@@ -1637,13 +1637,39 @@ export class OmniRolesService {
     }
     const dao = await this.startDaoTransactions(organizationId, treasury);
     hashes.push(...dao.hashes);
+    const orders = await this.runStandingOrders(treasury.vaultAccountId);
+    hashes.push(...orders.hashes);
     if (hashes.length) this.forget(treasury.vaultAccountId);
     const waitingNs = [
       ...queued.filter((rule) => BigInt(rule.execute_after_ns) > now).map((rule) => BigInt(rule.execute_after_ns)),
       ...dao.nextDueNs,
+      ...orders.nextDueNs,
     ];
     const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
     return { hashes, nextDueMs };
+  }
+
+  /**
+   * Payroll and other standing orders the members voted: run the one that is due (anyone may; the
+   * vault pays exactly the voted beneficiary and amount). One at a time: a vault has one euro payout
+   * in flight, so the next waits for the enclave's answer.
+   */
+  private async runStandingOrders(vaultAccountId: string): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
+    const orders = await this.near.viewFunction<Array<{ id: number; next_at_ns: string }>>(vaultAccountId, "list_standing_orders", {}).catch(() => null);
+    if (!orders?.length) return { hashes: [], nextDueNs: [] };
+    const now = nowNs();
+    const due = orders.filter((order) => BigInt(order.next_at_ns) <= now);
+    const later = orders.filter((order) => BigInt(order.next_at_ns) > now).map((order) => BigInt(order.next_at_ns));
+    if (!due.length) return { hashes: [], nextDueNs: later };
+    try {
+      const hash = await this.near.callFunction(vaultAccountId, "run_standing_order", { id: due[0]!.id }, "250000000000000", "0");
+      console.log(JSON.stringify({ event: "omniroles.standing_order_run", vaultAccountId, id: due[0]!.id, hash }));
+      return { hashes: [hash], nextDueNs: [now + BUSY_RECHECK_NS, ...later] };
+    } catch (error) {
+      // Another payout in flight (ERR_BANK_PAYOUT_PENDING) or the bank not set up yet: next round.
+      console.warn(`standing order ${due[0]!.id} on ${vaultAccountId} not run yet: ${String(error).match(/ERR_[A-Z_]+|BeneficiaryNotAllowed/)?.[0] ?? String(error).slice(0, 120)}`);
+      return { hashes: [], nextDueNs: [now + BUSY_RECHECK_NS, ...later] };
+    }
   }
 
   /**
@@ -1830,6 +1856,32 @@ export class OmniRolesService {
       method: "queue_rule_change",
       change: { AddSealedBankBeneficiary: { label: input.label.trim(), commitment: input.commitment.toLowerCase(), sealed_for_signer: input.sealedForSigner, sealed_for_members: input.sealedForMembers } },
     }]);
+  }
+
+  /** Payroll, rent, a retainer: the members vote once, the vault pays on every date. */
+  async standingOrderProposal(organizationId: string, input: { beneficiaryId: number; amount: string; firstAt: string; periodDays: number; count: number | null; label: string; remove?: number | undefined }) {
+    const treasury = await this.requireTreasury(organizationId);
+    if (input.remove) return this.proposal(treasury, `Stop standing order #${input.remove}`, [{ method: "queue_rule_change", change: { RemoveStandingOrder: { id: input.remove } } }]);
+    const first = Date.parse(input.firstAt);
+    if (!Number.isFinite(first)) throw new OmniRolesError(400, "invalid_date", "Choose the first payment date");
+    if (!/^\d+$/.test(input.amount) || BigInt(input.amount) === 0n) throw new OmniRolesError(400, "invalid_amount", "The amount must be positive");
+    const periodNs = BigInt(Math.round(input.periodDays * 86_400_000)) * 1_000_000n;
+    return this.proposal(treasury, `Pay beneficiary #${input.beneficiaryId} every ${input.periodDays} days`, [{
+      method: "queue_rule_change",
+      change: { AddStandingOrder: { beneficiary_id: input.beneficiaryId, amount: input.amount, first_at_ns: (BigInt(first) * 1_000_000n).toString(), period_ns: periodNs.toString(), count: input.count, label: input.label.trim() } },
+    }]);
+  }
+
+  async standingOrders(organizationId: string) {
+    const treasury = await this.requireTreasury(organizationId);
+    const orders = await this.view<Array<{ id: number; beneficiary_id: number; amount: string; next_at_ns: string; period_ns: string; remaining: number | null; runs: number; label: string }>>(treasury.vaultAccountId, "list_standing_orders").catch(() => []);
+    return {
+      orders: orders.map((order) => ({
+        id: order.id, beneficiaryId: order.beneficiary_id, amount: order.amount, label: order.label, runs: order.runs, remaining: order.remaining,
+        nextAt: new Date(Number(BigInt(order.next_at_ns) / NANOS_PER_MS)).toISOString(),
+        periodDays: Number(BigInt(order.period_ns) / 1_000_000n) / 86_400_000,
+      })),
+    };
   }
 
   async bankBeneficiaryRemoval(organizationId: string, id: number) {

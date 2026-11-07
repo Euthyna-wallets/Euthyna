@@ -85,7 +85,10 @@ export type RuleChange =
   | { SetBankBoxKey: { key: string | null } }
   /** A beneficiary without its IBAN: commitment and envelopes (bank-private.ts). `label` is public. */
   | { AddSealedBankBeneficiary: { label: string; commitment: string; sealed_for_signer: string; sealed_for_members: string } }
-  | { RemoveSealedBankBeneficiary: { id: number } };
+  | { RemoveSealedBankBeneficiary: { id: number } }
+  /** Payroll, rent: pay a voted beneficiary `amount` every `period_ns` from `first_at_ns`; run by anyone once due. */
+  | { AddStandingOrder: { beneficiary_id: number; amount: string; first_at_ns: string; period_ns: string; count: number | null; label: string } }
+  | { RemoveStandingOrder: { id: number } };
 
 export type BankConfig = {
   outlayer_id: string;
@@ -1636,6 +1639,17 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     };
   }
   if ("RemoveSealedBankBeneficiary" in change) return { title: `Stop euro payouts to beneficiary #${change.RemoveSealedBankBeneficiary.id}`, details: [] };
+  if ("AddStandingOrder" in change) {
+    const order = change.AddStandingOrder;
+    const days = Number(BigInt(order.period_ns) / 1_000_000n) / 86_400_000;
+    const every = days === 1 ? "every day" : Number.isInteger(days) ? `every ${days} days` : `every ${Math.round(days * 1440)} minutes`;
+    const first = new Date(Number(BigInt(order.first_at_ns) / 1_000_000n)).toISOString().slice(0, 16).replace("T", " ");
+    return {
+      title: `Pay beneficiary #${order.beneficiary_id} ${amountText(BigInt(order.amount), context.profile.tokens.find((token) => token.symbol === "EURC"))} ${every}${order.label ? ` (${order.label})` : ""}`,
+      details: [`First on ${first} UTC${order.count ? `, ${order.count} times` : ", until the members stop it"}. The vault pays it on each date without another vote; the beneficiary's account stays sealed.`],
+    };
+  }
+  if ("RemoveStandingOrder" in change) return { title: `Stop standing order #${change.RemoveStandingOrder.id}`, details: [] };
   if ("SetBankPermission" in change) {
     const permission = change.SetBankPermission.permission;
     if (!permission) return { title: `Remove euro payouts from role ${change.SetBankPermission.role}`, details: [] };

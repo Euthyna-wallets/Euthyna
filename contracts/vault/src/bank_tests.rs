@@ -459,3 +459,106 @@ fn request_to_unknown_iban_panics() {
     let mut v = fixture();
     let _ = v.request_bank_payout("payments".into(), OTHER_IBAN, U128(1), "inv-1".into());
 }
+
+fn standing_order(count: Option<u32>) -> RuleChange {
+    RuleChange::AddStandingOrder {
+        beneficiary_id: IBAN,
+        amount: U128(2_400_000_000),
+        first_at_ns: U64(1_000),
+        period_ns: U64(30 * 86_400_000_000_000),
+        count,
+        label: "Payroll".into(),
+    }
+}
+
+#[test]
+fn a_standing_order_pays_the_voted_amount_on_its_date_without_any_budget() {
+    let mut v = fixture();
+    Vault::validate_rule_change(&standing_order(Some(2)));
+    v.apply_rule_change(standing_order(Some(2)), 1);
+    let order = v.list_standing_orders()[0].clone();
+    context("anyone.testnet", 999);
+    assert!(v.due_standing_orders().is_empty(), "not before its date");
+
+    context("anyone.testnet", 1_000);
+    assert_eq!(v.due_standing_orders(), vec![order.id]);
+    let _ = v.run_standing_order(order.id);
+    let payout = v.list_bank_payouts(None, None)[0].clone();
+    assert_eq!(payout.role, DAO_ROLE);
+    assert_eq!(payout.amount.0, 2_400_000_000);
+    assert_eq!(payout.reference, "SO1-1");
+    let next = &v.list_standing_orders()[0];
+    assert_eq!(next.next_at_ns.0, 1_000 + 30 * 86_400_000_000_000);
+    assert_eq!((next.remaining, next.runs), (Some(1), 1));
+    assert_eq!(
+        v.allowances[&[5; 32]].reserved.0, 0,
+        "no role budget is used"
+    );
+
+    // The enclave answers: the transfer is queued like a voted transaction.
+    context("vault.testnet", 1_001);
+    let answer = json!({"ok": true, "rule_id": "r", "deposit_address": "0x71c2b82c60d0e139ec2ac1bc8edb270528e1ee5a", "crypto_amount": "2400"});
+    assert_eq!(
+        v.on_bank_signer(payout.op_id, Ok(answer)),
+        BankPayoutState::Transferring
+    );
+    let transfer_id = v
+        .get_bank_payout(payout.op_id)
+        .unwrap()
+        .transfer_op_id
+        .unwrap();
+    let transfer = v.operations.get(&transfer_id).unwrap();
+    assert_eq!(transfer.role, DAO_ROLE);
+    assert!(transfer.consumptions.is_empty());
+    v.recheck_bank_transfer(&payout.op_id, transfer);
+    v.release_operation(transfer_id, OperationState::Confirmed, false);
+    assert!(v.dao_queue.is_empty());
+}
+
+#[test]
+fn a_failed_standing_order_goes_back_to_its_date_and_the_last_run_removes_it() {
+    let mut v = fixture();
+    v.apply_rule_change(standing_order(Some(1)), 1);
+    context("anyone.testnet", 1_000);
+    let _ = v.run_standing_order(1);
+    assert!(
+        v.list_standing_orders().is_empty(),
+        "its only run is under way"
+    );
+    let payout = v.list_bank_payouts(None, None)[0].clone();
+    context("vault.testnet", 1_001);
+    assert_eq!(
+        v.on_bank_signer(payout.op_id, Err(PromiseError::Failed)),
+        BankPayoutState::Failed
+    );
+    let back = &v.list_standing_orders()[0];
+    assert_eq!(
+        (back.next_at_ns.0, back.remaining, back.runs),
+        (1_000, Some(1), 0),
+        "restored: the keeper tries again"
+    );
+    context("anyone.testnet", 1_002);
+    assert_eq!(v.due_standing_orders(), vec![1]);
+}
+
+#[test]
+fn removing_a_beneficiary_cancels_its_standing_orders() {
+    let mut v = fixture();
+    v.apply_rule_change(standing_order(None), 1);
+    v.apply_rule_change(RuleChange::RemoveSealedBankBeneficiary { id: IBAN }, 1);
+    assert!(v.list_standing_orders().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "ERR_STANDING_ORDER_PERIOD")]
+fn a_standing_order_cannot_run_every_second() {
+    let _v = fixture();
+    Vault::validate_rule_change(&RuleChange::AddStandingOrder {
+        beneficiary_id: IBAN,
+        amount: U128(1),
+        first_at_ns: U64(0),
+        period_ns: U64(1_000_000_000),
+        count: None,
+        label: String::new(),
+    });
+}

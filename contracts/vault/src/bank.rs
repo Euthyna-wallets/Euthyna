@@ -39,6 +39,12 @@ const KEY_TRANSFER: &[u8] = b"bank:qt:";
 const LEGACY_BENEFICIARIES: &[u8] = b"bank:b";
 const LEGACY_PAYOUT: &[u8] = b"bank:o:";
 const LEGACY_INDEX: &[u8] = b"bank:i";
+const KEY_ORDERS: &[u8] = b"bank:so";
+const KEY_ORDER_SEQUENCE: &[u8] = b"bank:son";
+const KEY_ORDER_RUN: &[u8] = b"bank:sor:";
+const MAX_STANDING_ORDERS: usize = 64;
+/// A standing order runs at most this often.
+const MIN_ORDER_PERIOD_NS: u64 = 60_000_000_000;
 const MAX_BENEFICIARIES: usize = 64;
 const MAX_LABEL_CHARS: usize = 32;
 const MAX_SEALED_FOR_SIGNER: usize = 2_048;
@@ -148,6 +154,29 @@ pub struct BankPayout {
     pub error: Option<String>,
 }
 
+/// A payout the members voted once and the vault makes on schedule: payroll, rent, a retainer.
+#[derive(Clone, Debug)]
+#[near(serializers = [borsh, json])]
+pub struct StandingOrder {
+    pub id: u32,
+    pub beneficiary_id: u32,
+    /// In the euro token's base units, every time.
+    pub amount: U128,
+    pub next_at_ns: U64,
+    pub period_ns: U64,
+    /// Runs left; none: until the members remove it.
+    pub remaining: Option<u32>,
+    pub runs: u32,
+    /// Public, like the beneficiary's label: never a name.
+    pub label: String,
+}
+
+impl StandingOrder {
+    fn reference_prefix(&self) -> String {
+        format!("SO{}", self.id)
+    }
+}
+
 #[near(serializers = [json])]
 pub struct BankCheck {
     pub allowed: bool,
@@ -236,6 +265,66 @@ fn index() -> Vec<OperationId> {
 pub(crate) fn payout_of_transfer(transfer_id: &OperationId) -> Option<OperationId> {
     read(&key(KEY_TRANSFER, transfer_id))
 }
+fn standing_orders() -> Vec<StandingOrder> {
+    read(KEY_ORDERS).unwrap_or_default()
+}
+fn set_standing_orders(orders: &[StandingOrder]) {
+    if orders.is_empty() {
+        env::storage_remove(KEY_ORDERS);
+    } else {
+        write(KEY_ORDERS, &orders.to_vec());
+    }
+}
+
+/// Asks OutLayer to run the bank signer for this payout; the callback queues the transfer.
+fn call_signer(
+    config: &BankConfig,
+    entry: &SealedBeneficiary,
+    op_id: OperationId,
+    amount: u128,
+    reference: &str,
+    expires_at_ns: u64,
+    source: EvmAddress,
+) -> Promise {
+    // What the signer gets: the payout the vault just authorised, nothing it could widen.
+    // The partner's nonce is at most 36 characters: the first 128 bits of the payout id.
+    let input = format!(
+        "{{\"op\":\"payout\",\"vault\":{},\"customer_id\":{},\"commitment\":{},\"sealed\":{},\"reference\":{},\"crypto_amount\":{},\"source_address\":{},\"network\":{},\"crypto\":{},\"nonce\":{},\"expiry\":{}}}",
+        json_string(env::current_account_id().as_str()),
+        json_string(&config.customer_id),
+        json_string(&entry.commitment),
+        json_string(&entry.sealed_for_signer),
+        json_string(reference),
+        json_string(&decimal_string(amount, config.decimals)),
+        json_string(&format!("0x{}", hex::encode(source))),
+        json_string(&config.network),
+        json_string(&config.crypto),
+        json_string(&hex::encode(&op_id[..16])),
+        json_string(&rfc3339(expires_at_ns)),
+    );
+    let args = format!(
+        "{{\"source\":{{\"WasmUrl\":{{\"url\":{},\"hash\":{},\"build_target\":\"wasm32-wasip2\"}}}},\"resource_limits\":{{\"max_instructions\":2000000000,\"max_memory_mb\":128,\"max_execution_seconds\":60}},\"input_data\":{},\"secrets_ref\":{{\"profile\":{},\"account_id\":{}}},\"response_format\":\"Json\",\"payer_account_id\":{}}}",
+        json_string(&config.signer_url),
+        json_string(&config.signer_hash),
+        json_string(&input),
+        json_string(&config.secrets_profile),
+        json_string(config.secrets_owner.as_str()),
+        json_string(env::current_account_id().as_str()),
+    );
+    Promise::new(config.outlayer_id.clone())
+        .function_call(
+            "request_execution".to_owned(),
+            args.into_bytes(),
+            OUTLAYER_DEPOSIT,
+            OUTLAYER_GAS,
+        )
+        .then(
+            Vault::ext(env::current_account_id())
+                .with_static_gas(SIGNER_CALLBACK_GAS)
+                .on_bank_signer(op_id),
+        )
+}
+
 fn pending() -> Option<OperationId> {
     read(KEY_PENDING)
 }
@@ -527,43 +616,133 @@ impl Vault {
             hex::encode(op_id)
         ));
 
-        // What the signer gets: the payout the vault just authorised, nothing it could widen.
-        // The partner's nonce is at most 36 characters: the first 128 bits of the payout id.
-        let input = format!(
-            "{{\"op\":\"payout\",\"vault\":{},\"customer_id\":{},\"commitment\":{},\"sealed\":{},\"reference\":{},\"crypto_amount\":{},\"source_address\":{},\"network\":{},\"crypto\":{},\"nonce\":{},\"expiry\":{}}}",
-            json_string(env::current_account_id().as_str()),
-            json_string(&config.customer_id),
-            json_string(&entry.commitment),
-            json_string(&entry.sealed_for_signer),
-            json_string(&reference),
-            json_string(&decimal_string(amount.0, config.decimals)),
-            json_string(&format!("0x{}", hex::encode(source))),
-            json_string(&config.network),
-            json_string(&config.crypto),
-            json_string(&hex::encode(&op_id[..16])),
-            json_string(&rfc3339(expires_at_ns)),
+        call_signer(
+            &config,
+            &entry,
+            op_id,
+            amount.0,
+            &reference,
+            expires_at_ns,
+            source,
+        )
+    }
+
+    pub fn list_standing_orders(&self) -> Vec<StandingOrder> {
+        standing_orders()
+    }
+
+    /// Standing orders whose date has come (the keeper runs them).
+    pub fn due_standing_orders(&self) -> Vec<u32> {
+        let now = env::block_timestamp();
+        standing_orders()
+            .into_iter()
+            .filter(|order| order.next_at_ns.0 <= now)
+            .map(|order| order.id)
+            .collect()
+    }
+
+    /// Anyone, once its date has come: pays a standing order the members voted (payroll, rent,
+    /// a monthly supplier). No agent and no budget: the vote is the authorisation, so the vault
+    /// pays exactly the voted beneficiary and amount, and moves the order to its next date.
+    pub fn run_standing_order(&mut self, id: u32) -> Promise {
+        self.assert_not_paused();
+        require!(
+            env::prepaid_gas()
+                >= OUTLAYER_GAS
+                    .saturating_add(SIGNER_CALLBACK_GAS)
+                    .saturating_add(REQUEST_OVERHEAD_GAS),
+            "ERR_BANK_GAS"
         );
-        let args = format!(
-            "{{\"source\":{{\"WasmUrl\":{{\"url\":{},\"hash\":{},\"build_target\":\"wasm32-wasip2\"}}}},\"resource_limits\":{{\"max_instructions\":2000000000,\"max_memory_mb\":128,\"max_execution_seconds\":60}},\"input_data\":{},\"secrets_ref\":{{\"profile\":{},\"account_id\":{}}},\"response_format\":\"Json\",\"payer_account_id\":{}}}",
-            json_string(&config.signer_url),
-            json_string(&config.signer_hash),
-            json_string(&input),
-            json_string(&config.secrets_profile),
-            json_string(config.secrets_owner.as_str()),
-            json_string(env::current_account_id().as_str()),
+        let now = env::block_timestamp();
+        let mut orders = standing_orders();
+        let position = orders
+            .iter()
+            .position(|order| order.id == id)
+            .unwrap_or_else(|| env::panic_str("ERR_STANDING_ORDER_NOT_FOUND"));
+        let order = orders[position].clone();
+        require!(order.next_at_ns.0 <= now, "ERR_STANDING_ORDER_NOT_DUE");
+        require!(pending().is_none(), "ERR_BANK_PAYOUT_PENDING");
+        let config = config().unwrap_or_else(|| env::panic_str("ERR_BANK_NOT_CONFIGURED"));
+        let entry = beneficiary(order.beneficiary_id)
+            .unwrap_or_else(|| env::panic_str("BeneficiaryNotAllowed"));
+        let source = self
+            .wallets
+            .get(&config.chain_id)
+            .and_then(|wallet| wallet.address)
+            .unwrap_or_else(|| env::panic_str("ERR_WALLET_NOT_DERIVED"));
+        let reference = format!(
+            "{}-{}",
+            order.reference_prefix(),
+            order.runs.saturating_add(1)
         );
-        Promise::new(config.outlayer_id)
-            .function_call(
-                "request_execution".to_owned(),
-                args.into_bytes(),
-                OUTLAYER_DEPOSIT,
-                OUTLAYER_GAS,
-            )
-            .then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(SIGNER_CALLBACK_GAS)
-                    .on_bank_signer(op_id),
-            )
+        let reference_key = ReferenceKey {
+            role: DAO_ROLE.to_owned(),
+            reference: reference.clone(),
+        };
+        require!(
+            !self.references.contains_key(&reference_key),
+            "ERR_REFERENCE_ALREADY_USED"
+        );
+        let vault = env::current_account_id();
+        let op_id = self.next_operation_id(&vault, config.chain_id);
+        self.references.insert(reference_key, op_id);
+        let expires_at_ns = now.saturating_add(PAYOUT_TTL_NS);
+        store(&BankPayout {
+            op_id,
+            member: vault,
+            role: DAO_ROLE.to_owned(),
+            beneficiary_id: entry.id,
+            beneficiary_label: entry.label.clone(),
+            commitment: entry.commitment.clone(),
+            amount: order.amount,
+            reference: reference.clone(),
+            consumption: AllowanceConsumption {
+                key: [0; 32],
+                amount: U128(0),
+                calls_only: false,
+            },
+            state: BankPayoutState::Requested,
+            created_at_ns: U64(now),
+            expires_at_ns: U64(expires_at_ns),
+            rule_id: None,
+            deposit_address: None,
+            fiat_amount: None,
+            transfer_op_id: None,
+            error: None,
+        });
+        set_pending(Some(op_id));
+        let mut ids = index();
+        ids.push(op_id);
+        write(KEY_INDEX, &ids);
+        // The next date now; put back if this payout fails, so the keeper tries again.
+        write(&key(KEY_ORDER_RUN, &op_id), &order);
+        let mut next = order.clone();
+        next.runs = next.runs.saturating_add(1);
+        next.next_at_ns = U64(order.next_at_ns.0.saturating_add(order.period_ns.0));
+        match next.remaining {
+            Some(1) => {
+                orders.remove(position);
+            }
+            remaining => {
+                next.remaining = remaining.map(|count| count.saturating_sub(1));
+                orders[position] = next;
+            }
+        }
+        set_standing_orders(&orders);
+        env::log_str(&format!(
+            "OMNIROLES_BANK_PAYOUT_REQUESTED:{}",
+            hex::encode(op_id)
+        ));
+        env::log_str(&format!("OMNIROLES_STANDING_ORDER_RUN:{id}"));
+        call_signer(
+            &config,
+            &entry,
+            op_id,
+            order.amount.0,
+            &reference,
+            expires_at_ns,
+            source,
+        )
     }
 
     /// The signer answered: queue the EURC transfer to the partner's deposit address, or release.
@@ -652,7 +831,11 @@ impl Vault {
                 role: payout.role.clone(),
                 request,
                 permission_index: 0,
-                consumptions: vec![payout.consumption.clone()],
+                consumptions: if payout.role == DAO_ROLE {
+                    Vec::new()
+                } else {
+                    vec![payout.consumption.clone()]
+                },
                 measured_value: None,
                 policy_version: self.policy_version,
                 registry_version: self.registry_version,
@@ -788,6 +971,10 @@ impl Vault {
                 .is_some_and(|entry| entry.commitment == payout.commitment),
             "ERR_CONDITIONS_CHANGED"
         );
+        if payout.role == DAO_ROLE {
+            // A standing order: voted as such; the beneficiary and the config were checked above.
+            return;
+        }
         let permission =
             permission_of(&payout.role).unwrap_or_else(|| env::panic_str("ERR_CONDITIONS_CHANGED"));
         require!(
@@ -805,6 +992,31 @@ impl Vault {
 
     /// Nothing left the company: give back the budget, the membership use and the reference.
     fn fail_bank_payout(&mut self, mut payout: BankPayout, error: &str) -> BankPayoutState {
+        if payout.role == DAO_ROLE {
+            // A standing order: nothing was reserved; it goes back to the date it was due.
+            if let Some(order) = read::<StandingOrder>(&key(KEY_ORDER_RUN, &payout.op_id)) {
+                let mut orders: Vec<StandingOrder> = standing_orders()
+                    .into_iter()
+                    .filter(|existing| existing.id != order.id)
+                    .collect();
+                orders.push(order);
+                orders.sort_by_key(|order| order.id);
+                set_standing_orders(&orders);
+                env::storage_remove(&key(KEY_ORDER_RUN, &payout.op_id));
+            }
+            self.references.remove(&ReferenceKey {
+                role: payout.role.clone(),
+                reference: payout.reference.clone(),
+            });
+            payout.state = BankPayoutState::Failed;
+            payout.error = Some(error.chars().take(200).collect());
+            store(&payout);
+            env::log_str(&format!(
+                "OMNIROLES_BANK_PAYOUT_FAILED:{}",
+                hex::encode(payout.op_id)
+            ));
+            return BankPayoutState::Failed;
+        }
         let reservations = self
             .role_reservations
             .get_mut(&payout.role)
@@ -907,6 +1119,53 @@ impl Vault {
                     .filter(|entry| entry.id != *id)
                     .collect();
                 set_beneficiaries(&entries);
+                // Its standing orders go with it.
+                let orders: Vec<StandingOrder> = standing_orders()
+                    .into_iter()
+                    .filter(|order| order.beneficiary_id != *id)
+                    .collect();
+                set_standing_orders(&orders);
+            }
+            RuleChange::AddStandingOrder {
+                beneficiary_id,
+                amount,
+                first_at_ns,
+                period_ns,
+                count,
+                label,
+            } => {
+                require!(
+                    beneficiary(*beneficiary_id).is_some(),
+                    "BeneficiaryNotAllowed"
+                );
+                let mut orders = standing_orders();
+                require!(
+                    orders.len() < MAX_STANDING_ORDERS,
+                    "ERR_STANDING_ORDERS_FULL"
+                );
+                let id = read::<u32>(KEY_ORDER_SEQUENCE)
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                write(KEY_ORDER_SEQUENCE, &id);
+                orders.push(StandingOrder {
+                    id,
+                    beneficiary_id: *beneficiary_id,
+                    amount: *amount,
+                    next_at_ns: *first_at_ns,
+                    period_ns: *period_ns,
+                    remaining: *count,
+                    runs: 0,
+                    label: label.clone(),
+                });
+                set_standing_orders(&orders);
+                env::log_str(&format!("OMNIROLES_STANDING_ORDER_ADDED:{id}"));
+            }
+            RuleChange::RemoveStandingOrder { id } => {
+                let orders: Vec<StandingOrder> = standing_orders()
+                    .into_iter()
+                    .filter(|order| order.id != *id)
+                    .collect();
+                set_standing_orders(&orders);
             }
             RuleChange::SetBankPermission { role, permission } => {
                 set_permission(role, permission.clone())
@@ -935,7 +1194,30 @@ impl Vault {
                 sealed_for_signer,
                 sealed_for_members,
             } => validate_sealed(label, commitment, sealed_for_signer, sealed_for_members),
-            RuleChange::RemoveSealedBankBeneficiary { .. } => {}
+            RuleChange::RemoveSealedBankBeneficiary { .. }
+            | RuleChange::RemoveStandingOrder { .. } => {}
+            RuleChange::AddStandingOrder {
+                amount,
+                period_ns,
+                count,
+                label,
+                ..
+            } => {
+                require!(amount.0 > 0, "ERR_ZERO_AMOUNT");
+                require!(
+                    period_ns.0 >= MIN_ORDER_PERIOD_NS,
+                    "ERR_STANDING_ORDER_PERIOD"
+                );
+                require!(
+                    count.is_none_or(|count| count > 0),
+                    "ERR_STANDING_ORDER_COUNT"
+                );
+                require!(
+                    label.chars().count() <= MAX_LABEL_CHARS
+                        && label.chars().all(|c| (' '..='~').contains(&c)),
+                    "ERR_BANK_LABEL"
+                );
+            }
             RuleChange::RemoveBankBeneficiary { iban } => {
                 require!(!iban.is_empty(), "ERR_BANK_IBAN")
             }
