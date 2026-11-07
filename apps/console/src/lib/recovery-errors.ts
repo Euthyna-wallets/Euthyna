@@ -10,6 +10,7 @@ const MEANINGS: Record<string, string> = {
   ERR_SAME_ACCOUNT: "Sign in with a new account: the lost account cannot ask for its own seat.",
   ERR_RECOVERY_OPEN: "A request for this seat is already open. Wait for it to be voted, cancelled or to expire.",
   ERR_NO_RECOVERY: "There is no open request for this seat.",
+  ERR_RECOVERY_COOLDOWN: "The founder cancelled a request for this seat recently. A new one can be filed once the waiting period after that cancel is over.",
   ERR_DKIM_KEY_UNKNOWN: "The contract does not know this provider's signing key yet. Try a Gmail, Outlook or iCloud mailbox.",
   ERR_PROOF_INVALID: "The proof did not verify on chain. Prove the email again.",
   ERR_PROOF_SIZE: "The proof is malformed. Prove the email again.",

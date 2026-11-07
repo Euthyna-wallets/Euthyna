@@ -35,15 +35,29 @@ const loadCircuit = () => (circuit ??= fetch("/circuits/email_recovery.json").th
 
 const threads = () => (globalThis.crossOriginIsolated ? Math.min(navigator.hardwareConcurrency || 1, 8) : 1);
 
+/**
+ * Why a pasted email has no DKIM-Signature header. Headers there but no signature: the provider
+ * did not sign it, which is what Gmail does with an email sent to yourself. No headers at all: only
+ * the body was copied.
+ */
+export function unsignedText(source: string): string {
+  if (/^(from|received|delivered-to|message-id):/im.test(source)) {
+    return "This email has no DKIM signature: its provider did not sign it. Gmail does not sign an email you send to yourself. Send it to another address you can open, then copy its source from the mailbox that received it.";
+  }
+  return "Paste the whole original message, headers included (it starts with lines like \"Delivered-To:\" or \"Received:\")";
+}
+
 /** The email from a downloaded .eml file, or from its source pasted as text ("Show original" → copy). */
 export async function emailSource(input: File | string): Promise<string> {
   if (typeof input === "string") {
     if (input.length > 2_000_000) throw new Error("This is too long for an email");
-    if (!/^dkim-signature:/im.test(input)) throw new Error("Paste the whole original message, headers included (it starts with lines like \"Delivered-To:\" or \"Received:\")");
+    if (!/^dkim-signature:/im.test(input)) throw new Error(unsignedText(input));
     return input;
   }
   if (input.size > 2_000_000) throw new Error("This file is too large for an email");
-  return emlFromBytes(new Uint8Array(await input.arrayBuffer()));
+  const eml = emlFromBytes(new Uint8Array(await input.arrayBuffer()));
+  if (!/^dkim-signature:/im.test(eml)) throw new Error(unsignedText(eml));
+  return eml;
 }
 
 /** A seat's enrollment, read from the contract (null when the founder never enrolled). */
