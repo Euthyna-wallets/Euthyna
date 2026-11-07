@@ -25,6 +25,9 @@ Run: `NOAH_API_KEY=… DATABASE_URL=… VAULT=<vault> pnpm --filter @euthyna/api
 | The members of sealedprod1106 vote to pay 5 EURC to a supplier from those euros | proposal #13, approved by two of three; scheduled by the vault | NEAR `7eqYU8we8uCAZ7jVbfzMHi3Q8ibdZw6uBo8Jt6STNdrn`, `FMKS3Ty1zjSGSSbUjZco9j4EVa3mGtswGZxfyTuhToDF` |
 | After the veto window the API starts it, NEAR MPC signs it for the vault, the worker broadcasts it | 5 EURC received by the supplier (`0x1be62b8a…8e1d`): 19.71 → 24.71 | Base Sepolia `0xc45d7ea2a864c590e9f23eb2abfb173d0189eb4587f9abaddd15aa5b4c768470` (vault operation `f8643bfc…e027`, wallet nonce 8); started by the API `Bjv1TApifuxda22Fkq5gLsAvvhepJxrPhwkCTRgpUKQ2`, settled by the worker from the MPC attestation of the finalized Base block, state `Confirmed` |
 | The worker settles it on the vault | budget and nonce closed on NEAR, about 25 min after the transfer (Base finality) | NEAR `Cix2CioqhiKRc3UANU8zxsBctqZbq5bbuNnNxdUXiZME` |
+| An agent of sealedprod1106 (`treasury-desk`, ceiling 50 EUR, 100 EUR a day, all voted) pays an IBAN that was not voted | refused by the vault: `BeneficiaryNotAllowed`; 70 EUR to the voted IBAN: `ERR_MAX_PER_PAYOUT` | `check_bank_payout` |
+| The members vote the borrowed customer id of another account (`SetBankConfig`, proposal #21) and the agent pays | refused **in the enclave**: `the customer is not this vault's`; budget and reference given back | NEAR `FiG8TyWU8Aaswhf7SHKPLY9URLCMABjxphYkMugJF2QL` |
+| With the vault's own customer (proposal #22), the agent pays 5 EUR to Atelier Dupont SAS (`FR76 3000 6000 0112 3456 7890 189`) | the enclave signs the partner's single-use rule `ba917604-…`; the vault queues 5 EURC; NEAR MPC signs it; the partner pays **4.78 EUR to the IBAN** | NEAR `fwwpChrpcwKewsBGLz7sF93o7UukUQc3qEC9FtSwBQC`, Base Sepolia `0x0eef2dd1f229f0f0d7731a383df2176426d6b8b7113a591046a186817010c8e6` |
 
 ## Euros out: an agent pays a voted IBAN
 
