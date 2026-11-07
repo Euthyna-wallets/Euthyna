@@ -18,9 +18,9 @@ import { SigningInbox } from "./SigningInbox.js";
 import { WalletBar } from "./WalletBar.js";
 import { Kicker, NightPanel } from "./design.js";
 import { WalletProvider } from "../lib/wallet-context.js";
+import { setupLater } from "../lib/setup-later.js";
 import { setDemoWalletScope } from "../lib/wallet-store.js";
-import { disconnectNearWallet, signVaultCall } from "../wallets.js";
-import { displayAccount } from "./ui.js";
+import { signVaultCall } from "../wallets.js";
 
 type Organization = { id: string; name: string };
 
@@ -79,7 +79,9 @@ export function Layout() {
   const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: Boolean(active), staleTime: 60_000 });
   const myAccount = members.data?.me ?? "";
   const toVote = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress" && Boolean(myAccount) && !(myAccount in proposal.votes)).length;
-  const setupRequired = Boolean(status.data) && (!status.data?.wallet || (roles.isSuccess && roles.data.roles.length === 0));
+  const noRole = roles.isSuccess && roles.data.roles.length === 0;
+  // "Skip for now" in setup (past the wallet): no reminder for the roles still to vote.
+  const setupRequired = Boolean(status.data) && (!status.data?.wallet || (noRole && !setupLater(active?.id)));
   const paused = status.data?.paused ?? false;
   const [halting, setHalting] = useState(false);
   const [haltError, setHaltError] = useState<string | null>(null);
@@ -191,7 +193,8 @@ export function Layout() {
             className="signout"
             type="button"
             title="Sign out, then sign in with another member's wallet"
-            onClick={() => void authClient.signOut().then(disconnectNearWallet).then(() => navigate("/"))}
+            // The wallet stays connected: signing out asks it for nothing, and signing back in is one signature.
+            onClick={() => void authClient.signOut().then(() => navigate("/"))}
           >
             SIGN OUT
           </button>
@@ -203,6 +206,9 @@ export function Layout() {
             {status.data?.treasury && !paused && setupRequired ? (
               // No voted role yet: no agent can work.
               <span className="state-pill paused">Setting up</span>
+            ) : status.data?.treasury && !paused && noRole ? (
+              // Setup skipped: the company is live, no agent can work until a role is voted.
+              <span className="state-pill">No agent at work yet</span>
             ) : status.data?.treasury ? (
               <span className={`state-pill${paused ? " paused" : ""}`}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: paused ? "var(--terra-ink)" : "var(--aegean-ink)" }} />
@@ -214,10 +220,6 @@ export function Layout() {
             <span className="tesnet-pill">Testnet</span>
             <SigningInbox />
             <WalletBar />
-            <span className="who">
-              <span className="avatar">{initials(session.data?.user.name ?? "?")}</span>
-              {myAccount ? displayAccount(myAccount) : session.data?.user.name || "member"}
-            </span>
           </header>
           <main style={{ display: "flex", flexDirection: "column", gap: 22, minWidth: 0 }}>
             {paused ? (
