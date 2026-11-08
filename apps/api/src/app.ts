@@ -889,6 +889,10 @@ export function createApp({
       return context.json(await omniroles.bankPermissionProposal(orgOf(context), input));
     });
     app.post("/v1/console/omniroles/proposals/bank-config", requireConsoleAdmin(auth, consoleLimiter), async (context) => context.json(await omniroles.bankConfigProposal(orgOf(context))));
+    app.post("/v1/console/omniroles/proposals/bank-signer-source", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+      const body = z.object({ follow: z.boolean() }).parse(await context.req.json());
+      return context.json(await omniroles.bankSignerSourceProposal(orgOf(context), body.follow));
+    });
     app.post("/v1/console/omniroles/proposals/role", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, roleDraftSchema);
       return context.json(await omniroles.roleProposal(orgOf(context), input.draft as RoleDraft));

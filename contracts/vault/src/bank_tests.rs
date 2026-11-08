@@ -562,3 +562,122 @@ fn a_standing_order_cannot_run_every_second() {
         label: String::new(),
     });
 }
+
+fn receipts_text() -> String {
+    near_sdk::test_utils::get_created_receipts()
+        .iter()
+        .flat_map(|receipt| receipt.actions.iter())
+        .map(|action| match action {
+            near_sdk::mock::MockAction::FunctionCallWeight { method_name, args, .. } => {
+                format!("{} {}", String::from_utf8_lossy(method_name), String::from_utf8_lossy(args))
+            }
+            other => format!("{other:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn signer_source(project: Option<&str>, follow: bool) -> RuleChange {
+    RuleChange::SetBankSignerSource { project: project.map(str::to_string), follow }
+}
+
+fn vote(v: &mut Vault, change: RuleChange) {
+    Vault::validate_rule_change(&change);
+    v.apply_rule_change(change, 1);
+}
+
+#[test]
+#[should_panic(expected = "ERR_BANK_SIGNER_PROJECT")]
+fn a_signer_project_is_owner_slash_name() {
+    Vault::validate_rule_change(&signer_source(Some("not a project"), false));
+}
+
+#[test]
+#[should_panic(expected = "ERR_BANK_FOLLOW_NEEDS_PROJECT")]
+fn following_needs_a_project() {
+    Vault::validate_rule_change(&signer_source(None, true));
+}
+
+#[test]
+fn from_a_project_the_vault_still_runs_exactly_its_voted_hash() {
+    let mut v = fixture();
+    context("owner.testnet", 2);
+    vote(&mut v, signer_source(Some("ops.testnet/bank-signer"), false));
+    context("agent.testnet", 3);
+    let _ = v.request_bank_payout("payments".into(), IBAN, U128(1_000_000), "inv-1".into());
+    let call = receipts_text();
+    assert!(call.contains(&format!(
+        r#""source":{{"Project":{{"project_id":"ops.testnet/bank-signer","version_key":"{}"}}}}"#,
+        "ab".repeat(32)
+    )), "{call}");
+    assert!(!call.contains("WasmUrl"));
+    // Back to the code URL.
+    let mut v = fixture();
+    context("owner.testnet", 2);
+    vote(&mut v, signer_source(Some("ops.testnet/bank-signer"), false));
+    vote(&mut v, signer_source(None, false));
+    assert!(v.get_bank_signer_source().is_none());
+}
+
+fn project(active: &str) -> Result<Option<near_sdk::serde_json::Value>, PromiseError> {
+    Ok(Some(json!({ "project_id": "ops.testnet/bank-signer", "owner": "ops.testnet", "active_version": active })))
+}
+
+#[test]
+fn a_followed_version_is_queued_once_like_a_vote_and_the_council_can_veto_it() {
+    let mut v = fixture();
+    context("owner.testnet", 2);
+    vote(&mut v, signer_source(Some("ops.testnet/bank-signer"), true));
+    context("anyone.testnet", 10);
+    // Anyone asks the project for its active version.
+    let _ = v.follow_bank_signer();
+    let call = receipts_text();
+    assert!(call.contains(r#"get_project {"project_id":"ops.testnet/bank-signer"}"#), "{call}");
+
+    // The version the vault already runs: nothing to do.
+    context("vault.testnet", 11);
+    assert_eq!(v.on_bank_signer_project(project(&"ab".repeat(32))), None);
+    // Another project's answer, or no project: ignored.
+    assert_eq!(v.on_bank_signer_project(Ok(Some(json!({ "project_id": "evil.testnet/x", "active_version": "cd".repeat(32) })))), None);
+    assert_eq!(v.on_bank_signer_project(Ok(None)), None);
+
+    // A new version: queued as an ordinary rule, after the rule delay.
+    let queue_id = v.on_bank_signer_project(project(&"cd".repeat(32))).expect("queued");
+    let entry = v.get_rule_change(queue_id).unwrap();
+    assert_eq!(entry.state, RuleChangeState::Queued);
+    assert_eq!(entry.execute_after_ns.0, 11 + 10, "the vault's own rule delay (10 here)");
+    match &entry.change {
+        RuleChange::SetBankConfig { config: Some(next) } => {
+            assert_eq!(next.signer_hash, "cd".repeat(32));
+            let same = BankConfig { signer_hash: "ab".repeat(32), ..next.clone() };
+            assert_eq!(near_sdk::serde_json::to_value(&same).unwrap(), near_sdk::serde_json::to_value(config()).unwrap(), "nothing else changes");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Once only.
+    assert_eq!(v.on_bank_signer_project(project(&"cd".repeat(32))), None);
+
+    // The council vetoes it: the vault keeps its signer, and that version is not queued again.
+    context("council.testnet", 12);
+    v.veto_rule_change(queue_id);
+    context("vault.testnet", 13);
+    assert_eq!(v.on_bank_signer_project(project(&"cd".repeat(32))), None);
+    assert_eq!(v.get_bank_config().unwrap().signer_hash, "ab".repeat(32));
+
+    // A later version is queued and, once its delay is over, becomes the signer.
+    let next = v.on_bank_signer_project(project(&"ef".repeat(32))).expect("queued");
+    context("anyone.testnet", 22);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = v.execute_rule_change(next); })).is_err(), "not before its delay");
+    context("anyone.testnet", 23);
+    let _ = v.execute_rule_change(next);
+    assert_eq!(v.get_bank_config().unwrap().signer_hash, "ef".repeat(32));
+}
+
+#[test]
+#[should_panic(expected = "ERR_BANK_NOT_FOLLOWING")]
+fn a_vault_that_votes_each_version_is_not_followed() {
+    let mut v = fixture();
+    context("owner.testnet", 2);
+    vote(&mut v, signer_source(Some("ops.testnet/bank-signer"), false));
+    let _ = v.follow_bank_signer();
+}

@@ -193,6 +193,12 @@ export function EuroPayoutsCard() {
         <>
           <div style={ROW}><b style={LABEL}>Signer</b><span>OutLayer enclave on <span className="mono">{data.config.outlayer_id}</span> · code <span className="mono">{data.config.signer_hash.slice(0, 12)}…</span>{data.config.configured === false ? " (this console expects a newer signer: propose again)" : ""}</span>
             {data.config.configured === false ? <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.configProposal())}>UPDATE</button> : <span />}</div>
+          <div style={ROW}><b style={LABEL}>Updates</b>
+            <span>{data.signerSource?.follow
+              ? <>New enclave versions apply by themselves after the veto window; any member can veto one. {data.signerSource.pendingVersion ? <>Version <span className="mono">{data.signerSource.pendingVersion.slice(0, 12)}…</span> is in its veto window (see Votes).</> : "Up to date."}</>
+              : data.signerProject ? "Each new enclave version needs a vote." : "Each new enclave version needs a vote and new keys."}</span>
+            {data.signerProject && !data.signerSource?.follow ? <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.signerSourceProposal(true))}>TAKE UPDATES</button>
+              : data.signerSource?.follow ? <button className="btn-line" style={{ fontSize: 10 }} disabled={sign.isPending} onClick={() => sign.mutate(bankApi.signerSourceProposal(false))}>VOTE EACH</button> : <span />}</div>
           <div style={ROW}><b style={LABEL}>Settles</b><span>{data.config.crypto.replace(/_TEST$/, "")} on {NETWORKS[data.config.network] ?? data.config.network}, from the company wallet · partner customer <span className="mono">{data.config.customer_id}</span></span><span /></div>
 
           <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>

@@ -1,6 +1,6 @@
 [package]
 name = "euthyna-bank-signer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Euthyna's bank signer: a WASI program run inside OutLayer's TEE; the only holder of the Noah signing key, and it signs only the payouts a vault has already authorised"

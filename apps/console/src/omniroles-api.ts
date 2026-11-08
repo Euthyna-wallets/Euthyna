@@ -211,6 +211,9 @@ export type BankPolicy = {
   supported: boolean;
   deployable: boolean;
   config: null | { outlayer_id: string; signer_hash: string; network: string; crypto: string; customer_id: string; decimals: number; configured: boolean | null };
+  /** The enclave's OutLayer project the vault runs, and whether it takes its versions after the veto window. */
+  signerSource?: { project: string; follow: boolean; pendingVersion: string | null } | null;
+  signerProject?: string | null;
   customerId?: string | null;
   boxKey?: string | null;
   readers?: Array<{ account: string; publicKey: string }>;
@@ -242,6 +245,7 @@ export const bankApi = {
   permissionProposal: (input: { role: string; budget: string | null; maxPerPayout: string | null; newBudget?: { amount: string; periodDays: number } }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/bank-permission", { method: "POST", body: JSON.stringify(input) }),
   configProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/bank-config", { method: "POST", body: "{}" }),
+  signerSourceProposal: (follow: boolean) => api<ProposalDraft>("/v1/console/omniroles/proposals/bank-signer-source", { method: "POST", body: JSON.stringify({ follow }) }),
   rails: () => api<{ rails: Array<{ id: string; channelId: string | null; method: string; minimum: string | null; maximum: string | null; seconds: number | null; rate: string | null }> }>("/v1/console/bank/rails"),
   standingOrders: () => api<{ orders: Array<{ id: number; beneficiaryId: number; amount: string; label: string; runs: number; remaining: number | null; nextAt: string; periodDays: number }> }>("/v1/console/omniroles/standing-orders"),
   standingOrderProposal: (input: { beneficiaryId: number; amount: string; firstAt: string; periodDays: number; count: number | null; label: string } | { beneficiaryId: number; remove: number }) =>

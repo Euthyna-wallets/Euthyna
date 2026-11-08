@@ -97,6 +97,8 @@ const schema = z.object({
   BANK_SIGNER_HASH: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   /** The enclave's X25519 box key (hex), from its `pubkey` output: beneficiaries are sealed to it. */
   BANK_SIGNER_BOX_KEY: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** The enclave's OutLayer project ("owner/name"); vaults that follow it take its versions after the veto window. */
+  BANK_SIGNER_PROJECT: z.string().regex(/^[a-z0-9._-]+\/[A-Za-z0-9._-]+$/).optional(),
   BANK_SIGNER_SECRETS_OWNER: z.string().min(2).optional(),
   BANK_SIGNER_SECRETS_PROFILE: z.string().min(1).default("noah"),
   BANK_SIGNER_OUTLAYER_ID: z.string().min(2).default("outlayer.testnet"),

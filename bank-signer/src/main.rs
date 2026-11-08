@@ -244,6 +244,7 @@ fn pubkey() -> Result<Value, String> {
         "public_key_pem": pem,
         "public_key_sec1_hex": hex::encode(sec1),
         "box_public_key_hex": hex::encode(boxed.as_bytes()),
+        "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -259,6 +260,7 @@ fn now_s() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+#[cfg(test)]
 fn jwt(key: &SigningKey, method: &str, path: &str, body: Option<&[u8]>) -> String {
     jwt_with_query(key, method, path, None, body)
 }
