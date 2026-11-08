@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Suppliers · add a beneficiary</title>
+
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0D1730}a:hover{color:#8A5A00}
+.side{background-color:#061433;background-image:linear-gradient(180deg,rgba(6,20,51,.78),rgba(3,9,24,.95)),url(../assets/textures/marble-night.jpg);background-size:cover,700px}
+.ground{background-color:#F3EFE7;background-image:linear-gradient(rgba(246,242,235,.86),rgba(246,242,235,.86)),url(../assets/textures/marble-white.jpg);background-size:cover,cover}
+.slab{background-color:#FBF9F4;background-image:linear-gradient(120deg,rgba(255,255,255,.78),rgba(255,255,255,.5)),url(../assets/textures/marble-white.jpg);background-size:cover,900px;box-shadow:14px 18px 40px rgba(13,23,48,.14),inset 0 0 0 1px rgba(13,23,48,.08)}
+.stele{background-color:#FBF9F4;background-image:linear-gradient(115deg,rgba(255,255,255,.72),rgba(255,255,255,.32) 45%,rgba(13,23,48,.08)),url(../assets/textures/marble-white.jpg);background-size:cover,cover;border-radius:220px 220px 2px 2px;box-shadow:26px 30px 60px rgba(13,23,48,.25),inset 0 0 0 1px rgba(13,23,48,.08),inset 0 0 0 10px rgba(255,255,255,.35)}
+.night{background-color:#0A1D47;background-image:linear-gradient(rgba(6,20,51,.88),rgba(6,20,51,.92)),url(../assets/textures/marble-night.jpg);background-size:cover,600px}
+.ori{background-color:#B4532E;background-image:linear-gradient(100deg,rgba(255,236,200,.22),rgba(0,0,0,0) 35%,rgba(40,10,0,.3)),url(../assets/textures/orichalcum.jpg);background-size:cover,cover}
+.carved{color:#7A705F;text-shadow:0 1px 0 rgba(255,255,255,.95),0 -1px 0 rgba(60,48,34,.45)}
+.seal{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#FFE7B4 0%,#E2A453 28%,#A8692A 62%,#5E3A12 100%);box-shadow:inset 0 0 0 3px rgba(255,236,196,.28),inset 0 0 0 4px rgba(60,32,8,.35),inset 0 -4px 8px rgba(40,18,0,.45),0 6px 14px rgba(0,0,0,.25);flex:0 0 auto;font:800 7.5px Cinzel,serif;letter-spacing:.06em;color:#3A2208}
+.wax{border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 28%,#E9E3D6 0%,#B9AE98 40%,#7C715C 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.3),inset 0 -4px 8px rgba(40,30,10,.35),0 6px 14px rgba(0,0,0,.18);flex:0 0 auto;font:800 7px Cinzel,serif;letter-spacing:.06em;color:#2E2718}
+.kick{font:700 11px Cinzel,serif;letter-spacing:.26em;text-transform:uppercase}
+.mono{font-family:'JetBrains Mono',monospace}
+.nav a{display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:2px;text-decoration:none;color:#C9D3EA;font:600 14.5px 'Plus Jakarta Sans',sans-serif}
+.nav a b{font:700 11px Cinzel,serif;letter-spacing:.14em;color:#8C9CC2;width:26px}
+.inp{box-sizing:border-box;width:100%;min-height:44px;padding:10px 12px;border:1px solid rgba(13,23,48,.22);background:rgba(255,255,255,.82);font:14px 'Plus Jakarta Sans',sans-serif;color:#0D1730}
+.lab{display:block;font:600 12px 'Plus Jakarta Sans',sans-serif;color:#4A5675;margin-bottom:6px}
+.chip{min-height:44px;padding:8px 14px;border:1px solid rgba(13,23,48,.22);background:rgba(255,255,255,.7);font:600 13px 'Plus Jakarta Sans',sans-serif;color:#0D1730;cursor:pointer;text-align:left}
+.chip-on{min-height:44px;padding:8px 14px;border:1px solid #8A5A00;background:#FCF0D4;font:700 13px 'Plus Jakarta Sans',sans-serif;color:#0D1730;cursor:pointer;text-align:left;box-shadow:inset 0 0 0 1px #8A5A00}
+</style>
+
+<div class="ground" style="min-height: 1240px; display: flex; flex-wrap: wrap; font-family: 'Plus Jakarta Sans', sans-serif; color: #0D1730">
+
+  <aside class="side" style="flex: 1 1 268px; max-width: 268px; box-sizing: border-box; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; color: #E7ECF6">
+    <div style="display: flex; align-items: center; gap: 10px; font: 700 15px Cinzel, serif; letter-spacing: .24em; color: #F3EFE6; padding: 0 6px">
+      <svg width="24" height="24" viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="307" fill="none" stroke="#F3EFE6" stroke-width="102"></circle><rect x="297" y="461" width="430" height="102" fill="#C9890C"></rect><rect x="41" y="461" width="72" height="102" fill="#C9890C"></rect><rect x="911" y="461" width="72" height="102" fill="#C9890C"></rect></svg>EUTHYNA</div>
+    <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid #1F3A6E; border-radius: 2px; padding: 12px">
+      <span class="ori" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 800 15px Cinzel, serif; color: rgba(42,13,4,.85)">PF</span>
+      <span><b style="display: block; font: 700 14px Cinzel, serif; letter-spacing: .1em">PIXEL FORGE</b><span style="font-size: 12.5px; color: #A9B6D3">On Atlantis · testnet</span></span>
+    </div>
+    <nav class="nav" aria-label="Console" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="#"><b>I</b>HQ</a><a href="#"><b>II</b>Agents</a><a href="#"><b>III</b>Rules</a><a href="#"><b>IV</b>Activity</a><a href="#"><b>V</b>Treasury</a><a href="#"><b>VI</b>Votes</a><a href="#"><b>VII</b>Owners</a><a href="#"><b>VIII</b>Market</a>
+      <a href="#" aria-current="page" style="background: #F3EFE7; color: #0D1730"><b style="color: #8A5A00">IX</b>Settings</a>
+    </nav>
+  </aside>
+
+  <main style="flex: 999 1 640px; min-width: 0; box-sizing: border-box; padding: 32px 40px 56px; display: flex; flex-direction: column; gap: 24px">
+    <header style="display: flex; flex-direction: column; gap: 6px">
+      <span style="font: 600 13px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Pixel Forge · settings</span>
+      <h1 class="carved" style="margin: 0; font: 900 52px Cinzel, serif; letter-spacing: .1em">SUPPLIERS</h1>
+      <p style="margin: 0; font-size: 15px; color: #4A5675; max-width: 760px">Who the vault may pay: wallets on chain, and bank accounts in euros, reais, dollars and pounds through the bank signer. Every change is a members' vote, then the veto window.</p>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start">
+
+      <section class="stele" aria-label="The beneficiaries" style="flex: 1 1 420px; max-width: 520px; box-sizing: border-box; padding: 96px 44px 40px; display: flex; flex-direction: column; gap: 4px">
+        <span class="kick" style="color: #8A5A00; text-align: center">On chain · sealed</span>
+        <h2 class="carved" style="margin: 4px 0 18px; text-align: center; font: 900 28px Cinzel, serif; letter-spacing: .16em">THE BENEFICIARIES</h2>
+
+        <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+          <span class="seal" style="width: 44px; height: 44px">VOTED</span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <b style="font: 800 17px Cinzel, serif; letter-spacing: .12em; color: #6A604F">STUDIO PIXEL</b>
+            <span class="mono" style="font-size: 13px; color: #0D1730">0x8a41…3c2D · USDC on Base Sepolia</span>
+            <span style="font-size: 12px; color: #4A5675">Wallet · proposal #4</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+          <span class="seal" style="width: 44px; height: 44px">VOTED</span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <b style="font: 800 17px Cinzel, serif; letter-spacing: .12em; color: #6A604F">#2 · SUPPLIER A</b>
+            <span style="font-size: 13.5px"><b>Atelier Dupont SAS</b> · <span class="mono">FR76 3000 6000 01…0189</span></span>
+            <span style="font-size: 12px; color: #4A5675">Euro bank account (SEPA) · EUR · read in this browser only</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+          <span class="seal" style="width: 44px; height: 44px">VOTED</span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <b style="font: 800 17px Cinzel, serif; letter-spacing: .12em; color: #6A604F">#3 · CONTRACTOR BR</b>
+            <span style="font-size: 13.5px"><b>Ana Souza</b> · Pix key <span class="mono">ana.s…@mail.com</span></span>
+            <span style="font-size: 12px; color: #4A5675">Brazil (Pix) · BRL · read in this browser only</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+          <span class="seal" style="width: 44px; height: 44px">VOTED</span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <b style="font: 800 17px Cinzel, serif; letter-spacing: .12em; color: #6A604F">#4 · EMPLOYEE UK</b>
+            <span style="font-size: 13.5px"><b>Tom Hale</b> · sort code <span class="mono">04-00-04</span> · <span class="mono">…4471</span></span>
+            <span style="font-size: 12px; color: #4A5675">United Kingdom (Faster Payments) · GBP · salary</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(13,23,48,.14)">
+          <span class="wax" style="width: 44px; height: 44px">SEALED</span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <b style="font: 800 17px Cinzel, serif; letter-spacing: .12em; color: #6A604F">#5 · CONTRACTOR US</b>
+            <span class="mono" style="font-size: 13px">sealed · 9c1e40b7a2d1f033…</span>
+            <span style="font-size: 12px; color: #4A5675">Not sealed for your reading key. Ask a member to re-seal it.</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 18px; border-top: 1px solid rgba(13,23,48,.14)">
+          <span style="font-size: 12.5px; color: #4A5675; text-align: center">Read from the vault, opened with your reading key. Nothing here reached our servers.</span>
+        </div>
+      </section>
+
+      <div style="flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+        <section class="slab" aria-labelledby="add-title" style="box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 20px">
+          <h2 id="add-title" class="kick" style="margin: 0; color: #8A5A00">Add a beneficiary</h2>
+
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font: 700 13px 'Plus Jakarta Sans', sans-serif">1 · Where the money goes</span>
+            <div role="radiogroup" aria-label="Payout rail" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+              <button type="button" role="radio" aria-checked="false" class="chip">Euro bank account<br><span style="font: 500 12px 'Plus Jakarta Sans', sans-serif; color: #4A5675">SEPA · EUR</span></button>
+              <button type="button" role="radio" aria-checked="true" class="chip-on">Brazil<br><span style="font: 500 12px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Pix · BRL</span></button>
+              <button type="button" role="radio" aria-checked="false" class="chip">United States<br><span style="font: 500 12px 'Plus Jakarta Sans', sans-serif; color: #4A5675">ACH · USD</span></button>
+              <button type="button" role="radio" aria-checked="false" class="chip">United Kingdom<br><span style="font: 500 12px 'Plus Jakarta Sans', sans-serif; color: #4A5675">Faster Payments · GBP</span></button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: rgba(13,23,48,.12); border: 1px solid rgba(13,23,48,.12)">
+            <div style="background: #FBF9F4; padding: 10px 12px"><span class="lab" style="margin: 0">Fee</span><b class="mono" style="font-size: 14px">1.5 %</b></div>
+            <div style="background: #FBF9F4; padding: 10px 12px"><span class="lab" style="margin: 0">Minimum</span><b class="mono" style="font-size: 14px">10 BRL</b></div>
+            <div style="background: #FBF9F4; padding: 10px 12px"><span class="lab" style="margin: 0">Arrives</span><b class="mono" style="font-size: 14px">~1 min</b></div>
+            <div style="background: #FBF9F4; padding: 10px 12px"><span class="lab" style="margin: 0">Today</span><b class="mono" style="font-size: 14px">1 EURC ≈ 9.37 BRL</b></div>
+          </div>
+          <span style="margin-top: -12px; font-size: 12px; color: #4A5675">Terms of this channel, read from the partner just now. The rate is set again at each payout. <b style="color: #6B4600">Proposed, not in #148.</b></span>
+
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <span style="font: 700 13px 'Plus Jakarta Sans', sans-serif">2 · The account <span style="font-weight: 500; color: #4A5675">(fields the partner asks for this channel)</span></span>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+              <div><label class="lab" for="first">First name</label><input id="first" class="inp" value="Ana"></div>
+              <div><label class="lab" for="last">Last name</label><input id="last" class="inp" value="Souza"></div>
+              <div><label class="lab" for="ptype">Pix key type</label>
+                <select id="ptype" class="inp"><option>Email</option><option>Phone number</option><option>CPF / CNPJ</option><option>Random key</option></select></div>
+              <div><label class="lab" for="pix">Pix key</label><input id="pix" class="inp mono" value="ana.souza@mail.com"></div>
+              <div style="grid-column: 1 / -1"><label class="lab" for="label">Public label (on chain, never a name)</label><input id="label" class="inp" value="Contractor BR 2"></div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding-top: 4px; border-top: 1px solid rgba(13,23,48,.12)">
+            <span style="flex: 1 1 260px; font-size: 12.5px; color: #4A5675; padding-top: 12px">Sealed in this browser: the chain and our servers get a commitment, never the country, the channel, the key or the name. Agents pay it by its number; the enclave pays no other account.</span>
+            <button type="button" class="ori" style="margin-top: 12px; min-height: 44px; padding: 11px 18px; border: 0; font: 800 12px Cinzel, serif; letter-spacing: .16em; color: #200A03; cursor: pointer">PROPOSE: ADD #6</button>
+          </div>
+        </section>
+
+        <section class="night" aria-labelledby="chain-title" style="box-sizing: border-box; padding: 24px 28px; color: #E7ECF6; display: flex; flex-direction: column; gap: 14px">
+          <h2 id="chain-title" class="kick" style="margin: 0; color: #F2B544">What the vote puts on chain</h2>
+          <div style="display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px 16px; font-size: 13.5px">
+            <span style="color: #A9B6D3">Number, label</span><span class="mono">#6 · "Contractor BR 2"</span>
+            <span style="color: #A9B6D3">commitment v2</span><span class="mono" style="overflow-wrap: anywhere">sha256(vault, channel, form, salt) · 4be1…77a0</span>
+            <span style="color: #A9B6D3">sealed_for_signer</span><span class="mono">for the enclave only</span>
+            <span style="color: #A9B6D3">sealed_for_members</span><span class="mono">for the 3 members' reading keys</span>
+          </div>
+          <p style="margin: 0; font-size: 13px; color: #C9D3EA; border-top: 1px solid rgba(255,255,255,.12); padding-top: 12px">The partner's channel and the form travel inside the envelope. The enclave sends the form as is and redacts every value from its errors.</p>
+        </section>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+
+</body>
+</html>
