@@ -10,7 +10,7 @@ import { viewContract } from "../wallets.js";
 export type EditableRole = {
   draft: RoleDraft;
   /** Members as the vault holds them (kind kept), the sealed-orders contract included. */
-  members: Array<{ member: string; kind: string }>;
+  members: Array<{ member: string; kind: string; service?: string }>;
   hadSolana: boolean;
   /** The sealed-orders contract of this server, when sealed orders are on. */
   sealedId: string | null;
@@ -21,7 +21,7 @@ const hex = (bytes: number[]) => `0x${bytes.map((byte) => byte.toString(16).padS
 export async function loadEditableRole(input: {
   vaultAccountId: string;
   name: string;
-  members: Array<{ member: string; kind: string }>;
+  members: Array<{ member: string; kind: string; service?: string }>;
   sharesAccountId: string | null;
   sealedId: string | null;
 }): Promise<EditableRole | null> {

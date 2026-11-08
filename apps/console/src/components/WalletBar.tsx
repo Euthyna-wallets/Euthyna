@@ -9,7 +9,9 @@ import { switchNearWallet } from "../wallets.js";
 /** Members sign votes with their NEAR wallet; it must be the account they signed in with. */
 export function WalletBar() {
   const wallets = useWallets();
-  const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, staleTime: 60_000 });
+  const session = authClient.useSession();
+  // Scoped to the session's company: wait until it is set.
+  const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: Boolean(session.data?.session.activeOrganizationId), staleTime: 60_000 });
   const me = members.data?.me ?? null;
   const mismatch = Boolean(me && wallets.nearAccountId && wallets.nearAccountId !== me);
   return (

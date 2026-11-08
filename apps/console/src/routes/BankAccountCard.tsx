@@ -247,7 +247,8 @@ export function EuroPayoutsCard() {
                 <Seal word={STATE_WORD[payout.state] ?? payout.state} size={36} tone={payout.state === "Failed" ? "refused" : undefined} />
                 <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                   <span><b className="mono">{(Number(payout.amount) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2 })} EUR</b> to beneficiary #{payout.beneficiary.id}{payout.beneficiary.label ? ` · ${payout.beneficiary.label}` : ""}</span>
-                  <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{new Date(payout.at).toLocaleString()} · {payout.actor} ({payout.role}) · ref {payout.reference}{payout.fiatAmount ? ` · partner pays ${payout.fiatAmount} EUR` : ""}{payout.error ? ` · ${payout.error}` : ""}</span>
+                  <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{new Date(payout.at).toLocaleString()} · {payout.actor} ({payout.role}) · ref {payout.reference}{payout.fiatAmount ? ` · beneficiary receives ${payout.fiatAmount} in their currency` : ""}</span>
+                  {payout.error ? <span title={payout.error} style={{ fontSize: 12, color: "#A33A2A" }}>{bankErrorText(payout.error)}</span> : null}
                 </span>
                 {explorer ? <a href={explorer} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--aegean-ink)" }}>vault ↗</a> : <span />}
               </div>
@@ -340,4 +341,13 @@ export function PayrollCard() {
       {sign.error ? <div role="alert" style={{ border: "1px solid rgba(217,87,59,.55)", background: "rgba(217,87,59,.08)", padding: "10px 12px", fontSize: 13, color: "var(--terra-ink)" }}>{sign.error.message}</div> : null}
     </Slab>
   );
+}
+
+/** The partner's refusal, in words a treasurer reads; the raw message stays on hover. */
+export function bankErrorText(error: string): string {
+  if (/channel policy denied|ImplicitDeny/i.test(error)) return "Not paid: the bank partner has not opened this payment rail for the company yet. The euros stayed in the company wallet.";
+  if (/insufficient|balance/i.test(error)) return "Not paid: the company wallet did not hold enough EURC.";
+  if (/expired/i.test(error)) return "Not paid: the partner's quote expired before the transfer. Ask again.";
+  if (/noah \d{3}/i.test(error)) return "Not paid: the bank partner refused this payout. The euros stayed in the company wallet.";
+  return `Not paid: ${error.length > 120 ? `${error.slice(0, 117)}…` : error}`;
 }

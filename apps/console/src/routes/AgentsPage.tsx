@@ -5,7 +5,7 @@ import { decodeVaultCalls } from "@euthyna/sdk/roles";
 
 import { api, type AgentRow } from "../api.js";
 import { Kicker, Niche, NightPanel, PageTitle, SectionHead, Slab } from "../components/design.js";
-import { agentState, ago, feedOf, type AgentState } from "../components/ops.js";
+import { agentState, ago, feedOf, withChainAgents, type AgentState } from "../components/ops.js";
 import { PageState, everyDays, short } from "../components/ui.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type RoleView } from "../omniroles-api.js";
@@ -38,6 +38,7 @@ export function AgentsPage() {
   const activity = useQuery({ queryKey: ["omni-activity"], queryFn: omni.activity, enabled: Boolean(status.data?.treasury), refetchInterval: 20_000 });
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<{ agents: AgentRow[] }>("/v1/console/agents"), refetchInterval: 10_000 });
   const [ready, setReady] = useState<AgentReady | null>(null);
+  const allAgents = withChainAgents(agents.data?.agents ?? [], roles.data?.roles ?? []);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +124,7 @@ export function AgentsPage() {
       <PageState
         loading={agents.isLoading}
         error={agents.error}
-        empty={agents.data?.agents.length === 0}
+        empty={allAgents.length === 0}
         emptyContent={
           <Slab style={{ padding: "20px 22px" }}>
             <p className="empty-state" style={{ margin: 0 }}>No agent yet.</p>
@@ -131,7 +132,7 @@ export function AgentsPage() {
         }
       >
         {(() => {
-          const cards = (agents.data?.agents ?? []).slice().sort((a, b) => Number(b.active) - Number(a.active)).map((agent) => {
+          const cards = allAgents.slice().sort((a, b) => Number(b.active) - Number(a.active)).map((agent) => {
             const jobs = (roles.data?.roles ?? []).filter((role) => role.members.some((member) => member.member === agent.nearAccountId));
             const isAgent = (actor: string) => actor === agent.name || actor === agent.nearAccountId;
             const done = (activity.data?.operations ?? []).filter((operation) => isAgent(operation.actor));

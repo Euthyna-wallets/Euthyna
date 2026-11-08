@@ -1010,6 +1010,10 @@ export class OmniRolesService {
   async status(organizationId: string) {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };
+    // One wave: every read below is independent (the version list only needs code_source).
+    const versions = this.view<string>(treasury.vaultAccountId, "code_source").catch(() => this.config.nomosId)
+      .then(async (source) => ({ source, published: (await this.vaultVersions(source).catch(() => [])).map((version) => version.codeHash) }));
+    const planned = this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
     const [daoPolicy, daoKeys, vaultAccount, vaultKeys, owner, council, visa, status, wallet, paused] = await Promise.all([
       this.view<{ roles: Array<{ name: string; kind: unknown }>; default_vote_policy: { threshold: unknown } }>(treasury.daoAccountId, "get_policy").catch(() => null),
       this.cached("keys", treasury.daoAccountId).catch(() => null),
@@ -1026,10 +1030,9 @@ export class OmniRolesService {
       .flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []))
       .sort();
     if (daoMembers.length) await this.syncSeats(organizationId, daoMembers).catch(() => undefined);
-    const plan = await this.plan(organizationId, treasury.daoAccountId.split(".")[0] ?? "company").catch(() => null);
+    const plan = await planned;
     const expectedMembers = (plan?.council.map((member) => member.nearAccountId) ?? []).sort();
-    const codeSource = await this.view<string>(treasury.vaultAccountId, "code_source").catch(() => this.config.nomosId);
-    const published = (await this.vaultVersions(codeSource).catch(() => [])).map((version) => version.codeHash);
+    const { source: codeSource, published } = await versions;
     const vaultCode = vaultAccount?.code_hash ?? "missing";
     const visaKey = Buffer.from(await this.visaSigner.publicKey()).toString("base64");
     const statusKey = Buffer.from(await this.statusSigner.publicKey()).toString("base64");
@@ -1961,11 +1964,13 @@ export class OmniRolesService {
       if ("SetRole" in change) roleNames.add(change.SetRole.role);
       if ("RemoveRole" in change) roleNames.delete(change.RemoveRole.role);
     }
-    const memberships = new Map<string, { member: string; kind: string }[]>();
+    const memberships = new Map<string, { member: string; kind: string; service?: string }[]>();
     for (const change of executed) {
       if ("GrantMembership" in change) {
         const list = (memberships.get(change.GrantMembership.role) ?? []).filter((item) => item.member !== change.GrantMembership.member);
-        memberships.set(change.GrantMembership.role, [...list, { member: change.GrantMembership.member, kind: change.GrantMembership.kind }]);
+        // The sealed-orders contract holds a role to fill orders: a service, not an AI agent.
+        const service = change.GrantMembership.member === this.config.sealedOrdersId ? "sealed orders" : undefined;
+        memberships.set(change.GrantMembership.role, [...list, { member: change.GrantMembership.member, kind: change.GrantMembership.kind, ...(service ? { service } : {}) }]);
       }
       if ("RevokeMembership" in change) {
         memberships.set(change.RevokeMembership.role, (memberships.get(change.RevokeMembership.role) ?? []).filter((item) => item.member !== change.RevokeMembership.member));
@@ -2430,6 +2435,17 @@ export class OmniRolesService {
       // Bridge recipients are compared by hash: name the company's shares contract.
       const shares = this.sharesAccountOf(treasury);
       labels[stringHash(nearRecipient(shares))] = `${nearRecipient(shares)} (company shares)`;
+      // A bank payout's EURC goes to the partner's single-use deposit address: name it, so the
+      // transfer reads as the payout it is, not as an unknown recipient.
+      const count = await this.view<number>(treasury.vaultAccountId, "count_bank_payouts").catch(() => 0);
+      if (count) {
+        const payouts = await this.view<BankPayout[]>(treasury.vaultAccountId, "list_bank_payouts", { from_index: Math.max(0, count - 50), limit: 50 }).catch(() => []);
+        for (const payout of payouts) {
+          if (!payout.deposit_address) continue;
+          const address = getAddress(hexOf(payout.deposit_address));
+          labels[address] ??= `the bank partner (payout to ${payout.beneficiary_label})`;
+        }
+      }
     }
     return labels;
   }

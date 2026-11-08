@@ -57,26 +57,30 @@ export function Layout() {
   });
   const activeOrganizationId = session.data?.session.activeOrganizationId;
   const active = organizations.data?.find((organization) => organization.id === activeOrganizationId) ?? organizations.data?.[0] ?? null;
+  // Every console call is scoped to the session's company: none goes out before it is set
+  // (each would come back 401, then again once it is).
+  const orgReady = Boolean(active && activeOrganizationId === active.id);
+  // Same keys as the pages, so the layout and the page share one request.
   const status = useQuery({
-    queryKey: ["omni-status", active?.id],
+    queryKey: ["omni-status"],
     queryFn: omni.status,
-    enabled: Boolean(active),
+    enabled: orgReady,
     refetchInterval: 30_000,
   });
   const roles = useQuery({
-    queryKey: ["omni-roles", active?.id],
+    queryKey: ["omni-roles"],
     queryFn: omni.roles,
     enabled: Boolean(status.data?.treasury),
   });
   const governance = useQuery({
-    queryKey: ["omni-governance", active?.id],
+    queryKey: ["omni-governance"],
     queryFn: omni.governance,
     enabled: Boolean(status.data?.treasury),
     refetchInterval: 30_000,
   });
   // Listed in the Atlantis directory, or a private vault (the default).
   const directory = useQuery({ queryKey: ["omni-directory"], queryFn: omni.directory, enabled: Boolean(status.data?.treasury), staleTime: 60_000 });
-  const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: Boolean(active), staleTime: 60_000 });
+  const members = useQuery({ queryKey: ["omni-members"], queryFn: omni.members, enabled: orgReady, staleTime: 60_000 });
   const myAccount = members.data?.me ?? "";
   const toVote = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress" && Boolean(myAccount) && !(myAccount in proposal.votes)).length;
   const noRole = roles.isSuccess && roles.data.roles.length === 0;
@@ -91,8 +95,8 @@ export function Layout() {
   }, [session.data?.user.id]);
 
   useEffect(() => {
-    if (active && !activeOrganizationId) {
-      void authClient.organization.setActive({ organizationId: active.id });
+    if (active && activeOrganizationId !== active.id) {
+      void authClient.organization.setActive({ organizationId: active.id }).then(() => session.refetch());
     }
   }, [active?.id, activeOrganizationId]);
 
@@ -143,7 +147,9 @@ export function Layout() {
                     void authClient.organization.setActive({ organizationId: event.target.value }).then(async () => {
                       localStorage.setItem("mandateos.organization", event.target.value);
                       await organizations.refetch();
-                      await queryClient.invalidateQueries();
+                      await session.refetch();
+                      // Drop the other company's data rather than show it until the refetch.
+                      await queryClient.resetQueries();
                     });
                   }}
                 >
@@ -227,8 +233,16 @@ export function Layout() {
                 <b style={{ color: "#fff" }}>Operations are paused.</b> No money can move until members vote to resume.
               </NightPanel>
             ) : null}
-            <RecoveryAlert />
-            <Outlet />
+            {orgReady ? (
+              <>
+                <RecoveryAlert />
+                <Outlet />
+              </>
+            ) : organizations.isSuccess && !active ? (
+              <Outlet />
+            ) : (
+              <div className="loading-slab" style={{ minHeight: 240 }} />
+            )}
           </main>
         </div>
       </div>
