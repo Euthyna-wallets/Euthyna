@@ -21,6 +21,7 @@ function world(now: { ms: number }) {
     "idle.nomos.testnet": [],
   };
   const reads: string[] = [];
+  const calls: string[] = [];
   const executed: string[] = [];
   const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
   const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
@@ -30,6 +31,7 @@ function world(now: { ms: number }) {
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
+      calls.push(`${account}:${method}`);
       if (method === "list_dao_transactions") return [];
       if (method === "list_standing_orders") return standing[account] ?? [];
       if (method === "get_bank_signer_source") return follow[account] ?? null;
@@ -59,7 +61,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts, follow, active };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -81,8 +83,12 @@ describe("rule activation job", () => {
     expect(await service.activateAllReadyRules()).toEqual({ checked: 0, skipped: false });
     expect(reads).toEqual([]);
 
-    // After a minute, the idle vaults are read again; the broken one waits longer.
-    vi.setSystemTime(now.ms + 61_000);
+    // After five minutes, the idle vaults are read again; the broken one waits longer.
+    vi.setSystemTime(now.ms + 100_000);
+    reads.length = 0;
+    await service.activateAllReadyRules();
+    expect(reads).toEqual([]); // not before the next known date (2 minutes) or five idle minutes
+    vi.setSystemTime(now.ms + 301_000);
     await service.activateAllReadyRules();
     expect(reads.sort()).toEqual(["idle.nomos.testnet", "later.nomos.testnet", "ready.nomos.testnet"]);
   });
@@ -147,14 +153,37 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(asked()).toBe(0); // the vault already runs the active version
     active.version = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 11 * 60_000);
+    vi.setSystemTime(now.ms + 30 * 60_000);
+    await service.activateAllReadyRules();
+    expect(asked()).toBe(0); // the project is looked at once an hour
+    vi.setSystemTime(now.ms + 61 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
     // Queued (or vetoed) already: not asked again.
     follow[vault]!.last_queued = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 22 * 60_000);
+    vi.setSystemTime(now.ms + 122 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
+  });
+
+  it("reads what only a vote changes once, until the vault's rules move", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls, standing, rules } = world(now);
+    const vault = "idle.nomos.testnet";
+    standing[vault] = [{ id: 1, next_at_ns: ns(now.ms + 30 * 86_400_000), runs: 0 }];
+    const orderReads = () => calls.filter((call) => call === `${vault}:list_standing_orders`).length;
+    for (const minutes of [0, 6, 12, 18]) {
+      vi.setSystemTime(now.ms + minutes * 60_000);
+      await service.activateAllReadyRules();
+    }
+    expect(orderReads()).toBe(1);
+    // A rule queued (or applied): read again.
+    rules[vault] = [{ queue_id: [9], change: { AddStandingOrder: {} }, state: "Queued", execute_after_ns: ns(now.ms + 86_400_000), expires_at_ns: ns(now.ms + 2 * 86_400_000) }];
+    vi.setSystemTime(now.ms + 24 * 60_000);
+    await service.activateAllReadyRules();
+    expect(orderReads()).toBe(2);
   });
 
   it("never runs two passes at once", async () => {

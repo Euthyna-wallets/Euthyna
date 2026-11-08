@@ -171,20 +171,26 @@ const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
 const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
 const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 /** The activation job: how often an idle vault is read, how long after a veto window ends, and backoffs. */
-// Each idle read costs a few RPC calls per vault: every 3 minutes keeps a vault well inside a
-// daily quota; a member's vote in the console wakes its vault at once (`refresh`).
-const IDLE_RECHECK_MS = 180_000;
+// An idle vault costs two reads (its rules, its voted transactions): every 5 minutes. A member's
+// vote in the console wakes the vault at once (`refresh`); known dates (a veto window's end, a
+// payroll date) wake it on time.
+const IDLE_RECHECK_MS = 300_000;
 const DUE_MARGIN_MS = 3_000;
 const ERROR_RECHECK_MS = 30_000;
 const BROKEN_RECHECK_MS = 15 * 60_000;
-const STORAGE_CHECK_EVERY_MS = 10 * 60_000;
+const STORAGE_CHECK_EVERY_MS = 30 * 60_000;
 const BUSY_RECHECK_NS = 20_000_000_000n;
 /** A standing order's run is tried at most this many times; then it waits for the members. */
 const STANDING_ORDER_ATTEMPTS = 3;
 /** Wait before trying a refused run again: 15 minutes, then 30. */
 const STANDING_ORDER_BACKOFF_NS = 15n * 60n * 1_000_000_000n;
 /** How often a vault that follows its enclave project looks for a new version. */
-const FOLLOW_RECHECK_NS = 10n * 60n * 1_000_000_000n;
+const FOLLOW_RECHECK_NS = 60n * 60n * 1_000_000_000n;
+/**
+ * What only a rule changes (standing orders, the enclave's source) is read again when the vault's
+ * rule list changes, after the keeper runs something, or at the latest after this long.
+ */
+const RULE_FACTS_TTL_MS = 60 * 60_000;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -429,6 +435,9 @@ export class OmniRolesService {
   /** vault -> when the activation job reads it next (ms). Empty after a restart: every vault is read once. */
   private readonly nextActivationCheck = new Map<string, number>();
   private readonly storageCheckedAt = new Map<string, number>();
+  /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
+  private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
+  private readonly followCheckedAt = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -1624,6 +1633,7 @@ export class OmniRolesService {
     const treasury = await this.requireTreasury(organizationId);
     // Fresh from the chain, never the screens' cache: a stale list would miss a rule or run one twice.
     const rules = await this.near.viewFunction<QueuedRule[]>(treasury.vaultAccountId, "list_rule_changes", { before: null, limit: 50 });
+    this.noteRules(treasury.vaultAccountId, rules);
     const now = nowNs();
     const queued = rules.filter((rule) => rule.state === "Queued" && now <= BigInt(rule.expires_at_ns));
     const ready = queued
@@ -1648,6 +1658,8 @@ export class OmniRolesService {
         console.warn(`rule ${Object.keys(rule.change ?? {})[0] ?? "change"} on ${treasury.vaultAccountId} not applied yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
       }
     }
+    // A rule the keeper just applied may change what the vault pays or runs: read it again.
+    if (hashes.length) this.ruleFacts.delete(treasury.vaultAccountId);
     const dao = await this.startDaoTransactions(organizationId, treasury);
     hashes.push(...dao.hashes);
     const orders = await this.runStandingOrders(treasury.vaultAccountId);
@@ -1665,13 +1677,32 @@ export class OmniRolesService {
     return { hashes, nextDueMs };
   }
 
+  /** The rule list moved (a rule queued, applied, vetoed): forget what rules decide. */
+  private noteRules(vaultAccountId: string, rules: QueuedRule[]): void {
+    const fingerprint = rules.map((rule) => `${hexOf(rule.queue_id)}:${rule.state}`).join(",");
+    if (this.ruleFacts.get(vaultAccountId)?.fingerprint !== fingerprint) this.ruleFacts.set(vaultAccountId, { fingerprint, values: new Map() });
+  }
+
+  /** A read that only a rule changes: from the last read while the rule list has not moved. */
+  private async ruleFact<T>(vaultAccountId: string, method: string, read: () => Promise<T>): Promise<T> {
+    const facts = this.ruleFacts.get(vaultAccountId) ?? { fingerprint: "", values: new Map() };
+    this.ruleFacts.set(vaultAccountId, facts);
+    const kept = facts.values.get(method);
+    if (kept && Date.now() - kept.readAt < RULE_FACTS_TTL_MS) return kept.value as T;
+    const value = await read();
+    facts.values.set(method, { value, readAt: Date.now() });
+    return value;
+  }
+
   /**
    * Payroll and other standing orders the members voted: run the one that is due (anyone may; the
    * vault pays exactly the voted beneficiary and amount). One at a time: a vault has one euro payout
    * in flight, so the next waits for the enclave's answer.
    */
   private async runStandingOrders(vaultAccountId: string): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
-    const orders = await this.near.viewFunction<Array<{ id: number; next_at_ns: string; runs?: number }>>(vaultAccountId, "list_standing_orders", {}).catch(() => null);
+    type Order = { id: number; next_at_ns: string; runs?: number };
+    // Kept between passes: an order changes only by a vote or by being run (then read again).
+    const orders = await this.ruleFact<Order[] | null>(vaultAccountId, "list_standing_orders", () => this.near.viewFunction<Order[]>(vaultAccountId, "list_standing_orders", {}).catch(() => null));
     if (!orders?.length) return { hashes: [], nextDueNs: [] };
     const now = nowNs();
     const later = orders.filter((order) => BigInt(order.next_at_ns) > now).map((order) => BigInt(order.next_at_ns));
@@ -1693,6 +1724,7 @@ export class OmniRolesService {
     if (!runnable) return { hashes: [], nextDueNs: [...waits, ...later] };
     try {
       const hash = await this.near.callFunction(vaultAccountId, "run_standing_order", { id: runnable.id }, "250000000000000", "0");
+      this.ruleFacts.get(vaultAccountId)?.values.delete("list_standing_orders");
       console.log(JSON.stringify({ event: "omniroles.standing_order_run", vaultAccountId, id: runnable.id, hash }));
       return { hashes: [hash], nextDueNs: [now + BUSY_RECHECK_NS, ...waits, ...later] };
     } catch (error) {
@@ -1708,9 +1740,13 @@ export class OmniRolesService {
    * as an ordinary rule: this job applies it once the veto window is over, like any vote.
    */
   private async followBankSigner(vaultAccountId: string): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
-    const source = await this.near.viewFunction<{ project: string; follow: boolean; last_queued: string | null } | null>(vaultAccountId, "get_bank_signer_source", {}).catch(() => null);
+    type Source = { project: string; follow: boolean; last_queued: string | null } | null;
+    const source = await this.ruleFact<Source>(vaultAccountId, "get_bank_signer_source", () => this.near.viewFunction<Source>(vaultAccountId, "get_bank_signer_source", {}).catch(() => null));
     if (!source?.follow) return { hashes: [], nextDueNs: [] };
     const recheck = nowNs() + FOLLOW_RECHECK_NS;
+    // The project's versions change rarely (a release): look once an hour.
+    if (Date.now() - (this.followCheckedAt.get(vaultAccountId) ?? 0) < Number(FOLLOW_RECHECK_NS / 1_000_000n)) return { hashes: [], nextDueNs: [] };
+    this.followCheckedAt.set(vaultAccountId, Date.now());
     const config = await this.near.viewFunction<{ outlayer_id: string; signer_hash: string } | null>(vaultAccountId, "get_bank_config", {}).catch(() => null);
     const project = config ? await this.near.viewFunction<{ active_version?: string } | null>(config.outlayer_id, "get_project", { project_id: source.project }).catch(() => null) : null;
     const active = project?.active_version?.toLowerCase();
@@ -1718,6 +1754,7 @@ export class OmniRolesService {
     try {
       const hash = await this.near.callFunction(vaultAccountId, "follow_bank_signer", {}, "80000000000000", "0");
       console.log(JSON.stringify({ event: "omniroles.bank_signer_followed", vaultAccountId, version: active, hash }));
+      this.ruleFacts.delete(vaultAccountId);
       return { hashes: [hash], nextDueNs: [nowNs() + BUSY_RECHECK_NS] };
     } catch (error) {
       console.warn(`bank signer of ${vaultAccountId} not followed yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
@@ -2504,6 +2541,7 @@ export class OmniRolesService {
     for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
     // The vote may have queued a rule: read the vault on the next pass, once the blocks are final.
     this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
+    this.ruleFacts.delete(treasury.vaultAccountId);
   }
 
   private forget(accountId: string): void {

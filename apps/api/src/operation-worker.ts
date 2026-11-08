@@ -8,6 +8,12 @@ import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
+
+/** How often the worker looks in every vault for operations an agent left signed. */
+const DISCOVER_EVERY_MS = 10 * 60_000;
+/** How long a vault without a wallet on a chain is not asked again. */
+const NO_WALLET_RECHECK_MS = 60 * 60_000;
+
 const ACTIVE_STATES = [
   "Prepared",
   "Queued",
@@ -352,6 +358,7 @@ export class OperationWorker {
   }
 
   private lastDiscoveryAt = Number.NEGATIVE_INFINITY;
+  private readonly noWalletUntil = new Map<string, number>();
 
   /**
    * Agents sign through the vault themselves; nothing guarantees they come back to settle. An
@@ -363,14 +370,20 @@ export class OperationWorker {
   private async discover(now: Date): Promise<number> {
     const { listVaults, tracked, adopt } = this.store;
     if (!listVaults || !tracked || !adopt) return 0;
-    if (now.getTime() - this.lastDiscoveryAt < (this.config.discoverIntervalMs ?? 60_000)) return 0;
+    // An abandoned operation waits minutes anyway (the agent left it): every 10 minutes is enough,
+    // and keeps the RPC quota for the work that is due.
+    if (now.getTime() - this.lastDiscoveryAt < (this.config.discoverIntervalMs ?? DISCOVER_EVERY_MS)) return 0;
     this.lastDiscoveryAt = now.getTime();
     let adopted = 0;
     for (const vault of await listVaults.call(this.store)) {
       try {
         const chainIds = [...new Set([...vault.chainIds, ...Object.keys(this.chains).map(Number)])];
         for (const chainId of chainIds) {
+          // A vault without a wallet on a chain: asked again once an hour, not on every round.
+          const walletKey = `${vault.vaultAccountId}:${chainId}`;
+          if ((this.noWalletUntil.get(walletKey) ?? 0) > now.getTime()) continue;
           const wallet = await this.near.viewFunction<{ in_flight?: number[][] } | null>(vault.vaultAccountId, "get_wallet", { chain_id: chainId });
+          if (!wallet) this.noWalletUntil.set(walletKey, now.getTime() + NO_WALLET_RECHECK_MS);
           const ids = (wallet?.in_flight ?? []).map((id) => bytesToHex(Uint8Array.from(id)));
           if (!ids.length) continue;
           const known = await tracked.call(this.store, vault.organizationId, ids);

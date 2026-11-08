@@ -153,7 +153,8 @@ if (rob) {
   void rob.start().then(() => console.log("Rob the Agent: shared keys on Ruggy's account")).catch((error: unknown) => console.error("Rob the Agent could not start:", error));
   setInterval(() => void rob.maintain().catch((error: unknown) => console.warn(`rob maintenance: ${String(error)}`)), 10 * 60_000).unref();
   // The council bot: nothing the game queues may outlive its veto window.
-  setInterval(() => void rob.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`)), 20_000).unref();
+  // Rob's vault vetoes within 60 s: a sweep every 30 s gives every rule two chances.
+  setInterval(() => void rob.sweep().catch((error: unknown) => console.warn(`rob council sweep: ${String(error)}`)), 30_000).unref();
   // Rug O'Clock: on the hour, Ruggy (a real LLM) reads the most voted invoice; off without an LLM.
   scheduleRugOClock(attachRugOClock(rob, { store: prisma, llm: rugOClockLlm(env) }));
 }
