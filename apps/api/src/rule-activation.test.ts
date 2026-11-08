@@ -21,6 +21,8 @@ function world(now: { ms: number }) {
     "idle.nomos.testnet": [],
   };
   const reads: string[] = [];
+  const calls: string[] = [];
+  const banks = new Set<string>();
   const executed: string[] = [];
   const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
   const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
@@ -30,10 +32,11 @@ function world(now: { ms: number }) {
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
+      calls.push(`${account}:${method}`);
       if (method === "list_dao_transactions") return [];
       if (method === "list_standing_orders") return standing[account] ?? [];
       if (method === "get_bank_signer_source") return follow[account] ?? null;
-      if (method === "get_bank_config") return follow[account] ? { outlayer_id: "outlayer.testnet", signer_hash: "ab".repeat(32) } : null;
+      if (method === "get_bank_config") return follow[account] || banks.has(account) ? { outlayer_id: "outlayer.testnet", signer_hash: "ab".repeat(32) } : null;
       if (method === "get_project") return { project_id: "ops.testnet/bank-signer", active_version: active.version };
       if (method === "count_bank_payouts") return (payouts[account] ?? []).length;
       if (method === "list_bank_payouts") return payouts[account] ?? [];
@@ -59,7 +62,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts, follow, active };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -81,8 +84,12 @@ describe("rule activation job", () => {
     expect(await service.activateAllReadyRules()).toEqual({ checked: 0, skipped: false });
     expect(reads).toEqual([]);
 
-    // After a minute, the idle vaults are read again; the broken one waits longer.
-    vi.setSystemTime(now.ms + 61_000);
+    // After five minutes, the idle vaults are read again; the broken one waits longer.
+    vi.setSystemTime(now.ms + 100_000);
+    reads.length = 0;
+    await service.activateAllReadyRules();
+    expect(reads).toEqual([]); // not before the next known date (2 minutes) or five idle minutes
+    vi.setSystemTime(now.ms + 301_000);
     await service.activateAllReadyRules();
     expect(reads.sort()).toEqual(["idle.nomos.testnet", "later.nomos.testnet", "ready.nomos.testnet"]);
   });
@@ -147,14 +154,51 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(asked()).toBe(0); // the vault already runs the active version
     active.version = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 3 * 60_000);
+    vi.setSystemTime(now.ms + 30 * 60_000);
+    await service.activateAllReadyRules();
+    expect(asked()).toBe(0); // the project is looked at once an hour
+    vi.setSystemTime(now.ms + 61 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
     // Queued (or vetoed) already: not asked again.
     follow[vault]!.last_queued = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 6 * 60_000);
+    vi.setSystemTime(now.ms + 122 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
+  });
+
+  it("reads what only a vote changes once, until the vault's rules move", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls, standing, rules } = world(now);
+    const vault = "idle.nomos.testnet";
+    standing[vault] = [{ id: 1, next_at_ns: ns(now.ms + 30 * 86_400_000), runs: 0 }];
+    const orderReads = () => calls.filter((call) => call === `${vault}:list_standing_orders`).length;
+    for (const minutes of [0, 6, 12, 18]) {
+      vi.setSystemTime(now.ms + minutes * 60_000);
+      await service.activateAllReadyRules();
+    }
+    expect(orderReads()).toBe(1);
+    // A rule queued (or applied): read again.
+    rules[vault] = [{ queue_id: [9], change: { AddStandingOrder: {} }, state: "Queued", execute_after_ns: ns(now.ms + 86_400_000), expires_at_ns: ns(now.ms + 2 * 86_400_000) }];
+    vi.setSystemTime(now.ms + 24 * 60_000);
+    await service.activateAllReadyRules();
+    expect(orderReads()).toBe(2);
+  });
+
+  it("reads a vault that pays IBANs every minute, so an agent's payout transfer starts at once", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls, banks } = world(now);
+    banks.add("idle.nomos.testnet");
+    const passes = (vault: string) => calls.filter((call) => call === `${vault}:list_dao_transactions`).length;
+    await service.activateAllReadyRules();
+    vi.setSystemTime(now.ms + 75_000);
+    await service.activateAllReadyRules();
+    expect(passes("idle.nomos.testnet")).toBe(2);
+    expect(passes("later.nomos.testnet")).toBe(1); // no bank: waits for its own date
   });
 
   it("never runs two passes at once", async () => {
