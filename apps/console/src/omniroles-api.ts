@@ -133,7 +133,8 @@ export type ActivityItem = {
   request?: { chainId: number; to: string; data: string; value: string } | null;
 };
 
-export type Activity = { operations: OnchainOperation[]; integrity: WalletIntegrity[]; requests: ActivityItem[] };
+/** `chainIndex`: "unavailable" when the agents' direct operations could not be read this time. */
+export type Activity = { operations: OnchainOperation[]; integrity: WalletIntegrity[]; requests: ActivityItem[]; chainIndex?: "complete" | "unavailable" | "off" };
 
 export type SharesEpoch = { near: string; token: string; voted_shares: string };
 
