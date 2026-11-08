@@ -55,17 +55,42 @@ export function extractMpcSignatures(status: NearTransactionStatus): MpcSignatur
   return signatures;
 }
 
+/** How long the primary endpoint is set aside after it refuses for its quota or rate. */
+const PRIMARY_REST_MS = 10 * 60_000;
+
 export class NearClient {
   private readonly accountPromise: Promise<Account>;
+  private readonly fallbackAccountPromise: Promise<Account> | null;
   private readonly limiter: RpcLimiter;
+  /** Until when the primary endpoint is set aside (its quota is spent or it rate-limits us). */
+  private primaryRestingUntil = 0;
 
-  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY"> & Partial<Pick<Env, "NEAR_RPC_CONCURRENCY" | "NEAR_RPC_MIN_INTERVAL_MS">>) {
-    this.accountPromise = this.createRelayerAccount();
+  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY"> & Partial<Pick<Env, "NEAR_RPC_CONCURRENCY" | "NEAR_RPC_MIN_INTERVAL_MS" | "NEAR_RPC_FALLBACK_URL">>) {
+    this.accountPromise = this.createRelayerAccount(env.NEAR_RPC_URL);
+    this.fallbackAccountPromise = env.NEAR_RPC_FALLBACK_URL ? this.createRelayerAccount(env.NEAR_RPC_FALLBACK_URL) : null;
     // Several calls at once, paced, and screens before the background job (it used to be one call per 500 ms for everything).
     this.limiter = new RpcLimiter(env.NEAR_RPC_CONCURRENCY ?? 3, env.NEAR_RPC_MIN_INTERVAL_MS ?? 150);
   }
 
-  private async createRelayerAccount(): Promise<Account> {
+  /** The endpoint to use now: the primary, or the fallback while the primary rests. */
+  private rpcUrl(): string {
+    return this.env.NEAR_RPC_FALLBACK_URL && Date.now() < this.primaryRestingUntil ? this.env.NEAR_RPC_FALLBACK_URL : this.env.NEAR_RPC_URL;
+  }
+
+  /** The relayer account on the endpoint in use (transactions follow the same switch as reads). */
+  private account(): Promise<Account> {
+    return this.fallbackAccountPromise && this.rpcUrl() !== this.env.NEAR_RPC_URL ? this.fallbackAccountPromise : this.accountPromise;
+  }
+
+  /** The primary answered "too many requests" or "quota spent": use the fallback for a while. */
+  private restPrimary(reason: string): boolean {
+    if (!this.env.NEAR_RPC_FALLBACK_URL || this.rpcUrl() !== this.env.NEAR_RPC_URL) return false;
+    this.primaryRestingUntil = Date.now() + PRIMARY_REST_MS;
+    console.warn(JSON.stringify({ event: "near.rpc_fallback", reason, minutes: PRIMARY_REST_MS / 60_000 }));
+    return true;
+  }
+
+  private async createRelayerAccount(nodeUrl: string): Promise<Account> {
     const keyStore = new keyStores.InMemoryKeyStore();
     await keyStore.setKey(
       this.env.NEAR_NETWORK_ID,
@@ -74,7 +99,7 @@ export class NearClient {
     );
     const near = new Near({
       networkId: this.env.NEAR_NETWORK_ID,
-      nodeUrl: this.env.NEAR_RPC_URL,
+      nodeUrl,
       keyStore,
     });
     return near.account(this.env.NEAR_RELAYER_ACCOUNT_ID);
@@ -83,12 +108,14 @@ export class NearClient {
   private async requestRpc<T>(method: string, params: unknown): Promise<T> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
-        const response = await fetch(this.env.NEAR_RPC_URL, {
+        const response = await fetch(this.rpcUrl(), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos", method, params }),
           signal: AbortSignal.timeout(15_000),
         });
+        // A spent daily quota will not come back with a retry: switch to the fallback at once.
+        if (response.status === 429 && this.restPrimary("429")) continue;
         if (response.status === 429 && attempt < 4) {
           const retryAfter = Number(response.headers.get("retry-after"));
           // Some providers answer "Retry-After: 0": never retry faster than our own backoff.
@@ -101,6 +128,7 @@ export class NearClient {
         }
         if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
         const payload = (await response.json()) as RpcResponse<T>;
+        if (payload.error && /limit|quota/i.test(String((payload.error as { message?: unknown }).message ?? "")) && this.restPrimary("quota")) continue;
         if (payload.error) {
           throw new NearRpcApplicationError(
             `NEAR RPC ${payload.error.message}: ${JSON.stringify(payload.error.data ?? null)}`,
@@ -167,7 +195,7 @@ export class NearClient {
       gasTgas?: number;
     }>,
   ): Promise<string> {
-    const account = await this.accountPromise;
+    const account = await this.account();
     const mapped = actions.map((action) => {
       if (action.type === "CreateAccount") return transactions.createAccount();
       if (action.type === "Transfer") return transactions.transfer(BigInt(action.depositYocto ?? "0"));
@@ -186,7 +214,7 @@ export class NearClient {
   }
 
   async createSubaccount(accountId: string, publicKey: string, amountYocto: string): Promise<string> {
-    const account = await this.accountPromise;
+    const account = await this.account();
     await account.createAccount(accountId, publicKey, amountYocto);
     return accountId;
   }
@@ -199,7 +227,7 @@ export class NearClient {
     reserveYocto: string;
     allowanceYocto: null;
   }): Promise<string> {
-    const account = await this.accountPromise;
+    const account = await this.account();
     const outcome = await account.signAndSendTransaction({
       receiverId: input.accountId,
       actions: [
@@ -328,7 +356,7 @@ export class NearClient {
     gas: string,
     depositYocto: string,
   ): Promise<string> {
-    const account = await this.accountPromise;
+    const account = await this.account();
     const outcome = await account.functionCall({
       contractId,
       methodName,
@@ -345,7 +373,7 @@ export class NearClient {
     args: Record<string, unknown>,
     gas: string,
   ): Promise<string> {
-    const account = await this.accountPromise;
+    const account = await this.account();
     const outcome = await account.functionCall({
       contractId,
       methodName,

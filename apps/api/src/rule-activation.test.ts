@@ -147,12 +147,12 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(asked()).toBe(0); // the vault already runs the active version
     active.version = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 3 * 60_000);
+    vi.setSystemTime(now.ms + 11 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
     // Queued (or vetoed) already: not asked again.
     follow[vault]!.last_queued = "cd".repeat(32);
-    vi.setSystemTime(now.ms + 6 * 60_000);
+    vi.setSystemTime(now.ms + 22 * 60_000);
     await service.activateAllReadyRules();
     expect(asked()).toBe(1);
   });

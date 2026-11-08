@@ -61,4 +61,29 @@ describe("NearClient RPC throttling", () => {
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(peak).toBeLessThanOrEqual(2);
   });
+
+  it("moves to the fallback endpoint at once when the primary's quota is spent, and stays there a while", async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url === "https://private.example/key") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: "mandateos", error: { code: -32003, message: "daily request limit reached" } }), { status: 429 });
+      }
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "mandateos", result: { keys: [] } }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new NearClient({
+      NEAR_NETWORK_ID: "testnet",
+      NEAR_RPC_URL: "https://private.example/key",
+      NEAR_RPC_FALLBACK_URL: "https://public.example",
+      NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
+      NEAR_RELAYER_PRIVATE_KEY: KeyPair.fromRandom("ed25519").toString(),
+      NEAR_RPC_MIN_INTERVAL_MS: 0,
+    });
+    const started = Date.now();
+    await expect(client.getAccessKeys("account.testnet")).resolves.toEqual({ keys: [] });
+    expect(Date.now() - started).toBeLessThan(400); // no backoff spent on a quota that will not come back
+    await client.getAccessKeys("account.testnet");
+    expect(urls).toEqual(["https://private.example/key", "https://public.example", "https://public.example"]);
+  });
 });

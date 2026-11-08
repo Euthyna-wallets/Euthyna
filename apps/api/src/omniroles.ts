@@ -171,7 +171,9 @@ const STORAGE_PRICE_PER_BYTE = 10_000_000_000_000_000_000n;
 const STORAGE_LOW_YOCTO = 500_000_000_000_000_000_000_000n;
 const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 /** The activation job: how often an idle vault is read, how long after a veto window ends, and backoffs. */
-const IDLE_RECHECK_MS = 60_000;
+// Each idle read costs a few RPC calls per vault: every 3 minutes keeps a vault well inside a
+// daily quota; a member's vote in the console wakes its vault at once (`refresh`).
+const IDLE_RECHECK_MS = 180_000;
 const DUE_MARGIN_MS = 3_000;
 const ERROR_RECHECK_MS = 30_000;
 const BROKEN_RECHECK_MS = 15 * 60_000;
@@ -182,7 +184,7 @@ const STANDING_ORDER_ATTEMPTS = 3;
 /** Wait before trying a refused run again: 15 minutes, then 30. */
 const STANDING_ORDER_BACKOFF_NS = 15n * 60n * 1_000_000_000n;
 /** How often a vault that follows its enclave project looks for a new version. */
-const FOLLOW_RECHECK_NS = 2n * 60n * 1_000_000_000n;
+const FOLLOW_RECHECK_NS = 10n * 60n * 1_000_000_000n;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -2500,6 +2502,8 @@ export class OmniRolesService {
     };
     forget();
     for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
+    // The vote may have queued a rule: read the vault on the next pass, once the blocks are final.
+    this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
   }
 
   private forget(accountId: string): void {
