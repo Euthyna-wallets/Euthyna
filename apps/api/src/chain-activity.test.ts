@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { vaultLogs } from "./chain-activity.js";
+import { memoryLogStore, vaultLogs } from "./chain-activity.js";
 
 const VAULT = "acme.nomos.euthyna.testnet";
 const hash = (index: number) => `tx${String(index).padStart(4, "0")}`;
@@ -46,5 +46,14 @@ describe("vault activity from the chain", () => {
   it("throws when the index does not answer, so the screen can say the list is incomplete", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("slow down", { status: 429 })));
     await expect(vaultLogs("https://index.example", "third.nomos.euthyna.testnet")).rejects.toThrow(/HTTP 429/);
+  });
+
+  it("keeps an operation once found, even when the index no longer returns its transaction", async () => {
+    const store = memoryLogStore();
+    const { txs } = index(30, 5);
+    await vaultLogs("https://index.example", VAULT, store);
+    txs.splice(0, txs.length, { transaction_hash: "only-new", tx_block_timestamp: String(4_000_000n * 1_000_000_000n), tx_block_height: 2_000_000 });
+    const logs = await vaultLogs("https://index.example", VAULT, store);
+    expect(logs.map((log) => log.txHash)).toEqual([hash(5)]);
   });
 });

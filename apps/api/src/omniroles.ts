@@ -63,7 +63,7 @@ import {
 import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import bs58 from "bs58";
 import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@euthyna/sdk";
-import { vaultLogs } from "./chain-activity.js";
+import { vaultLogs, type VaultLog, type VaultLogStore } from "./chain-activity.js";
 import { usdPrices, usdValue } from "./prices.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 
@@ -2348,12 +2348,14 @@ export class OmniRolesService {
     // the vault's own logs, read from the chain, are the record.
     const seen = new Set(operations.map((item) => item.opId.toLowerCase()));
     // If the index does not answer, say so: an empty list would read as "the agents did nothing".
+    // What was found before is in the database: an index that does not answer only delays the newest.
     let chainIndex: "complete" | "unavailable" | "off" = this.config.txIndexerUrl ? "complete" : "off";
+    const store = this.vaultLogStore();
     const logs = this.config.txIndexerUrl
-      ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId)).catch((error: unknown) => {
+      ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId, store)).catch(async (error: unknown) => {
         chainIndex = "unavailable";
         console.warn(JSON.stringify({ event: "omniroles.activity_index_unavailable", vaultAccountId: treasury.vaultAccountId, error: String(error).slice(0, 200) }));
-        return [];
+        return store.list(treasury.vaultAccountId).catch(() => [] as VaultLog[]);
       })
       : [];
     // A euro payout is one row: its EURC transfer to the partner is part of it, not a second line.
@@ -2607,6 +2609,26 @@ export class OmniRolesService {
 
   private async treasury(organizationId: string) {
     return this.prisma.treasury.findUnique({ where: { organizationId_environment: { organizationId, environment: "uat" } } });
+  }
+
+  /** The vault operations found in the chain's logs, kept in the database (see VaultOperationLog). */
+  private vaultLogStore(): VaultLogStore {
+    const prisma = this.prisma;
+    return {
+      readTxs: async (vaultAccountId) => new Set((await prisma.vaultTxRead.findMany({ where: { vaultAccountId }, select: { txHash: true } })).map((row) => row.txHash)),
+      save: async (vaultAccountId, txHashes, logs) => {
+        if (logs.length) {
+          await prisma.vaultOperationLog.createMany({
+            data: logs.map((log) => ({ vaultAccountId, opId: log.opId, kind: log.kind, txHash: log.txHash, at: new Date(log.at) })),
+            skipDuplicates: true,
+          });
+        }
+        // After the operations: a transaction marked read always has its operations kept.
+        if (txHashes.length) await prisma.vaultTxRead.createMany({ data: txHashes.map((txHash) => ({ vaultAccountId, txHash })), skipDuplicates: true });
+      },
+      list: async (vaultAccountId) => (await prisma.vaultOperationLog.findMany({ where: { vaultAccountId }, orderBy: { at: "desc" } }))
+        .map((row) => ({ kind: row.kind as VaultLog["kind"], opId: row.opId as `0x${string}`, txHash: row.txHash, at: row.at.toISOString() })),
+    };
   }
 
   private async requireTreasury(organizationId: string) {

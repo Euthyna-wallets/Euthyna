@@ -33,13 +33,35 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 }
 
 /**
- * A transaction's logs never change: each one is read from the index once, then kept here. So
- * every call can scan the vault's whole history and only pays for the transactions it has not
- * seen yet (the keeper's own calls fill a vault's history quickly; a window of the last N would
- * push an agent's operations out of view).
+ * Where what was read is kept. A transaction's logs never change: each transaction is read from the
+ * index once, and every operation found is kept for good (the database in the server, so a restart
+ * or a slow index hides nothing already found).
  */
-const logsByTx = new Map<string, VaultLog[]>();
-const MAX_KEPT_TXS = 50_000;
+export interface VaultLogStore {
+  readTxs(vaultAccountId: string): Promise<Set<string>>;
+  save(vaultAccountId: string, txHashes: string[], logs: VaultLog[]): Promise<void>;
+  list(vaultAccountId: string): Promise<VaultLog[]>;
+}
+
+/** In memory (tests, or a server without a database). */
+export function memoryLogStore(): VaultLogStore {
+  const txs = new Map<string, Set<string>>();
+  const ops = new Map<string, Map<string, VaultLog>>();
+  return {
+    readTxs: async (vault) => new Set(txs.get(vault) ?? []),
+    save: async (vault, hashes, logs) => {
+      const read = txs.get(vault) ?? new Set<string>();
+      for (const hash of hashes) read.add(hash);
+      txs.set(vault, read);
+      const known = ops.get(vault) ?? new Map<string, VaultLog>();
+      for (const log of logs) if (!known.has(log.opId)) known.set(log.opId, log);
+      ops.set(vault, known);
+    },
+    list: async (vault) => [...(ops.get(vault)?.values() ?? [])].sort((a, b) => b.at.localeCompare(a.at)),
+  };
+}
+
+const defaultStore = memoryLogStore();
 const MAX_PAGES = 20;
 
 /** Every transaction of the account, newest first (the index pages by block height). */
@@ -59,43 +81,39 @@ async function accountTxs(base: string, accountId: string): Promise<AccountTx[]>
 }
 
 /**
- * The vault's operations, newest first, from its whole history. Throws when the index does not
- * answer: the caller says the list is incomplete instead of showing a shorter one.
+ * The vault's operations, newest first, from its whole history: those already kept, plus what the
+ * index holds in transactions not read yet. Throws when the index does not answer: the caller still
+ * has `store.list` and says the newest may be missing.
  */
-export async function vaultLogs(indexerUrl: string, vaultAccountId: string): Promise<VaultLog[]> {
+export async function vaultLogs(indexerUrl: string, vaultAccountId: string, store: VaultLogStore = defaultStore): Promise<VaultLog[]> {
   const base = indexerUrl.replace(/\/$/, "");
   const txs = await accountTxs(base, vaultAccountId);
   const when = new Map(txs.map((tx) => [tx.transaction_hash, new Date(Number(BigInt(tx.tx_block_timestamp) / 1_000_000n)).toISOString()]));
-  const unread = txs.map((tx) => tx.transaction_hash).filter((hash) => !logsByTx.has(`${vaultAccountId}:${hash}`));
+  const already = await store.readTxs(vaultAccountId);
+  // Oldest first: an operation keeps the transaction that announced it.
+  const unread = txs.map((tx) => tx.transaction_hash).filter((hash) => !already.has(hash)).reverse();
   for (let index = 0; index < unread.length; index += 20) {
     const chunk = unread.slice(index, index + 20);
     const { transactions } = await post<{ transactions: Array<IndexedTx | null> }>(`${base}/v0/transactions`, { tx_hashes: chunk });
-    const read = new Map<string, VaultLog[]>();
-    for (const tx of transactions) {
-      if (!tx) continue;
-      const logs: VaultLog[] = [];
+    const read: string[] = [];
+    const logs: VaultLog[] = [];
+    const byHash = new Map(transactions.filter((tx): tx is IndexedTx => Boolean(tx)).map((tx) => [tx.transaction.hash, tx]));
+    for (const hash of chunk) {
+      const tx = byHash.get(hash);
+      if (!tx) continue; // not indexed yet: asked again next time
+      read.push(hash);
       for (const receipt of tx.receipts ?? []) {
         const executor = receipt.execution_outcome?.outcome?.executor_id ?? receipt.receipt?.receiver_id;
         if (executor !== vaultAccountId) continue; // only the vault's own logs count
         for (const log of receipt.execution_outcome?.outcome?.logs ?? []) {
           for (const [kind, pattern] of PATTERNS) {
             const match = log.match(pattern);
-            if (match) logs.push({ kind, opId: `0x${match[1]!}`, txHash: tx.transaction.hash, at: "" });
+            if (match) logs.push({ kind, opId: `0x${match[1]!}`, txHash: hash, at: when.get(hash) ?? new Date(0).toISOString() });
           }
         }
       }
-      read.set(tx.transaction.hash, logs);
     }
-    // A transaction the index does not have yet is asked again next time.
-    for (const hash of chunk) if (read.has(hash)) logsByTx.set(`${vaultAccountId}:${hash}`, read.get(hash)!);
-    if (logsByTx.size > MAX_KEPT_TXS) logsByTx.clear();
+    await store.save(vaultAccountId, read, logs);
   }
-  const found = new Map<string, VaultLog>();
-  // Oldest first, so an operation keeps the transaction that announced it.
-  for (const tx of [...txs].reverse()) {
-    for (const log of logsByTx.get(`${vaultAccountId}:${tx.transaction_hash}`) ?? []) {
-      if (!found.has(log.opId.slice(2))) found.set(log.opId.slice(2), { ...log, at: when.get(tx.transaction_hash) ?? new Date(0).toISOString() });
-    }
-  }
-  return [...found.values()].sort((a, b) => b.at.localeCompare(a.at));
+  return store.list(vaultAccountId);
 }

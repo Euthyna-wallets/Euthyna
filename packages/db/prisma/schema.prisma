@@ -767,3 +767,30 @@ model Invoice {
   @@index([organizationId, createdAt])
   @@map("invoice")
 }
+
+/// Operations agents signed directly on a vault (MCP + signer: they never go through the API),
+/// found in the vault's logs through the chain index. Kept for good: a slow or missing index, or
+/// a vault whose history grows, never hides an operation already found.
+model VaultOperationLog {
+  vaultAccountId String
+  /// 0x + 64 hex
+  opId           String
+  /// evm | dao | solana | near | bank
+  kind           String
+  txHash         String
+  at             DateTime
+  createdAt      DateTime @default(now())
+
+  @@id([vaultAccountId, opId])
+  @@index([vaultAccountId, at])
+}
+
+/// Transactions of a vault already read from the chain index: their logs never change, so each is
+/// read once, across restarts.
+model VaultTxRead {
+  vaultAccountId String
+  txHash         String
+  readAt         DateTime @default(now())
+
+  @@id([vaultAccountId, txHash])
+}
