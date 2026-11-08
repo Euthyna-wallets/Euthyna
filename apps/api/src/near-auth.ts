@@ -82,7 +82,14 @@ export function nearSignIn(options: NearSignInOptions) {
           valid = false;
         }
         if (!valid) throw APIError.fromStatus("UNAUTHORIZED", { message: "invalid NEP-413 signature" });
-        if (!await options.isFullAccessKey(accountId, publicKey)) {
+        let fullAccess: boolean;
+        try {
+          fullAccess = await options.isFullAccessKey(accountId, publicKey);
+        } catch {
+          // The chain did not answer: say so, rather than blame the user's key.
+          throw APIError.fromStatus("SERVICE_UNAVAILABLE", { message: "NEAR did not answer in time: sign in again in a few seconds." });
+        }
+        if (!fullAccess) {
           if (options.accountExists && !await options.accountExists(accountId)) {
             throw APIError.fromStatus("UNAUTHORIZED", {
               message: `${accountId} does not exist on NEAR yet. Create an account in a NEAR wallet, or send this one 0.1 NEAR to activate it.`,

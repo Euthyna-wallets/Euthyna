@@ -9,7 +9,9 @@ from the browser; the Euthyna API is not involved.
 | `/c/<dao>` | `get_company` on the registry; the vault's access keys and wallets; the treasury: NEAR in the DAO, ETH, USDC and wNEAR in the company wallets on Base and Ethereum, valued at CoinGecko market prices; revenue paid to voters from `info` of the shares contract |
 
 The registry is `VITE_MANDATEOS_REGISTRY_ID` (default `atlantis-registry.testnet`)
-and the RPC is `VITE_NEAR_RPC_URL`.
+and the RPC is `VITE_NEAR_RPC_URL`, set from `PUBLIC_NEAR_RPC_URL` in Docker Compose: it is
+built into the page, so it is always a public endpoint. The server's own `NEAR_RPC_URL`
+(possibly a private endpoint with its key) never reaches the browser.
 
 The illustrations in `apps/console/public/landing/` are original isometric
 scenes made for Euthyna.

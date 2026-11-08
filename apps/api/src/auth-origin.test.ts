@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
+
+import { serializeNep413 } from "@near-wallet-selector/core";
 import { getTestInstance } from "better-auth/test";
+import { KeyPair } from "near-api-js";
 import { describe, expect, it } from "vitest";
 
 import { buildAuthOptions, type AuthEnvironment } from "./auth.js";
@@ -36,5 +40,22 @@ describe("console authentication", () => {
     const context = await auth.$context;
     expect(context.trustedOrigins).toContain("http://console.example.com");
     expect(context.trustedOrigins).not.toContain("http://evil.example.com");
+  });
+
+  it("says NEAR is not answering, instead of blaming the key, when the key check fails", async () => {
+    const down = { recipient: "console.example.com", isFullAccessKey: async () => { throw new Error("NEAR RPC HTTP 429"); } };
+    const { auth } = await getTestInstance({ ...buildAuthOptions(authEnv, undefined, down), emailAndPassword: { enabled: true } }, { port: 3001 });
+    const headers = { "content-type": "application/json", origin: authEnv.CONSOLE_ORIGIN };
+    const challenge = (await (await auth.handler(new Request(`${authEnv.BETTER_AUTH_URL}/api/auth/near/challenge`, {
+      method: "POST", headers, body: JSON.stringify({ accountId: "alice.testnet" }),
+    }))).json()) as { message: string; recipient: string; nonceBase64: string };
+    const key = KeyPair.fromRandom("ed25519");
+    const digest = createHash("sha256").update(serializeNep413({ message: challenge.message, recipient: challenge.recipient, nonce: Buffer.from(challenge.nonceBase64, "base64") })).digest();
+    const response = await auth.handler(new Request(`${authEnv.BETTER_AUTH_URL}/api/auth/sign-in/near`, {
+      method: "POST", headers,
+      body: JSON.stringify({ accountId: "alice.testnet", publicKey: key.getPublicKey().toString(), signature: Buffer.from(key.sign(digest).signature).toString("base64"), nonceBase64: challenge.nonceBase64 }),
+    }));
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { message: string }).message).toMatch(/NEAR did not answer/);
   });
 });
