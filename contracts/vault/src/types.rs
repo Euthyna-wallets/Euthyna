@@ -442,6 +442,15 @@ pub enum RuleChange {
     RemoveStandingOrder {
         id: u32,
     },
+    /// Where the enclave's code comes from: an OutLayer project ("owner/name") whose secrets
+    /// follow its versions, the vault running exactly its voted `signer_hash` of it. `follow`:
+    /// the project's active version is queued as a `SetBankConfig` rule by anyone
+    /// (`follow_bank_signer`), so it applies after the vault's rule delay unless the council
+    /// vetoes it. `project: None` returns to the code URL of `SetBankConfig`.
+    SetBankSignerSource {
+        project: Option<String>,
+        follow: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

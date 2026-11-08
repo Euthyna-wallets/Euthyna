@@ -104,6 +104,8 @@ export interface BankSignerDeployment {
   secretsProfile: string;
   /** The enclave's X25519 key (hex), from its `pubkey` output: beneficiaries are sealed to it. */
   boxKey: string;
+  /** The enclave's OutLayer project ("owner/name"): its secrets follow its versions, so a vault can follow them. */
+  project?: string | undefined;
 }
 
 /** Fees of the EURC transfer on Base Sepolia (caps; the DAO gas policy bounds them). */
@@ -179,6 +181,8 @@ const BUSY_RECHECK_NS = 20_000_000_000n;
 const STANDING_ORDER_ATTEMPTS = 3;
 /** Wait before trying a refused run again: 15 minutes, then 30. */
 const STANDING_ORDER_BACKOFF_NS = 15n * 60n * 1_000_000_000n;
+/** How often a vault that follows its enclave project looks for a new version. */
+const FOLLOW_RECHECK_NS = 2n * 60n * 1_000_000_000n;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -1646,11 +1650,14 @@ export class OmniRolesService {
     hashes.push(...dao.hashes);
     const orders = await this.runStandingOrders(treasury.vaultAccountId);
     hashes.push(...orders.hashes);
+    const follow = await this.followBankSigner(treasury.vaultAccountId);
+    hashes.push(...follow.hashes);
     if (hashes.length) this.forget(treasury.vaultAccountId);
     const waitingNs = [
       ...queued.filter((rule) => BigInt(rule.execute_after_ns) > now).map((rule) => BigInt(rule.execute_after_ns)),
       ...dao.nextDueNs,
       ...orders.nextDueNs,
+      ...follow.nextDueNs,
     ];
     const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
     return { hashes, nextDueMs };
@@ -1690,6 +1697,29 @@ export class OmniRolesService {
       // Another payout in flight (ERR_BANK_PAYOUT_PENDING) or the bank not set up yet: next round.
       console.warn(`standing order ${runnable.id} on ${vaultAccountId} not run yet: ${String(error).match(/ERR_[A-Z_]+|BeneficiaryNotAllowed/)?.[0] ?? String(error).slice(0, 120)}`);
       return { hashes: [], nextDueNs: [now + BUSY_RECHECK_NS, ...waits, ...later] };
+    }
+  }
+
+  /**
+   * A vault that follows its enclave project: when the project's active version is new to the
+   * vault, ask the vault to queue it (`follow_bank_signer`, open to anyone). The vault queues it
+   * as an ordinary rule: this job applies it once the veto window is over, like any vote.
+   */
+  private async followBankSigner(vaultAccountId: string): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
+    const source = await this.near.viewFunction<{ project: string; follow: boolean; last_queued: string | null } | null>(vaultAccountId, "get_bank_signer_source", {}).catch(() => null);
+    if (!source?.follow) return { hashes: [], nextDueNs: [] };
+    const recheck = nowNs() + FOLLOW_RECHECK_NS;
+    const config = await this.near.viewFunction<{ outlayer_id: string; signer_hash: string } | null>(vaultAccountId, "get_bank_config", {}).catch(() => null);
+    const project = config ? await this.near.viewFunction<{ active_version?: string } | null>(config.outlayer_id, "get_project", { project_id: source.project }).catch(() => null) : null;
+    const active = project?.active_version?.toLowerCase();
+    if (!config || !active || active === config.signer_hash.toLowerCase() || active === source.last_queued) return { hashes: [], nextDueNs: [recheck] };
+    try {
+      const hash = await this.near.callFunction(vaultAccountId, "follow_bank_signer", {}, "80000000000000", "0");
+      console.log(JSON.stringify({ event: "omniroles.bank_signer_followed", vaultAccountId, version: active, hash }));
+      return { hashes: [hash], nextDueNs: [nowNs() + BUSY_RECHECK_NS] };
+    } catch (error) {
+      console.warn(`bank signer of ${vaultAccountId} not followed yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
+      return { hashes: [], nextDueNs: [recheck] };
     }
   }
 
@@ -1831,7 +1861,7 @@ export class OmniRolesService {
     });
     if (config === undefined) return { supported: false as const, deployable: Boolean(this.config.bankSigner), config: null, boxKey: null, readers: [], beneficiaries: [], roles: [], payouts: [] };
     const account = await this.prisma.bankAccount.findFirst({ where: { organizationId, provider: "noah" } });
-    const [beneficiaries, count, rolesView, boxKey, readers] = await Promise.all([
+    const [beneficiaries, count, rolesView, boxKey, readers, signerSource] = await Promise.all([
       this.view<SealedBeneficiary[]>(vault, "list_bank_beneficiaries").catch(() => [] as SealedBeneficiary[]),
       this.view<number>(vault, "count_bank_payouts"),
       this.roles(organizationId),
@@ -1840,6 +1870,7 @@ export class OmniRolesService {
       this.config.sealedOrdersId
         ? this.view<Array<{ account: string; public_key: string }>>(this.config.sealedOrdersId, "readers", { vault }).catch(() => [])
         : Promise.resolve([] as Array<{ account: string; public_key: string }>),
+      this.view<{ project: string; follow: boolean; last_queued: string | null } | null>(vault, "get_bank_signer_source").catch(() => null),
     ]);
     const payouts = count ? await this.view<BankPayout[]>(vault, "list_bank_payouts", { from_index: Math.max(0, count - 50), limit: 50 }) : [];
     const agents = await this.prisma.agent.findMany({ where: { organizationId } });
@@ -1856,7 +1887,12 @@ export class OmniRolesService {
     return {
       supported: true as const,
       deployable: Boolean(this.config.bankSigner),
-      config: config ? { ...config, token: hexOf(config.token), configured: this.config.bankSigner ? config.signer_hash === this.config.bankSigner.signerHash : null } : null,
+      // A vault that follows its enclave project is never "outdated": new versions come by themselves.
+      config: config ? { ...config, token: hexOf(config.token), configured: signerSource?.follow ? true : this.config.bankSigner ? config.signer_hash === this.config.bankSigner.signerHash : null } : null,
+      signerSource: signerSource
+        ? { project: signerSource.project, follow: signerSource.follow, pendingVersion: signerSource.last_queued && signerSource.last_queued !== config?.signer_hash ? signerSource.last_queued : null }
+        : null,
+      signerProject: this.config.bankSigner?.project ?? null,
       customerId: account?.customerId ?? null,
       boxKey,
       readers: readers.map((reader) => ({ account: reader.account, publicKey: reader.public_key })),
@@ -1982,6 +2018,18 @@ export class OmniRolesService {
       { method: "queue_rule_change", change: { SetBankConfig: { config } } },
       // Beneficiaries are sealed to this enclave's key; voting it also erases any IBAN kept in clear.
       { method: "queue_rule_change", change: { SetBankBoxKey: { key: signer.boxKey } } },
+      // Fixes to the enclave then arrive by themselves, each after the veto window (members can veto).
+      ...(signer.project ? [{ method: "queue_rule_change" as const, change: { SetBankSignerSource: { project: signer.project, follow: true } } }] : []),
+    ]);
+  }
+
+  /** Follow the enclave project's versions (each after the veto window), or vote each one. */
+  async bankSignerSourceProposal(organizationId: string, follow: boolean) {
+    const treasury = await this.requireTreasury(organizationId);
+    const project = this.config.bankSigner?.project;
+    if (!project) throw new OmniRolesError(404, "no_signer_project", "This console's bank signer is not published as an OutLayer project");
+    return this.proposal(treasury, follow ? "Take bank enclave updates after the veto window" : "Vote each bank enclave update", [
+      { method: "queue_rule_change", change: { SetBankSignerSource: { project, follow } } },
     ]);
   }
 

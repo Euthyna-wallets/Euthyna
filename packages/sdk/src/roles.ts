@@ -88,7 +88,8 @@ export type RuleChange =
   | { RemoveSealedBankBeneficiary: { id: number } }
   /** Payroll, rent: pay a voted beneficiary `amount` every `period_ns` from `first_at_ns`; run by anyone once due. */
   | { AddStandingOrder: { beneficiary_id: number; amount: string; first_at_ns: string; period_ns: string; count: number | null; label: string } }
-  | { RemoveStandingOrder: { id: number } };
+  | { RemoveStandingOrder: { id: number } }
+  | { SetBankSignerSource: { project: string | null; follow: boolean } };
 
 export type BankConfig = {
   outlayer_id: string;
@@ -1650,6 +1651,16 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     };
   }
   if ("RemoveStandingOrder" in change) return { title: `Stop standing order #${change.RemoveStandingOrder.id}`, details: [] };
+  if ("SetBankSignerSource" in change) {
+    const { project, follow } = change.SetBankSignerSource;
+    if (!project) return { title: "Run the bank enclave from its voted code URL", details: [] };
+    return {
+      title: follow ? `Follow the bank enclave's published versions (${project})` : `Run the bank enclave from project ${project}`,
+      details: follow
+        ? ["each new version is queued like a vote and applies after the rule delay", "any council member can veto it before then", "the vault runs exactly the queued code hash"]
+        : ["the vault runs exactly the code hash the members voted", "each new version needs a vote"],
+    };
+  }
   if ("SetBankPermission" in change) {
     const permission = change.SetBankPermission.permission;
     if (!permission) return { title: `Remove euro payouts from role ${change.SetBankPermission.role}`, details: [] };

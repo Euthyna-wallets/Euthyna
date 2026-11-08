@@ -244,6 +244,7 @@ fn pubkey() -> Result<Value, String> {
         "public_key_pem": pem,
         "public_key_sec1_hex": hex::encode(sec1),
         "box_public_key_hex": hex::encode(boxed.as_bytes()),
+        "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -259,10 +260,19 @@ fn now_s() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+#[cfg(test)]
 fn jwt(key: &SigningKey, method: &str, path: &str, body: Option<&[u8]>) -> String {
+    jwt_with_query(key, method, path, None, body)
+}
+
+/// Noah: a GET with query parameters signs them too (`queryParams`, docs.noah.com, "Request Signing Keys").
+fn jwt_with_query(key: &SigningKey, method: &str, path: &str, query: Option<&Value>, body: Option<&[u8]>) -> String {
     let header = b64url(br#"{"alg":"ES256","typ":"JWT"}"#);
     let iat = now_s();
     let mut claims = json!({ "aud": NOAH_AUD, "iat": iat, "exp": iat + JWT_TTL_S, "method": method, "path": path });
+    if let Some(query) = query {
+        claims["queryParams"] = query.clone();
+    }
     if let Some(body) = body {
         claims["bodyHash"] = Value::String(hex::encode(Sha256::digest(body)));
     }
@@ -286,22 +296,32 @@ impl Noah {
     }
 
     /// `path` starts with "/v1/…" (what the JWT names); the request goes to the API host.
-    fn post(&self, path: &str, body: &Value) -> Result<Value, String> {
-        let bytes = body.to_string().into_bytes();
-        let signature = jwt(&self.key, "POST", path, Some(&bytes));
+    fn send(&self, method: &str, path: &str, query: Option<&Value>, body: Option<&Value>) -> Result<Value, String> {
+        let bytes = body.map(|body| body.to_string().into_bytes());
+        let signature = jwt_with_query(&self.key, method, path, query, bytes.as_deref());
         let host = self.url.trim_end_matches("/v1");
-        let request = Client::new().post(&format!("{host}{path}")).header("X-Api-Key", self.api_key.as_str());
+        let query_string = query
+            .and_then(Value::as_object)
+            .map(|items| {
+                items.iter().map(|(key, value)| format!("{}={}", url_encode(key), url_encode(&value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string())))).collect::<Vec<_>>().join("&")
+            })
+            .filter(|text| !text.is_empty())
+            .map(|text| format!("?{text}"))
+            .unwrap_or_default();
+        let address = format!("{host}{path}{query_string}");
+        let client = Client::new();
+        let request = if method == "GET" { client.get(&address) } else { client.post(&address) };
+        let request = request.header("X-Api-Key", self.api_key.as_str());
         #[cfg(feature = "dev-unsigned")]
         let request = if std::env::var("NOAH_DEV_UNSIGNED").is_ok() { request } else { request.header("Api-Signature", signature.as_str()) };
         #[cfg(not(feature = "dev-unsigned"))]
         let request = request.header("Api-Signature", signature.as_str());
-        let response = request
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .connect_timeout(Duration::from_secs(20))
-            .body(&bytes)
-            .send()
-            .map_err(|error| format!("noah unreachable: {error}"))?;
+        let request = request.header("Accept", "application/json").connect_timeout(Duration::from_secs(20));
+        let response = match bytes {
+            Some(bytes) => request.header("Content-Type", "application/json").body(&bytes).send(),
+            None => request.send(),
+        }
+        .map_err(|error| format!("noah unreachable: {error}"))?;
         let status = response.status();
         let text = String::from_utf8_lossy(&response.body().unwrap_or_default()).to_string();
         if !(200..300).contains(&status) {
@@ -319,6 +339,48 @@ impl Noah {
         }
         serde_json::from_str(&text).map_err(|_| "noah: not JSON".to_string())
     }
+}
+
+/// What a payout needs from the partner (a trait, so the tests can stand in for it).
+trait NoahApi {
+    fn post(&self, path: &str, body: &Value) -> Result<Value, String>;
+    fn get(&self, path: &str, query: &Value) -> Result<Value, String>;
+}
+
+impl NoahApi for Noah {
+    fn post(&self, path: &str, body: &Value) -> Result<Value, String> {
+        self.send("POST", path, None, Some(body))
+    }
+    fn get(&self, path: &str, query: &Value) -> Result<Value, String> {
+        self.send("GET", path, Some(query), None)
+    }
+}
+
+fn url_encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+/// The payee's method if the partner already saved it for this customer (after a first payout).
+/// The partner then wants that method named (`PaymentMethodID`): sending the form again is
+/// refused on some rails (Pix: "selected payment method does not belong to declared self").
+fn saved_method(noah: &dyn NoahApi, customer_id: &str, form: &Value) -> Option<String> {
+    let listed = noah.get("/v1/payment-methods", &json!({ "CustomerID": customer_id })).ok()?;
+    let identifier = &form["IdentifierDetails"];
+    let account = form["BankDetails"]["AccountNumber"].as_str().map(|text| text.replace(' ', "").to_ascii_uppercase());
+    listed["Items"].as_array()?.iter().find_map(|item| {
+        let shown = &item["DisplayDetails"];
+        let same = if identifier.is_object() {
+            shown["IdentifierType"] == identifier["IdentifierType"] && shown["Identifier"] == identifier["Identifier"] && identifier["Identifier"].is_string()
+        } else {
+            account.is_some() && shown["AccountNumber"].as_str().map(|text| text.replace(' ', "").to_ascii_uppercase()) == account
+        };
+        if same && item["Capabilities"]["PayoutTo"].as_bool() != Some(false) { item["ID"].as_str().map(str::to_string) } else { None }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -441,16 +503,30 @@ fn sepa_form(iban: &str, holder_name: &str, holder_type: &str, reference: &str) 
 }
 
 fn payout_to(input: &Input, channel: &str, form: &Value) -> Result<Value, String> {
-    let noah = Noah::from_env()?;
-    // 1. The beneficiary and the amount become a form session.
-    let prepared = noah.post("/v1/transactions/sell/prepare", &json!({
-        "ChannelID": channel,
-        "CryptoCurrency": input.crypto,
-        "CustomerID": input.customer_id,
-        "CryptoAmount": input.crypto_amount,
-        "DelayedSell": true,
-        "Form": form,
-    }))?;
+    payout_with(&Noah::from_env()?, input, channel, form)
+}
+
+fn payout_with(noah: &dyn NoahApi, input: &Input, channel: &str, form: &Value) -> Result<Value, String> {
+    // 1. The beneficiary and the amount become a form session. A payee the partner already
+    // saved is named by its method; a bank payee keeps its form first (it carries this payout's
+    // reference) and falls back to the method if the partner refuses the form.
+    let prepare = |payee: (&str, Value)| {
+        let mut body = json!({
+            "ChannelID": channel,
+            "CryptoCurrency": input.crypto,
+            "CustomerID": input.customer_id,
+            "CryptoAmount": input.crypto_amount,
+            "DelayedSell": true,
+        });
+        body[payee.0] = payee.1;
+        noah.post("/v1/transactions/sell/prepare", &body)
+    };
+    let saved = saved_method(noah, &input.customer_id, form);
+    let prepared = match (&saved, form["IdentifierDetails"].is_object()) {
+        (Some(method), true) => prepare(("PaymentMethodID", Value::String(method.clone())))?,
+        (Some(method), false) => prepare(("Form", form.clone())).or_else(|_| prepare(("PaymentMethodID", Value::String(method.clone()))))?,
+        (None, _) => prepare(("Form", form.clone()))?,
+    };
     let form_session = prepared["FormSessionID"].as_str().ok_or("noah: no FormSessionID")?.to_string();
     let fiat_amount = prepared["FiatAmount"].as_str().unwrap_or("").to_string();
 
@@ -578,6 +654,102 @@ mod tests {
         use p256::ecdsa::signature::Verifier;
         let signature = Signature::from_slice(&base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
         key.verifying_key().verify(format!("{}.{}", parts[0], parts[1]).as_bytes(), &signature).unwrap();
+    }
+
+    /// Behaves like the partner's sandbox: a payee is saved on its first payout; after that,
+    /// sending its form again is refused for an identifier rail (Pix), and accepted for a bank.
+    struct FakeNoah {
+        saved: std::cell::RefCell<Vec<(String, Value)>>,
+        prepares: std::cell::RefCell<Vec<Value>>,
+        refuse_bank_forms: bool,
+    }
+
+    impl FakeNoah {
+        fn new() -> Self {
+            Self { saved: Default::default(), prepares: Default::default(), refuse_bank_forms: false }
+        }
+    }
+
+    impl NoahApi for FakeNoah {
+        fn post(&self, path: &str, body: &Value) -> Result<Value, String> {
+            if path.starts_with("/v1/workflows") {
+                return Ok(json!({ "RuleID": "rule-1", "Conditions": [{ "DestinationAddress": { "Address": "0xdeposit" } }] }));
+            }
+            self.prepares.borrow_mut().push(body.clone());
+            if let Some(method) = body["PaymentMethodID"].as_str() {
+                return if self.saved.borrow().iter().any(|(id, _)| id == method) { Ok(json!({ "FormSessionID": "fs", "FiatAmount": "46.92" })) } else { Err("noah 400: unknown method".into()) };
+            }
+            let form = &body["Form"];
+            let display = if form["IdentifierDetails"].is_object() {
+                json!({ "IdentifierType": form["IdentifierDetails"]["IdentifierType"], "Identifier": form["IdentifierDetails"]["Identifier"] })
+            } else {
+                json!({ "AccountNumber": form["BankDetails"]["AccountNumber"] })
+            };
+            let known = self.saved.borrow().iter().any(|(_, shown)| *shown == display);
+            if known && (form["IdentifierDetails"].is_object() || self.refuse_bank_forms) {
+                return Err("noah 500 on /v1/transactions/sell/prepare: unexpected error while processing your request".into());
+            }
+            if !known {
+                let id = format!("Method/{}", self.saved.borrow().len() + 1);
+                self.saved.borrow_mut().push((id, display));
+            }
+            Ok(json!({ "FormSessionID": "fs", "FiatAmount": "46.92" }))
+        }
+
+        fn get(&self, path: &str, query: &Value) -> Result<Value, String> {
+            assert_eq!(path, "/v1/payment-methods");
+            assert_eq!(query["CustomerID"], "eut-1");
+            let items: Vec<Value> = self.saved.borrow().iter().map(|(id, shown)| json!({ "ID": id, "DisplayDetails": shown, "Capabilities": { "PayoutTo": true } })).collect();
+            Ok(json!({ "Items": items }))
+        }
+    }
+
+    fn payout_input() -> Input {
+        serde_json::from_value(json!({ "op": "payout", "vault": "acme.euthyna-nomos.testnet", "customer_id": "eut-1", "reference": "SO4-2", "crypto_amount": "5", "crypto": "EURC_TEST" })).unwrap()
+    }
+
+    #[test]
+    fn pays_the_same_pix_payee_twice() {
+        let noah = FakeNoah::new();
+        let form = json!({ "BeneficiaryName": { "FirstName": "Ana", "LastName": "Souza" }, "IdentifierDetails": { "IdentifierType": "Email", "Identifier": "ana@example.com" } });
+        // First payout: the form; the partner saves the payee.
+        assert_eq!(payout_with(&noah, &payout_input(), "pix", &form).unwrap()["ok"], true);
+        // Second: the saved method, not the form (which the partner would refuse).
+        assert_eq!(payout_with(&noah, &payout_input(), "pix", &form).unwrap()["ok"], true);
+        let prepares = noah.prepares.borrow();
+        assert!(prepares[0]["Form"].is_object() && prepares[0].get("PaymentMethodID").is_none());
+        assert_eq!(prepares[1]["PaymentMethodID"], "Method/1");
+        assert!(prepares[1].get("Form").is_none());
+        // Another payee is not mistaken for this one.
+        let other = json!({ "BeneficiaryName": { "FirstName": "Lia" }, "IdentifierDetails": { "IdentifierType": "Email", "Identifier": "lia@example.com" } });
+        drop(prepares);
+        payout_with(&noah, &payout_input(), "pix", &other).unwrap();
+        assert!(noah.prepares.borrow()[2]["Form"].is_object());
+    }
+
+    #[test]
+    fn a_bank_payee_keeps_its_form_and_falls_back_to_the_saved_method() {
+        let form = json!({ "AccountHolderName": { "AccountHolderType": "Business", "Name": "Atelier Dupont SAS" }, "BankDetails": { "AccountNumber": "FR7630006000011234567890189" }, "Reference": "SO4-2" });
+        let noah = FakeNoah::new();
+        payout_with(&noah, &payout_input(), "sepa", &form).unwrap();
+        payout_with(&noah, &payout_input(), "sepa", &form).unwrap();
+        // The form (with this payout's reference) both times while the partner takes it.
+        assert!(noah.prepares.borrow().iter().all(|body| body["Form"]["Reference"] == "SO4-2"));
+        // If the partner starts refusing the form of a saved bank payee: the saved method.
+        let strict = FakeNoah { refuse_bank_forms: true, ..FakeNoah::new() };
+        payout_with(&strict, &payout_input(), "sepa", &form).unwrap();
+        assert_eq!(payout_with(&strict, &payout_input(), "sepa", &form).unwrap()["ok"], true);
+        assert_eq!(strict.prepares.borrow().last().unwrap()["PaymentMethodID"], "Method/1");
+    }
+
+    #[test]
+    fn a_get_signs_its_query() {
+        std::env::set_var("PROTECTED_NOAH_SEED", "11".repeat(32));
+        let token = jwt_with_query(&signing_key().unwrap(), "GET", "/v1/payment-methods", Some(&json!({ "CustomerID": "eut-1" })), None);
+        let claims: Value = serde_json::from_slice(&base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(token.split('.').nth(1).unwrap()).unwrap()).unwrap();
+        assert_eq!(claims["queryParams"]["CustomerID"], "eut-1");
+        assert!(claims.get("bodyHash").is_none());
+        assert_eq!(url_encode("a b@c"), "a%20b%40c");
     }
 
     #[test]

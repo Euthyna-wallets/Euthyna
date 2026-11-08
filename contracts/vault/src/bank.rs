@@ -42,6 +42,13 @@ const LEGACY_INDEX: &[u8] = b"bank:i";
 const KEY_ORDERS: &[u8] = b"bank:so";
 const KEY_ORDER_SEQUENCE: &[u8] = b"bank:son";
 const KEY_ORDER_RUN: &[u8] = b"bank:sor:";
+/// The enclave's OutLayer project and whether the vault follows its versions.
+const KEY_SIGNER_SOURCE: &[u8] = b"bank:src";
+/// The last version `follow_bank_signer` queued: never queued twice, even once vetoed.
+const KEY_FOLLOW_QUEUED: &[u8] = b"bank:srcq";
+const MAX_PROJECT_CHARS: usize = 128;
+const PROJECT_VIEW_GAS: Gas = Gas::from_tgas(10);
+const FOLLOW_CALLBACK_GAS: Gas = Gas::from_tgas(25);
 const MAX_STANDING_ORDERS: usize = 64;
 /// A standing order runs at most this often.
 const MIN_ORDER_PERIOD_NS: u64 = 60_000_000_000;
@@ -276,6 +283,44 @@ fn set_standing_orders(orders: &[StandingOrder]) {
     }
 }
 
+/// The enclave's OutLayer project, if the vault runs it from one (see `SetBankSignerSource`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub struct BankSignerSource {
+    pub project: String,
+    pub follow: bool,
+}
+
+pub(crate) fn signer_source() -> Option<BankSignerSource> {
+    read(KEY_SIGNER_SOURCE)
+}
+
+/// "owner.near/name": the project's owner account and a short name.
+fn valid_project(project: &str) -> bool {
+    let Some((owner, name)) = project.split_once('/') else { return false };
+    project.len() <= MAX_PROJECT_CHARS
+        && owner.parse::<AccountId>().is_ok()
+        && !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// What OutLayer runs: the voted hash, of the project when there is one (its secrets follow its
+/// versions), else from the code URL. Either way, these exact bytes or nothing.
+fn code_source_json(config: &BankConfig) -> String {
+    match signer_source() {
+        Some(source) => format!(
+            "{{\"Project\":{{\"project_id\":{},\"version_key\":{}}}}}",
+            json_string(&source.project),
+            json_string(&config.signer_hash),
+        ),
+        None => format!(
+            "{{\"WasmUrl\":{{\"url\":{},\"hash\":{},\"build_target\":\"wasm32-wasip2\"}}}}",
+            json_string(&config.signer_url),
+            json_string(&config.signer_hash),
+        ),
+    }
+}
+
 /// Asks OutLayer to run the bank signer for this payout; the callback queues the transfer.
 fn call_signer(
     config: &BankConfig,
@@ -303,9 +348,8 @@ fn call_signer(
         json_string(&rfc3339(expires_at_ns)),
     );
     let args = format!(
-        "{{\"source\":{{\"WasmUrl\":{{\"url\":{},\"hash\":{},\"build_target\":\"wasm32-wasip2\"}}}},\"resource_limits\":{{\"max_instructions\":2000000000,\"max_memory_mb\":128,\"max_execution_seconds\":60}},\"input_data\":{},\"secrets_ref\":{{\"profile\":{},\"account_id\":{}}},\"response_format\":\"Json\",\"payer_account_id\":{}}}",
-        json_string(&config.signer_url),
-        json_string(&config.signer_hash),
+        "{{\"source\":{},\"resource_limits\":{{\"max_instructions\":2000000000,\"max_memory_mb\":128,\"max_execution_seconds\":60}},\"input_data\":{},\"secrets_ref\":{{\"profile\":{},\"account_id\":{}}},\"response_format\":\"Json\",\"payer_account_id\":{}}}",
+        code_source_json(config),
         json_string(&input),
         json_string(&config.secrets_profile),
         json_string(config.secrets_owner.as_str()),
@@ -452,6 +496,65 @@ impl Vault {
     /// The enclave's X25519 key beneficiaries are sealed to (hex), as the members voted it.
     pub fn get_bank_box_key(&self) -> Option<String> {
         box_key()
+    }
+
+    /// The enclave's OutLayer project and whether the vault follows its versions; with the last
+    /// version `follow_bank_signer` queued.
+    pub fn get_bank_signer_source(&self) -> Option<near_sdk::serde_json::Value> {
+        signer_source().map(|source| {
+            near_sdk::serde_json::json!({
+                "project": source.project,
+                "follow": source.follow,
+                "last_queued": read::<String>(KEY_FOLLOW_QUEUED),
+            })
+        })
+    }
+
+    /// Anyone: when the vault follows its enclave project, read the project's active version and
+    /// queue it as the vault's signer (a `SetBankConfig` rule, applied after the rule delay
+    /// unless the council vetoes it). A version is queued once: a vetoed one is not queued again.
+    pub fn follow_bank_signer(&mut self) -> Promise {
+        let source = signer_source().unwrap_or_else(|| env::panic_str("ERR_BANK_NO_SIGNER_PROJECT"));
+        require!(source.follow, "ERR_BANK_NOT_FOLLOWING");
+        let config = config().unwrap_or_else(|| env::panic_str("ERR_BANK_NOT_CONFIGURED"));
+        Promise::new(config.outlayer_id.clone())
+            .function_call(
+                "get_project".to_owned(),
+                near_sdk::serde_json::json!({ "project_id": source.project }).to_string().into_bytes(),
+                NearToken::from_yoctonear(0),
+                PROJECT_VIEW_GAS,
+            )
+            .then(
+                Vault::ext(env::current_account_id())
+                    .with_static_gas(FOLLOW_CALLBACK_GAS)
+                    .on_bank_signer_project(),
+            )
+    }
+
+    /// The project's active version: queued if it is new to this vault.
+    #[private]
+    pub fn on_bank_signer_project(
+        &mut self,
+        #[callback_result] result: Result<Option<near_sdk::serde_json::Value>, PromiseError>,
+    ) -> Option<QueueId> {
+        let project = result.ok().flatten()?;
+        let active = project["active_version"].as_str()?.to_ascii_lowercase();
+        let config = config()?;
+        let source = signer_source().filter(|source| source.follow)?;
+        if project["project_id"].as_str() != Some(source.project.as_str()) || !hex64(&active) {
+            return None;
+        }
+        if active == config.signer_hash.to_ascii_lowercase() || read::<String>(KEY_FOLLOW_QUEUED).as_deref() == Some(active.as_str()) {
+            return None;
+        }
+        write(KEY_FOLLOW_QUEUED, &active);
+        let change = RuleChange::SetBankConfig {
+            config: Some(BankConfig { signer_hash: active.clone(), ..config }),
+        };
+        Self::validate_rule_change(&change);
+        let queued = self.enqueue_rule_change(change, env::current_account_id());
+        env::log_str(&format!("OMNIROLES_BANK_SIGNER_UPDATE_QUEUED:{active}"));
+        Some(queued.queue_id)
     }
 
     pub fn get_bank_permission(&self, role: String) -> Option<BankPermission> {
@@ -1170,6 +1273,16 @@ impl Vault {
             RuleChange::SetBankPermission { role, permission } => {
                 set_permission(role, permission.clone())
             }
+            RuleChange::SetBankSignerSource { project, follow } => match project {
+                Some(project) => {
+                    write(KEY_SIGNER_SOURCE, &BankSignerSource { project: project.clone(), follow: *follow });
+                    env::log_str(&format!("OMNIROLES_BANK_SIGNER_SOURCE:{project}:{}", if *follow { "follow" } else { "voted" }));
+                }
+                None => {
+                    env::storage_remove(KEY_SIGNER_SOURCE);
+                    env::log_str("OMNIROLES_BANK_SIGNER_SOURCE:url");
+                }
+            },
             _ => return false,
         }
         true
@@ -1220,6 +1333,10 @@ impl Vault {
             }
             RuleChange::RemoveBankBeneficiary { iban } => {
                 require!(!iban.is_empty(), "ERR_BANK_IBAN")
+            }
+            RuleChange::SetBankSignerSource { project, follow } => {
+                require!(project.as_deref().is_none_or(valid_project), "ERR_BANK_SIGNER_PROJECT");
+                require!(project.is_some() || !follow, "ERR_BANK_FOLLOW_NEEDS_PROJECT");
             }
             RuleChange::SetBankPermission { role, permission } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");

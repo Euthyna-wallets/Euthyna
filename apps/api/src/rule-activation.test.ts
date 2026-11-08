@@ -24,12 +24,17 @@ function world(now: { ms: number }) {
   const executed: string[] = [];
   const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
   const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
+  const follow: Record<string, { project: string; follow: boolean; last_queued: string | null }> = {};
+  const active = { version: "ab".repeat(32) };
   const lanes: string[] = [];
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
       if (method === "list_dao_transactions") return [];
       if (method === "list_standing_orders") return standing[account] ?? [];
+      if (method === "get_bank_signer_source") return follow[account] ?? null;
+      if (method === "get_bank_config") return follow[account] ? { outlayer_id: "outlayer.testnet", signer_hash: "ab".repeat(32) } : null;
+      if (method === "get_project") return { project_id: "ops.testnet/bank-signer", active_version: active.version };
       if (method === "count_bank_payouts") return (payouts[account] ?? []).length;
       if (method === "list_bank_payouts") return payouts[account] ?? [];
       reads.push(account);
@@ -54,7 +59,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -129,6 +134,27 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 5 * 3_600_000);
     await service.activateAllReadyRules();
     expect(runs()).toBe(1);
+  });
+
+  it("asks a vault that follows its enclave project to queue a new version, once", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, follow, active } = world(now);
+    const vault = "idle.nomos.testnet";
+    const asked = () => executed.filter((call) => call === `${vault}:follow_bank_signer`).length;
+    follow[vault] = { project: "ops.testnet/bank-signer", follow: true, last_queued: null };
+    await service.activateAllReadyRules();
+    expect(asked()).toBe(0); // the vault already runs the active version
+    active.version = "cd".repeat(32);
+    vi.setSystemTime(now.ms + 3 * 60_000);
+    await service.activateAllReadyRules();
+    expect(asked()).toBe(1);
+    // Queued (or vetoed) already: not asked again.
+    follow[vault]!.last_queued = "cd".repeat(32);
+    vi.setSystemTime(now.ms + 6 * 60_000);
+    await service.activateAllReadyRules();
+    expect(asked()).toBe(1);
   });
 
   it("never runs two passes at once", async () => {

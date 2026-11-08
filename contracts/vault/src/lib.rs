@@ -438,13 +438,18 @@ impl Vault {
     pub fn queue_rule_change(&mut self, change: RuleChange) -> QueuedRuleChange {
         self.assert_owner();
         Self::validate_rule_change(&change);
+        self.enqueue_rule_change(change, env::predecessor_account_id())
+    }
+
+    /// Queued like an owner's vote: the same rule delay, the same council veto.
+    pub(crate) fn enqueue_rule_change(&mut self, change: RuleChange, proposed_by: AccountId) -> QueuedRuleChange {
         self.rule_sequence = self.rule_sequence.saturating_add(1);
         let now = env::block_timestamp();
         let queue_id = self.queue_id(self.rule_sequence, &change);
         let entry = QueuedRuleChange {
             queue_id,
             change,
-            proposed_by: env::predecessor_account_id(),
+            proposed_by,
             queued_at_ns: U64(now),
             execute_after_ns: U64(now.saturating_add(self.rule_delay_ns)),
             expires_at_ns: U64(now.saturating_add(self.rule_expiration_ns)),
@@ -1770,7 +1775,8 @@ impl Vault {
             | RuleChange::AddSealedBankBeneficiary { .. }
             | RuleChange::RemoveSealedBankBeneficiary { .. }
             | RuleChange::AddStandingOrder { .. }
-            | RuleChange::RemoveStandingOrder { .. }) => {
+            | RuleChange::RemoveStandingOrder { .. }
+            | RuleChange::SetBankSignerSource { .. }) => {
                 self.apply_bank_rule(&change);
             }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
@@ -1940,7 +1946,8 @@ impl Vault {
             | RuleChange::AddSealedBankBeneficiary { .. }
             | RuleChange::RemoveSealedBankBeneficiary { .. }
             | RuleChange::AddStandingOrder { .. }
-            | RuleChange::RemoveStandingOrder { .. }) => {
+            | RuleChange::RemoveStandingOrder { .. }
+            | RuleChange::SetBankSignerSource { .. }) => {
                 Self::validate_bank_rule(change);
             }
             RuleChange::SetSolanaPermissions { role, permissions } => {
