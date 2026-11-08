@@ -136,22 +136,53 @@ Not public: who is paid, their account, their name.
   vault's checks, before the signer is even called.
 - Guaranteed by the enclave: the partner's API key answers only to a vault's call with the exact
   WASM the members voted (`signer_hash`); nobody, including us, can use it from a laptop. Changing
-  the signer code or its secrets means a new hash, and a new `SetBankConfig` vote.
+  the signer code means a new hash, which a vault takes only by a vote or, if it follows the
+  enclave project, after its veto window (below).
 - Not guaranteed: the partner's execution (Noah pays the IBAN off chain; the vault sees its own
   EURC leave and the partner's rule id), and the partner's own honesty. The audit trail is the vault
   payout record, the OutLayer execution and the partner's transaction.
+
+### Enclave updates: one vote, or none with a veto window
+
+The enclave runs from an OutLayer **project** (`euthyna-ops.testnet/bank-signer`). The project's
+secrets row is shared by its versions and locked to the builds it names, so a fixed enclave keeps
+its generated seed: the same partner key, the same box key, no beneficiary to seal again. The vault
+still runs exactly one hash: OutLayer is called with `Project { project_id, version_key: signer_hash }`.
+
+- `SetBankSignerSource { project, follow }` (voted once). With `follow`, anyone may call
+  `follow_bank_signer()`: the vault reads the project's active version and queues it as an
+  ordinary `SetBankConfig` rule, so it applies after the vault's rule delay unless a council member
+  vetoes it. A version is queued once: a vetoed one does not come back. The keeper calls it.
+- Without `follow`, each version is a vote, as before.
+- Release: build, upload, `outlayer deploy bank-signer <url>`, then
+  `node bank-signer/scripts/sandbox-twice.mjs` (each rail paid **twice** to the same payee against
+  the partner's sandbox: the check that would have caught the Pix bug), admit the new hash next to
+  the old one (`update_access`), and drop the old one once the vaults run the new one.
+
+Proof on sealedprod1106 (2026-11-08): vault `f8b6bebb…` (proposal #38); enclave 0.2.0 `e11f11df…`
+from the project, payees resealed, `follow` on (proposal #39); Pix paid twice to the same payee
+(`DAhG79sZ…`, `DuhwL86p…`, 46.93 BRL each) and SEPA once (`548ZoeUn…`, 4.78 EUR). Then 0.2.1
+`6b0d3046…` activated in the project: `follow_bank_signer` queued it with no vote (`GStmvBGe…`),
+applied after the 5-minute window (`Fn2TA9Yb…`), and Pix paid a third time with the same partner
+key and the same sealed payee (`HuQaXsrj…`, 48.25 BRL).
+
+The Pix bug it fixed: the partner saves a payee on its first payout, then refuses its form
+("selected payment method does not belong to declared self", then 500). The enclave now lists the
+customer's saved methods (signed GET with `queryParams`) and names a saved Pix payee by its
+`PaymentMethodID`; a bank payee keeps its form (it carries the payout's reference) and falls back
+to its saved method.
 
 ### Deployment (testnet)
 
 | | |
 | --- | --- |
-| Signer WASM | sha256 `40db3075632bf201b5056c5330052eb4e7aefbebb93e66c558293d0c7ed6693c`, on FastFS `https://test.fastfs.io/euthyna-ops.testnet/outlayer.testnet/40db3075…693c.wasm` (uploaded by `euthyna-ops.testnet`; `cargo build --release --target wasm32-wasip2` in `bank-signer/`) |
+| Signer WASM | 0.2.1, sha256 `6b0d3046c32a15404f2512d660c3fd613f76909109c950866d309436c4442130`, on FastFS `https://test.fastfs.io/euthyna-ops.testnet/outlayer.testnet/6b0d3046…2130.wasm`, active version of project `euthyna-ops.testnet/bank-signer` (`cargo build --release --target wasm32-wasip2` in `bank-signer/`) |
 | Box key | `c5c6d26b84243488ef3b2f0efef3c05d4d99e45aa530e13e35f09bf06877bc66` (X25519), from the enclave's `pubkey` output (sealedprod1106 proposal #26) |
-| Secrets | profile `noah` of `euthyna-ops.testnet`, bound to that hash; access `And[Predecessor{Or[AccountPattern vaults, Whitelist[sealedprod1106 DAO]]}, WasmHash]` (NEAR `7egpNTpg…`; stored with access restricted to the owner, then narrowed); `PROTECTED_NOAH_SEED` generated in the enclave, never exported. The DAO is admitted only to read the public key: the code pays out for a vault only |
-| Signer public key | read through sealedprod1106's DAO (proposal #26): `MFkw…3Saag==` (P-256), attached to a Noah sandbox API key that only this build can use |
-| Earlier builds | `528edf86…` let a vault vote any partner customer id; `05ca8512…` took the IBAN in clear; `e263a0e2…` paid SEPA only. Their secrets rows are deleted and their Noah keys revoked, so a vault cannot vote those hashes back |
+| Secrets | profile `noah` of project `euthyna-ops.testnet/bank-signer`, locked to the build: access `And[Predecessor{Or[AccountPattern vaults, Whitelist[sealedprod1106 DAO]]}, WasmHash 6b0d3046…]` (both hashes during the 0.2.0 → 0.2.1 switch, then only the new one); `PROTECTED_NOAH_SEED` generated in the enclave, never exported, kept across versions. The DAO is admitted only to read the public key: the code pays out for a vault only |
+| Signer public key | read through sealedprod1106's DAO (proposal #37): `MFkw…nod5Q==` (P-256), attached to a Noah sandbox API key; box key `41ae950e…`. Both stay the same for the project's next versions |
+| Earlier builds | `528edf86…` let a vault vote any partner customer id; `05ca8512…` took the IBAN in clear; `e263a0e2…` paid SEPA only; `40db3075…` paid a Pix payee only once. Their secrets rows are deleted and their Noah keys to revoke, so a vault cannot vote those hashes back |
 | Vault version | `F4BZbfghE6CY6qQDU5pQZyBUspN3vKSAZYob3DLjnGML` (`contracts/res/vault.wasm`, sha256 `d0d44d4ab01edd864b1264dca97e67a13eab1017a1767ea1bc78c62297319c3f`), published on `euthyna-nomos.testnet` (NEAR `CxhAFbNeKvuu4BM48MD76qFHfDJsdHj625QeDwdTZL1R`); `sealedprod1106` moved its code source to that Nomos by vote (`SetCodeSource`, proposal #15) and upgraded by vote (proposals #16, #18, #19, #24, #27) |
-| Console env | `BANK_SIGNER_URL`, `BANK_SIGNER_HASH`, `BANK_SIGNER_BOX_KEY`, `BANK_SIGNER_SECRETS_OWNER`, `BANK_SIGNER_SECRETS_PROFILE` (`env.example`) |
+| Console env | `BANK_SIGNER_URL`, `BANK_SIGNER_HASH`, `BANK_SIGNER_BOX_KEY`, `BANK_SIGNER_SECRETS_OWNER`, `BANK_SIGNER_SECRETS_PROFILE`, `BANK_SIGNER_PROJECT` (`env.example`) |
 
 ## Limits
 
