@@ -23,6 +23,7 @@ function world(now: { ms: number }) {
   const reads: string[] = [];
   const calls: string[] = [];
   const banks = new Set<string>();
+  const refuse = new Set<string>();
   const executed: string[] = [];
   const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
   const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
@@ -47,6 +48,7 @@ function world(now: { ms: number }) {
     getAccount: vi.fn(async () => ({ amount: (10n ** 25n).toString(), storage_usage: 1000 })),
     callFunction: vi.fn(async (account: string, method: string) => {
       executed.push(`${account}:${method}`);
+      if (method === "execute_rule_change" && refuse.has(account)) throw new Error("Smart contract panicked: ERR_MEMBERSHIP_IN_USE");
       for (const rule of rules[account] ?? []) rule.state = "Executed";
       return `tx-${account}`;
     }),
@@ -62,7 +64,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks, refuse };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -199,6 +201,27 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(passes("idle.nomos.testnet")).toBe(2);
     expect(passes("later.nomos.testnet")).toBe(1); // no bank: waits for its own date
+  });
+
+  it("does not send a refused rule again on every pass", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, rules, refuse } = world(now);
+    const vault = "idle.nomos.testnet";
+    rules[vault] = [{ queue_id: [7], change: { RevokeMembership: {} }, state: "Queued", execute_after_ns: ns(now.ms - 1_000), expires_at_ns: ns(now.ms + 86_400_000) }];
+    refuse.add(vault);
+    const tries = () => executed.filter((call) => call === `${vault}:execute_rule_change`).length;
+    await service.activateAllReadyRules();
+    expect(tries()).toBe(1);
+    for (const seconds of [30, 60, 90]) {
+      vi.setSystemTime(now.ms + seconds * 1_000);
+      await service.activateAllReadyRules();
+    }
+    expect(tries()).toBe(1); // not before two minutes
+    vi.setSystemTime(now.ms + 125_000);
+    await service.activateAllReadyRules();
+    expect(tries()).toBe(2);
   });
 
   it("never runs two passes at once", async () => {

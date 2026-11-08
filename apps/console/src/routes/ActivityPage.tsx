@@ -80,6 +80,11 @@ export function ActivityPage() {
       </header>
 
       <Trust items={query.data?.integrity ?? []} />
+      {query.data?.chainIndex === "unavailable" ? (
+        <div role="status" style={{ border: "1px solid rgba(163,58,42,.35)", background: "rgba(163,58,42,.06)", padding: "10px 14px", fontSize: 13, color: "var(--ink-2)" }}>
+          Activity may be incomplete: the chain index did not answer, so operations agents signed directly on the vault are missing from this view. They come back on the next refresh.
+        </div>
+      ) : null}
 
       <div className="tab-line" role="tablist" aria-label="Filter activity">
         {FILTERS.map(([value, label]) => (

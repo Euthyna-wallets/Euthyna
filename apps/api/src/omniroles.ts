@@ -63,7 +63,7 @@ import {
 import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
 import bs58 from "bs58";
 import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@euthyna/sdk";
-import { vaultLogs } from "./chain-activity.js";
+import { vaultLogs, type VaultLog, type VaultLogStore } from "./chain-activity.js";
 import { usdPrices, usdValue } from "./prices.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, formatUnits, getAddress, keccak256, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 
@@ -193,6 +193,9 @@ const FOLLOW_RECHECK_NS = 60n * 60n * 1_000_000_000n;
 const RULE_FACTS_TTL_MS = 60 * 60_000;
 /** A vault that pays IBANs is read every minute: an agent's payout must not wait for the idle read. */
 const BANK_RECHECK_NS = 60n * 1_000_000_000n;
+/** A refused rule is tried again after 2, 4, 8… minutes, at most every 30. */
+const REFUSED_RULE_FIRST_WAIT_MS = 2 * 60_000;
+const REFUSED_RULE_MAX_WAIT_MS = 30 * 60_000;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -440,6 +443,8 @@ export class OmniRolesService {
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
   private readonly followCheckedAt = new Map<string, number>();
+  /** Rules the vault refused for now, and when to try each again. */
+  private readonly refusedRules = new Map<string, { tries: number; retryAt: number }>();
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -1649,14 +1654,28 @@ export class OmniRolesService {
       this.storageCheckedAt.set(treasury.vaultAccountId, Date.now());
     }
     const hashes: string[] = [];
+    const retries: bigint[] = [];
     for (const rule of ready) {
+      // A rule the vault refused (a role still busy: ERR_ROLE_IN_USE) is not sent again on every
+      // pass: each try is a failed transaction, paid in gas, that also crowds the vault's history.
+      const key = `${treasury.vaultAccountId}:${hexOf(rule.queue_id)}`;
+      const refused = this.refusedRules.get(key);
+      if (refused && refused.retryAt > Date.now()) {
+        retries.push(BigInt(refused.retryAt) * 1_000_000n);
+        continue;
+      }
       // An upgrade fetches and deploys ~800 KB of code: give it the full 300 Tgas.
       const gas = rule.change && typeof rule.change === "object" && "Upgrade" in rule.change ? "300000000000000" : "100000000000000";
       // One rule the vault refuses for now (a budget still reserved by an unsettled operation:
       // ERR_ALLOWANCE_IN_USE, ERR_ROLE_IN_USE) must not hold back the others: it is tried again next round.
       try {
         hashes.push(await this.near.callFunction(treasury.vaultAccountId, "execute_rule_change", { queue_id: rule.queue_id }, gas, "0"));
+        this.refusedRules.delete(key);
       } catch (error) {
+        const tries = (refused?.tries ?? 0) + 1;
+        const retryAt = Date.now() + Math.min(REFUSED_RULE_MAX_WAIT_MS, REFUSED_RULE_FIRST_WAIT_MS * 2 ** (tries - 1));
+        this.refusedRules.set(key, { tries, retryAt });
+        retries.push(BigInt(retryAt) * 1_000_000n);
         console.warn(`rule ${Object.keys(rule.change ?? {})[0] ?? "change"} on ${treasury.vaultAccountId} not applied yet: ${String(error).match(/ERR_[A-Z_]+/)?.[0] ?? String(error).slice(0, 120)}`);
       }
     }
@@ -1678,6 +1697,7 @@ export class OmniRolesService {
       ...orders.nextDueNs,
       ...follow.nextDueNs,
       ...(banking ? [nowNs() + BANK_RECHECK_NS] : []),
+      ...retries,
     ];
     const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
     return { hashes, nextDueMs };
@@ -2327,8 +2347,16 @@ export class OmniRolesService {
     // Agents acting directly on the vault (MCP + signer) never reach our database:
     // the vault's own logs, read from the chain, are the record.
     const seen = new Set(operations.map((item) => item.opId.toLowerCase()));
+    // If the index does not answer, say so: an empty list would read as "the agents did nothing".
+    // What was found before is in the database: an index that does not answer only delays the newest.
+    let chainIndex: "complete" | "unavailable" | "off" = this.config.txIndexerUrl ? "complete" : "off";
+    const store = this.vaultLogStore();
     const logs = this.config.txIndexerUrl
-      ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId)).catch(() => [])
+      ? await this.memo(`vault-logs:${treasury.vaultAccountId}`, 20_000, () => vaultLogs(this.config.txIndexerUrl!, treasury.vaultAccountId, store)).catch(async (error: unknown) => {
+        chainIndex = "unavailable";
+        console.warn(JSON.stringify({ event: "omniroles.activity_index_unavailable", vaultAccountId: treasury.vaultAccountId, error: String(error).slice(0, 200) }));
+        return store.list(treasury.vaultAccountId).catch(() => [] as VaultLog[]);
+      })
       : [];
     // A euro payout is one row: its EURC transfer to the partner is part of it, not a second line.
     const payouts = new Map<string, BankPayout>();
@@ -2467,7 +2495,7 @@ export class OmniRolesService {
           : null,
       };
     });
-    return { operations, integrity, requests };
+    return { operations, integrity, requests, chainIndex };
   }
 
   /**
@@ -2581,6 +2609,26 @@ export class OmniRolesService {
 
   private async treasury(organizationId: string) {
     return this.prisma.treasury.findUnique({ where: { organizationId_environment: { organizationId, environment: "uat" } } });
+  }
+
+  /** The vault operations found in the chain's logs, kept in the database (see VaultOperationLog). */
+  private vaultLogStore(): VaultLogStore {
+    const prisma = this.prisma;
+    return {
+      readTxs: async (vaultAccountId) => new Set((await prisma.vaultTxRead.findMany({ where: { vaultAccountId }, select: { txHash: true } })).map((row) => row.txHash)),
+      save: async (vaultAccountId, txHashes, logs) => {
+        if (logs.length) {
+          await prisma.vaultOperationLog.createMany({
+            data: logs.map((log) => ({ vaultAccountId, opId: log.opId, kind: log.kind, txHash: log.txHash, at: new Date(log.at) })),
+            skipDuplicates: true,
+          });
+        }
+        // After the operations: a transaction marked read always has its operations kept.
+        if (txHashes.length) await prisma.vaultTxRead.createMany({ data: txHashes.map((txHash) => ({ vaultAccountId, txHash })), skipDuplicates: true });
+      },
+      list: async (vaultAccountId) => (await prisma.vaultOperationLog.findMany({ where: { vaultAccountId }, orderBy: { at: "desc" } }))
+        .map((row) => ({ kind: row.kind as VaultLog["kind"], opId: row.opId as `0x${string}`, txHash: row.txHash, at: row.at.toISOString() })),
+    };
   }
 
   private async requireTreasury(organizationId: string) {
