@@ -257,7 +257,7 @@ function RoleCard({ role, onEdit, editing = false }: { role: RoleView; onEdit?: 
         </div>
       ) : null}
       <div style={{ fontSize: 12.5, color: "#4A5675", borderTop: "1px solid rgba(13,23,48,.1)", paddingTop: 8 }}>
-        Members: {role.members.length === 0 ? "Nobody holds this role yet." : role.members.map((member) => `${member.kind === "Agent" ? "AI agent" : "Human"} · ${short(member.member, 10)}`).join(" · ")}
+        Members: {role.members.length === 0 ? "Nobody holds this role yet." : role.members.map((member) => `${member.service ? `${member.service} contract` : member.kind === "Agent" ? "AI agent" : "Human"} · ${short(member.member, 10)}`).join(" · ")}
       </div>
     </Slab>
   );
@@ -761,7 +761,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
                   return (
                     <label key={member.member} className="check" style={CHECK_ROW}>
                       <input type="checkbox" checked={checked} onChange={() => { setMembers((current) => checked ? current.filter((item) => item !== member.member) : [...current, member.member]); setPreview(null); }} style={CHECKBOX} />
-                      {member.kind === "Human" ? "Human" : "AI agent"} <span className="mono" title={member.member} style={{ fontSize: 11.5, color: "#66718C" }}>{displayAccount(member.member)}</span>
+                      {member.kind === "Human" ? "Human" : member.service ? `${member.service[0]!.toUpperCase()}${member.service.slice(1)} contract` : "AI agent"} <span className="mono" title={member.member} style={{ fontSize: 11.5, color: "#66718C" }}>{displayAccount(member.member)}</span>
                     </label>
                   );
                 })}

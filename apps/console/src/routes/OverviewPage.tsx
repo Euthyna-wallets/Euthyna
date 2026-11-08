@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api, type AgentRow } from "../api.js";
-import { PanelLink, agentState, ago, feedOf, until } from "../components/ops.js";
+import { PanelLink, agentState, ago, feedOf, until, withChainAgents } from "../components/ops.js";
 import { PageState, short } from "../components/ui.js";
 import { chainLabel, ColumnGauge, Kicker, Niche, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
@@ -35,7 +35,7 @@ export function OverviewPage() {
   const purchases = useQuery({ queryKey: ["market-purchases"], queryFn: marketConsole.purchases, enabled: ready, retry: false, refetchInterval: 30_000 });
   const me = wallets.nearAccountId;
   const roleList = roles.data?.roles ?? [];
-  const staff = (agents.data?.agents ?? []).filter((agent) => agent.active);
+  const staff = withChainAgents(agents.data?.agents ?? [], roleList).filter((agent) => agent.active);
   const nameOf = (actor: string) => staff.find((agent) => agent.nearAccountId === actor || agent.name === actor)?.name ?? short(actor, 14);
   const entries = entriesOf(activity.data);
   const waiting = (governance.data?.proposals ?? []).filter((proposal) => proposal.status === "InProgress");
@@ -49,7 +49,7 @@ export function OverviewPage() {
     .sort((a, b) => b.usd - a.usd);
   const maxChain = Math.max(1, ...byChain.map((item) => item.usd));
 
-  const loading = ready && (roles.isLoading || governance.isLoading || activity.isLoading);
+  const loading = ready && (roles.isLoading || governance.isLoading || activity.isLoading || agents.isLoading);
   const next = loading
     ? null
     : !status.data?.treasury
@@ -166,7 +166,7 @@ export function OverviewPage() {
                   </Link>
                 }
               />
-              {agents.isLoading ? (
+              {agents.isLoading || roles.isLoading ? (
                 <div className="loading-slab" style={{ minHeight: 120 }} />
               ) : staff.length === 0 ? (
                 <Slab style={{ padding: 20 }}>

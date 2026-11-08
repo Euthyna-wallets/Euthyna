@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { authClient } from "../auth.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni } from "../omniroles-api.js";
 
 /** Top bar reminder: proposals waiting for the connected member's vote. */
 export function SigningInbox() {
   const wallets = useWallets();
-  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, refetchInterval: 30_000 });
+  const session = authClient.useSession();
+  const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, enabled: Boolean(session.data?.session.activeOrganizationId), refetchInterval: 30_000 });
   const governance = useQuery({
     queryKey: ["omni-governance"],
     queryFn: omni.governance,

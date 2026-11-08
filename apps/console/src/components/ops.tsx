@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import type { AgentRow } from "../api.js";
 import type { Activity, RoleView } from "../omniroles-api.js";
 import { everyDays, short } from "./ui.js";
 
@@ -155,4 +156,25 @@ export function agentState(agent: { active: boolean; nearAccountId: string; name
   if (paused) return "paused";
   const recent = feed.find((item) => item.actor === agent.nearAccountId || item.actor === agent.name);
   return recent && Date.now() - new Date(recent.at).getTime() < 86_400_000 ? "working" : "idle";
+}
+
+/**
+ * The company's agents: those hired here, plus any agent the owners gave a role by vote
+ * directly on chain (scripts, another console). The vault's roles are the source of truth,
+ * so an agent that pays inside a role is never shown as "no agent yet".
+ */
+export function withChainAgents(hired: AgentRow[], roles: RoleView[]): AgentRow[] {
+  const known = new Set(hired.map((agent) => agent.nearAccountId));
+  const extra: AgentRow[] = [];
+  for (const role of roles) {
+    for (const member of role.members) {
+      if (member.kind !== "Agent" || member.service || known.has(member.member)) continue;
+      known.add(member.member);
+      extra.push({
+        id: `chain:${member.member}`, name: member.member.split(".")[0] ?? member.member, role: role.name, nearAccountId: member.member,
+        nearPublicKey: "", vaultAccountId: "", evmAddress: null, mpcPath: "", active: true, createdByUserId: null, createdAt: "",
+      });
+    }
+  }
+  return [...hired, ...extra];
 }

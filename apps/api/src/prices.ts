@@ -1,11 +1,11 @@
 /**
  * Indicative USD prices for the treasury view. Testnet tokens have no market:
- * each is valued at its mainnet counterpart (ETH, SOL, NEAR) and dollar
+ * each is valued at its mainnet counterpart (ETH, SOL, NEAR, EURC) and dollar
  * stablecoins at 1. Coinbase public spot prices, cached for five minutes.
  */
 
 const STABLE = /^(USDC|USDT|DAI|TestUSDC|USDC \(Aave test\))$/;
-const BASE: Record<string, string> = { ETH: "ETH", WETH: "ETH", SOL: "SOL", NEAR: "NEAR", wNEAR: "NEAR" };
+const BASE: Record<string, string> = { ETH: "ETH", WETH: "ETH", SOL: "SOL", NEAR: "NEAR", wNEAR: "NEAR", EURC: "EURC" };
 
 let cache: { at: number; prices: Record<string, number> } | null = null;
 

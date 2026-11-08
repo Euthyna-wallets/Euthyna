@@ -87,7 +87,8 @@ export type RoleView = {
   enabled: boolean;
   description: Sentence | null;
   budgets: Array<{ key: string; label: string; token: string | null; available: string | null; max: string | null; periodDays: number | null }>;
-  members: Array<{ member: string; kind: string }>;
+  /** `service`: a contract the owners gave a role (sealed orders), not an AI agent. */
+  members: Array<{ member: string; kind: string; service?: string }>;
 };
 
 /** An operation as the vault (NEAR) and the EVM chain record it. */
