@@ -22,13 +22,16 @@ function world(now: { ms: number }) {
   };
   const reads: string[] = [];
   const executed: string[] = [];
-  const standing: Record<string, Array<{ id: number; next_at_ns: string }>> = {};
+  const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
+  const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
   const lanes: string[] = [];
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
       if (method === "list_dao_transactions") return [];
       if (method === "list_standing_orders") return standing[account] ?? [];
+      if (method === "count_bank_payouts") return (payouts[account] ?? []).length;
+      if (method === "list_bank_payouts") return payouts[account] ?? [];
       reads.push(account);
       if (account === "broken.nomos.testnet") throw new Error("CodeDoesNotExist");
       return rules[account] ?? [];
@@ -51,7 +54,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing };
+  return { service, reads, executed, lanes, rules, standing, payouts };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -104,6 +107,28 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 13_500);
     await service.activateAllReadyRules();
     expect(executed).toContain("idle.nomos.testnet:run_standing_order");
+  });
+
+  it("does not run a refused payroll payout again on every pass: it waits, then gives up after three tries", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, standing, payouts } = world(now);
+    const vault = "idle.nomos.testnet";
+    const runs = () => executed.filter((call) => call === `${vault}:run_standing_order`).length;
+    standing[vault] = [{ id: 3, next_at_ns: ns(now.ms - 60_000), runs: 0 }];
+    payouts[vault] = [{ reference: "SO3-1", state: "Failed", created_at_ns: ns(now.ms - 5_000) }];
+    await service.activateAllReadyRules();
+    expect(runs()).toBe(0);
+    // 15 minutes after the refusal, one more try.
+    vi.setSystemTime(now.ms + 15 * 60_000);
+    await service.activateAllReadyRules();
+    expect(runs()).toBe(1);
+    // Three refusals of the same run: it waits for the members.
+    payouts[vault].push({ reference: "SO3-1", state: "Failed", created_at_ns: ns(now.ms + 15 * 60_000) }, { reference: "SO3-1", state: "Failed", created_at_ns: ns(now.ms + 46 * 60_000) });
+    vi.setSystemTime(now.ms + 5 * 3_600_000);
+    await service.activateAllReadyRules();
+    expect(runs()).toBe(1);
   });
 
   it("never runs two passes at once", async () => {

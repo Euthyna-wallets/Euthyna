@@ -175,6 +175,10 @@ const ERROR_RECHECK_MS = 30_000;
 const BROKEN_RECHECK_MS = 15 * 60_000;
 const STORAGE_CHECK_EVERY_MS = 10 * 60_000;
 const BUSY_RECHECK_NS = 20_000_000_000n;
+/** A standing order's run is tried at most this many times; then it waits for the members. */
+const STANDING_ORDER_ATTEMPTS = 3;
+/** Wait before trying a refused run again: 15 minutes, then 30. */
+const STANDING_ORDER_BACKOFF_NS = 15n * 60n * 1_000_000_000n;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -1658,21 +1662,50 @@ export class OmniRolesService {
    * in flight, so the next waits for the enclave's answer.
    */
   private async runStandingOrders(vaultAccountId: string): Promise<{ hashes: string[]; nextDueNs: bigint[] }> {
-    const orders = await this.near.viewFunction<Array<{ id: number; next_at_ns: string }>>(vaultAccountId, "list_standing_orders", {}).catch(() => null);
+    const orders = await this.near.viewFunction<Array<{ id: number; next_at_ns: string; runs?: number }>>(vaultAccountId, "list_standing_orders", {}).catch(() => null);
     if (!orders?.length) return { hashes: [], nextDueNs: [] };
     const now = nowNs();
-    const due = orders.filter((order) => BigInt(order.next_at_ns) <= now);
     const later = orders.filter((order) => BigInt(order.next_at_ns) > now).map((order) => BigInt(order.next_at_ns));
+    const due = orders.filter((order) => BigInt(order.next_at_ns) <= now);
     if (!due.length) return { hashes: [], nextDueNs: later };
+    // A refused payout gives the order back with the same date: without this, it would be run
+    // again on every pass (a failed payout, and a call to the enclave, every few seconds).
+    const failures = await this.standingOrderFailures(vaultAccountId);
+    const waits: bigint[] = [];
+    const runnable = due.find((order) => {
+      const failed = failures.get(`SO${order.id}-${(order.runs ?? 0) + 1}`) ?? [];
+      if (failed.length >= STANDING_ORDER_ATTEMPTS) return false;
+      if (!failed.length) return true;
+      const retryAt = failed[failed.length - 1]! + STANDING_ORDER_BACKOFF_NS * 2n ** BigInt(failed.length - 1);
+      if (retryAt <= now) return true;
+      waits.push(retryAt);
+      return false;
+    });
+    if (!runnable) return { hashes: [], nextDueNs: [...waits, ...later] };
     try {
-      const hash = await this.near.callFunction(vaultAccountId, "run_standing_order", { id: due[0]!.id }, "250000000000000", "0");
-      console.log(JSON.stringify({ event: "omniroles.standing_order_run", vaultAccountId, id: due[0]!.id, hash }));
-      return { hashes: [hash], nextDueNs: [now + BUSY_RECHECK_NS, ...later] };
+      const hash = await this.near.callFunction(vaultAccountId, "run_standing_order", { id: runnable.id }, "250000000000000", "0");
+      console.log(JSON.stringify({ event: "omniroles.standing_order_run", vaultAccountId, id: runnable.id, hash }));
+      return { hashes: [hash], nextDueNs: [now + BUSY_RECHECK_NS, ...waits, ...later] };
     } catch (error) {
       // Another payout in flight (ERR_BANK_PAYOUT_PENDING) or the bank not set up yet: next round.
-      console.warn(`standing order ${due[0]!.id} on ${vaultAccountId} not run yet: ${String(error).match(/ERR_[A-Z_]+|BeneficiaryNotAllowed/)?.[0] ?? String(error).slice(0, 120)}`);
-      return { hashes: [], nextDueNs: [now + BUSY_RECHECK_NS, ...later] };
+      console.warn(`standing order ${runnable.id} on ${vaultAccountId} not run yet: ${String(error).match(/ERR_[A-Z_]+|BeneficiaryNotAllowed/)?.[0] ?? String(error).slice(0, 120)}`);
+      return { hashes: [], nextDueNs: [now + BUSY_RECHECK_NS, ...waits, ...later] };
     }
+  }
+
+  /** The failed payouts of recent standing-order runs, by reference ("SO3-1"), oldest first. */
+  private async standingOrderFailures(vaultAccountId: string): Promise<Map<string, bigint[]>> {
+    const failures = new Map<string, bigint[]>();
+    const count = await this.near.viewFunction<number>(vaultAccountId, "count_bank_payouts", {}).catch(() => 0);
+    if (!count) return failures;
+    const payouts = await this.near.viewFunction<Array<{ reference: string; state: string; created_at_ns: string }>>(
+      vaultAccountId, "list_bank_payouts", { from_index: Math.max(0, count - 30), limit: 30 },
+    ).catch(() => []);
+    for (const payout of payouts) {
+      if (payout.state !== "Failed" || !/^SO\d+-\d+$/.test(payout.reference)) continue;
+      failures.set(payout.reference, [...(failures.get(payout.reference) ?? []), BigInt(payout.created_at_ns)]);
+    }
+    return failures;
   }
 
   /**
