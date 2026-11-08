@@ -191,6 +191,8 @@ const FOLLOW_RECHECK_NS = 60n * 60n * 1_000_000_000n;
  * rule list changes, after the keeper runs something, or at the latest after this long.
  */
 const RULE_FACTS_TTL_MS = 60 * 60_000;
+/** A vault that pays IBANs is read every minute: an agent's payout must not wait for the idle read. */
+const BANK_RECHECK_NS = 60n * 1_000_000_000n;
 /** Vaults checked at once by the job. */
 const ACTIVATION_LANES = 3;
 
@@ -1666,12 +1668,16 @@ export class OmniRolesService {
     hashes.push(...orders.hashes);
     const follow = await this.followBankSigner(treasury.vaultAccountId);
     hashes.push(...follow.hashes);
+    // A vault that pays IBANs: an agent's payout queues its EURC transfer when the enclave answers,
+    // without any call to this server. Read such a vault every minute so the transfer starts at once.
+    const banking = await this.ruleFact<unknown>(treasury.vaultAccountId, "get_bank_config", () => this.near.viewFunction<unknown>(treasury.vaultAccountId, "get_bank_config", {}).catch(() => null));
     if (hashes.length) this.forget(treasury.vaultAccountId);
     const waitingNs = [
       ...queued.filter((rule) => BigInt(rule.execute_after_ns) > now).map((rule) => BigInt(rule.execute_after_ns)),
       ...dao.nextDueNs,
       ...orders.nextDueNs,
       ...follow.nextDueNs,
+      ...(banking ? [nowNs() + BANK_RECHECK_NS] : []),
     ];
     const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
     return { hashes, nextDueMs };

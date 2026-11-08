@@ -22,6 +22,7 @@ function world(now: { ms: number }) {
   };
   const reads: string[] = [];
   const calls: string[] = [];
+  const banks = new Set<string>();
   const executed: string[] = [];
   const standing: Record<string, Array<{ id: number; next_at_ns: string; runs?: number }>> = {};
   const payouts: Record<string, Array<{ reference: string; state: string; created_at_ns: string }>> = {};
@@ -35,7 +36,7 @@ function world(now: { ms: number }) {
       if (method === "list_dao_transactions") return [];
       if (method === "list_standing_orders") return standing[account] ?? [];
       if (method === "get_bank_signer_source") return follow[account] ?? null;
-      if (method === "get_bank_config") return follow[account] ? { outlayer_id: "outlayer.testnet", signer_hash: "ab".repeat(32) } : null;
+      if (method === "get_bank_config") return follow[account] || banks.has(account) ? { outlayer_id: "outlayer.testnet", signer_hash: "ab".repeat(32) } : null;
       if (method === "get_project") return { project_id: "ops.testnet/bank-signer", active_version: active.version };
       if (method === "count_bank_payouts") return (payouts[account] ?? []).length;
       if (method === "list_bank_payouts") return payouts[account] ?? [];
@@ -61,7 +62,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -184,6 +185,20 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 24 * 60_000);
     await service.activateAllReadyRules();
     expect(orderReads()).toBe(2);
+  });
+
+  it("reads a vault that pays IBANs every minute, so an agent's payout transfer starts at once", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 28, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls, banks } = world(now);
+    banks.add("idle.nomos.testnet");
+    const passes = (vault: string) => calls.filter((call) => call === `${vault}:list_dao_transactions`).length;
+    await service.activateAllReadyRules();
+    vi.setSystemTime(now.ms + 75_000);
+    await service.activateAllReadyRules();
+    expect(passes("idle.nomos.testnet")).toBe(2);
+    expect(passes("later.nomos.testnet")).toBe(1); // no bank: waits for its own date
   });
 
   it("never runs two passes at once", async () => {
