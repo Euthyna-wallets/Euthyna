@@ -30,8 +30,35 @@ describe("NearClient RPC throttling", () => {
       NEAR_RELAYER_PRIVATE_KEY: KeyPair.fromRandom("ed25519").toString(),
     });
 
+    const started = Date.now();
     await expect(client.getAccessKeys("account.testnet")).resolves.toEqual({ keys: [] });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([url]) => url === "https://rpc.testnet.near.org")).toBe(true);
+    // "Retry-After: 0" does not turn the backoff into an instant retry.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(450);
+  });
+
+  it("paces the console's proxied reads with the server's own", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchMock = vi.fn(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "mandateos", result: { ok: true } }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new NearClient({
+      NEAR_NETWORK_ID: "testnet",
+      NEAR_RPC_URL: "https://rpc.testnet.near.org",
+      NEAR_RELAYER_ACCOUNT_ID: "relayer.testnet",
+      NEAR_RELAYER_PRIVATE_KEY: KeyPair.fromRandom("ed25519").toString(),
+      NEAR_RPC_CONCURRENCY: 2,
+      NEAR_RPC_MIN_INTERVAL_MS: 0,
+    });
+    await Promise.all(Array.from({ length: 6 }, () => client.proxyRpc("query", {})));
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(peak).toBeLessThanOrEqual(2);
   });
 });

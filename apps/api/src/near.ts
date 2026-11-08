@@ -91,9 +91,11 @@ export class NearClient {
         });
         if (response.status === 429 && attempt < 4) {
           const retryAfter = Number(response.headers.get("retry-after"));
-          const delayMs = Number.isFinite(retryAfter) && retryAfter >= 0
-            ? retryAfter * 1_000
-            : 1_000 * (2 ** attempt);
+          // Some providers answer "Retry-After: 0": never retry faster than our own backoff.
+          const backoffMs = 500 * (2 ** attempt);
+          const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.max(retryAfter * 1_000, backoffMs)
+            : backoffMs;
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
@@ -119,8 +121,13 @@ export class NearClient {
     return this.limiter.run(() => this.requestRpc<T>(method, params));
   }
 
+  /**
+   * The console's RPC proxy: reads share the server's pacing (one quota for every browser);
+   * a broadcast goes straight through so it never holds a read slot while it waits.
+   */
   async proxyRpc<T>(method: string, params: unknown): Promise<T> {
-    return this.requestRpc<T>(method, params);
+    if (/^(broadcast_tx|send_tx)/.test(method)) return this.requestRpc<T>(method, params);
+    return this.rpc<T>(method, params);
   }
 
 

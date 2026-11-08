@@ -42,11 +42,13 @@ const gasEstimator = BaseGasEstimator.fromRpc(env.BASE_SEPOLIA_RPC_URL, {
 });
 const auth = new BetterAuthGateway(createAuth(env, prisma, {
   recipient: new URL(env.CONSOLE_ORIGIN).host,
+  // An unknown account has no key; any other RPC failure is thrown, so sign-in says NEAR is not answering.
   isFullAccessKey: async (accountId, publicKey) => {
     try {
       return hasFullAccessKey((await near.getAccessKeys(accountId)).keys, publicKey);
-    } catch {
-      return false;
+    } catch (error) {
+      if (/does not exist|UNKNOWN_ACCOUNT/i.test(error instanceof Error ? error.message : String(error))) return false;
+      throw error;
     }
   },
   // Only a definite "unknown account" counts as missing: an RPC failure keeps the generic message.
