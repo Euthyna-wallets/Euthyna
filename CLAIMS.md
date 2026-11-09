@@ -63,7 +63,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 | Claim | Status | Proof |
 | --- | --- | --- |
 | Base Sepolia: payments signed by MPC and broadcast | Testnet | [docs/shares.md](./docs/shares.md), [docs/vault-testnet.md](./docs/vault-testnet.md) |
-| Solana devnet: the vault builds the transaction, MPC signs ed25519, MPC attests finality | Code, Reported | `contracts/vault/src/solana.rs`, `packages/sdk/src/solana.ts` and tests; whitepaper reports an 18 second devnet transfer. **Add the signature to the docs.** |
+| Solana devnet: the vault builds the transaction, MPC signs ed25519, MPC attests finality | Code, Reported | `contracts/vault/src/solana.rs`, `packages/sdk/src/solana.ts` and tests; the whitepaper reports an 18 second devnet transfer; no signature in this repository yet, so treat it as code |
 | Ethereum Sepolia | Code, Reported | API, SDK and console support chain 11155111 (`apps/api/src/omniroles.ts`). The MPC settlement table in `contracts/vault/src/foreign.rs` lists Base, Arbitrum, BNB, Polygon and Avalanche, **not Ethereum**. Confirm how Ethereum settles and add a hash. |
 | Arbitrum, BSC, Plasma, Tron, Bitcoin | NEXT | Whitepaper, "Chains" and "Next". Arbitrum, BNB, Polygon and Avalanche are mapped in `foreign.rs` for settlement, not demonstrated. |
 
@@ -95,7 +95,7 @@ Every statement on the public site (`/`, `/whitepaper`) and what proves it. Stat
 
 | Claim | Status | Proof |
 | --- | --- | --- |
-| Supplier payouts on Base or Solana, treasury yield (wrap, Uniswap swap, Aave), revenue sharing, an AI company on Atlantis: "Testnet" | Reported | Whitepaper, "Use cases". Revenue sharing has hashes in [docs/shares.md](./docs/shares.md); add hashes for the others. |
+| Supplier payouts on Base or Solana, treasury yield (wrap, Uniswap swap, Aave), revenue sharing, an AI company on Atlantis: "Testnet" | Reported | Whitepaper, "Use cases". Revenue sharing and IBAN payouts have hashes ([docs/shares.md](./docs/shares.md), [docs/bank.md](./docs/bank.md)); the others have none yet, so treat them as code. |
 | Freelance agent: "Possible" with payment roles | Code | `payments` block in `packages/sdk/src/roles.ts` |
 | Rebalancing across chains, retail wallet | NEXT | Whitepaper, "Next" |
 
