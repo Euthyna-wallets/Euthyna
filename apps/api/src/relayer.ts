@@ -1,6 +1,6 @@
 import { bytesToHex, createPublicClient, http, keccak256, TransactionReceiptNotFoundError, type Address, type Hex } from "viem";
 import type { Env } from "./env.js";
-import { GasTank } from "./gas-tank.js";
+import { GasTank, type WalletAuthorization } from "./gas-tank.js";
 import { Guard } from "./guard.js";
 import { NearClient } from "./near.js";
 import type { VaultOperation } from "./types.js";
@@ -51,9 +51,13 @@ export class BaseRelayer {
   }
 
   /** Sponsored execution: the relayer (the gas tank) sends the wallet's signed `execute` call. */
-  async relay(wallet: Address, calldata: number[]): Promise<Hex> {
+  async relay(wallet: Address, calldata: number[], authorization?: WalletAuthorization): Promise<Hex> {
     if (!this.gasTank) throw new Error("sponsored execution needs BASE_GAS_TANK_PRIVATE_KEY (the relayer that pays the gas)");
-    return this.gasTank.relay(wallet, bytesToHex(Uint8Array.from(calldata)));
+    return this.gasTank.relay(wallet, bytesToHex(Uint8Array.from(calldata)), authorization);
+  }
+
+  async nonce(address: Address): Promise<number> {
+    return this.client.getTransactionCount({ address, blockTag: "pending" });
   }
 
   async code(address: Address): Promise<Hex | undefined> {

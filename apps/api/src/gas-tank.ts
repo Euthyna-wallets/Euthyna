@@ -17,6 +17,9 @@ const MARGIN_WEI = 20_000_000_000_000n; // 0.00002 ETH
 
 export type TankTopUp = { wallet: Address; sentWei: bigint; txHash: Hex } | null;
 
+/** An EIP-7702 authorization of a company wallet, signed by NEAR MPC. */
+export type WalletAuthorization = { chainId: number; address: Address; nonce: number; r: Hex; s: Hex; yParity: number };
+
 export class GasTank {
   private readonly account;
   private readonly client;
@@ -48,12 +51,16 @@ export class GasTank {
    * Sponsored execution (EIP-7702): sends the wallet's signed `execute(...)` call from the tank,
    * which pays the gas. The call itself carries the vault's signature; the tank adds nothing to it.
    */
-  async relay(wallet: Address, data: Hex): Promise<Hex> {
-    return this.wallet.sendTransaction({ to: wallet, data, value: 0n, chain: this.chain, account: this.account });
+  /** With `authorization`, the wallet's EIP-7702 delegation goes in the same (type-4) transaction, before the call runs. */
+  async relay(wallet: Address, data: Hex, authorization?: WalletAuthorization): Promise<Hex> {
+    return this.wallet.sendTransaction({
+      to: wallet, data, value: 0n, chain: this.chain, account: this.account,
+      ...(authorization ? { authorizationList: [authorization] } : {}),
+    });
   }
 
   /** Submits the wallet's EIP-7702 authorization (signed by NEAR MPC) in a type-4 transaction the tank pays for. */
-  async delegate(authorization: { chainId: number; address: Address; nonce: number; r: Hex; s: Hex; yParity: number }): Promise<Hex> {
+  async delegate(authorization: WalletAuthorization): Promise<Hex> {
     return this.wallet.sendTransaction({
       to: this.account.address,
       value: 0n,

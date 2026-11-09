@@ -52,4 +52,14 @@ describe("keepDelegated", () => {
     expect(await keepDelegated(f.near, f.chain, "v", 84532)).toBe("submitted");
     expect(f.submitted).toEqual([{ chainId: 84532, address: executor, nonce: 3, r: `0x${"01".repeat(32)}`, s: `0x${"02".repeat(32)}`, yParity: 1 }]);
   });
+
+  it("submits a signed authorization the wallet has not used, even when the code already points there", async () => {
+    const delegation = { executor: Array(20).fill(0xcc), nonce: 4, signature: { big_r: [3, ...Array(32).fill(1)], s: Array(32).fill(2), recovery_id: 0 } };
+    const unused = fakes({ executor, code: `0xef0100${"cc".repeat(20)}` as Hex, delegation });
+    (unused.chain as unknown as { nonce?: () => Promise<number> }).nonce = () => Promise.resolve(4);
+    expect(await keepDelegated(unused.near, unused.chain, "v", 84532)).toBe("submitted");
+    const used = fakes({ executor, code: `0xef0100${"cc".repeat(20)}` as Hex, delegation });
+    (used.chain as unknown as { nonce?: () => Promise<number> }).nonce = () => Promise.resolve(5);
+    expect(await keepDelegated(used.near, used.chain, "v", 84532)).toBe("delegated");
+  });
 });
