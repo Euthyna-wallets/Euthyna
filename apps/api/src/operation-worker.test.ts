@@ -631,7 +631,10 @@ describe("sponsored execution (EIP-7702)", () => {
     const near = test.near as FakeNear & { settleSponsored: (...a: unknown[]) => Promise<string> };
     const view = near.viewFunction.bind(near);
     const settledLogs: unknown[] = [];
-    near.viewFunction = (<T>(id: string, method: string) => method === "get_sponsored_operation" ? Promise.resolve({ deadline } as T) : view<T>(id, method)) as typeof near.viewFunction;
+    near.viewFunction = (<T>(id: string, method: string) => method === "get_sponsored_operation" ? Promise.resolve({ deadline } as T)
+      : method === "get_evm_executor" ? Promise.resolve(`0x${"cc".repeat(20)}` as T)
+      : method === "get_wallet_delegation" ? Promise.resolve(null as T)
+      : view<T>(id, method)) as typeof near.viewFunction;
     near.settleSponsored = (_v: unknown, _op: unknown, log: unknown) => { settledLogs.push(log); near.operation = { ...near.operation, state: "Confirmed" }; return Promise.resolve("near-settle-sponsored"); };
     const base = test.base as FakeBase & { relay: (w: Hex, raw: number[] | null) => Promise<Hex>; executedLog: () => Promise<unknown> };
     const relayed: Array<[Hex, number[] | null]> = [];
@@ -674,6 +677,19 @@ describe("sponsored execution (EIP-7702)", () => {
     base.relay = (_w, _raw, auth) => { auths.push(auth); return Promise.resolve(relayHash); };
     await test.createWorker().tick();
     expect(auths).toEqual([{ chainId: 84532, address: `0x${"cc".repeat(20)}`, nonce: 1, r: `0x${"05".repeat(32)}`, s: `0x${"06".repeat(32)}`, yParity: 0 }]);
+  });
+
+  it("does not relay to a wallet with no code and no authorization to send", async () => {
+    const test = sponsored();
+    const base = test.base as FakeBase & { code: () => Promise<Hex> };
+    base.code = () => Promise.resolve("0x");
+    await test.createWorker().tick();
+    expect(test.relayed).toEqual([]);
+    expect(test.store.operation.lastError).toBe("waiting for the wallet's EIP-7702 delegation");
+    base.code = () => Promise.resolve(`0xef0100${"cc".repeat(20)}` as Hex);
+    test.advance(1_000);
+    await test.createWorker().tick();
+    expect(test.relayed).toHaveLength(1);
   });
 
   it("sends the call again when it was mined but ran nothing", async () => {
