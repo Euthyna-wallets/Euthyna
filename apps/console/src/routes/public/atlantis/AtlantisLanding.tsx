@@ -386,6 +386,15 @@ export function AtlantisLanding() {
               </div>
             ))}
           </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, flexWrap: "wrap", padding: "26px 30px", border: "1px solid rgba(242,181,68,.45)", borderRadius: 2, background: "rgba(3,9,24,.45)" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 680 }}>
+              <b style={{ font: `800 20px ${BRAND}`, letterSpacing: ".14em", color: "#F3EFE6" }}>DON'T TAKE OUR WORD FOR IT. ROB OUR AGENT.</b>
+              <span style={{ fontSize: 15, color: "#C9D3EA" }}>
+                Ruggy is already jailbroken: you are his brain. Every card is a real testnet transaction against a real vault, and the vault answers. No wallet needed.
+              </span>
+            </div>
+            <Link to="/rob" className="btno ori">PLAY ROB THE AGENT</Link>
+          </div>
         </div>
       </section>
 

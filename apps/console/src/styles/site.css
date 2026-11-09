@@ -127,11 +127,23 @@
   .hero-veil{background:linear-gradient(90deg,rgba(3,9,24,.97) 0%,rgba(3,9,24,.9) 32%,rgba(3,9,24,.45) 56%,rgba(3,9,24,.08) 72%,rgba(3,9,24,.35) 100%),linear-gradient(180deg,rgba(3,9,24,.55) 0%,rgba(3,9,24,0) 22%,rgba(3,9,24,0) 74%,rgba(6,20,51,.98) 100%),url(/media/hero-poster.jpg) 70% center/cover no-repeat}
 }
 
+/* ---------- header menu ---------- */
+.navtoggle{display:none}
+.navlinks a{white-space:nowrap}
+@media (max-width:1240px){
+  .navlinks{display:none !important}
+  .navtoggle{display:inline-block}
+}
+.navmenu a{padding:12px 0;border-bottom:1px solid #142E63}
+@media (min-width:901px){.navmenu .menu-openapp{display:none}}
+
 /* ---------- mobile ---------- */
 @media (max-width:900px){
   .wrap,.pg{padding:0 20px}
   .g2,.g3,.g4,.hero-grid,.atl-grid,.court{grid-template-columns:minmax(0,1fr) !important}
   .navlinks{display:none !important}
+  .openapp{display:none !important}
+  .navtoggle{display:inline-block}
   .stele-stage{height:420px !important}
   .frieze{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
   .slabtitle{font-size:42px !important}
