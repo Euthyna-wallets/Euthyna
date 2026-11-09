@@ -103,7 +103,7 @@ const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY &
   ? new MarketService(
     prisma,
     chequeChain((method, params) => near.proxyRpc(method, params)),
-    new NearChequeRelayer(env.MARKET_RELAYER_ACCOUNT_ID, env.MARKET_RELAYER_PRIVATE_KEY, env.NEAR_NETWORK_ID, env.NEAR_RPC_URL),
+    new NearChequeRelayer(env.MARKET_RELAYER_ACCOUNT_ID, env.MARKET_RELAYER_PRIVATE_KEY, env.NEAR_NETWORK_ID, near.pool),
     {
       network: `near:${env.NEAR_NETWORK_ID}`,
       webhookSecret: env.MARKET_WEBHOOK_SECRET,
@@ -142,7 +142,7 @@ const rob = env.ROB_RUGGY_ACCOUNT_ID && env.ROB_RUGGY_PRIVATE_KEY && env.ROB_VAU
       const [accountId, ...key] = item.trim().split(":");
       return { accountId: accountId!, secretKey: key.join(":") };
     }),
-    rpc: new NearRpc(env.ROB_RPC_URL, fetch, env.NEAR_RPC_URL),
+    rpc: new NearRpc(env.ROB_RPC_URL, fetch, near.pool.urls),
     store: prisma,
     ruggySecretKey: env.ROB_RUGGY_PRIVATE_KEY,
     clientSalt: createHash("sha256").update(`rob:${env.ROB_RUGGY_PRIVATE_KEY}`).digest("hex"),

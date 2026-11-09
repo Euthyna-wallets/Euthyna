@@ -1,7 +1,8 @@
 import { hexToBytes, type Hex } from "viem";
-import { keyStores, KeyPair, Near, transactions, utils, type Account } from "near-api-js";
+import { transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import { RpcLimiter } from "./rpc-limiter.js";
+import { isRateRefusal, pooledAccount, RpcPool } from "./rpc-pool.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
 interface RpcResponse<T> {
@@ -9,6 +10,22 @@ interface RpcResponse<T> {
   error?: { message: string; data?: unknown };
 }
 class NearRpcApplicationError extends Error {}
+
+/** The error part of a JSON-RPC answer, if any (a 200 can carry a rate refusal). */
+function textOfError(text: string): string {
+  try {
+    const body = JSON.parse(text) as { error?: unknown };
+    return body.error ? JSON.stringify(body.error) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The pool in order: NEAR_RPC_URL (paid), NEAR_RPC_URLS (comma separated), then NEAR_RPC_FALLBACK_URL. */
+export function rpcEndpoints(env: { NEAR_RPC_URL: string; NEAR_RPC_URLS?: string | undefined; NEAR_RPC_FALLBACK_URL?: string | undefined }): string[] {
+  return [env.NEAR_RPC_URL, ...(env.NEAR_RPC_URLS ?? "").split(",").map((url) => url.trim()).filter(Boolean), env.NEAR_RPC_FALLBACK_URL]
+    .filter((url): url is string => Boolean(url));
+}
 
 
 type NearOutcome = {
@@ -55,94 +72,71 @@ export function extractMpcSignatures(status: NearTransactionStatus): MpcSignatur
   return signatures;
 }
 
-/** How long the primary endpoint is set aside after it refuses for its quota or rate. */
-const PRIMARY_REST_MS = 10 * 60_000;
-
 export class NearClient {
   private readonly accountPromise: Promise<Account>;
-  private readonly fallbackAccountPromise: Promise<Account> | null;
   private readonly limiter: RpcLimiter;
-  /** Until when the primary endpoint is set aside (its quota is spent or it rate-limits us). */
-  private primaryRestingUntil = 0;
+  /** The endpoints, the paid one first: one that refuses for its rate or quota rests, the next one answers. */
+  readonly pool: RpcPool;
 
-  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY"> & Partial<Pick<Env, "NEAR_RPC_CONCURRENCY" | "NEAR_RPC_MIN_INTERVAL_MS" | "NEAR_RPC_FALLBACK_URL">>) {
-    this.accountPromise = this.createRelayerAccount(env.NEAR_RPC_URL);
-    this.fallbackAccountPromise = env.NEAR_RPC_FALLBACK_URL ? this.createRelayerAccount(env.NEAR_RPC_FALLBACK_URL) : null;
+  constructor(private readonly env: Pick<Env, "NEAR_NETWORK_ID" | "NEAR_RPC_URL" | "NEAR_RELAYER_ACCOUNT_ID" | "NEAR_RELAYER_PRIVATE_KEY"> & Partial<Pick<Env, "NEAR_RPC_CONCURRENCY" | "NEAR_RPC_MIN_INTERVAL_MS" | "NEAR_RPC_FALLBACK_URL" | "NEAR_RPC_URLS">>) {
+    this.pool = new RpcPool(rpcEndpoints(env));
+    this.accountPromise = pooledAccount(this.pool, env.NEAR_NETWORK_ID, env.NEAR_RELAYER_ACCOUNT_ID, env.NEAR_RELAYER_PRIVATE_KEY);
     // Several calls at once, paced, and screens before the background job (it used to be one call per 500 ms for everything).
     this.limiter = new RpcLimiter(env.NEAR_RPC_CONCURRENCY ?? 3, env.NEAR_RPC_MIN_INTERVAL_MS ?? 150);
   }
 
-  /** The endpoint to use now: the primary, or the fallback while the primary rests. */
-  private rpcUrl(): string {
-    return this.env.NEAR_RPC_FALLBACK_URL && Date.now() < this.primaryRestingUntil ? this.env.NEAR_RPC_FALLBACK_URL : this.env.NEAR_RPC_URL;
-  }
-
-  /** The relayer account on the endpoint in use (transactions follow the same switch as reads). */
+  /** The relayer account; its views and transactions go through the pool too. */
   private account(): Promise<Account> {
-    return this.fallbackAccountPromise && this.rpcUrl() !== this.env.NEAR_RPC_URL ? this.fallbackAccountPromise : this.accountPromise;
-  }
-
-  /** The primary answered "too many requests" or "quota spent": use the fallback for a while. */
-  private restPrimary(reason: string): boolean {
-    if (!this.env.NEAR_RPC_FALLBACK_URL || this.rpcUrl() !== this.env.NEAR_RPC_URL) return false;
-    this.primaryRestingUntil = Date.now() + PRIMARY_REST_MS;
-    console.warn(JSON.stringify({ event: "near.rpc_fallback", reason, minutes: PRIMARY_REST_MS / 60_000 }));
-    return true;
-  }
-
-  private async createRelayerAccount(nodeUrl: string): Promise<Account> {
-    const keyStore = new keyStores.InMemoryKeyStore();
-    await keyStore.setKey(
-      this.env.NEAR_NETWORK_ID,
-      this.env.NEAR_RELAYER_ACCOUNT_ID,
-      KeyPair.fromString(this.env.NEAR_RELAYER_PRIVATE_KEY as `ed25519:${string}`),
-    );
-    const near = new Near({
-      networkId: this.env.NEAR_NETWORK_ID,
-      nodeUrl,
-      keyStore,
-    });
-    return near.account(this.env.NEAR_RELAYER_ACCOUNT_ID);
+    return this.accountPromise;
   }
 
   private async requestRpc<T>(method: string, params: unknown): Promise<T> {
+    const tried = new Set<string>();
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      // Another endpoint answers at once; when every one was tried, wait and start over.
+      let url = this.pool.pick(tried);
+      if (!url) {
+        tried.clear();
+        await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
+        url = this.pool.pick()!;
+      }
+      tried.add(url);
+      let response: Response;
       try {
-        const response = await fetch(this.rpcUrl(), {
+        response = await fetch(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: "mandateos", method, params }),
           signal: AbortSignal.timeout(15_000),
         });
-        // A spent daily quota will not come back with a retry: switch to the fallback at once.
-        if (response.status === 429 && this.restPrimary("429")) continue;
-        if (response.status === 429 && attempt < 4) {
-          const retryAfter = Number(response.headers.get("retry-after"));
-          // Some providers answer "Retry-After: 0": never retry faster than our own backoff.
-          const backoffMs = 500 * (2 ** attempt);
-          const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
-            ? Math.max(retryAfter * 1_000, backoffMs)
-            : backoffMs;
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          continue;
-        }
-        if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
-        const payload = (await response.json()) as RpcResponse<T>;
-        if (payload.error && /limit|quota/i.test(String((payload.error as { message?: unknown }).message ?? "")) && this.restPrimary("quota")) continue;
-        if (payload.error) {
-          throw new NearRpcApplicationError(
-            `NEAR RPC ${payload.error.message}: ${JSON.stringify(payload.error.data ?? null)}`,
-          );
-        }
-        if (payload.result === undefined) throw new Error("NEAR RPC response missing result");
-        return payload.result;
       } catch (error) {
-        if (error instanceof NearRpcApplicationError) throw error;
+        // No answer: a read goes to the next endpoint; so does a broadcast (the same signed bytes, so at most once on chain).
+        this.pool.rest(url, "down");
         if (attempt >= 4) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 1_000 * (2 ** attempt)));
+        continue;
       }
+      const text = await response.text();
+      const refusal = isRateRefusal(response.status, response.ok ? textOfError(text) : text);
+      if (refusal) {
+        this.pool.rest(url, refusal);
+        continue;
+      }
+      if (response.status >= 500) {
+        this.pool.rest(url, "down");
+        continue;
+      }
+      if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+      const payload = JSON.parse(text) as RpcResponse<T>;
+      if (payload.error) {
+        throw new NearRpcApplicationError(
+          `NEAR RPC ${payload.error.message}: ${JSON.stringify(payload.error.data ?? null)}`,
+        );
+      }
+      if (payload.result === undefined) throw new Error("NEAR RPC response missing result");
+      this.pool.ok(url);
+      return payload.result;
     }
-    throw new Error("NEAR RPC retry budget exhausted");
+    throw new Error("NEAR RPC: every endpoint refused (rate, quota or no answer)");
   }
 
   private async rpc<T>(method: string, params: unknown): Promise<T> {
