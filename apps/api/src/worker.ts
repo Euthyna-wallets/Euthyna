@@ -39,17 +39,31 @@ const worker = new OperationWorker(
   undefined,
   createChainRelayers(env, near, guard),
 );
-// Sponsored execution: wallets whose company voted an executor get delegated (EIP-7702), every 2 minutes.
-const DELEGATION_EVERY_MS = 120_000;
-let delegationCheckedAt = 0;
+// Sponsored execution: wallets whose company voted an executor get delegated (EIP-7702). Every vault
+// is looked at every 30 s (one view when nothing is voted); a vault on its way (signing, submitted)
+// is looked at again on the next round, every 5 s, so a vote is followed within about a minute.
+const DELEGATION_SCAN_MS = 30_000;
+const DELEGATION_FOLLOW_MS = 5_000;
+let delegationScannedAt = 0;
+let delegationFollowedAt = 0;
+let delegating = new Set<string>();
 async function keepWalletsDelegated() {
-  if (Date.now() - delegationCheckedAt < DELEGATION_EVERY_MS) return;
-  delegationCheckedAt = Date.now();
-  const treasuries = await prisma.treasury.findMany({ select: { vaultAccountId: true } });
-  for (const { vaultAccountId } of treasuries) {
+  const now = Date.now();
+  const scan = now - delegationScannedAt >= DELEGATION_SCAN_MS;
+  if (!scan && (delegating.size === 0 || now - delegationFollowedAt < DELEGATION_FOLLOW_MS)) return;
+  delegationFollowedAt = now;
+  if (scan) delegationScannedAt = now;
+  const vaults = scan
+    ? (await prisma.treasury.findMany({ select: { vaultAccountId: true } })).map((row) => row.vaultAccountId)
+    : [...delegating];
+  const next = new Set<string>(scan ? [] : delegating);
+  for (const vaultAccountId of vaults) {
     const outcome = await keepDelegated(near, base, vaultAccountId, 84532).catch((error: unknown) => `failed: ${String(error).slice(0, 160)}`);
+    if (outcome === "signing" || outcome === "submitted") next.add(vaultAccountId);
+    else next.delete(vaultAccountId);
     if (outcome !== "none" && outcome !== "delegated") console.log(JSON.stringify({ event: "worker.delegation", vaultAccountId, outcome }));
   }
+  delegating = next;
 }
 let running = true;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

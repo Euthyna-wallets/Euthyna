@@ -9,7 +9,8 @@ import { PageState } from "../components/ui.js";
 import { readerKey } from "../lib/reader-key.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { bankApi, omni, type ProposalDraft } from "../omniroles-api.js";
-import { signDaoProposal } from "../wallets.js";
+import { publicKeyBase64, SEALED_DEPOSIT_YOCTO } from "@euthyna/sdk/sealed-orders";
+import { signContractCall, signDaoProposal } from "../wallets.js";
 
 type Entry = { address: number[]; label: string };
 type Registry = { suppliers: Array<{ name: string; wallets: Array<{ chainId: number; address: string }> }> };
@@ -56,9 +57,18 @@ export function SuppliersPage() {
       } else {
         // Sealed here, in this browser: the server and the chain get a commitment and two envelopes.
         if (!policy.boxKey) throw new Error("Euro payouts are not enabled yet: the members vote the bank signer first (Treasury → Euro payouts).");
-        if (!policy.readers?.length) throw new Error("No member has a reading key yet: register yours (Treasury → Sealed orders) so the members can read the IBANs they vote.");
+        let readers = policy.readers ?? [];
+        if (!readers.length) {
+          // No member can read sealed IBANs yet: register this member's reading key first (one signature),
+          // then seal for it. The key is derived from the wallet, so nothing to keep.
+          const sealed = await omni.sealed();
+          if (!sealed.sealedAccountId) throw new Error("No member has a reading key yet, and the sealed-orders contract is not configured to register one.");
+          const key = await readerKey(treasury.vaultAccountId);
+          await signContractCall(wallets.nearAccountId, sealed.sealedAccountId, "register_reader", { vault: treasury.vaultAccountId, public_key: publicKeyBase64(key.publicKey) }, { deposit: SEALED_DEPOSIT_YOCTO, gas: "80000000000000" });
+          readers = [{ account: wallets.nearAccountId, publicKey: publicKeyBase64(key.publicKey) }];
+        }
         if (!channelId) throw new Error("The bank partner offers no payout channel for this country right now.");
-        const vote = await payeeVote({ vault: treasury.vaultAccountId, rail, channelId, values, boxKeyHex: policy.boxKey, readers: policy.readers });
+        const vote = await payeeVote({ vault: treasury.vaultAccountId, rail, channelId, values, boxKeyHex: policy.boxKey, readers });
         expected = { AddSealedBankBeneficiary: { label: label.trim(), commitment: vote.commitment, sealed_for_signer: vote.sealedForSigner, sealed_for_members: vote.sealedForMembers } };
         draft = await bankApi.beneficiaryProposal({ label: label.trim(), commitment: vote.commitment, sealedForSigner: vote.sealedForSigner, sealedForMembers: vote.sealedForMembers });
       }

@@ -297,6 +297,12 @@ export async function signDaoProposal(
   proposal: { receiverId: string; args: Record<string, unknown>; deposit: string },
 ): Promise<{ transactionHash: string; proposalId: number }> {
   const wallet = await transactionWallet();
+  // A council member who proposes also approves, in the same transaction: the proposal then needs one
+  // more founder, not two. The vote names the id the proposal will get and its kind: if another
+  // proposal lands first, the kinds differ, the DAO refuses the vote and the whole transaction with it.
+  const kind = (proposal.args as { proposal?: { kind?: unknown } }).proposal?.kind;
+  const approve = kind !== undefined && await isCouncilMember(proposal.receiverId, signerId);
+  const nextId = approve ? await daoView<number>(proposal.receiverId, "get_last_proposal_id") : null;
   const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: proposal.receiverId,
@@ -308,14 +314,36 @@ export async function signDaoProposal(
         gas: "150000000000000",
         deposit: proposal.deposit,
       },
-    }],
+    }, ...(nextId !== null ? [{
+      type: "FunctionCall" as const,
+      params: { methodName: "act_proposal", args: { id: nextId, action: "VoteApprove", proposal: kind }, gas: "100000000000000", deposit: "0" },
+    }] : [])],
   });
   const transactionHash = outcome.transaction_outcome.id;
-  const proposalId =
+  const failure = (outcome.status as { Failure?: unknown } | undefined)?.Failure;
+  if (failure) throw new Error(`The DAO refused the proposal (${JSON.stringify(failure).slice(0, 160)}). Nothing was proposed; try again.`);
+  const proposalId = nextId ??
     decodeProposalId(outcome.status?.SuccessValue) ??
     await proposalIdFromTransaction(transactionHash, signerId);
   await refreshOmniReads();
   return { transactionHash, proposalId };
+}
+
+async function daoView<T>(daoAccountId: string, methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+  const result = await nearRpcMethod<{ result: number[] }>("query", {
+    request_type: "call_function", finality: "final", account_id: daoAccountId, method_name: methodName,
+    args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
+  });
+  return JSON.parse(Buffer.from(result.result).toString()) as T;
+}
+
+/** In a group role of the DAO that may vote (the council). */
+async function isCouncilMember(daoAccountId: string, accountId: string): Promise<boolean> {
+  const policy = await daoView<{ roles: Array<{ kind: unknown; permissions: string[] }> }>(daoAccountId, "get_policy").catch(() => null);
+  return (policy?.roles ?? []).some((role) => {
+    const group = (role.kind as { Group?: string[] } | null)?.Group ?? [];
+    return group.includes(accountId) && role.permissions.some((permission) => /VoteApprove|^\*:\*$/.test(permission));
+  });
 }
 
 /**
