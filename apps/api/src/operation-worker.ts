@@ -6,6 +6,8 @@ import { bytesToHex, hexToBytes, type Hex } from "viem";
 import { onChainWalletEvmAddress } from "./agent-chain.js";
 import type { Guard } from "./guard.js";
 import { extractMpcSignatures, type NearTransactionStatus } from "./near.js";
+import { pendingAuthorization } from "./delegation-keeper.js";
+import type { WalletAuthorization } from "./gas-tank.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
 
@@ -122,7 +124,8 @@ export interface WorkerBaseGateway {
   receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash?: Hex } | null>;
   blockNumber(): Promise<bigint>;
   finalizedBlockNumber(): Promise<bigint>;
-  relay?(wallet: Hex, calldata: number[]): Promise<Hex>;
+  relay?(wallet: Hex, calldata: number[], authorization?: WalletAuthorization): Promise<Hex>;
+  code?(address: Hex): Promise<Hex | undefined>;
   executedLog?(hash: Hex, wallet: Hex, opId: Hex): Promise<{ blockHash: Hex; blockNumber: bigint; transactionIndex: number; logIndex: number } | null>;
 }
 
@@ -679,7 +682,9 @@ export class OperationWorker {
         await this.schedule(record, "Signed", "sponsored deadline passed");
         return;
       }
-      const hash = await this.base.relay(wallet, operation.signed_transaction);
+      // A wallet whose authorization is signed but not on chain yet gets it in the same transaction.
+      const authorization = this.base.code ? await pendingAuthorization(this.near, { code: (address) => this.base.code!(address) }, record.vaultAccountId, operation.request.chain_id, wallet) : null;
+      const hash = await this.base.relay(wallet, operation.signed_transaction, authorization ?? undefined);
       await this.store.update(record, {
         state: "Broadcast", txHash: hash, broadcastAt: this.now(), lastAttemptAt: this.now(),
         nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs), lastError: null,
@@ -704,12 +709,16 @@ export class OperationWorker {
       await this.schedule(record, "Broadcast", `sponsored call ${hash} reverted`);
       return;
     }
+    const log = await this.base.executedLog(hash, wallet, opId);
+    if (!log) {
+      // Mined but nothing ran (the wallet had no code yet): `execute` runs an id once, so send it again.
+      await this.store.update(record, { txHash: null, broadcastAt: null, nextAttemptAt: this.now(), lastError: `no Executed log in ${hash}, sending again` });
+      return;
+    }
     if (receipt.blockNumber > await this.base.finalizedBlockNumber()) {
       await this.schedule(record, "Broadcast", "waiting for foreign-chain finality");
       return;
     }
-    const log = await this.base.executedLog(hash, wallet, opId);
-    if (!log) throw new Error(`no Executed(${opId}) log from ${wallet} in ${hash}`);
     await this.near.settleSponsored(record.vaultAccountId, opBytes(record.opId), { txHash: hash, ...log });
     const settled = await this.near.getOperation(record.vaultAccountId, opBytes(record.opId));
     await this.store.update(record, {

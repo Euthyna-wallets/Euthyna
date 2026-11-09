@@ -661,6 +661,35 @@ describe("sponsored execution (EIP-7702)", () => {
     expect(test.store.operation.state).toBe("Confirmed");
   });
 
+  it("sends the wallet's signed authorization along with the first call", async () => {
+    const test = sponsored();
+    const near = test.near as FakeNear;
+    const view = near.viewFunction.bind(near);
+    near.viewFunction = (<T>(id: string, method: string) => method === "get_evm_executor" ? Promise.resolve(`0x${"cc".repeat(20)}` as T)
+      : method === "get_wallet_delegation" ? Promise.resolve({ executor: Array(20).fill(0xcc), nonce: 1, signature: { big_r: [2, ...Array(32).fill(5)], s: Array(32).fill(6), recovery_id: 0 } } as T)
+      : view<T>(id, method)) as typeof near.viewFunction;
+    const base = test.base as FakeBase & { code: () => Promise<Hex>; relay: (w: Hex, raw: number[] | null, auth?: unknown) => Promise<Hex> };
+    base.code = () => Promise.resolve("0x");
+    const auths: unknown[] = [];
+    base.relay = (_w, _raw, auth) => { auths.push(auth); return Promise.resolve(relayHash); };
+    await test.createWorker().tick();
+    expect(auths).toEqual([{ chainId: 84532, address: `0x${"cc".repeat(20)}`, nonce: 1, r: `0x${"05".repeat(32)}`, s: `0x${"06".repeat(32)}`, yParity: 0 }]);
+  });
+
+  it("sends the call again when it was mined but ran nothing", async () => {
+    const test = sponsored();
+    test.store.operation.txHash = relayHash;
+    test.store.operation.broadcastAt = new Date(nowStart);
+    test.base.receipts.set(relayHash, { status: "success", blockNumber: 99n });
+    (test.base as unknown as { executedLog: () => Promise<null> }).executedLog = () => Promise.resolve(null);
+    await test.createWorker().tick();
+    expect(test.settledLogs).toEqual([]);
+    expect(test.store.operation).toMatchObject({ txHash: null, lastError: `no Executed log in ${relayHash}, sending again` });
+    test.advance(1_000);
+    await test.createWorker().tick();
+    expect(test.relayed).toHaveLength(1);
+  });
+
   it("does not relay after the deadline", async () => {
     const test = sponsored(10); // 10 s; the NEAR block is at 20 s
     await test.createWorker().tick();

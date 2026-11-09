@@ -117,7 +117,11 @@ pub(crate) fn digest_for(
     expires_at_ns: u64,
     unconfirmed_after_ns: u64,
 ) -> Option<[u8; 32]> {
-    executor_of(request.chain_id)?;
+    let executor = executor_of(request.chain_id)?;
+    // Sponsored only once NEAR MPC signed the wallet's authorization to this executor: before that the
+    // wallet has no code to run `execute` (the relayer sends the authorization along with the first call).
+    delegation_of(request.chain_id)
+        .filter(|delegation| delegation.executor == executor && delegation.signature.is_some())?;
     // The relayer has at least half the unconfirmed window after the last moment it can be signed.
     let deadline = expires_at_ns.saturating_add(unconfirmed_after_ns / 2) / 1_000_000_000;
     write(
@@ -579,10 +583,14 @@ impl Vault {
                 existing
             }
             _ => {
-                require!(
-                    wallet.active_operation.is_none() && wallet.in_flight.is_empty(),
-                    "ERR_WALLET_QUEUE_BUSY"
-                );
+                // The authorization takes the wallet's next nonce: no transaction of the wallet may be
+                // waiting for one. Sponsored calls use no nonce of the wallet and do not count.
+                let busy = wallet
+                    .active_operation
+                    .iter()
+                    .chain(wallet.in_flight.iter())
+                    .any(|op_id| !is_sponsored(op_id));
+                require!(!busy, "ERR_WALLET_QUEUE_BUSY");
                 let nonce = wallet.next_nonce;
                 wallet.next_nonce = wallet.next_nonce.saturating_add(1);
                 let delegation = WalletDelegation {

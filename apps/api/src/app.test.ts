@@ -707,6 +707,20 @@ describe("console isolation and emergency", () => {
     );
   });
 
+  it("refuses a second agent with the same name with a clear message", async () => {
+    const { app, auth } = testApp();
+    const nearAccountId = proposedAgentAccountId("Naomi", "mandateos.testnet", "org-1");
+    auth.listed.push({ nearAccountId } as never);
+    const response = await app.request("/v1/console/agents", {
+      method: "POST",
+      headers: consoleHeaders({ cookie: "session-admin" }),
+      body: JSON.stringify({ name: "Naomi", role: "payments", nearAccountId, nearPublicKey: "ed25519:11111111111111111111111111111111", vaultAccountId: "vault-1.near", mpcPath: "agents/payments/base" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "agent_name_taken" });
+    expect(auth.created).toEqual([]);
+  });
+
   it("provisions an agent and rate-limits repeated sponsor requests", async () => {
     const { app, auth } = testApp();
     const path = "/v1/console/agents/11111111-1111-4111-8111-111111111111/provision";

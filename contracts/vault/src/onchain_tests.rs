@@ -1188,6 +1188,10 @@ mod sponsored_flow {
         );
         // A short unconfirmed window, so the executor's deadline is what holds a release back.
         v.settlement_config.unconfirmed_after_ns = U64(10 * 60 * 1_000_000_000);
+        // The wallet's authorization is signed: from here on, its calls are sponsored.
+        drop(v.delegate_wallet(84532));
+        let digest = v.get_wallet_delegation(84532).unwrap().digest;
+        v.on_delegation_signature(84532, digest, mpc_signature());
         context("agent.testnet", 3);
         let op = v.prepare("payments".into(), payment_request("invoice-2", true));
         (v, op.op_id)
@@ -1222,8 +1226,10 @@ mod sponsored_flow {
     #[test]
     fn signing_does_not_take_the_wallets_nonce_and_yields_the_execute_call() {
         let (mut v, id) = sponsored();
+        // The authorization took nonce 0; the call takes none.
+        assert_eq!(v.wallets.get(&84532).unwrap().next_nonce, 1);
         let _ = v.authorize(id, None);
-        assert_eq!(v.wallets.get(&84532).unwrap().next_nonce, 0);
+        assert_eq!(v.wallets.get(&84532).unwrap().next_nonce, 1);
         v.on_mpc_signature(id, mpc_signature());
         let op = v.operations.get(&id).unwrap();
         let calldata = op.signed_transaction.clone().unwrap();
@@ -1417,6 +1423,44 @@ mod sponsored_flow {
                 amount: U128(1),
             },
         );
+    }
+
+    #[test]
+    fn calls_stay_plain_until_the_wallets_authorization_is_signed() {
+        let (mut v, first) = fixture(false, true);
+        context("owner.testnet", 2);
+        v.cancel_prepared(first);
+        v.apply_rule_change(
+            RuleChange::SetEvmExecutor {
+                chain_id: 84532,
+                executor: Some(EXECUTOR),
+            },
+            2,
+        );
+        context("agent.testnet", 3);
+        let op = v.prepare("payments".into(), payment_request("invoice-early", true));
+        // No code at the wallet yet: a sponsored call would run nothing. It is a plain transaction.
+        assert!(v.get_sponsored_operation(op.op_id).is_none());
+        assert_eq!(op.tx_digest, evm::signing_digest(&op.transaction));
+    }
+
+    #[test]
+    fn a_sponsored_call_in_flight_does_not_block_a_new_authorization() {
+        let (mut v, id) = sponsored();
+        let _ = v.authorize(id, None);
+        v.on_mpc_signature(id, mpc_signature());
+        assert!(!v.wallets.get(&84532).unwrap().in_flight.is_empty());
+        // The members move to another executor: the wallet signs a new authorization at once.
+        context("owner.testnet", 4);
+        v.apply_rule_change(
+            RuleChange::SetEvmExecutor {
+                chain_id: 84532,
+                executor: Some([0xdd; 20]),
+            },
+            4,
+        );
+        drop(v.delegate_wallet(84532));
+        assert_eq!(v.get_wallet_delegation(84532).unwrap().executor, [0xdd; 20]);
     }
 
     #[test]

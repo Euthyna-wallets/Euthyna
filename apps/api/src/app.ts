@@ -749,6 +749,10 @@ export function createApp({
     if (input.nearAccountId && input.nearAccountId !== expectedAccountId) {
       return context.json({ error: "agent_account_mismatch", expectedAccountId }, 422);
     }
+    // The NEAR account comes from the name: a second "Naomi" would be the first one's account.
+    if ((await auth.listAgents(consoleIdentity.organizationId)).some((agent) => agent.nearAccountId === expectedAccountId)) {
+      return context.json({ error: "agent_name_taken", message: `An agent already uses ${expectedAccountId}: pick another name.` }, 409);
+    }
     const created = await auth.createAgent({
       organizationId: consoleIdentity.organizationId,
       name: input.name,
