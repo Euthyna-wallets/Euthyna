@@ -5,6 +5,7 @@ import { singleRoleTitle } from "../lib/role-summary.js";
 import { BASE_SEPOLIA, budgetsOf, councilThreshold, decodeVaultCalls, describePolicyChange, describeRegistryProposal, describeSharesProposal, describeVaultCall, nearRecipient, stringHash, type RuleChange } from "@euthyna/sdk/roles";
 
 import { api } from "../api.js";
+import { chainView } from "../lib/chain-view.js";
 import { displayAccount, PageState } from "../components/ui.js";
 import { Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab, VetoRing, VoteTokens } from "../components/design.js";
 import { useWallets } from "../lib/wallet-context.js";
@@ -193,6 +194,7 @@ export function GovernancePage() {
                 key={proposal.id}
                 proposal={proposal}
                 vaultAccountId={data!.vaultAccountId}
+                daoAccountId={data!.dao.accountId}
                 needed={needed}
                 me={me}
                 canVote={(isMember || (myShareVotes > 0n && shareholderKind(proposal.kind))) && !(me in proposal.votes)}
@@ -361,13 +363,22 @@ type Registry = {
  * proposal, so a server that showed something else could not collect votes for it.
  * Supplier names come from Euthyna: the full address is printed next to each one.
  */
-function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string): Sentence[] | null {
+function useVerifiedChanges(proposal: GovernanceProposal, vaultAccountId: string, daoAccountId: string): Sentence[] | null {
+  // A shares contract is this company's when the contract itself says it belongs to this DAO (read on chain here):
+  // its name differs between vault generations (<slug>-shares.<parent> next to a Nomos vault).
+  const stakingId = (proposal.kind as { SetStakingContract?: { staking_id?: string } } | null)?.SetStakingContract?.staking_id ?? null;
+  const stakingInfo = useQuery({
+    queryKey: ["shares-info", stakingId],
+    queryFn: () => chainView<{ dao_id: string }>(stakingId!, "info"),
+    enabled: Boolean(stakingId),
+    staleTime: 60_000,
+  });
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => api<Registry>("/v1/console/registry"), staleTime: 60_000 });
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, staleTime: 60_000 });
   const directory = useQuery({ queryKey: ["omni-directory"], queryFn: omni.directory, staleTime: 60_000 });
   const policyChange = describePolicyChange(proposal.kind);
   if (policyChange) return [{ title: policyChange.title, details: policyChange.details }];
-  const sharesChange = describeSharesProposal(proposal.kind, vaultAccountId.replace(/-vault\./, "-shares."));
+  const sharesChange = describeSharesProposal(proposal.kind, stakingId && stakingInfo.data?.dao_id === daoAccountId ? stakingId : vaultAccountId.replace(/-vault\./, "-shares."));
   if (sharesChange) return [sharesChange];
   const listing = describeRegistryProposal(proposal.kind, directory.data?.registryId ?? null);
   if (listing) return [listing];
@@ -396,6 +407,7 @@ function shareholderKind(kind: unknown): boolean {
 function ProposalCard(props: {
   proposal: GovernanceProposal;
   vaultAccountId: string;
+  daoAccountId: string;
   needed: number;
   lockedShares?: bigint | null;
   me: string;
@@ -405,7 +417,7 @@ function ProposalCard(props: {
   onVote: (action: "VoteApprove" | "VoteReject") => void;
 }) {
   const { proposal } = props;
-  const verified = useVerifiedChanges(proposal, props.vaultAccountId);
+  const verified = useVerifiedChanges(proposal, props.vaultAccountId, props.daoAccountId);
   const approvals = Object.values(proposal.votes).filter((vote) => vote === "Approve").length;
   const rejections = Object.values(proposal.votes).filter((vote) => vote === "Reject").length;
   return (

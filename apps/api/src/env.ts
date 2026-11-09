@@ -37,6 +37,14 @@ const schema = z.object({
    * One that refuses for its rate or quota rests; the next one answers. Server only.
    */
   NEAR_RPC_URLS: z.string().optional(),
+  /**
+   * Testnet only: a key holding test ETH on Base Sepolia that pays the network fee a company wallet
+   * lacks, just before its transaction is broadcast (judges and new companies start with no ETH).
+   * It moves only its own test ETH. Ignored on mainnet.
+   */
+  BASE_GAS_TANK_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  /** Most the tank sends one wallet per UTC day, in wei (default 0.002 ETH). */
+  BASE_GAS_TANK_PER_WALLET_DAY_WEI: z.string().regex(/^\d+$/).default("2000000000000000"),
   /** NEAR RPC calls at once, and the least time between two starts (a public RPC rate-limits). */
   NEAR_RPC_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(3),
   NEAR_RPC_MIN_INTERVAL_MS: z.coerce.number().int().min(0).max(5_000).default(150),

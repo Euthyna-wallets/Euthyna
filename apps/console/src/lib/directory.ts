@@ -39,7 +39,7 @@ export type CompanyProfile = DirectoryEntry & {
   paused: boolean;
   wallets: Array<{ chainId: number; name: string; address: string }>;
   employees: Employee[];
-  shares: null | { symbol: string; total: string; sold: string; priceNear: string; distributedNear: string; distributedNearRaw: string; distributedToken: string; revenueToken: string | null; epochHours: number };
+  shares: null | { accountId: string; priceYocto: string; symbol: string; total: string; sold: string; priceNear: string; distributedNear: string; distributedNearRaw: string; distributedToken: string; revenueToken: string | null; epochHours: number };
 };
 
 async function rpc<T>(params: Record<string, unknown>): Promise<T> {
@@ -160,6 +160,8 @@ export async function companyProfile(entry: DirectoryEntry): Promise<CompanyProf
     employees,
     shares: shares && shares.dao_id === entry.dao_id
       ? {
+        accountId: entry.shares_id!,
+        priceYocto: shares.price_per_share,
         symbol: shares.symbol,
         total: shares.total_supply,
         sold: (BigInt(shares.total_supply) - BigInt(shares.unsold)).toString(),
