@@ -435,6 +435,22 @@ function nowNs(): bigint {
   return BigInt(Date.now()) * NANOS_PER_MS;
 }
 
+/** Reads the Activity page makes at once: the screen's other calls (a sign-in, a vote) wait behind at most these. */
+const ACTIVITY_READS = 2;
+
+/** Runs `work` on each item, at most `size` at a time, keeping the items' order in the result. */
+async function inPool<T, R>(items: readonly T[], size: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index]!);
+    }
+  }));
+  return results;
+}
+
 export class OmniRolesService {
   private activationRunning = false;
   /** vault -> when the activation job reads it next (ms). Empty after a restart: every vault is read once. */
@@ -2324,7 +2340,7 @@ export class OmniRolesService {
     const agentByAccount = new Map(agents.map((agent) => [agent.nearAccountId, agent.name]));
 
     const operations = [];
-    const rowEntries = await Promise.all(rows.map((row) => this.ledgerEntry(row.vaultAccountId ?? treasury.vaultAccountId, row.opId).catch(() => null)));
+    const rowEntries = await inPool(rows, ACTIVITY_READS, (row) => this.ledgerEntry(row.vaultAccountId ?? treasury.vaultAccountId, row.opId).catch(() => null));
     for (const [index, row] of rows.entries()) {
       const vaultAccountId = row.vaultAccountId ?? treasury.vaultAccountId;
       const recorded = rowEntries[index];
@@ -2365,7 +2381,7 @@ export class OmniRolesService {
     // A payout's record stops changing once refused, or once its transfer is queued: kept, so the
     // page (refreshed every few seconds) reads only the payouts still waiting for the enclave.
     const payouts = new Map<string, BankPayout>();
-    await Promise.all(logs.filter((log) => log.kind === "bank").map(async (log) => {
+    await inPool(logs.filter((log) => log.kind === "bank"), ACTIVITY_READS, async (log) => {
       const key = `${treasury.vaultAccountId}:${log.opId}`;
       const kept = this.settledPayouts.get(key);
       if (kept) return void payouts.set(log.opId, kept);
@@ -2373,7 +2389,7 @@ export class OmniRolesService {
       if (!payout) return;
       payouts.set(log.opId, payout);
       if (payout.state === "Failed" || (payout.state === "Transferring" && payout.transfer_op_id)) this.settledPayouts.set(key, payout);
-    }));
+    });
     const transferOf = new Map([...payouts.values()].filter((payout) => payout.transfer_op_id).map((payout) => [hexOf(payout.transfer_op_id!).toLowerCase(), payout]));
     // Every operation's ledger entry, read together (the finished ones come from memory).
     const entries = new Map<string, Awaited<ReturnType<OmniRolesService["ledgerEntry"]>>>();
@@ -2381,15 +2397,15 @@ export class OmniRolesService {
       ...logs.filter((log) => log.kind === "evm" || log.kind === "dao").map((log) => log.opId),
       ...[...payouts.values()].filter((payout) => payout.transfer_op_id).map((payout) => hexOf(payout.transfer_op_id!)),
     ]);
-    await Promise.all([...wanted].map(async (opId) => entries.set(opId.toLowerCase(), await this.ledgerEntry(treasury.vaultAccountId, opId).catch(() => null))));
+    await inPool([...wanted], ACTIVITY_READS, async (opId) => entries.set(opId.toLowerCase(), await this.ledgerEntry(treasury.vaultAccountId, opId).catch(() => null)));
     const entryOf = (opId: string) => (entries.has(opId.toLowerCase()) ? Promise.resolve(entries.get(opId.toLowerCase()) ?? null) : this.ledgerEntry(treasury.vaultAccountId, opId).catch(() => null));
     // Solana and NEAR operations, read together rather than one after another.
     const opArg = (opId: string) => ({ op_id: Array.from(Buffer.from(opId.slice(2), "hex")) });
     const opViews = new Map<string, unknown>();
-    await Promise.all(logs.filter((log) => log.kind === "solana" || log.kind === "near").map(async (log) => {
+    await inPool(logs.filter((log) => log.kind === "solana" || log.kind === "near"), ACTIVITY_READS, async (log) => {
       const method = log.kind === "solana" ? "get_solana_operation" : "get_near_operation";
       opViews.set(log.opId, await this.near.viewFunction<unknown>(treasury.vaultAccountId, method, opArg(log.opId)).catch(() => null));
-    }));
+    });
     for (const log of logs) {
       if (seen.has(log.opId) || transferOf.has(log.opId)) continue;
       if (log.kind === "bank") {
