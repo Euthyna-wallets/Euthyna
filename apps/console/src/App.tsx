@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 
 import { authClient } from "./auth.js";
@@ -61,10 +62,23 @@ function Gate() {
   return <Outlet />;
 }
 
+/** A new page opens at its top. React Router keeps the scroll of the previous page; a URL with a #section is left to the header. */
+function ScrollToTopOnNavigate() {
+  const { pathname, hash } = useLocation();
+  const previous = useRef(pathname);
+  useEffect(() => {
+    if (previous.current === pathname) return;
+    previous.current = pathname;
+    if (!hash) window.scrollTo(0, 0);
+  }, [pathname, hash]);
+  return null;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <ScrollToTopOnNavigate />
         <Routes>
           {/* Public pages: read from NEAR, no sign-in. */}
           <Route path="/" element={<AtlantisLanding />} />
