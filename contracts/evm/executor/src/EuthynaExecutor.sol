@@ -73,6 +73,29 @@ contract EuthynaExecutor {
     /// A delegated wallet keeps receiving ETH like the plain address it was.
     receive() external payable {}
 
+    /// ...and NFTs: with code at its address, the wallet is asked to accept safe transfers and safe
+    /// mints (ERC-721, ERC-1155). A plain address never was, so these accept everything, as before.
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external
+        pure
+        returns (bytes4)
+    {
+        return this.onERC1155BatchReceived.selector;
+    }
+
+    /// ERC-165: ERC-165 itself and ERC1155TokenReceiver (which ERC-1155 requires receivers to declare).
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7 || interfaceId == 0x4e2312e0;
+    }
+
     function _used() private pure returns (mapping(bytes32 => bool) storage used) {
         bytes32 slot = USED_SLOT;
         assembly {

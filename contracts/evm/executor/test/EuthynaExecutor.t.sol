@@ -28,6 +28,31 @@ contract Token {
     }
 }
 
+/// The receiver checks of OpenZeppelin's ERC-721 `_safeMint`/`safeTransferFrom` and of ERC-1155.
+contract Nft {
+    mapping(uint256 => address) public ownerOf;
+    function safeMint(address to, uint256 id) external {
+        ownerOf[id] = to;
+        if (to.code.length > 0) {
+            bytes4 ok = IERC721Receiver(to).onERC721Received(msg.sender, address(0), id, "");
+            require(ok == IERC721Receiver.onERC721Received.selector, "ERC721: refused");
+        }
+    }
+    function safeMint1155(address to, uint256 id) external {
+        bytes4 ok = IERC1155Receiver(to).onERC1155Received(msg.sender, address(0), id, 1, "");
+        require(ok == IERC1155Receiver.onERC1155Received.selector, "ERC1155: refused");
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        bytes4 batch = IERC1155Receiver(to).onERC1155BatchReceived(msg.sender, address(0), ids, ids, "");
+        require(batch == IERC1155Receiver.onERC1155BatchReceived.selector, "ERC1155: batch refused");
+    }
+}
+interface IERC721Receiver { function onERC721Received(address, address, uint256, bytes calldata) external returns (bytes4); }
+interface IERC1155Receiver {
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external returns (bytes4);
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata) external returns (bytes4);
+}
+
 contract EuthynaExecutorTest {
     Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     event Executed(bytes32 indexed opId);
@@ -166,5 +191,16 @@ contract EuthynaExecutorTest {
         (uint8 v, bytes32 r, bytes32 s) = _signed(WALLET_KEY, SUPPLIER, 0.25 ether, "", opId, deadline);
         EuthynaExecutor(payable(wallet)).execute(SUPPLIER, 0.25 ether, "", opId, deadline, v, r, s);
         require(SUPPLIER.balance == 0.25 ether && wallet.balance == 0.75 ether, "eth");
+    }
+
+    function test_the_delegated_wallet_still_receives_nfts() public {
+        assert(wallet.code.length > 0);
+        Nft nft = new Nft();
+        nft.safeMint(wallet, 1);
+        assert(nft.ownerOf(1) == wallet);
+        nft.safeMint1155(wallet, 2);
+        assert(EuthynaExecutor(payable(wallet)).supportsInterface(0x4e2312e0));
+        assert(EuthynaExecutor(payable(wallet)).supportsInterface(0x01ffc9a7));
+        assert(!EuthynaExecutor(payable(wallet)).supportsInterface(0xffffffff));
     }
 }
