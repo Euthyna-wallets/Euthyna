@@ -1467,6 +1467,29 @@ mod sponsored_flow {
     }
 
     #[test]
+    fn a_vote_shortens_the_veto_window_to_one_minute_on_testnet() {
+        let (mut v, _) = fixture(false, true);
+        v.rule_expiration_ns = 86_400_000_000_000;
+        context("owner.testnet", 2);
+        v.apply_rule_change(RuleChange::SetRuleDelay { seconds: U64(60) }, 2);
+        assert_eq!(v.get_rule_delay(), U64(60));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_RULE_DELAY_TOO_SHORT")]
+    fn mainnet_keeps_at_least_a_day() {
+        let (mut v, _) = fixture(false, true);
+        v.settlement_config.mainnet = true;
+        context("owner.testnet", 2);
+        v.apply_rule_change(
+            RuleChange::SetRuleDelay {
+                seconds: U64(3_600),
+            },
+            2,
+        );
+    }
+
+    #[test]
     fn the_wallet_delegates_once_to_the_voted_executor() {
         let (mut v, _) = fixture(false, true);
         context("owner.testnet", 2);

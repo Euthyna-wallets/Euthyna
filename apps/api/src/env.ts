@@ -96,7 +96,8 @@ const schema = z.object({
   BASE_TX_MAX_PRIORITY_FEE_PER_GAS_CAP_WEI: z.string().regex(/^[1-9]\d*$/).default("10000000000"),
   CONTRACT_ARTIFACTS_DIR: z.string().default("contracts/res"),
   ETHEREUM_SEPOLIA_RPC_URL: z.string().url().default("https://ethereum-sepolia-rpc.publicnode.com"),
-  OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(300),
+  // The veto window of new vaults. 60 s suits testnet demos; set a day or more on mainnet.
+  OMNIROLES_RULE_DELAY_SECONDS: z.coerce.number().int().min(60).default(60),
   OMNIROLES_SHARES_DEPOSIT_YOCTO: z.string().regex(/^\d+$/).default("2900000000000000000000000"),
   /** Revenue epoch of new shares contracts. Default: 1 hour on testnet, 7 days elsewhere. */
   OMNIROLES_SHARES_EPOCH_SECONDS: z.coerce.number().int().positive().optional(),

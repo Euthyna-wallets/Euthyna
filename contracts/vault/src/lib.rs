@@ -1054,6 +1054,11 @@ impl Vault {
             .collect()
     }
 
+    /// The veto window of rule changes and voted transactions, in seconds.
+    pub fn get_rule_delay(&self) -> U64 {
+        U64(self.rule_delay_ns / 1_000_000_000)
+    }
+
     pub fn dao_queue(&self) -> Vec<Base64VecU8> {
         self.dao_queue
             .iter()
@@ -1814,6 +1819,18 @@ impl Vault {
             RuleChange::SetEvmExecutor { chain_id, executor } => {
                 sponsored::set_executor(chain_id, executor);
             }
+            RuleChange::SetRuleDelay { seconds } => {
+                let minimum = if self.settlement_config.mainnet {
+                    86_400
+                } else {
+                    60
+                };
+                require!(seconds.0 >= minimum, "ERR_RULE_DELAY_TOO_SHORT");
+                let delay_ns = seconds.0.saturating_mul(1_000_000_000);
+                require!(self.rule_expiration_ns > delay_ns, "ERR_RULE_EXPIRATION");
+                self.rule_delay_ns = delay_ns;
+                env::log_str(&format!("OMNIROLES_RULE_DELAY:{}", seconds.0));
+            }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 solana::set_permissions(&role, permissions);
@@ -1984,6 +2001,9 @@ impl Vault {
             | RuleChange::RemoveStandingOrder { .. }
             | RuleChange::SetBankSignerSource { .. }) => {
                 Self::validate_bank_rule(change);
+            }
+            RuleChange::SetRuleDelay { seconds } => {
+                require!(seconds.0 >= 60, "ERR_RULE_DELAY_TOO_SHORT");
             }
             RuleChange::SetEvmExecutor { chain_id, executor } => {
                 // A chain whose transactions NEAR MPC can attest, so the vault can settle.
