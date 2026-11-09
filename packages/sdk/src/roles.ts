@@ -78,6 +78,8 @@ export type RuleChange =
   | { SetCodeSource: { account_id: string } }
   /** Sponsored execution (EIP-7702): the wallet delegates to this executor, Euthyna's relayer pays the gas. null turns it off. */
   | { SetEvmExecutor: { chain_id: number; executor: number[] | null } }
+  /** The veto window of later rule changes and voted transactions (testnet: 60 s at least; mainnet: a day). */
+  | { SetRuleDelay: { seconds: string } }
   /** Euro payouts to voted IBANs: where the bank signer runs and how the transfer settles. */
   | { SetBankConfig: { config: BankConfig | null } }
   | { AddBankBeneficiary: { beneficiary: BankBeneficiary } }
@@ -1623,6 +1625,11 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     return { title: `Register the vault on ${ft?.symbol ?? change.NearStorageDeposit.token} (NEAR)`, details: ["Pays the token's storage deposit (about 0.00125 NEAR) from the vault, so it can hold this token."] };
   }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
+  if ("SetRuleDelay" in change) {
+    const seconds = Number(change.SetRuleDelay.seconds);
+    const text = seconds % 3600 === 0 ? `${seconds / 3600} hour${seconds === 3600 ? "" : "s"}` : seconds % 60 === 0 ? `${seconds / 60} minute${seconds === 60 ? "" : "s"}` : `${seconds} seconds`;
+    return { title: `Set the veto window to ${text}`, details: ["Later rule changes and voted transactions wait this long before they apply; any council member can veto them meanwhile."] };
+  }
   if ("SetEvmExecutor" in change) {
     const { chain_id, executor } = change.SetEvmExecutor;
     if (!executor) return { title: `Stop sponsoring network fees on ${chainName(chain_id)}`, details: ["The wallet pays its own gas again: it needs ETH for every transaction."] };

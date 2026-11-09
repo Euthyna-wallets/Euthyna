@@ -27,6 +27,9 @@ export class GasTank {
   private readonly chain: Chain;
   /** Wei sent per wallet and UTC day (memory: a restart only resets the day's count). */
   private readonly sent = new Map<string, bigint>();
+  /** The tank's next nonce as this process counts it, and the queue that hands nonces out one at a time. */
+  private localNonce: number | null = null;
+  private sending: Promise<unknown> = Promise.resolve();
 
   constructor(
     privateKey: Hex,
@@ -48,26 +51,39 @@ export class GasTank {
   }
 
   /**
+   * One send at a time, each with its own nonce: the chain's pending count, or the next one this
+   * process handed out when the RPC has not seen the previous transaction yet (two sends in a row
+   * would otherwise get the same nonce and the second be refused).
+   */
+  private send(request: Record<string, unknown>): Promise<Hex> {
+    const run = this.sending.then(async () => {
+      const pending = await this.client.getTransactionCount({ address: this.account.address, blockTag: "pending" });
+      const nonce = Math.max(pending, this.localNonce ?? 0);
+      try {
+        const hash = await this.wallet.sendTransaction({ ...request, nonce, chain: this.chain, account: this.account } as Parameters<typeof this.wallet.sendTransaction>[0]);
+        this.localNonce = nonce + 1;
+        return hash;
+      } catch (error) {
+        this.localNonce = null; // ask the chain again next time
+        throw error;
+      }
+    });
+    this.sending = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
    * Sponsored execution (EIP-7702): sends the wallet's signed `execute(...)` call from the tank,
    * which pays the gas. The call itself carries the vault's signature; the tank adds nothing to it.
    */
   /** With `authorization`, the wallet's EIP-7702 delegation goes in the same (type-4) transaction, before the call runs. */
   async relay(wallet: Address, data: Hex, authorization?: WalletAuthorization): Promise<Hex> {
-    return this.wallet.sendTransaction({
-      to: wallet, data, value: 0n, chain: this.chain, account: this.account,
-      ...(authorization ? { authorizationList: [authorization] } : {}),
-    });
+    return this.send({ to: wallet, data, value: 0n, ...(authorization ? { authorizationList: [authorization] } : {}) });
   }
 
   /** Submits the wallet's EIP-7702 authorization (signed by NEAR MPC) in a type-4 transaction the tank pays for. */
   async delegate(authorization: WalletAuthorization): Promise<Hex> {
-    return this.wallet.sendTransaction({
-      to: this.account.address,
-      value: 0n,
-      authorizationList: [authorization],
-      chain: this.chain,
-      account: this.account,
-    });
+    return this.send({ to: this.account.address, value: 0n, authorizationList: [authorization] });
   }
 
   /** Sends the transaction's sender what it lacks to pay for it; null when it already has enough. */
@@ -86,7 +102,7 @@ export class GasTank {
       console.warn(JSON.stringify({ event: "gas_tank.cap_reached", wallet: sender, needWei: amount.toString(), sentTodayWei: already.toString() }));
       return null;
     }
-    const txHash = await this.wallet.sendTransaction({ to: sender, value: amount, chain: this.chain, account: this.account });
+    const txHash = await this.send({ to: sender, value: amount });
     await this.client.waitForTransactionReceipt({ hash: txHash, confirmations: 1 });
     this.sent.set(key, already + amount);
     console.info(JSON.stringify({ event: "gas_tank.sponsored", wallet: sender, sentWei: amount.toString(), txHash }));

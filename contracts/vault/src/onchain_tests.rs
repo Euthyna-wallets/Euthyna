@@ -127,7 +127,10 @@ fn proof_args(v: &Vault, id: OperationId, cancel: bool) -> ([u8; 32], [u8; 32]) 
         op.signed_transaction.as_ref().unwrap()
     };
     let tx_hash = env::keccak256_array(raw);
-    (tx_hash, foreign::payload_hash(6, tx_hash, [9; 32]))
+    (
+        tx_hash,
+        foreign::payload_hash(6, tx_hash, [9; 32], foreign::evm_finality(false).1),
+    )
 }
 fn verify(v: &mut Vault, id: OperationId, cancel: bool, valid: bool) {
     let _ = if cancel {
@@ -1306,7 +1309,7 @@ mod sponsored_flow {
         v.on_mpc_signature(id, mpc_signature());
         let (tx, block) = ([7; 32], [8; 32]);
         drop(v.settle_sponsored(id, tx, block, U64(100), U64(2), U64(5)));
-        let expected = sponsored::log_payload_hash(6, tx, block, 100, 2, 5, [3; 20], &id);
+        let expected = sponsored::log_payload_hash(6, tx, block, 100, 2, 5, [3; 20], &id, 1);
         // A proof of something else does not settle.
         v.on_settle_sponsored_verified(id, expected, Ok(response([9; 32])));
         assert_eq!(
@@ -1461,6 +1464,29 @@ mod sponsored_flow {
         );
         drop(v.delegate_wallet(84532));
         assert_eq!(v.get_wallet_delegation(84532).unwrap().executor, [0xdd; 20]);
+    }
+
+    #[test]
+    fn a_vote_shortens_the_veto_window_to_one_minute_on_testnet() {
+        let (mut v, _) = fixture(false, true);
+        v.rule_expiration_ns = 86_400_000_000_000;
+        context("owner.testnet", 2);
+        v.apply_rule_change(RuleChange::SetRuleDelay { seconds: U64(60) }, 2);
+        assert_eq!(v.get_rule_delay(), U64(60));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_RULE_DELAY_TOO_SHORT")]
+    fn mainnet_keeps_at_least_a_day() {
+        let (mut v, _) = fixture(false, true);
+        v.settlement_config.mainnet = true;
+        context("owner.testnet", 2);
+        v.apply_rule_change(
+            RuleChange::SetRuleDelay {
+                seconds: U64(3_600),
+            },
+            2,
+        );
     }
 
     #[test]

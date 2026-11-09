@@ -16,6 +16,8 @@ export class BaseRelayer {
     private readonly near: NearClient,
     private readonly guard: Guard,
     private readonly gasTank: GasTank | null = null,
+    /** The block tag the vault's attestation asks for: `safe` on testnet, `finalized` on mainnet. */
+    private readonly settleAt: "safe" | "finalized" = "finalized",
   ) {
     // Chain-agnostic JSON-RPC: the same relayer serves Base and the other EVM chains.
     this.client = createPublicClient({ transport: http(rpcUrl) });
@@ -90,8 +92,9 @@ export class BaseRelayer {
     }
   }
 
+  /** The newest block NEAR MPC will attest (the vault asks `Safe` on testnet, `Finalized` on mainnet). */
   async finalizedBlockNumber(): Promise<bigint> {
-    return (await this.client.getBlock({ blockTag: "finalized" })).number;
+    return (await this.client.getBlock({ blockTag: this.settleAt })).number;
   }
 
   async blockNumber(): Promise<bigint> {
@@ -118,11 +121,11 @@ export function createBaseRelayer(env: Env, near: NearClient, guard: Guard): Bas
     ? new GasTank(env.BASE_GAS_TANK_PRIVATE_KEY as `0x${string}`, env.BASE_SEPOLIA_RPC_URL, 84532, BigInt(env.BASE_GAS_TANK_PER_WALLET_DAY_WEI))
     : null;
   if (tank) console.info(JSON.stringify({ event: "gas_tank.on", address: tank.address }));
-  return new BaseRelayer(env.BASE_SEPOLIA_RPC_URL, near, guard, tank);
+  return new BaseRelayer(env.BASE_SEPOLIA_RPC_URL, near, guard, tank, env.NEAR_NETWORK_ID === "testnet" ? "safe" : "finalized");
 }
 
 /** Relayers for the other EVM chains a company wallet can act on, by chain id. */
 export function createChainRelayers(env: Env, near: NearClient, guard: Guard): Record<number, BaseRelayer> {
-  return { 11155111: new BaseRelayer(env.ETHEREUM_SEPOLIA_RPC_URL, near, guard) };
+  return { 11155111: new BaseRelayer(env.ETHEREUM_SEPOLIA_RPC_URL, near, guard, null, env.NEAR_NETWORK_ID === "testnet" ? "safe" : "finalized") };
 }
 

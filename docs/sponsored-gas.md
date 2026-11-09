@@ -72,7 +72,11 @@ Executor tests (Foundry, `vm.signAndAttachDelegation`):
   The worker retries on its next poll.
 - "Stop sponsoring" does not yet send an authorization to `0x0`: the wallet stays delegated (it still runs only
   what the vault signs).
-- Base Sepolia's `finalized` block trails the head by hours, so sponsored payments settle that much later.
+- Testnet settles on Base's `safe` head (the L2 block is posted on L1), about 5 minutes after the call; mainnet
+  keeps `Finalized` (`foreign::evm_finality`). Base Sepolia's `finalized` head can trail by an hour or more.
+- Sponsored transfers voted by the DAO start without waiting for each other (they use no wallet nonce): two voted
+  transfers ran and settled within 5 minutes on 9 November (`apps/api/scripts/sponsored-parallel-e2e.mts`, NEAR
+  `EokVMGtV…`, `AZ6fGm3w…`). Plain transactions still go one at a time.
 
 ## Why not eth-infinitism's Simple7702Account
 

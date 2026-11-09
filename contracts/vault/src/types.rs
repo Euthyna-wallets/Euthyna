@@ -458,6 +458,11 @@ pub enum RuleChange {
         chain_id: u64,
         executor: Option<EvmAddress>,
     },
+    /// The veto window of later rule changes and voted transactions: at least 1 minute on testnet,
+    /// 1 day on mainnet, and shorter than a queued change's expiration. Applies after the current window.
+    SetRuleDelay {
+        seconds: U64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

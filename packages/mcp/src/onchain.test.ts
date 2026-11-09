@@ -32,7 +32,7 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
       const winner = options.cancellation && !options.originalWins ? cancellation : original;
       return (options.timeout || params[0] !== winner ? null : { status: "0x1", blockHash: block }) as T;
     }
-    if (method === "eth_getBlockByNumber") { expect(params[0]).toBe("finalized"); return { number: "0x10", hash: block } as T; }
+    if (method === "eth_getBlockByNumber") { expect(params[0]).toBe("safe"); return { number: "0x10", hash: block } as T; }
     if (method === "eth_getBlockByHash") return { number: "0x10" } as T;
     return "0x1" as T;
   };
