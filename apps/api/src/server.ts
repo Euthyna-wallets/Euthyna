@@ -164,7 +164,7 @@ if (rob) {
 const testDkimKeys = env.NEAR_NETWORK_ID === "testnet" && env.RECOVERY_TEST_DKIM_KEYS
   ? JSON.parse(env.RECOVERY_TEST_DKIM_KEYS) as Record<string, string>
   : undefined;
-const recoveryContractId = env.RECOVERY_CONTRACT_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "euthyna-recovery-v4.testnet" : undefined);
+const recoveryContractId = env.RECOVERY_CONTRACT_ID ?? (env.NEAR_NETWORK_ID === "testnet" ? "euthyna-recovery-v6.testnet" : undefined);
 const recovery = recoveryContractId
   ? new RecoveryService({
     contractId: recoveryContractId,

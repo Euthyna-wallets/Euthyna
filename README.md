@@ -127,15 +127,15 @@ lets the attacker make it sign anything its key can sign. So no lock depends on 
 
 ## Try the seat recovery
 
-The ZK Email proof is verified by a NEAR contract, `euthyna-recovery-v4.testnet`. On testnet the lost account can
-cancel for **10 minutes** (48 hours is meant for mainnet), so the whole flow fits in one sitting.
+The ZK Email proof is verified by a NEAR contract, `euthyna-recovery-v6.testnet`. On testnet the lost account can
+cancel for **1 minute** (48 hours is meant for mainnet), so the whole flow fits in one sitting.
 
 **1. Check the contract, read-only (1 minute, no wallet).** [near CLI](https://github.com/near/near-cli-rs):
 
 ```bash
-near account list-keys euthyna-recovery-v4.testnet network-config testnet now
+near account list-keys euthyna-recovery-v6.testnet network-config testnet now
 #   → no access key: nobody can change or upgrade it
-near contract call-function as-read-only euthyna-recovery-v4.testnet dkim_keys json-args '{"domain":"gmail.com"}' network-config testnet now
+near contract call-function as-read-only euthyna-recovery-v6.testnet dkim_keys json-args '{"domain":"gmail.com"}' network-config testnet now
 #   → the DKIM keys it accepts for Gmail (sha256 of the key as the circuit takes it)
 near contract call-function as-read-only euthyna-recovery.testnet recoveries_of json-args '{"dao_id":"eut-rec-11526.sputnikv2.testnet"}' network-config testnet now
 #   → the demo DAO's history on the first contract (euthyna-recovery.testnet): one recovery cancelled by the founder, then one left to run past its delay
@@ -164,7 +164,7 @@ email with the subject shown (`Euthyna enroll near:<your account>`) from Gmail, 
 **Prove**, sign. → *Enrolled on chain: a mailbox at … can recover your seat.* Then, signed in with another NEAR
 account, open **/recover**, give the DAO and the founder's account, send `Euthyna recovery near:<new account>` from
 the same mailbox, prove and sign. → *Request recorded on chain … can cancel it until …* The founder sees it in
-Settings and can **cancel**; after 10 minutes any member gets **Submit the vote**. The email never leaves the
+Settings and can **cancel**; after 1 minute any member gets **Submit the vote**. The email never leaves the
 browser; only the zero-knowledge proof and a salted hash of the address go on chain.
 
 ## Sealed orders: limit orders nobody sees
