@@ -3,7 +3,8 @@
  * market relayer that pays the gas to relay held cheques. Its key never leaves
  * this process and is never logged.
  */
-import { KeyPair, keyStores, Near, type Account } from "near-api-js";
+import { pooledAccount, RpcPool } from "../rpc-pool.js";
+import type { Account } from "near-api-js";
 
 import type { ChequeChain } from "./cheque.js";
 import { relayAction } from "./cheque.js";
@@ -105,10 +106,8 @@ export function outcomeError(outcome: Outcome): string | null {
 export class NearChequeRelayer implements ChequeRelayer {
   private readonly account: Promise<Account>;
 
-  constructor(readonly accountId: string, privateKey: string, networkId: string, nodeUrl: string) {
-    const keyStore = new keyStores.InMemoryKeyStore();
-    this.account = keyStore.setKey(networkId, accountId, KeyPair.fromString(privateKey as `ed25519:${string}`))
-      .then(() => new Near({ networkId, nodeUrl, keyStore }).account(accountId));
+  constructor(readonly accountId: string, privateKey: string, networkId: string, pool: RpcPool | string) {
+    this.account = pooledAccount(typeof pool === "string" ? new RpcPool([pool]) : pool, networkId, accountId, privateKey);
   }
 
   async relay(signedDelegateB64: string, senderId: string): Promise<RelayOutcome> {

@@ -31,6 +31,12 @@ const schema = z.object({
   NEAR_RPC_URL: z.string().url().default("https://rpc.testnet.near.org"),
   /** Used while NEAR_RPC_URL refuses for its quota or rate (a public endpoint): server only, like NEAR_RPC_URL. */
   NEAR_RPC_FALLBACK_URL: z.string().url().optional(),
+  /**
+   * More endpoints for the pool, comma separated, after NEAR_RPC_URL and before NEAR_RPC_FALLBACK_URL
+   * (testnet, public: https://rpc.testnet.fastnear.com,https://near-testnet.drpc.org,https://rpc.testnet.near.org).
+   * One that refuses for its rate or quota rests; the next one answers. Server only.
+   */
+  NEAR_RPC_URLS: z.string().optional(),
   /** NEAR RPC calls at once, and the least time between two starts (a public RPC rate-limits). */
   NEAR_RPC_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(3),
   NEAR_RPC_MIN_INTERVAL_MS: z.coerce.number().int().min(0).max(5_000).default(150),
