@@ -399,7 +399,10 @@ function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: str
     try {
       const tx = await work();
       setNote(`Done: transaction ${tx.slice(0, 10)}…`);
+      // Views read final blocks, a few seconds behind the transaction: read again until they catch up,
+      // or LOCK only shows after a reload.
       await holder.refetch();
+      for (const wait of [3_000, 8_000]) setTimeout(() => void holder.refetch(), wait);
     } catch (cause) {
       setNote(String(cause instanceof Error ? cause.message : cause).slice(0, 200));
     } finally {
