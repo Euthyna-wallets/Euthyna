@@ -51,7 +51,7 @@ the signature covers the whole list. Only on a chain with sponsored execution
 | ERC-721 `safeMint` to the delegated wallet | Base Sepolia | `0x85aab66234ab7fd99c0ad1fb096ee6b876b90adb6dc8237e9c2b826111d5d93c` |
 | Executor v3 voted, wallet re-delegated | Base Sepolia | code `0xef010076bb5c47b0759af0300afeea954fa837a96675ed` |
 | approve + swap + revoke, one `executeBatch` paid by the tank (4 in, 8 out, allowance back to 0, wallet 0 ETH) | Base Sepolia | `0xbc98d6eafc398384f05097ba55f4a023a336aca6e02e218ab0ddd0a3b97a4f68` |
-| its `settle_sponsored` | NEAR testnet | BATCH_SETTLE_TX |
+| its `settle_sponsored` → `Confirmed` | NEAR testnet | `5hvSeWvAqnXMF9M3MzK3CaQwzWfVM5yyQVUCrw7bPxjk` |
 
 The swap ran on a test router and test tokens the tank deployed (`apps/api/scripts/sponsored-batch-e2e.mts`):
 the wallet holds no Base Sepolia USDC and Circle's faucet is behind a captcha. A Uniswap swap is the same
@@ -73,3 +73,22 @@ Executor tests (Foundry, `vm.signAndAttachDelegation`):
 - "Stop sponsoring" does not yet send an authorization to `0x0`: the wallet stays delegated (it still runs only
   what the vault signs).
 - Base Sepolia's `finalized` block trails the head by hours, so sponsored payments settle that much later.
+
+## Why not eth-infinitism's Simple7702Account
+
+Tested live on Base Sepolia (`apps/api/scripts/simple7702-compare.mts`): a throwaway key delegated to the
+deployed Simple7702Account v0.8 (`0x4Cd241E8…66c9`), EntryPoint v0.8 (`0x4337084D…f108`), a paymaster
+for that wallet only, the tank as bundler.
+
+| | Result | Tx |
+| --- | --- | --- |
+| approve + swap + revoke via `executeBatch`, paymaster pays, wallet 0 ETH | works | `0x84a7a890…cb81` |
+| a UserOp signed, sent 3 minutes later | still runs: no deadline | `0xb2df3929…765a` |
+| a failing swap | bundle succeeds, `UserOperationEvent.success = false`, nonce used, gas paid | `0xbf3c58e3…c5` |
+| cancel: an empty UserOp with the same nonce first | the signed one can no longer run | `0x4f8b5eeb…527a` |
+
+It works, and it is audited, but a signed UserOp never expires (`_validateSignature` returns success with
+no time range). The vault gives budgets back when an operation expires without proof, so with this account
+it would have to cancel by burning the nonce first (as `cancel_nonce` does on the plain path) and settle on
+`UserOperationEvent` with `success` decoded. EuthynaExecutor checks the deadline itself. Ambire's
+`AmbireAccount7702` (ambire-common) has the same shape: `validateUserOp` returns success with no time range.
