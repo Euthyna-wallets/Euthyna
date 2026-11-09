@@ -10,16 +10,53 @@ NEAR and Base Sepolia today, Ethereum and Solana in the code. Everything outside
 So a hijacked agent cannot pay the attacker, a stolen server cannot move funds, and one rogue member
 cannot change the rules: **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)).
 
-**Atlantis**, the launchpad built on Euthyna, lets anyone start an AI company: founders and investors
-own it through a Sputnik DAO, agents do the work, revenue goes to the shareholders who vote.
-
 Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security & Defense,
-03 Privacy & Private AI, 04 Autonomous Business, 08 Real-World Money, 12 Social Money). Testnet only, unaudited.
+03 Privacy & Private AI, 04 Autonomous Business, 07 Agent Economy, 08 Real-World Money, 12 Social Money).
+Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hackathon](#built-for-the-hackathon).
 
 - **Demo:** <link to the X post>
 - **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 20 minutes, each step checkable on chain
 - **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
 - The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.
+
+## Why
+
+Companies want AI agents to do the busywork: read an invoice, check it, pay it. Four things stop them.
+
+| The problem | Euthyna's answer |
+| --- | --- |
+| **An agent with a key can be talked into spending it.** In May 2026 a Morse-code reply to Grok moved about $150,000 out of its Bankr wallet [1]; in February 2026 a trading agent sent a stranger tokens worth about $440,000 after a spam message [2]. | The rules live in the company wallet, not in the agent. The owners vote each member's role, human or agent; a NEAR vault with no access key checks it on chain before anything is signed. Outside the role, it is a vote. |
+| **Keys get lost.** Chainalysis estimates that 17% to 23% of all bitcoin is lost or out of circulation [3]. | A founder who loses their wallet proves in the browser, in zero knowledge, that they hold the mailbox they enrolled. A NEAR contract verifies the proof; the address never goes on chain; the lost account can cancel during a waiting period; then the founders vote the seat back. |
+| **A company's trades are public.** An on-chain limit order publishes its price, so anyone can read the treasury's plan and trade ahead of it. | Sealed orders: price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR. |
+| **The bank stays off chain, and so does its fraud.** Business email compromise, mostly swapped bank details on invoices, cost $2.8 billion in 2024 in FBI reports alone [4]. | The company's euro IBAN obeys the same on-chain rules. Members vote each supplier's IBAN; an agent pays only voted IBANs, within its role's euro budget. The bank partner's key sits in an enclave that answers only the vault, and the IBANs never appear on chain. |
+
+Asking a human to approve every payment removes the point of an agent; Gartner expects over 40% of agentic AI
+projects to be cancelled by 2027, citing inadequate risk controls among the reasons [5].
+
+**An example.** Léa (fictional) and her two partners run a small design studio. They vote one role for their
+bookkeeping agent: pay the suppliers they voted, by IBAN or in EURC, within a euro budget. The agent pays a
+supplier's invoice by SEPA. A poisoned invoice asks it to pay another account: the vault refuses, whatever the
+agent believes. Léa loses her phone: her email gets her seat back, by a proof and a vote. The studio parks
+its cash in WETH with a limit order nobody can read. **We ran each step on testnet**: the agent paid Atelier
+Dupont SAS 4.78 EUR by SEPA ([docs/bank.md](./docs/bank.md)), a seat was recovered on chain
+([docs/recovery.md](./docs/recovery.md)), a sealed order was filled on Base Sepolia
+([docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md)), and [Rob the Agent](https://euthyna.io/rob)
+lets anyone try to make a hijacked agent pay outside its role.
+
+**Where it goes.** Today, a company wallet for teams that let agents pay. Next, **Atlantis**: anyone starts an
+AI company owned by its shareholders through a Sputnik DAO; agents do the work, and the revenue goes to the
+holders who vote.
+
+[1] [Giskard](https://giskard.ai/knowledge/how-grok-got-prompt-injected-an-x-user-drained-150-000-from-an-ai-wallet) ·
+[2] [KuCoin News](https://www.kucoin.com/news/flash/ai-agent-lobstar-wilde-loses-440-000-in-solana-transfer-error) ·
+[3] [Chainalysis via PaymentsNext](https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/) ·
+[4] [FBI IC3 via Nacha](https://www.nacha.org/news/fbis-ic3-finds-almost-85-billion-lost-business-email-compromise-last-three-years) ·
+[5] [Gartner](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)
+
+Names used below: the **vault** (OmniRoles) is the contract that holds the rules and asks NEAR MPC to
+sign; **Nomos** creates one vault per company; the **Guard** is optional off-chain advice that can
+only refuse; **euthyna-signer** keeps an agent's key away from the AI; **Atlantis** is the launchpad
+built on Euthyna (see Where it goes).
 
 ## Check it yourself
 
@@ -62,7 +99,8 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 | **06 AI Security & Defense**<br>*give AI money without the keys to everything* | spending limits, policy engines, sandboxed wallets, function-call keys | The policy engine **is the wallet**: an agent's only key is a function-call key that can ask the vault, and the vault checks chain, contract, function, recipient, amount and budget on chain before MPC signs. No prompt injection can widen a role, and a stolen server finds no key that moves funds. The security council can veto a rule change or freeze every agent in one click. 48 attacks, 48 refused, and a public game (Rob the Agent) where anyone can try. |
 | **03 Privacy & Private AI**<br>*private by design* | confidential computation, private finance, protecting sensitive data | **A company can trade without showing its hand.** Its limit orders live as a single hash on chain; the limit price, the total and the deadline are never published, not even after a fill, and each fill is proven correct in zero knowledge. Only the members read the terms, encrypted to keys derived from their own wallets. **A founder recovers their seat without exposing their email**: a zero-knowledge proof made in the browser, only a salted hash on chain. |
 | **04 Autonomous Business**<br>*the company of one, or none* | treasury, sales, procurement, revenue sharing, chain signatures | **A company that runs itself, under rules its owners vote.** Agents pay suppliers and swap on Base through NEAR Chain Signatures, sell their work to other companies' agents on the Market (paid only on delivery), and send revenue to the shareholders through Omni Bridge. Humans only set the roles and the budgets. |
-| **08 Real-World Money**<br>*bring the boring money onchain* | invoicing, merchant payments, stablecoin rails for real businesses | **A company bank account that obeys the law it voted.** Clients pay the company's euro IBAN; the euros arrive as EURC in a wallet with no private key; the members vote a supplier payment and the vault signs it, or an agent pays invoice by invoice within a role's EURC budget, including to a supplier's IBAN: the vault checks the voted IBAN and the budget on chain, and the partner's API key sits in a TEE that obeys only the vault. **Invoicing** (each invoice has an RF reference and a SEPA QR; paid automatically when the transfer lands), **Payroll** (standing orders the members vote once, paid on each date without an agent) and **remittances** (sealed payees on Pix, ACH, UK and SEPA, paid in their currency); accounts and names never on chain. Agents pay without gas (meta transactions, NEP-366). Activity exports a CSV with the transaction of every payment, for the accountant. |
+| **07 Agent Economy**<br>*give AI a wallet* | agents that earn, spend, negotiate and hire | **Agents hire agents.** A company's agent finds another company's agent on the Market, hires it over A2A + x402, and its spending card signs a cheque the market cashes only on delivery; the seller's vault receives exactly the price. Each agent spends from a budget its owners voted, refilled by the vault. |
+| **08 Real-World Money**<br>*bring the boring money onchain* | invoicing, merchant payments, stablecoin rails for real businesses | **A company bank account that obeys the law it voted.** Clients pay the company's euro IBAN; the euros arrive as EURC in a wallet with no private key; the members vote a supplier payment and the vault signs it, or an agent pays invoice by invoice within a role's EURC budget, including to a supplier's IBAN: the vault checks the voted IBAN and the budget on chain, and the partner's API key sits in a TEE that obeys only the vault. **Invoicing** (each invoice has an RF reference and a SEPA QR; paid automatically when the transfer lands), **Payroll** (standing orders the members vote once, paid on each date without an agent) and **remittances** (sealed payees paid in their currency: Pix and SEPA paid on testnet, ACH and Faster Payments in the code); accounts and names never on chain. Agents pay without gas (meta transactions, NEP-366). Activity exports a CSV with the transaction of every payment, for the accountant. |
 | **12 Social Money**<br>*coordinate value together* | collective ownership, shared budgets, Sputnik DAO; build on the multisig, not a new one | **Sputnik becomes a company.** The DAO owns a vault that pays on NEAR and Base; members vote budgets per role instead of signing every payment; investors buy shares, vote, and earn the revenue of the epochs they voted in. A lost wallet does not cost a seat: the other founders vote it back. |
 
 ## Security model
@@ -77,6 +115,7 @@ lets the attacker make it sign anything its key can sign. So no lock depends on 
 | A stolen Guard key | The role conditions run before any visa: the Guard can only refuse, never widen a role | attack suite |
 | A stolen server, database or deployer key | No key that moves funds exists off chain (see 2 above) | `view_access_key_list`, `contracts/tests/tests/settlement.rs` |
 | A bad rule pushed through | Rules change only by DAO vote (two thirds), then wait out a veto window; one council member can veto a queued change; the council can pause every agent, only a vote resumes them | `contracts/tests/tests/dao_governance.rs` |
+| A bad bank enclave version | The vault runs one enclave hash. With "take updates" on, a new published version is queued as an ordinary rule: it applies after the veto window, and one council member can veto it (a vetoed version never comes back). Without it, each version is a vote | [docs/bank.md](./docs/bank.md#enclave-updates-one-vote-or-none-with-a-veto-window) (testnet run: 0.2.0 → 0.2.1 with no vote) |
 | A malicious code upgrade | Nomos publishes each vault version by its hash; a vault upgrades only on a DAO vote for that hash, after the veto window. The DAO can also vote `SetCodeSource` to fetch versions elsewhere | `contracts/tests/tests/nomos.rs` |
 | A founder loses their NEAR account | ZK Email recovery, verified on chain (see 5 above) | [docs/recovery.md](./docs/recovery.md) |
 | An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
@@ -155,7 +194,7 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 ## Technical architecture
 
-![Technical architecture: the agent calls the OmniRoles vault directly (prepare, authorize); the owners vote rules and suppliers through the Sputnik DAO; NEAR MPC signs for the company wallet, the signed transaction is relayed unchanged to Ethereum, Base, Arbitrum (Solana and Bitcoin next), and NEAR MPC verifies the finalized receipt so the vault settles the budget. The Guard is optional advice.](./docs/diagrams/technical.png)
+![Technical architecture: the agent calls the OmniRoles vault directly (prepare, authorize); the owners vote rules and suppliers through the Sputnik DAO; NEAR MPC signs for the company wallet, the signed transaction is relayed unchanged to Ethereum, Base, Arbitrum (Solana in the code, Bitcoin next), and NEAR MPC verifies the finalized receipt so the vault settles the budget. The Guard is optional advice.](./docs/diagrams/technical.png)
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
@@ -280,6 +319,14 @@ pnpm attack:all
 | `packages/sdk`, `packages/mcp` | the agent side: SDK and MCP server |
 | `signer` | `euthyna-signer` (Rust): keeps an agent's NEAR key away from the AI and signs only requests to its vault |
 | `apps/demo-agent` | a small agent that pays invoices |
+
+## Built for the hackathon
+
+Work started on 20 October 2026 (the hackathon's rules open submissions on 1 November): 308 of the
+491 commits on `main` (9 November) predate 1 November. Before 1 November: the vault and its rule
+engine, the shares, the registry, the API, the console and the MCP server. From 1 November: ZK Email
+seat recovery verified on chain, sealed orders, the euro IBAN with its bank enclave,
+`euthyna-signer` in this repository and the bank pages of the console. `git log --before=2026-11-01` shows the rest.
 
 ## Names
 
