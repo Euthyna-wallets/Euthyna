@@ -443,6 +443,8 @@ export class OmniRolesService {
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
   private readonly followCheckedAt = new Map<string, number>();
+  /** Bank payouts whose record no longer changes (refused, or transfer queued). */
+  private readonly settledPayouts = new Map<string, BankPayout>();
   /** Rules the vault refused for now, and when to try each again. */
   private readonly refusedRules = new Map<string, { tries: number; retryAt: number }>();
 
@@ -2322,9 +2324,10 @@ export class OmniRolesService {
     const agentByAccount = new Map(agents.map((agent) => [agent.nearAccountId, agent.name]));
 
     const operations = [];
-    for (const row of rows) {
+    const rowEntries = await Promise.all(rows.map((row) => this.ledgerEntry(row.vaultAccountId ?? treasury.vaultAccountId, row.opId).catch(() => null)));
+    for (const [index, row] of rows.entries()) {
       const vaultAccountId = row.vaultAccountId ?? treasury.vaultAccountId;
-      const recorded = await this.ledgerEntry(vaultAccountId, row.opId).catch(() => null);
+      const recorded = rowEntries[index];
       if (!recorded) continue; // unknown to the vault: never shown as if it were on chain
       const { operation, evmHash, receipt } = recorded;
       operations.push({
@@ -2359,19 +2362,40 @@ export class OmniRolesService {
       })
       : [];
     // A euro payout is one row: its EURC transfer to the partner is part of it, not a second line.
+    // A payout's record stops changing once refused, or once its transfer is queued: kept, so the
+    // page (refreshed every few seconds) reads only the payouts still waiting for the enclave.
     const payouts = new Map<string, BankPayout>();
-    for (const log of logs) {
-      if (log.kind !== "bank") continue;
+    await Promise.all(logs.filter((log) => log.kind === "bank").map(async (log) => {
+      const key = `${treasury.vaultAccountId}:${log.opId}`;
+      const kept = this.settledPayouts.get(key);
+      if (kept) return void payouts.set(log.opId, kept);
       const payout = await this.near.viewFunction<BankPayout | null>(treasury.vaultAccountId, "get_bank_payout", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
-      if (payout) payouts.set(log.opId, payout);
-    }
+      if (!payout) return;
+      payouts.set(log.opId, payout);
+      if (payout.state === "Failed" || (payout.state === "Transferring" && payout.transfer_op_id)) this.settledPayouts.set(key, payout);
+    }));
     const transferOf = new Map([...payouts.values()].filter((payout) => payout.transfer_op_id).map((payout) => [hexOf(payout.transfer_op_id!).toLowerCase(), payout]));
+    // Every operation's ledger entry, read together (the finished ones come from memory).
+    const entries = new Map<string, Awaited<ReturnType<OmniRolesService["ledgerEntry"]>>>();
+    const wanted = new Set<string>([
+      ...logs.filter((log) => log.kind === "evm" || log.kind === "dao").map((log) => log.opId),
+      ...[...payouts.values()].filter((payout) => payout.transfer_op_id).map((payout) => hexOf(payout.transfer_op_id!)),
+    ]);
+    await Promise.all([...wanted].map(async (opId) => entries.set(opId.toLowerCase(), await this.ledgerEntry(treasury.vaultAccountId, opId).catch(() => null))));
+    const entryOf = (opId: string) => (entries.has(opId.toLowerCase()) ? Promise.resolve(entries.get(opId.toLowerCase()) ?? null) : this.ledgerEntry(treasury.vaultAccountId, opId).catch(() => null));
+    // Solana and NEAR operations, read together rather than one after another.
+    const opArg = (opId: string) => ({ op_id: Array.from(Buffer.from(opId.slice(2), "hex")) });
+    const opViews = new Map<string, unknown>();
+    await Promise.all(logs.filter((log) => log.kind === "solana" || log.kind === "near").map(async (log) => {
+      const method = log.kind === "solana" ? "get_solana_operation" : "get_near_operation";
+      opViews.set(log.opId, await this.near.viewFunction<unknown>(treasury.vaultAccountId, method, opArg(log.opId)).catch(() => null));
+    }));
     for (const log of logs) {
       if (seen.has(log.opId) || transferOf.has(log.opId)) continue;
       if (log.kind === "bank") {
         const payout = payouts.get(log.opId);
         if (!payout) continue;
-        const transfer = payout.transfer_op_id ? await this.ledgerEntry(treasury.vaultAccountId, hexOf(payout.transfer_op_id)).catch(() => null) : null;
+        const transfer = payout.transfer_op_id ? await entryOf(hexOf(payout.transfer_op_id)) : null;
         const euros = formatUnits(BigInt(payout.amount), 6);
         operations.push({
           opId: log.opId,
@@ -2392,7 +2416,7 @@ export class OmniRolesService {
         continue;
       }
       if (log.kind === "solana") {
-        const op = await this.near.viewFunction<SolanaOperationView | null>(treasury.vaultAccountId, "get_solana_operation", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
+        const op = opViews.get(log.opId) as SolanaOperationView | null;
         if (!op) continue;
         const mint = op.request.asset === "Sol" ? null : base58Encode(op.request.asset.Spl.mint);
         const token = SOLANA_DEVNET.tokens.find((item) => item.mint === mint) ?? { symbol: mint ? short(mint) : "SOL", decimals: mint ? 0 : 9 };
@@ -2416,7 +2440,7 @@ export class OmniRolesService {
         continue;
       }
       if (log.kind === "near") {
-        const op = await this.near.viewFunction<NearOperationView | null>(treasury.vaultAccountId, "get_near_operation", { op_id: Array.from(Buffer.from(log.opId.slice(2), "hex")) }).catch(() => null);
+        const op = opViews.get(log.opId) as NearOperationView | null;
         if (!op) continue;
         const token = NEAR_TESTNET_TOKENS.find((item) => item.accountId === op.request.token) ?? { symbol: short(op.request.token), decimals: 0 };
         operations.push({
@@ -2437,7 +2461,7 @@ export class OmniRolesService {
         });
         continue;
       }
-      const recorded = await this.ledgerEntry(treasury.vaultAccountId, log.opId).catch(() => null);
+      const recorded = await entryOf(log.opId);
       if (!recorded) continue;
       const { operation, evmHash, receipt } = recorded;
       operations.push({
