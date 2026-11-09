@@ -207,6 +207,10 @@ export class OnchainAgentClient {
       op = await this.vault.view<DirectOperation>("get_operation", { op_id });
     }
     if (op.state !== "PossiblySigned") return op;
+    // Sponsored (EIP-7702): what the vault signed is the wallet's `execute` call, not a transaction.
+    // Euthyna's relayer sends it and pays the gas; the worker settles it on the Executed log.
+    const sponsored = await this.vault.view<{ deadline: number } | null>("get_sponsored_operation", { op_id }).catch(() => null);
+    if (sponsored) return { ...op, sponsored: true, relayedBy: "euthyna" };
     const config = await this.vault.view<{ cancel_after_ns: string; unconfirmed_after_ns: string }>("get_settlement_config");
     const age = BigInt(Date.now()) * 1_000_000n - BigInt(op.possibly_signed_at_ns ?? "0");
     const candidates = [
