@@ -2021,7 +2021,9 @@ export class OmniRolesService {
     if (!Number.isFinite(first)) throw new OmniRolesError(400, "invalid_date", "Choose the first payment date");
     if (!/^\d+$/.test(input.amount) || BigInt(input.amount) === 0n) throw new OmniRolesError(400, "invalid_amount", "The amount must be positive");
     const periodNs = BigInt(Math.round(input.periodDays * 86_400_000)) * 1_000_000n;
-    return this.proposal(treasury, `Pay beneficiary #${input.beneficiaryId} every ${input.periodDays} days`, [{
+    const minutes = Math.round(input.periodDays * 1440);
+    const every = minutes === 1440 ? "every day" : minutes % 1440 === 0 ? `every ${minutes / 1440} days` : `every ${minutes} minutes`;
+    return this.proposal(treasury, `Pay beneficiary #${input.beneficiaryId} ${every}`, [{
       method: "queue_rule_change",
       change: { AddStandingOrder: { beneficiary_id: input.beneficiaryId, amount: input.amount, first_at_ns: (BigInt(first) * 1_000_000n).toString(), period_ns: periodNs.toString(), count: input.count, label: input.label.trim() } },
     }]);

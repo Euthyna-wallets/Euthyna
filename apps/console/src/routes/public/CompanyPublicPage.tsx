@@ -7,6 +7,7 @@
  * which only appears when that block has something to show.
  */
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { formatUnits } from "viem";
 import { Link, useParams } from "react-router-dom";
 
@@ -14,6 +15,7 @@ import { companyProfile, REGISTRY_ID, treasuryOf, type CompanyProfile, type Empl
 import { market, slaText, tokenAmount, type MarketAgent } from "../../lib/market.js";
 import "../../styles/site.css";
 import { displayAccount } from "../../components/ui.js";
+import { connectNearWallet, nearAccounts, signContractCall, viewContract } from "../../wallets.js";
 import { Kicker, SiteFooter, SiteHeader } from "./site/SiteChrome.js";
 
 const BRAND = "Cinzel, serif";
@@ -286,9 +288,7 @@ export function CompanyPublicPage() {
                         .
                       </span>
                       <span style={{ fontSize: 13, color: "#A9B6D6" }}>Locked shares vote on company calls and transfers. Each epoch, revenue goes to the holders who voted.</span>
-                      <Link to="/shares" className="ori btno" style={{ textAlign: "center" }}>
-                        BUY SHARES · {company.shares.priceNear}
-                      </Link>
+                      <BuyShares sharesId={company.shares.accountId} priceYocto={company.shares.priceYocto} />
                     </>
                   ) : (
                     <span style={{ fontSize: 15, color: "#C9D3EA" }}>This company has not issued shares yet, so it shares no revenue.</span>
@@ -374,6 +374,68 @@ async function listEntry(dao: string) {
 }
 
 /** 100000 → "100,000". */
+/** First purchase registers the holder (the contract keeps 0.01 NEAR for its storage). */
+const REGISTRATION_FEE_YOCTO = 10n ** 22n;
+const formatYocto = (yocto: bigint) => `${Number(formatUnits(yocto, 24)).toLocaleString("en-US", { maximumFractionDigits: 4 })} NEAR`;
+
+/** Anyone buys from their own wallet, then locks shares to vote: no Euthyna account needed. */
+function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: string }) {
+  const [account, setAccount] = useState<string | null>(null);
+  const [shares, setShares] = useState("10");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const holder = useQuery({
+    queryKey: ["shares-holder", sharesId, account],
+    queryFn: () => viewContract<{ balance: string; locked: string; transferable: string } | null>(sharesId, "holder_of", { account_id: account }),
+    enabled: Boolean(account),
+  });
+  useEffect(() => {
+    void nearAccounts().then((accounts) => setAccount(accounts[0] ?? null)).catch(() => undefined);
+  }, []);
+  const count = /^\d+$/.test(shares) ? BigInt(shares) : 0n;
+  const deposit = count * BigInt(priceYocto) + (holder.data ? 0n : REGISTRATION_FEE_YOCTO);
+  const run = async (label: string, work: () => Promise<string>) => {
+    setBusy(label); setNote(null);
+    try {
+      const tx = await work();
+      setNote(`Done: transaction ${tx.slice(0, 10)}…`);
+      await holder.refetch();
+    } catch (cause) {
+      setNote(String(cause instanceof Error ? cause.message : cause).slice(0, 200));
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (!account) {
+    return (
+      <button className="ori btno" onClick={() => void connectNearWallet().then((accounts) => setAccount(accounts[0] ?? null)).catch((cause: unknown) => setNote(String(cause)))}>
+        CONNECT A NEAR WALLET TO BUY
+      </button>
+    );
+  }
+  const transferable = BigInt(holder.data?.transferable ?? "0");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input inputMode="numeric" aria-label="Number of shares to buy" value={shares} onChange={(event) => setShares(event.target.value)} style={{ width: 90, padding: "8px 10px" }} />
+        <button className="ori btno" disabled={Boolean(busy) || count === 0n} onClick={() => void run("buy", () => signContractCall(account, sharesId, "buy", {}, { deposit: deposit.toString() }))}>
+          {busy === "buy" ? "SIGNING…" : `BUY ${count} · ${formatYocto(deposit)}`}
+        </button>
+        {transferable > 0n ? (
+          <button className="ori btno" disabled={Boolean(busy)} onClick={() => void run("lock", () => signContractCall(account, sharesId, "lock", { amount: transferable.toString() }))}>
+            {busy === "lock" ? "SIGNING…" : `LOCK ${transferable} TO VOTE`}
+          </button>
+        ) : null}
+      </div>
+      <span style={{ fontSize: 12, color: "#A9B6D6" }}>
+        {account}: {holder.data ? `${holder.data.balance} held, ${holder.data.locked} locked to vote` : "no shares yet"}
+        {holder.data ? "" : " · the first purchase includes 0.01 NEAR of storage"}
+      </span>
+      {note ? <span role="status" style={{ fontSize: 12, color: "#F2B544" }}>{note}</span> : null}
+    </div>
+  );
+}
+
 function count(value: string): string {
   return /^\d+$/.test(value) ? Number(value).toLocaleString("en-US") : value;
 }
