@@ -5,7 +5,7 @@ type Hex = `0x${string}`;
 
 const id = Array<number>(32).fill(1);
 const block = `0x${"09".repeat(32)}` as Hex;
-function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean; vaultRefuses?: boolean; api?: boolean } = {}) {
+function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean; vaultRefuses?: boolean; api?: boolean; sponsored?: boolean } = {}) {
   const calls: Array<{ method: string; args?: Record<string, unknown> }> = [];
   let state = "Prepared";
   const vault = {
@@ -16,6 +16,7 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
     view: async <T>(method: string): Promise<T> => {
       if (method === "check_operation") return (options.vaultRefuses ? { allowed: false, reason: "ERR_PERMISSION_DENIED" } : { allowed: true, reason: null }) as T;
       if (method === "get_wallet") return { address: Array(20).fill(3) } as T;
+      if (method === "get_sponsored_operation") return (options.sponsored ? { deadline: 1, approval: null } : null) as T;
       if (method === "get_settlement_config") return { cancel_after_ns: "3600000000000", unconfirmed_after_ns: "21600000000000" } as T;
       return { state, signed_transaction: [2, 4, 6], cancellation: options.cancellation ? { signed_transaction: [8, 9] } : null, possibly_signed_at_ns: options.timeout ? "0" : (BigInt(Date.now()) * 1_000_000n).toString(),  } as T;
     },
@@ -42,6 +43,12 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
   return { tools: new MandateMcpTools(new OnchainAgentClient(vault, rpc, advisory)), calls, reported };
 }
 describe("direct MCP without an API", () => {
+  it("leaves a sponsored call to Euthyna's relayer: nothing broadcast by the agent", async () => {
+    const { tools, calls } = fixture({ sponsored: true });
+    const result = await tools.pay({ token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" });
+    expect(result.outcome).toBe("authorized");
+    expect(calls.some((c) => c.method === "eth_sendRawTransaction" || c.method === "settle")).toBe(false);
+  });
   it("prepares and authorizes without a visa, then verifies finalized receipt", async () => {
     const { tools, calls } = fixture();
     const result = await tools.pay({ token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" });
