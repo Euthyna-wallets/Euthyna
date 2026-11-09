@@ -10,7 +10,7 @@ The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 | --- | --- | --- |
 | [1. Look](#1-look-no-wallet) and [2. Attack a live vault](#2-attack-a-live-vault-no-wallet) | a browser; Node 22 for part 2 | 5 min |
 | [3](#3-create-a-company) to [6](#6-halt-every-agent-then-resume) | **three NEAR testnet accounts** (a company has at least three founders; two of three approve). [Meteor Wallet](https://wallet.meteorwallet.app), switched to testnet, creates them | 10 min |
-| [7. Recover a seat](#7-recover-a-founder-seat) | one more NEAR testnet account, and a mailbox | 15 min, 10 of them waiting |
+| [7. Recover a seat](#7-recover-a-founder-seat) | one more NEAR testnet account, and a mailbox | 8 min, 2 of them waiting |
 | [8. Market](#8-market) | optional | 5 min |
 | [9. Rob the Agent](#9-rob-the-agent-no-wallet) | a browser; a NEAR testnet wallet only for the trophy | 5 min |
 
@@ -126,7 +126,7 @@ Activity.
 
 ## 7. Recover a founder seat
 
-Proved with ZK Email and **verified by a NEAR contract** (`euthyna-recovery-v4.testnet`, no access key); no Euthyna
+Proved with ZK Email and **verified by a NEAR contract** (`euthyna-recovery-v5.testnet`, no access key); no Euthyna
 server is in the path. How it works and what is public: [docs/recovery.md](./docs/recovery.md).
 
 1. **Settings → Seat recovery**, signed in as a founder. Send yourself an email with the subject shown, paste its
@@ -138,15 +138,15 @@ server is in the path. How it works and what is public: [docs/recovery.md](./doc
 2. Sign in with a **new** NEAR account (it needs about 0.4 NEAR) and open `/recover`: the DAO, the lost account, and
    a second email from the same mailbox with the subject shown. **You should see** "Request recorded on chain".
 3. Back on the founder's account, Settings shows the request and **This is not me: cancel**: the defence against
-   a mailbox takeover. Do not cancel; wait 10 minutes (48 hours on mainnet).
+   a mailbox takeover. Do not cancel; wait 2 minutes (48 hours on mainnet).
 4. Another founder clicks **Submit the vote** (two proposals: the DAO members and the vault's council), and two
    founders approve both in **Votes**. **You should see** the new account in the members, the lost one gone (the
    council change applies after its veto window).
 5. **Check on chain**:
 
    ```sh
-   near contract call-function as-read-only euthyna-recovery-v4.testnet recovery json-args '{"dao_id":"<dao>","lost_account_id":"<lost>"}' network-config testnet now
-   near account list-keys euthyna-recovery-v4.testnet network-config testnet now   # no keys
+   near contract call-function as-read-only euthyna-recovery-v5.testnet recovery json-args '{"dao_id":"<dao>","lost_account_id":"<lost>"}' network-config testnet now
+   near account list-keys euthyna-recovery-v5.testnet network-config testnet now   # no keys
    ```
 
    A request with another mailbox fails with `ERR_DIFFERENT_MAILBOX`; before the delay is over, **Submit the vote** is
