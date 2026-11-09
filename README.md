@@ -66,6 +66,7 @@ node scripts/attack-testnet.mjs       # 8 of 8 attacks refused by the live vault
 # a live vault has no access key (NEAR CLI)
 near account list-keys pixel-forge.nomos.euthyna.testnet network-config testnet now
 # the full suite, with Rust and cargo-near: a real vault in a NEAR sandbox, plus the Guard
+# (the NEAR sandbox node needs `ulimit -n 65535`; a container with a lower hard limit cannot start it)
 pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 ```
 
