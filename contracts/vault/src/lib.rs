@@ -445,7 +445,11 @@ impl Vault {
     }
 
     /// Queued like an owner's vote: the same rule delay, the same council veto.
-    pub(crate) fn enqueue_rule_change(&mut self, change: RuleChange, proposed_by: AccountId) -> QueuedRuleChange {
+    pub(crate) fn enqueue_rule_change(
+        &mut self,
+        change: RuleChange,
+        proposed_by: AccountId,
+    ) -> QueuedRuleChange {
         self.rule_sequence = self.rule_sequence.saturating_add(1);
         let now = env::block_timestamp();
         let queue_id = self.queue_id(self.rule_sequence, &change);
@@ -681,8 +685,14 @@ impl Vault {
         let expires_at_ns = now.saturating_add(self.operation_ttl_ns);
         // A chain the members turned to sponsored execution: MPC signs the wallet's EIP-712 Execute
         // of the same call instead of a transaction (same checks, the relayer pays the gas).
-        let tx_digest = sponsored::digest_for(&request, wallet_address, &op_id, expires_at_ns, self.settlement_config.unconfirmed_after_ns.0)
-            .unwrap_or(tx_digest);
+        let tx_digest = sponsored::digest_for(
+            &request,
+            wallet_address,
+            &op_id,
+            expires_at_ns,
+            self.settlement_config.unconfirmed_after_ns.0,
+        )
+        .unwrap_or(tx_digest);
         let risk_value = Self::threshold_value(measured_value);
         let execute_after_ns = role_state
             .config
@@ -1010,8 +1020,14 @@ impl Vault {
         let (transaction, tx_digest) =
             evm::build_transaction(&Self::dao_gas_config(), nonce, &operation.request);
         let expires_at_ns = now.saturating_add(self.operation_ttl_ns);
-        let tx_digest = sponsored::digest_for(&operation.request, wallet_address, &op_id, expires_at_ns, self.settlement_config.unconfirmed_after_ns.0)
-            .unwrap_or(tx_digest);
+        let tx_digest = sponsored::digest_for(
+            &operation.request,
+            wallet_address,
+            &op_id,
+            expires_at_ns,
+            self.settlement_config.unconfirmed_after_ns.0,
+        )
+        .unwrap_or(tx_digest);
         operation.evm_nonce = nonce;
         operation.transaction = transaction;
         operation.tx_digest = tx_digest;
@@ -1971,8 +1987,14 @@ impl Vault {
             }
             RuleChange::SetEvmExecutor { chain_id, executor } => {
                 // A chain whose transactions NEAR MPC can attest, so the vault can settle.
-                require!(foreign::attestable(*chain_id), "ERR_FOREIGN_CHAIN_UNAVAILABLE");
-                require!(executor.is_none_or(|address| address != [0u8; 20]), "ERR_EVM_EXECUTOR");
+                require!(
+                    foreign::attestable(*chain_id),
+                    "ERR_FOREIGN_CHAIN_UNAVAILABLE"
+                );
+                require!(
+                    executor.is_none_or(|address| address != [0u8; 20]),
+                    "ERR_EVM_EXECUTOR"
+                );
             }
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
@@ -2172,7 +2194,12 @@ impl Vault {
     /// What the relayer submits: the signed transaction, or the sponsored `execute` calldata.
     fn signed_payload(operation: &Operation, signature: &MpcSignature) -> Vec<u8> {
         match sponsored::operation(&operation.op_id) {
-            Some(sponsored) => sponsored::execute_calldata(&operation.request, &operation.op_id, sponsored.deadline, signature),
+            Some(sponsored) => sponsored::sponsored_calldata(
+                &operation.request,
+                &operation.op_id,
+                &sponsored,
+                signature,
+            ),
             None => evm::signed_transaction(&operation.transaction, signature),
         }
     }

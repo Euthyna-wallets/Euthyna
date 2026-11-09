@@ -41,7 +41,10 @@ pub(crate) fn chain(chain_id: u64, mainnet: bool) -> (&'static str, u8) {
 }
 /// An EVM chain NEAR MPC attests transactions of (testnet or mainnet id).
 pub(crate) fn attestable(chain_id: u64) -> bool {
-    matches!(chain_id, 84532 | 8453 | 421614 | 42161 | 97 | 56 | 80002 | 137 | 43113 | 43114)
+    matches!(
+        chain_id,
+        84532 | 8453 | 421614 | 42161 | 97 | 56 | 80002 | 137 | 43113 | 43114
+    )
 }
 pub(crate) fn payload_hash(tag: u8, tx: [u8; 32], block: [u8; 32]) -> [u8; 32] {
     // V1=0; chain tag; EvmRpcRequest; [BlockHash=0]; Finalized=2;

@@ -226,7 +226,7 @@ export type ChainProfile = {
 export const NATIVE_ETH: Token = { address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 };
 
 /** EuthynaExecutor (contracts/evm/executor), deployed once on Base Sepolia: what wallets delegate to for sponsored gas. */
-export const EUTHYNA_EXECUTOR = "0x28998bde751ce908c7f2cda1961469994c52bf37";
+export const EUTHYNA_EXECUTOR = "0x76bb5c47b0759af0300afeea954fa837a96675ed";
 
 export const BASE_SEPOLIA: ChainProfile = {
   chainId: 84532,

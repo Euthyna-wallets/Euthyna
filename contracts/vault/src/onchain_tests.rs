@@ -1173,10 +1173,19 @@ mod sponsored_flow {
         context("owner.testnet", 2);
         v.cancel_prepared(first);
         v.memberships
-            .get_mut(&MembershipKey { role: "payments".into(), member: "agent.testnet".parse().unwrap() })
+            .get_mut(&MembershipKey {
+                role: "payments".into(),
+                member: "agent.testnet".parse().unwrap(),
+            })
             .unwrap()
             .max_uses = None;
-        v.apply_rule_change(RuleChange::SetEvmExecutor { chain_id: 84532, executor: Some(EXECUTOR) }, 2);
+        v.apply_rule_change(
+            RuleChange::SetEvmExecutor {
+                chain_id: 84532,
+                executor: Some(EXECUTOR),
+            },
+            2,
+        );
         // A short unconfirmed window, so the executor's deadline is what holds a release back.
         v.settlement_config.unconfirmed_after_ns = U64(10 * 60 * 1_000_000_000);
         context("agent.testnet", 3);
@@ -1193,8 +1202,19 @@ mod sponsored_flow {
         let (v, id) = sponsored();
         let op = v.operations.get(&id).unwrap();
         let deadline = v.get_sponsored_operation(id).unwrap().deadline;
-        assert_eq!(deadline, (op.expires_at_ns.0 + v.settlement_config.unconfirmed_after_ns.0 / 2) / 1_000_000_000);
-        let expected = sponsored::execute_digest(84532, [3; 20], op.request.target, 0, &op.request.calldata, &id, deadline);
+        assert_eq!(
+            deadline,
+            (op.expires_at_ns.0 + v.settlement_config.unconfirmed_after_ns.0 / 2) / 1_000_000_000
+        );
+        let expected = sponsored::execute_digest(
+            84532,
+            [3; 20],
+            op.request.target,
+            0,
+            &op.request.calldata,
+            &id,
+            deadline,
+        );
         assert_eq!(op.tx_digest, expected);
         assert_ne!(op.tx_digest, evm::signing_digest(&op.transaction));
     }
@@ -1207,7 +1227,12 @@ mod sponsored_flow {
         v.on_mpc_signature(id, mpc_signature());
         let op = v.operations.get(&id).unwrap();
         let calldata = op.signed_transaction.clone().unwrap();
-        assert_eq!(&calldata[..4], &env::keccak256_array(b"execute(address,uint256,bytes,bytes32,uint256,uint8,bytes32,bytes32)")[..4]);
+        assert_eq!(
+            &calldata[..4],
+            &env::keccak256_array(
+                b"execute(address,uint256,bytes,bytes32,uint256,uint8,bytes32,bytes32)"
+            )[..4]
+        );
         assert_eq!(&calldata[4 + 3 * 32..4 + 4 * 32], &id[..]);
     }
 
@@ -1248,7 +1273,10 @@ mod sponsored_flow {
         let (mut v, id) = sponsored();
         let _ = v.authorize(id, None);
         let at = release_time(&v, id) - 1;
-        assert!(at >= 3 + v.settlement_config.unconfirmed_after_ns.0, "the deadline, not the window, is what binds here");
+        assert!(
+            at >= 3 + v.settlement_config.unconfirmed_after_ns.0,
+            "the deadline, not the window, is what binds here"
+        );
         context("stranger.testnet", at);
         v.release_unconfirmed(id);
     }
@@ -1259,7 +1287,10 @@ mod sponsored_flow {
         let _ = v.authorize(id, None);
         context("stranger.testnet", release_time(&v, id));
         v.release_unconfirmed(id);
-        assert_eq!(v.operations.get(&id).unwrap().state, OperationState::Unconfirmed);
+        assert_eq!(
+            v.operations.get(&id).unwrap().state,
+            OperationState::Unconfirmed
+        );
     }
 
     #[test]
@@ -1272,22 +1303,148 @@ mod sponsored_flow {
         let expected = sponsored::log_payload_hash(6, tx, block, 100, 2, 5, [3; 20], &id);
         // A proof of something else does not settle.
         v.on_settle_sponsored_verified(id, expected, Ok(response([9; 32])));
-        assert_eq!(v.operations.get(&id).unwrap().state, OperationState::PossiblySigned);
+        assert_eq!(
+            v.operations.get(&id).unwrap().state,
+            OperationState::PossiblySigned
+        );
         v.on_settle_sponsored_verified(id, expected, Ok(response(expected)));
-        assert_eq!(v.operations.get(&id).unwrap().state, OperationState::Confirmed);
+        assert_eq!(
+            v.operations.get(&id).unwrap().state,
+            OperationState::Confirmed
+        );
+    }
+
+    const ROUTER: [u8; 20] = [9; 20];
+
+    /// The payments role may also call a router and approve it on the token: a swap.
+    fn with_swap_permissions(v: &mut Vault, approve: bool) {
+        let role = v.roles.get_mut("payments").unwrap();
+        role.config.permissions.push(Permission {
+            chain_id: 84532,
+            target: ROUTER,
+            selector: None,
+            conditions: vec![],
+            allow_value: false,
+        });
+        if approve {
+            role.config.permissions.push(Permission {
+                chain_id: 84532,
+                target: [1; 20],
+                selector: Some([0x09, 0x5e, 0xa7, 0xb3]),
+                conditions: vec![],
+                allow_value: false,
+            });
+        }
+    }
+
+    fn swap_request(reference: &str) -> OperationRequest {
+        from_value(json!({"chain_id":84532,"target":ROUTER.to_vec(),"value":"0","calldata":[4, 0xe4, 0x5a, 0xaf, 7],"allowance_amount":"0","reference":reference,"gas_limit":"300000","max_fee_per_gas":"2","max_priority_fee_per_gas":"1"})).unwrap()
+    }
+
+    fn swap_with_approval(approve_permission: bool) -> (Vault, OperationId) {
+        let (mut v, id) = sponsored();
+        context("owner.testnet", 4);
+        v.cancel_prepared(id);
+        with_swap_permissions(&mut v, approve_permission);
+        context("agent.testnet", 5);
+        let op = v.prepare_with_approval(
+            "payments".into(),
+            swap_request("swap-1"),
+            sponsored::SponsoredApproval {
+                token: [1; 20],
+                amount: U128(4_000_000),
+            },
+        );
+        (v, op.op_id)
+    }
+
+    #[test]
+    fn a_swap_is_signed_as_approve_swap_revoke() {
+        let (v, id) = swap_with_approval(true);
+        let op = v.operations.get(&id).unwrap();
+        let sp = v.get_sponsored_operation(id).unwrap();
+        let calls = sponsored::batch_calls(&op.request, sp.approval.as_ref().unwrap());
+        // The spender is the swap's own target; the last call takes the approval back.
+        assert_eq!(calls[0].2, sponsored::approve_calldata(&ROUTER, 4_000_000));
+        assert_eq!(calls[1].0, ROUTER);
+        assert_eq!(calls[2].2, sponsored::approve_calldata(&ROUTER, 0));
+        assert_eq!(
+            op.tx_digest,
+            sponsored::batch_digest(84532, [3; 20], &calls, &id, sp.deadline)
+        );
+    }
+
+    #[test]
+    fn the_relayer_gets_execute_batch() {
+        let (mut v, id) = swap_with_approval(true);
+        let _ = v.authorize(id, None);
+        v.on_mpc_signature(id, mpc_signature());
+        let calldata = v
+            .operations
+            .get(&id)
+            .unwrap()
+            .signed_transaction
+            .clone()
+            .unwrap();
+        assert_eq!(
+            &calldata[..4],
+            &env::keccak256_array(
+                b"executeBatch((address,uint256,bytes)[],bytes32,uint256,uint8,bytes32,bytes32)"
+            )[..4]
+        );
+        assert_eq!(&calldata[4 + 32..4 + 64], &id[..]);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_APPROVAL_DENIED")]
+    fn the_role_must_allow_the_approve() {
+        swap_with_approval(false);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_APPROVAL_NEEDS_SPONSORED")]
+    fn a_plain_chain_has_no_bundled_approval() {
+        let (mut v, id) = fixture(false, true);
+        context("owner.testnet", 2);
+        v.cancel_prepared(id);
+        with_swap_permissions(&mut v, true);
+        context("agent.testnet", 3);
+        v.prepare_with_approval(
+            "payments".into(),
+            swap_request("swap-1"),
+            sponsored::SponsoredApproval {
+                token: [1; 20],
+                amount: U128(1),
+            },
+        );
     }
 
     #[test]
     fn the_wallet_delegates_once_to_the_voted_executor() {
         let (mut v, _) = fixture(false, true);
         context("owner.testnet", 2);
-        let first = *v.wallets.get(&84532).unwrap().active_operation.as_ref().unwrap();
+        let first = *v
+            .wallets
+            .get(&84532)
+            .unwrap()
+            .active_operation
+            .as_ref()
+            .unwrap();
         v.cancel_prepared(first);
-        v.apply_rule_change(RuleChange::SetEvmExecutor { chain_id: 84532, executor: Some(EXECUTOR) }, 2);
+        v.apply_rule_change(
+            RuleChange::SetEvmExecutor {
+                chain_id: 84532,
+                executor: Some(EXECUTOR),
+            },
+            2,
+        );
         drop(v.delegate_wallet(84532));
         let delegation = v.get_wallet_delegation(84532).unwrap();
         assert_eq!(delegation.nonce, 0);
-        assert_eq!(delegation.digest, sponsored::authorization_digest(84532, EXECUTOR, 0));
+        assert_eq!(
+            delegation.digest,
+            sponsored::authorization_digest(84532, EXECUTOR, 0)
+        );
         assert_eq!(v.wallets.get(&84532).unwrap().next_nonce, 1);
         // A retry before MPC answered keeps the same nonce.
         drop(v.delegate_wallet(84532));
@@ -1295,7 +1452,13 @@ mod sponsored_flow {
         v.on_delegation_signature(84532, delegation.digest, mpc_signature());
         assert!(v.get_wallet_delegation(84532).unwrap().signature.is_some());
         // Back to plain transactions: the delegation is no longer the one to submit.
-        v.apply_rule_change(RuleChange::SetEvmExecutor { chain_id: 84532, executor: None }, 3);
+        v.apply_rule_change(
+            RuleChange::SetEvmExecutor {
+                chain_id: 84532,
+                executor: None,
+            },
+            3,
+        );
         assert!(v.get_wallet_delegation(84532).is_none());
         assert!(v.get_evm_executor(84532).is_none());
     }
@@ -1303,6 +1466,9 @@ mod sponsored_flow {
     #[test]
     #[should_panic(expected = "ERR_FOREIGN_CHAIN_UNAVAILABLE")]
     fn only_a_chain_mpc_can_attest() {
-        Vault::validate_rule_change(&RuleChange::SetEvmExecutor { chain_id: 1, executor: Some(EXECUTOR) });
+        Vault::validate_rule_change(&RuleChange::SetEvmExecutor {
+            chain_id: 1,
+            executor: Some(EXECUTOR),
+        });
     }
 }

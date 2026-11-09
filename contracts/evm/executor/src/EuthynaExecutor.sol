@@ -12,9 +12,16 @@ pragma solidity 0.8.38;
 /// After a successful call it emits `Executed(opId)`, which the vault settles on, as attested by
 /// NEAR MPC. A failed call reverts the whole transaction: no event, the vault does not settle, and
 /// the operation can still be released after its deadline.
+///
+/// `executeBatch` runs several calls under one signature, all or nothing: the vault uses it for
+/// approve + call + revoke, so a router gets exactly the tokens of one swap and no approval is
+/// left behind.
 contract EuthynaExecutor {
     /// keccak256("Execute(address to,uint256 value,bytes data,bytes32 opId,uint256 deadline)")
     bytes32 public constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,bytes32 opId,uint256 deadline)");
+    bytes32 public constant CALL_TYPEHASH = keccak256("Call(address to,uint256 value,bytes data)");
+    bytes32 public constant BATCH_TYPEHASH =
+        keccak256("Batch(Call[] calls,bytes32 opId,uint256 deadline)Call(address to,uint256 value,bytes data)");
     /// keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
     bytes32 private constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant NAME_HASH = keccak256("EuthynaExecutor");
@@ -24,12 +31,20 @@ contract EuthynaExecutor {
     /// keccak256(abi.encode(uint256(keccak256("euthyna.executor.used")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant USED_SLOT = 0xb14470db056c8f89d4f00de1ce87371b0f49c0ca2c80989a577b5d6d0db5b100;
 
+    struct Call {
+        address to;
+        uint256 value;
+        bytes data;
+    }
+
     event Executed(bytes32 indexed opId);
 
     error Expired();
     error AlreadyExecuted();
     error BadSignature();
     error CallFailed(bytes reason);
+    error BatchCallFailed(uint256 index, bytes reason);
+    error EmptyBatch();
 
     /// The EIP-712 domain of this wallet: its own address, on this chain.
     function domainSeparator() public view returns (bytes32) {
@@ -57,17 +72,43 @@ contract EuthynaExecutor {
         bytes32 r,
         bytes32 s
     ) external {
+        _authorize(digest(to, value, data, opId, deadline), opId, deadline, v, r, s);
+        (bool ok, bytes memory reason) = to.call{value: value}(data);
+        if (!ok) revert CallFailed(reason);
+        emit Executed(opId);
+    }
+
+    /// The digest the vault asks NEAR MPC to sign for a batch.
+    function batchDigest(Call[] calldata calls, bytes32 opId, uint256 deadline) public view returns (bytes32) {
+        bytes32[] memory hashes = new bytes32[](calls.length);
+        for (uint256 i = 0; i < calls.length; i++) {
+            hashes[i] = keccak256(abi.encode(CALL_TYPEHASH, calls[i].to, calls[i].value, keccak256(calls[i].data)));
+        }
+        bytes32 structHash = keccak256(abi.encode(BATCH_TYPEHASH, keccak256(abi.encodePacked(hashes)), opId, deadline));
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+    }
+
+    /// Runs the calls the wallet's key signed together, in order, all or nothing.
+    function executeBatch(Call[] calldata calls, bytes32 opId, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external {
+        if (calls.length == 0) revert EmptyBatch();
+        _authorize(batchDigest(calls, opId, deadline), opId, deadline, v, r, s);
+        for (uint256 i = 0; i < calls.length; i++) {
+            (bool ok, bytes memory reason) = calls[i].to.call{value: calls[i].value}(calls[i].data);
+            if (!ok) revert BatchCallFailed(i, reason);
+        }
+        emit Executed(opId);
+    }
+
+    /// Deadline, one run per id, low-s, and the signer is the wallet itself.
+    function _authorize(bytes32 hash, bytes32 opId, uint256 deadline, uint8 v, bytes32 r, bytes32 s) private {
         if (block.timestamp > deadline) revert Expired();
         mapping(bytes32 => bool) storage used = _used();
         if (used[opId]) revert AlreadyExecuted();
         if (uint256(s) > HALF_N) revert BadSignature();
-        address signer = ecrecover(digest(to, value, data, opId, deadline), v, r, s);
+        address signer = ecrecover(hash, v, r, s);
         // Without delegation, address(this) is this contract, which has no key: nothing verifies.
         if (signer == address(0) || signer != address(this)) revert BadSignature();
         used[opId] = true;
-        (bool ok, bytes memory reason) = to.call{value: value}(data);
-        if (!ok) revert CallFailed(reason);
-        emit Executed(opId);
     }
 
     /// A delegated wallet keeps receiving ETH like the plain address it was.

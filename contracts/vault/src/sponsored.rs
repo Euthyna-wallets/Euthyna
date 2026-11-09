@@ -8,11 +8,16 @@
 //! operation id, before the deadline. The vault settles on the wallet's `Executed(opId)` log,
 //! attested by NEAR MPC like the plain path's transaction (`settle_sponsored`).
 //!
+//! `prepare_with_approval` turns one call that spends a token (a swap) into a batch the wallet runs
+//! under a single signature: `approve(spender, amount)`, the call, `approve(spender, 0)`. The
+//! spender is always the call's target and the amount is checked against the role like any
+//! approve; the revoke is added by the vault, so no approval outlives the call.
+//!
 //! Nothing here touches the plain path: no executor voted, nothing changes. Kept in raw storage
 //! keys so the vault's state layout stays as it was.
-use crate::*;
 use crate::types::{EvmAddress, MpcSignature, OperationRequest};
-use near_sdk::json_types::U64;
+use crate::*;
+use near_sdk::json_types::{U64, U128};
 
 const KEY_EXECUTOR: &[u8] = b"spx:";
 const KEY_OPERATION: &[u8] = b"spo:";
@@ -25,7 +30,20 @@ const RELEASE_MARGIN_NS: u64 = 10 * 60 * 1_000_000_000;
 pub struct SponsoredOperation {
     /// Unix seconds; `execute` refuses after it.
     pub deadline: u64,
+    /// Set: the wallet runs approve + call + revoke (`executeBatch`) instead of the call alone.
+    pub approval: Option<SponsoredApproval>,
 }
+
+/// The token the call's target may take from the wallet, and how much, for this call only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
+pub struct SponsoredApproval {
+    pub token: EvmAddress,
+    pub amount: U128,
+}
+
+/// One call of a batch: (to, value, data).
+pub(crate) type BatchCall = (EvmAddress, u128, Vec<u8>);
 
 /// The wallet's EIP-7702 authorization to the voted executor, signed by NEAR MPC.
 #[derive(Clone, Debug)]
@@ -46,10 +64,15 @@ fn op_key(op_id: &OperationId) -> Vec<u8> {
     [KEY_OPERATION, op_id.as_slice()].concat()
 }
 fn read<T: borsh::BorshDeserialize>(key: &[u8]) -> Option<T> {
-    env::storage_read(key).map(|bytes| borsh::from_slice(&bytes).unwrap_or_else(|_| env::panic_str("ERR_SPONSORED_STATE")))
+    env::storage_read(key).map(|bytes| {
+        borsh::from_slice(&bytes).unwrap_or_else(|_| env::panic_str("ERR_SPONSORED_STATE"))
+    })
 }
 fn write<T: borsh::BorshSerialize>(key: &[u8], value: &T) {
-    env::storage_write(key, &borsh::to_vec(value).unwrap_or_else(|_| env::panic_str("ERR_SPONSORED_STATE")));
+    env::storage_write(
+        key,
+        &borsh::to_vec(value).unwrap_or_else(|_| env::panic_str("ERR_SPONSORED_STATE")),
+    );
 }
 
 pub(crate) fn executor_of(chain_id: u64) -> Option<EvmAddress> {
@@ -78,7 +101,10 @@ pub(crate) fn set_executor(chain_id: u64, executor: Option<EvmAddress>) {
     }
     env::log_str(&format!(
         "OMNIROLES_EVM_EXECUTOR:{chain_id}:{}",
-        executor.map_or_else(|| "none".to_string(), |address| format!("0x{}", hex::encode(address)))
+        executor.map_or_else(
+            || "none".to_string(),
+            |address| format!("0x{}", hex::encode(address))
+        )
     ));
 }
 
@@ -94,15 +120,33 @@ pub(crate) fn digest_for(
     executor_of(request.chain_id)?;
     // The relayer has at least half the unconfirmed window after the last moment it can be signed.
     let deadline = expires_at_ns.saturating_add(unconfirmed_after_ns / 2) / 1_000_000_000;
-    write(&op_key(op_id), &SponsoredOperation { deadline });
-    Some(execute_digest(request.chain_id, wallet, request.target, request.value.0, &request.calldata, op_id, deadline))
+    write(
+        &op_key(op_id),
+        &SponsoredOperation {
+            deadline,
+            approval: None,
+        },
+    );
+    Some(execute_digest(
+        request.chain_id,
+        wallet,
+        request.target,
+        request.value.0,
+        &request.calldata,
+        op_id,
+        deadline,
+    ))
 }
 
 /// The budget of a sponsored operation comes back without a proof only once `execute` refuses it.
 pub(crate) fn assert_releasable(op_id: &OperationId) {
     if let Some(op) = operation(op_id) {
         require!(
-            env::block_timestamp() >= op.deadline.saturating_mul(1_000_000_000).saturating_add(RELEASE_MARGIN_NS),
+            env::block_timestamp()
+                >= op
+                    .deadline
+                    .saturating_mul(1_000_000_000)
+                    .saturating_add(RELEASE_MARGIN_NS),
             "ERR_SPONSORED_DEADLINE_OPEN"
         );
     }
@@ -126,8 +170,19 @@ fn keccak(bytes: &[u8]) -> [u8; 32] {
 }
 
 pub(crate) fn domain_separator(chain_id: u64, wallet: EvmAddress) -> [u8; 32] {
-    let typehash = keccak(b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    keccak(&[typehash, keccak(b"EuthynaExecutor"), keccak(b"1"), word_u64(chain_id), word_address(&wallet)].concat())
+    let typehash = keccak(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    );
+    keccak(
+        &[
+            typehash,
+            keccak(b"EuthynaExecutor"),
+            keccak(b"1"),
+            word_u64(chain_id),
+            word_address(&wallet),
+        ]
+        .concat(),
+    )
 }
 
 pub(crate) fn execute_digest(
@@ -139,15 +194,176 @@ pub(crate) fn execute_digest(
     op_id: &OperationId,
     deadline: u64,
 ) -> [u8; 32] {
-    let typehash = keccak(b"Execute(address to,uint256 value,bytes data,bytes32 opId,uint256 deadline)");
-    let struct_hash = keccak(&[typehash, word_address(&to), word_u(value), keccak(data), *op_id, word_u64(deadline)].concat());
-    keccak(&[&[0x19u8, 0x01][..], &domain_separator(chain_id, wallet), &struct_hash].concat())
+    let typehash =
+        keccak(b"Execute(address to,uint256 value,bytes data,bytes32 opId,uint256 deadline)");
+    let struct_hash = keccak(
+        &[
+            typehash,
+            word_address(&to),
+            word_u(value),
+            keccak(data),
+            *op_id,
+            word_u64(deadline),
+        ]
+        .concat(),
+    );
+    keccak(
+        &[
+            &[0x19u8, 0x01][..],
+            &domain_separator(chain_id, wallet),
+            &struct_hash,
+        ]
+        .concat(),
+    )
+}
+
+/// `approve(spender, amount)` of an ERC-20.
+pub(crate) fn approve_calldata(spender: &EvmAddress, amount: u128) -> Vec<u8> {
+    [
+        &[0x09u8, 0x5e, 0xa7, 0xb3][..],
+        &word_address(spender),
+        &word_u(amount),
+    ]
+    .concat()
+}
+
+/// approve + the call + revoke: what a sponsored operation with an approval runs.
+pub(crate) fn batch_calls(
+    request: &OperationRequest,
+    approval: &SponsoredApproval,
+) -> Vec<BatchCall> {
+    vec![
+        (
+            approval.token,
+            0,
+            approve_calldata(&request.target, approval.amount.0),
+        ),
+        (request.target, request.value.0, request.calldata.clone()),
+        (approval.token, 0, approve_calldata(&request.target, 0)),
+    ]
+}
+
+/// EIP-712 `Batch(Call[] calls,bytes32 opId,uint256 deadline)` with `Call(address to,uint256 value,bytes data)`.
+pub(crate) fn batch_digest(
+    chain_id: u64,
+    wallet: EvmAddress,
+    calls: &[BatchCall],
+    op_id: &OperationId,
+    deadline: u64,
+) -> [u8; 32] {
+    let call_typehash = keccak(b"Call(address to,uint256 value,bytes data)");
+    let batch_typehash = keccak(b"Batch(Call[] calls,bytes32 opId,uint256 deadline)Call(address to,uint256 value,bytes data)");
+    let hashes: Vec<u8> = calls
+        .iter()
+        .flat_map(|(to, value, data)| {
+            keccak(
+                &[
+                    call_typehash,
+                    word_address(to),
+                    word_u(*value),
+                    keccak(data),
+                ]
+                .concat(),
+            )
+        })
+        .collect();
+    let struct_hash =
+        keccak(&[batch_typehash, keccak(&hashes), *op_id, word_u64(deadline)].concat());
+    keccak(
+        &[
+            &[0x19u8, 0x01][..],
+            &domain_separator(chain_id, wallet),
+            &struct_hash,
+        ]
+        .concat(),
+    )
+}
+
+fn padded(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    out.resize(data.len() + (32 - data.len() % 32) % 32, 0);
+    out
+}
+
+/// `executeBatch((address,uint256,bytes)[],bytes32,uint256,uint8,bytes32,bytes32)` with the MPC signature.
+pub(crate) fn execute_batch_calldata(
+    calls: &[BatchCall],
+    op_id: &OperationId,
+    deadline: u64,
+    signature: &MpcSignature,
+) -> Vec<u8> {
+    let selector =
+        &keccak(b"executeBatch((address,uint256,bytes)[],bytes32,uint256,uint8,bytes32,bytes32)")
+            [..4];
+    let mut r = [0u8; 32];
+    r.copy_from_slice(&signature.big_r[1..33]);
+    let mut out = selector.to_vec();
+    for word in [
+        word_u64(6 * 32),
+        *op_id,
+        word_u64(deadline),
+        word_u64(27 + u64::from(signature.recovery_id)),
+        r,
+        signature.s,
+    ] {
+        out.extend_from_slice(&word);
+    }
+    // The array: length, one offset per tuple (from the start of the offsets), then the tuples.
+    let tuples: Vec<Vec<u8>> = calls
+        .iter()
+        .map(|(to, value, data)| {
+            [
+                word_address(to),
+                word_u(*value),
+                word_u64(3 * 32),
+                word_u64(data.len() as u64),
+            ]
+            .concat()
+            .into_iter()
+            .chain(padded(data))
+            .collect()
+        })
+        .collect();
+    out.extend_from_slice(&word_u64(calls.len() as u64));
+    let mut offset = 32 * calls.len() as u64;
+    for tuple in &tuples {
+        out.extend_from_slice(&word_u64(offset));
+        offset += tuple.len() as u64;
+    }
+    for tuple in tuples {
+        out.extend(tuple);
+    }
+    out
+}
+
+/// What the relayer sends for a sponsored operation: `execute`, or `executeBatch` with an approval.
+pub(crate) fn sponsored_calldata(
+    request: &OperationRequest,
+    op_id: &OperationId,
+    sponsored: &SponsoredOperation,
+    signature: &MpcSignature,
+) -> Vec<u8> {
+    match &sponsored.approval {
+        Some(approval) => execute_batch_calldata(
+            &batch_calls(request, approval),
+            op_id,
+            sponsored.deadline,
+            signature,
+        ),
+        None => execute_calldata(request, op_id, sponsored.deadline, signature),
+    }
 }
 
 /// `execute(address,uint256,bytes,bytes32,uint256,uint8,bytes32,bytes32)` with the MPC signature:
 /// what the relayer sends to the wallet.
-pub(crate) fn execute_calldata(request: &OperationRequest, op_id: &OperationId, deadline: u64, signature: &MpcSignature) -> Vec<u8> {
-    let selector = &keccak(b"execute(address,uint256,bytes,bytes32,uint256,uint8,bytes32,bytes32)")[..4];
+pub(crate) fn execute_calldata(
+    request: &OperationRequest,
+    op_id: &OperationId,
+    deadline: u64,
+    signature: &MpcSignature,
+) -> Vec<u8> {
+    let selector =
+        &keccak(b"execute(address,uint256,bytes,bytes32,uint256,uint8,bytes32,bytes32)")[..4];
     let mut r = [0u8; 32];
     r.copy_from_slice(&signature.big_r[1..33]);
     let data = &request.calldata;
@@ -186,7 +402,12 @@ fn rlp_uint(value: u64) -> Vec<u8> {
 
 /// EIP-7702: keccak256(0x05 || rlp([chain_id, address, nonce])).
 pub(crate) fn authorization_digest(chain_id: u64, executor: EvmAddress, nonce: u64) -> [u8; 32] {
-    let payload = [rlp_uint(chain_id), [vec![0x94], executor.to_vec()].concat(), rlp_uint(nonce)].concat();
+    let payload = [
+        rlp_uint(chain_id),
+        [vec![0x94], executor.to_vec()].concat(),
+        rlp_uint(nonce),
+    ]
+    .concat();
     require!(payload.len() < 56, "ERR_RLP_LENGTH");
     keccak(&[vec![0x05, 0xc0 + payload.len() as u8], payload].concat())
 }
@@ -210,7 +431,17 @@ pub(crate) fn log_payload_hash(
     op_id: &OperationId,
 ) -> [u8; 32] {
     // `Executed(bytes32 indexed opId)` has no data: the node reports "0x".
-    any_log_payload_hash(tag, tx, block, block_number, tx_index, log_index, wallet, "0x", &[executed_topic(), *op_id])
+    any_log_payload_hash(
+        tag,
+        tx,
+        block,
+        block_number,
+        tx_index,
+        log_index,
+        wallet,
+        "0x",
+        &[executed_topic(), *op_id],
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -266,12 +497,81 @@ impl Vault {
         delegation_of(chain_id)
     }
 
+    /// `prepare` for a call that spends a token (a swap): the wallet approves the call's target for
+    /// `approval.amount` of `approval.token`, runs the call, and revokes the approval, all under one
+    /// signature and one transaction the relayer pays. The approve must be allowed by the same role
+    /// (the budget of an approve permission is checked, not charged: the call is charged). Only on a
+    /// chain with sponsored execution.
+    pub fn prepare_with_approval(
+        &mut self,
+        role: String,
+        request: OperationRequest,
+        approval: SponsoredApproval,
+    ) -> Operation {
+        require!(
+            executor_of(request.chain_id).is_some(),
+            "ERR_APPROVAL_NEEDS_SPONSORED"
+        );
+        require!(approval.amount.0 > 0, "ERR_ZERO_APPROVAL");
+        require!(
+            approval.token != request.target,
+            "ERR_APPROVAL_TOKEN_IS_TARGET"
+        );
+        let member = env::predecessor_account_id();
+        let now = env::block_timestamp();
+        let wallet = self
+            .wallets
+            .get(&request.chain_id)
+            .and_then(|wallet| wallet.address)
+            .expect("ERR_WALLET_NOT_DERIVED");
+        let approve = OperationRequest {
+            target: approval.token,
+            value: U128(0),
+            calldata: approve_calldata(&request.target, approval.amount.0),
+            allowance_amount: approval.amount,
+            ..request.clone()
+        };
+        let permissions = self
+            .roles
+            .get(&role)
+            .map(|state| state.config.permissions.clone())
+            .unwrap_or_default();
+        let mut refusal = String::from("NoPermission");
+        let allowed = permissions.iter().any(|permission| {
+            match self.check_permission(permission, &approve, &member, &role, wallet, now) {
+                Ok(_) => true,
+                Err(reason) => {
+                    refusal = Self::closer_refusal(std::mem::take(&mut refusal), reason);
+                    false
+                }
+            }
+        });
+        require!(allowed, format!("ERR_APPROVAL_DENIED:{refusal}"));
+        let mut prepared = self.prepare(role, request);
+        let mut sponsored = operation(&prepared.op_id).expect("ERR_SPONSORED_STATE");
+        let calls = batch_calls(&prepared.request, &approval);
+        sponsored.approval = Some(approval);
+        write(&op_key(&prepared.op_id), &sponsored);
+        prepared.tx_digest = batch_digest(
+            prepared.request.chain_id,
+            wallet,
+            &calls,
+            &prepared.op_id,
+            sponsored.deadline,
+        );
+        self.operations.insert(prepared.op_id, prepared.clone());
+        prepared
+    }
+
     /// Permissionless: has NEAR MPC sign the wallet's EIP-7702 authorization to the voted
     /// executor. It takes the wallet's next nonce, so no transaction of the wallet may be waiting.
     pub fn delegate_wallet(&mut self, chain_id: u64) -> Promise {
         self.assert_not_paused();
         let executor = executor_of(chain_id).expect("ERR_NO_EVM_EXECUTOR");
-        let wallet = self.wallets.get_mut(&chain_id).expect("ERR_WALLET_NOT_FOUND");
+        let wallet = self
+            .wallets
+            .get_mut(&chain_id)
+            .expect("ERR_WALLET_NOT_FOUND");
         require!(wallet.address.is_some(), "ERR_WALLET_NOT_DERIVED");
         let delegation = match delegation_of(chain_id) {
             Some(existing) if existing.executor == executor => {
@@ -279,7 +579,10 @@ impl Vault {
                 existing
             }
             _ => {
-                require!(wallet.active_operation.is_none() && wallet.in_flight.is_empty(), "ERR_WALLET_QUEUE_BUSY");
+                require!(
+                    wallet.active_operation.is_none() && wallet.in_flight.is_empty(),
+                    "ERR_WALLET_QUEUE_BUSY"
+                );
                 let nonce = wallet.next_nonce;
                 wallet.next_nonce = wallet.next_nonce.saturating_add(1);
                 let delegation = WalletDelegation {
@@ -316,15 +619,22 @@ impl Vault {
         digest: [u8; 32],
         #[callback_result] result: Result<MpcSignatureResponse, PromiseError>,
     ) {
-        let Some(mut delegation) = delegation_of(chain_id) else { return };
+        let Some(mut delegation) = delegation_of(chain_id) else {
+            return;
+        };
         if delegation.digest != digest || delegation.signature.is_some() {
             return;
         }
         let Ok(response) = result else { return };
-        let Some(signature) = Self::parse_mpc_signature(response) else { return };
+        let Some(signature) = Self::parse_mpc_signature(response) else {
+            return;
+        };
         delegation.signature = Some(signature);
         write(&chain_key(KEY_DELEGATION, chain_id), &delegation);
-        env::log_str(&format!("OMNIROLES_WALLET_DELEGATED:{chain_id}:{}", delegation.nonce));
+        env::log_str(&format!(
+            "OMNIROLES_WALLET_DELEGATED:{chain_id}:{}",
+            delegation.nonce
+        ));
     }
 
     /// Settles a sponsored operation from its `Executed(opId)` log. The hints (block, indexes) are
@@ -338,8 +648,14 @@ impl Vault {
         tx_index: U64,
         log_index: U64,
     ) -> Promise {
-        let op = self.operations.get(&op_id).expect("ERR_OPERATION_NOT_FOUND");
-        require!(op.state == OperationState::PossiblySigned, "ERR_NOT_POSSIBLY_SIGNED");
+        let op = self
+            .operations
+            .get(&op_id)
+            .expect("ERR_OPERATION_NOT_FOUND");
+        require!(
+            op.state == OperationState::PossiblySigned,
+            "ERR_NOT_POSSIBLY_SIGNED"
+        );
         require!(is_sponsored(&op_id), "ERR_NOT_SPONSORED");
         let wallet = self
             .wallets
@@ -347,7 +663,16 @@ impl Vault {
             .and_then(|wallet| wallet.address)
             .expect("ERR_WALLET_NOT_DERIVED");
         let (name, tag) = foreign::chain(op.request.chain_id, self.settlement_config.mainnet);
-        let expected = log_payload_hash(tag, tx_hash, block_hash, block_number.0, tx_index.0, log_index.0, wallet, &op_id);
+        let expected = log_payload_hash(
+            tag,
+            tx_hash,
+            block_hash,
+            block_number.0,
+            tx_index.0,
+            log_index.0,
+            wallet,
+            &op_id,
+        );
         let request = foreign::VerifyArgs::new(
             near_sdk::serde_json::json!({name: {
                 "tx_id": hex::encode(tx_hash),
@@ -375,11 +700,14 @@ impl Vault {
         expected_payload_hash: [u8; 32],
         #[callback_result] result: Result<foreign::VerifyResponse, PromiseError>,
     ) {
-        let Some(op) = self.operations.get(&op_id) else { return };
+        let Some(op) = self.operations.get(&op_id) else {
+            return;
+        };
         if op.state != OperationState::PossiblySigned {
             return;
         }
-        if result.is_ok_and(|response| response.payload_hash == hex::encode(expected_payload_hash)) {
+        if result.is_ok_and(|response| response.payload_hash == hex::encode(expected_payload_hash))
+        {
             self.release_operation(op_id, OperationState::Confirmed, false);
         }
     }
@@ -390,13 +718,67 @@ mod tests {
     use super::*;
 
     fn h32(text: &str) -> [u8; 32] {
-        hex::decode(text.trim_start_matches("0x")).unwrap().try_into().unwrap()
+        hex::decode(text.trim_start_matches("0x"))
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
     fn h20(text: &str) -> [u8; 20] {
-        hex::decode(text.trim_start_matches("0x")).unwrap().try_into().unwrap()
+        hex::decode(text.trim_start_matches("0x"))
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 
     // Vectors from viem 2.x (hashTypedData, hashAuthorization, encodeFunctionData).
+    // Vectors from viem 2.x: hashTypedData(Batch) and encodeFunctionData(executeBatch).
+    #[test]
+    fn batch_digest_and_calldata_match_viem() {
+        let wallet = h20("0x1db9bad1d7f4effed814dfc7a0dc5d5aef0f2303");
+        let usdc = h20("0x036CbD53842c5426634e7929541eC2318f3dCF7e");
+        let router = h20("0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4");
+        let mut swap = vec![0x04, 0xe4, 0x5a, 0xaf];
+        swap.extend([0x11u8; 37]);
+        let request = OperationRequest {
+            chain_id: 84532,
+            target: router,
+            value: U128(5),
+            calldata: swap,
+            allowance_amount: U128(0),
+            reference: "r".into(),
+            gas_limit: U128(0),
+            max_fee_per_gas: U128(0),
+            max_priority_fee_per_gas: U128(0),
+        };
+        let approval = SponsoredApproval {
+            token: usdc,
+            amount: U128(4_000_000),
+        };
+        let calls = batch_calls(&request, &approval);
+        assert_eq!(
+            hex::encode(&calls[0].2),
+            "095ea7b300000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc400000000000000000000000000000000000000000000000000000000003d0900"
+        );
+        let op_id = [0xab; 32];
+        assert_eq!(
+            hex::encode(batch_digest(84532, wallet, &calls, &op_id, 1794242060)),
+            "4558b98c1c2ca713c373d288b1605d1c28bff539a2c5f6c54f213a482437df16"
+        );
+        let signature = MpcSignature {
+            big_r: [vec![2], vec![1; 32]].concat(),
+            s: [2; 32],
+            recovery_id: 1,
+        };
+        let sponsored = SponsoredOperation {
+            deadline: 1794242060,
+            approval: Some(approval),
+        };
+        assert_eq!(
+            hex::encode(sponsored_calldata(&request, &op_id, &sponsored, &signature)),
+            "3b1e551800000000000000000000000000000000000000000000000000000000000000c0abababababababababababababababababababababababababababababababab000000000000000000000000000000000000000000000000000000006af1f60c000000000000000000000000000000000000000000000000000000000000001c010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000200000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc400000000000000000000000000000000000000000000000000000000003d09000000000000000000000000000000000000000000000000000000000000000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc400000000000000000000000000000000000000000000000000000000000000050000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000002904e45aaf111111111111111111111111111111111111111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        );
+    }
+
     #[test]
     fn execute_digest_matches_eip712() {
         let data = hex::decode("a9059cbb000000000000000000000000000000000000000000000000000000000000beef00000000000000000000000000000000000000000000000000000000004c4b40").unwrap();
@@ -409,14 +791,23 @@ mod tests {
             &[0xab; 32],
             1_794_200_000,
         );
-        assert_eq!(hex::encode(digest), "ff55052e7a6b0847eb65ff7ed598a29d08287341df23e95a0e37319f771996ac");
+        assert_eq!(
+            hex::encode(digest),
+            "ff55052e7a6b0847eb65ff7ed598a29d08287341df23e95a0e37319f771996ac"
+        );
     }
 
     #[test]
     fn authorization_digest_matches_eip7702() {
         let executor = h20("2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982");
-        assert_eq!(hex::encode(authorization_digest(84532, executor, 0)), "fb9cf7e4549b367d8262244967a8ffc33975e7c4b81145a07271588c2a2393b5");
-        assert_eq!(hex::encode(authorization_digest(84532, executor, 300)), "c2b831deb4e5a3c5a6ad398e097a97909778b348489a521d87f0d9b44ba96c2f");
+        assert_eq!(
+            hex::encode(authorization_digest(84532, executor, 0)),
+            "fb9cf7e4549b367d8262244967a8ffc33975e7c4b81145a07271588c2a2393b5"
+        );
+        assert_eq!(
+            hex::encode(authorization_digest(84532, executor, 300)),
+            "c2b831deb4e5a3c5a6ad398e097a97909778b348489a521d87f0d9b44ba96c2f"
+        );
     }
 
     #[test]
@@ -434,7 +825,11 @@ mod tests {
         };
         let mut big_r = vec![2u8];
         big_r.extend([0x11; 32]);
-        let signature = MpcSignature { big_r, s: [0x22; 32], recovery_id: 1 };
+        let signature = MpcSignature {
+            big_r,
+            s: [0x22; 32],
+            recovery_id: 1,
+        };
         let calldata = execute_calldata(&request, &[0xab; 32], 1_794_200_000, &signature);
         assert_eq!(
             hex::encode(calldata),
@@ -444,7 +839,10 @@ mod tests {
 
     #[test]
     fn executed_topic_is_the_event_signature() {
-        assert_eq!(hex::encode(executed_topic()), "a74c8847d513feba22a0f0cb38d53081abf97562cdb293926ba243689e7c41ca");
+        assert_eq!(
+            hex::encode(executed_topic()),
+            "a74c8847d513feba22a0f0cb38d53081abf97562cdb293926ba243689e7c41ca"
+        );
     }
 
     /// The payload NEAR MPC (v1.signer-prod.testnet) signed on 9 Nov 2026 for a log of Base Sepolia
@@ -466,6 +864,9 @@ mod tests {
                 h32("00000000000000000000000053b3fd8a86f23f3d503bbc994f26e50ecfc903e3"),
             ],
         );
-        assert_eq!(hex::encode(hash), "8bbcab92798aeebc45412452ebd2261051fab42a83120a86fd513f16a48b9dd7");
+        assert_eq!(
+            hex::encode(hash),
+            "8bbcab92798aeebc45412452ebd2261051fab42a83120a86fd513f16a48b9dd7"
+        );
     }
 }

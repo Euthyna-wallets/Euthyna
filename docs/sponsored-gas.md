@@ -7,7 +7,7 @@ transaction. With it, the wallet never holds ETH: Euthyna's relayer sends the ca
 
 1. **One vote.** `SetEvmExecutor { chain_id, executor }` (console: Wallet → Network fees → *Sponsor them*).
    The executor is [`EuthynaExecutor`](../contracts/evm/executor/src/EuthynaExecutor.sol), deployed once on
-   Base Sepolia at `0x28998bde751ce908c7f2cda1961469994c52bf37` (v2, accepts NFT safe transfers; v1 `0xcc74…6cb5` did not). No owner, no admin, no upgrade.
+   Base Sepolia at `0x76bb5c47b0759af0300afeea954fa837a96675ed` (v3: `executeBatch` and NFT safe transfers; v2 `0x2899…bf37` had no batch, v1 `0xcc74…6cb5` refused NFTs). No owner, no admin, no upgrade.
 2. **Delegation.** The worker's keeper (`apps/api/src/delegation-keeper.ts`) calls `delegate_wallet`: the vault
    has NEAR MPC sign the EIP-7702 authorization `keccak(0x05 ‖ rlp([chain_id, executor, nonce]))`. The gas
    tank submits it in a type-4 transaction. The wallet's code becomes `0xef0100 ‖ executor`.
@@ -22,6 +22,22 @@ transaction. With it, the wallet never holds ETH: Euthyna's relayer sends the ca
 
 What the relayer can do: send a signed call, or not. It cannot change the call, replay it, or move funds.
 
+## Swaps: approve + swap + revoke in one transaction
+
+`prepare_with_approval(role, request, approval { token, amount })` (MCP `execute_call` with
+`approveToken` + `approveAmount`). The vault signs one EIP-712 `Batch` of three calls, which the
+wallet runs with `executeBatch`, all or nothing:
+
+1. `token.approve(request.target, amount)`: the spender is always the call's own target;
+2. the call (the swap);
+3. `token.approve(request.target, 0)`: added by the vault, not by the agent.
+
+The approve must be allowed by the same role (its budget is checked, not charged: the swap is charged).
+If the swap fails, the approval is undone with it. The relayer cannot drop, reorder or change a call:
+the signature covers the whole list. Only on a chain with sponsored execution
+(`ERR_APPROVAL_NEEDS_SPONSORED` otherwise). Agents created before this need a new key: the method
+`prepare_with_approval` is not on their function-call key.
+
 ## Proof on testnet (9 November 2026)
 
 | Step | Where | Reference |
@@ -33,6 +49,13 @@ What the relayer can do: send a signed call, or not. It cannot change the call, 
 | `settle_sponsored` on the MPC-attested log → `Confirmed` | NEAR testnet | `Gafqdih1rYqkXLfWWnPUyaYeyB6rwTLX4Yju7WinhmdR` |
 | Executor v2 voted, wallet re-delegated by the keeper | Base Sepolia | code `0xef010028998bde751ce908c7f2cda1961469994c52bf37` |
 | ERC-721 `safeMint` to the delegated wallet | Base Sepolia | `0x85aab66234ab7fd99c0ad1fb096ee6b876b90adb6dc8237e9c2b826111d5d93c` |
+| Executor v3 voted, wallet re-delegated | Base Sepolia | code `0xef010076bb5c47b0759af0300afeea954fa837a96675ed` |
+| approve + swap + revoke, one `executeBatch` paid by the tank (4 in, 8 out, allowance back to 0, wallet 0 ETH) | Base Sepolia | `0xbc98d6eafc398384f05097ba55f4a023a336aca6e02e218ab0ddd0a3b97a4f68` |
+| its `settle_sponsored` | NEAR testnet | BATCH_SETTLE_TX |
+
+The swap ran on a test router and test tokens the tank deployed (`apps/api/scripts/sponsored-batch-e2e.mts`):
+the wallet holds no Base Sepolia USDC and Circle's faucet is behind a captcha. A Uniswap swap is the same
+three calls with the SwapRouter02 as target.
 
 Rerun: `apps/api/scripts/sponsored-testnet-e2e.mts` (then `sponsored-settle.mts` if Base Sepolia
 finality outlasts the run: it lags a few hours behind the head).

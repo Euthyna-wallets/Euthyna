@@ -247,11 +247,11 @@ export class OnchainAgentClient {
     await this.vault.cancelNonce(operationIdBytes(id));
     return this.status(id);
   }
-  async call(request: import("./index.js").OmniRolesOperationRequest) {
+  async call(request: import("./index.js").OmniRolesOperationRequest, approval?: import("./index.js").TokenApproval) {
     if (request.chain_id !== this.vault.identity().chain_id || Number(BigInt(await this.rpc<Hex>("eth_chainId", []))) !== request.chain_id) throw new Error("RPC chain does not match the vault wallet");
     const refused = await this.refusal(request);
     if (refused) return refused;
-    const prepared = await this.vault.prepareRequest(request);
+    const prepared = await this.vault.prepareRequest(request, approval);
     const nearTransactionHash = await this.vault.authorize(prepared.op_id, null);
     const opId = operationIdHex(prepared.op_id);
     const operation = await this.status(opId);

@@ -1,4 +1,6 @@
 import {
+  encodeFunctionData,
+  erc20Abi,
   hashTypedData,
   bytesToHex,
   getAddress,
@@ -59,6 +61,43 @@ export function digestSponsoredExecute(operation: VaultOperation, wallet: `0x${s
       opId: bytesToHex(Uint8Array.from(operation.op_id)),
       deadline,
     },
+  });
+}
+
+/** Approve + call + revoke under one EIP-712 `Batch` (sponsored operation with an approval). */
+export const BATCH_TYPES = {
+  Batch: [
+    { name: "calls", type: "Call[]" },
+    { name: "opId", type: "bytes32" },
+    { name: "deadline", type: "uint256" },
+  ],
+  Call: [
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+  ],
+} as const;
+
+export type SponsoredApproval = { token: number[]; amount: string };
+
+/** The calls the wallet runs for an operation with a bundled approval: the spender is the call's target. */
+export function batchCalls(operation: VaultOperation, approval: SponsoredApproval) {
+  const target = bytesToAddress(operation.request.target);
+  const token = bytesToAddress(approval.token);
+  const approve = (amount: bigint) => encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [target, amount] });
+  return [
+    { to: token, value: 0n, data: approve(BigInt(approval.amount)) },
+    { to: target, value: BigInt(operation.request.value), data: bytesToHex(Uint8Array.from(operation.request.calldata)) },
+    { to: token, value: 0n, data: approve(0n) },
+  ];
+}
+
+export function digestSponsoredBatch(operation: VaultOperation, wallet: `0x${string}`, deadline: bigint, approval: SponsoredApproval): Hex {
+  return hashTypedData({
+    domain: { name: "EuthynaExecutor", version: "1", chainId: operation.request.chain_id, verifyingContract: wallet },
+    types: BATCH_TYPES,
+    primaryType: "Batch",
+    message: { calls: batchCalls(operation, approval), opId: bytesToHex(Uint8Array.from(operation.op_id)), deadline },
   });
 }
 
