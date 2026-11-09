@@ -75,7 +75,7 @@ services:
         VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
         VITE_MANDATEOS_REGISTRY_ID: ${OMNIROLES_REGISTRY_ID:-euthyna-directory.testnet}
         VITE_MANDATEOS_PREVIOUS_REGISTRY_IDS: ${OMNIROLES_PREVIOUS_REGISTRY_IDS:-atlantis-registry.testnet}
-        VITE_EUTHYNA_RECOVERY_ID: ${RECOVERY_CONTRACT_ID:-euthyna-recovery-v5.testnet}
+        VITE_EUTHYNA_RECOVERY_ID: ${RECOVERY_CONTRACT_ID:-euthyna-recovery-v6.testnet}
     depends_on:
       api:
         condition: service_healthy

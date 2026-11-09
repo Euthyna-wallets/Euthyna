@@ -7,7 +7,7 @@ a seat by itself: the DAO's vote does.
 
 | | |
 | --- | --- |
-| Contract | [`contracts/email-recovery`](../contracts/email-recovery), deployed at `euthyna-recovery-v5.testnet` with **no access key** (keeper `euthyna-dkim-keeper.testnet`, 120 s; deploy, `new` and key deletion in one transaction `AFcfnUnjJFhJ9Uwr3mJEwqtsdTLxTnhBocoNWVoo8zug`). Before it: `euthyna-recovery-v4.testnet` (same code, 600 s) and the first deployment, `euthyna-recovery.testnet` (no cooldown after a cancel), is no longer used |
+| Contract | [`contracts/email-recovery`](../contracts/email-recovery), deployed at `euthyna-recovery-v6.testnet` with **no access key** (keeper `euthyna-dkim-keeper.testnet`, 60 s; deploy, `new` and key deletion in one transaction `6LRDHLcYsBtFYzPM4MRsWMtwxCuoFDzXhnBMQ5EAAH8j`). Before it: `euthyna-recovery-v5.testnet` (120 s) and `euthyna-recovery-v4.testnet` (same code, 600 s) and the first deployment, `euthyna-recovery.testnet` (no cooldown after a cancel), is no longer used |
 | Circuit | [`circuits/email-recovery`](../circuits/email-recovery) (Noir 1.0.0-beta.26, bb.js 5.3.0, zero-knowledge proofs) |
 | Verifier | zkVerify's UltraHonk verifier v0.4.0 ([`contracts/vendor/ultrahonk-no-std`](../contracts/vendor)), on NEAR's BN254 host functions |
 | Cost | about **85 Tgas** per enrollment or request (proof verified in the call), a few seconds to prove in Node, about 40 s in a browser on one thread |
@@ -84,8 +84,8 @@ no upgrade (the contract has no upgrade method and no access key).
 ## On testnet
 
 The table below is the first deployment, `euthyna-recovery.testnet`. The API and the console now use
-`euthyna-recovery-v5.testnet` (code hash `23BJWfFWycL71niKjgvhcMbrXGeH3QPGxroao3FTuZVm`, the current
-`contracts/res/email_recovery.wasm`, the same code as v4 with a 2-minute delay; the same DKIM keys as v4), unless `RECOVERY_CONTRACT_ID` says otherwise. Enrollments do not carry
+`euthyna-recovery-v6.testnet` (code hash `23BJWfFWycL71niKjgvhcMbrXGeH3QPGxroao3FTuZVm`, the current
+`contracts/res/email_recovery.wasm`, the same code as v4 with a 1-minute delay (the contract's minimum); the same DKIM keys as v4), unless `RECOVERY_CONTRACT_ID` says otherwise. Enrollments do not carry
 over: a founder enrolled on the first contract enrolls again.
 
 | Step | Result | Transaction |
@@ -101,7 +101,7 @@ over: a founder enrolled on the first contract enrolls again.
 | The contract says `ready`; the founders vote: proposal #0 adds Bob to the council (carol, dave approve), proposal #1 removes Alice (carol, dave, then Bob) | council: dave, carol, bob | #0 approved by dave `HTiBKYnUpeFc9akZUwdzsjJaS4zUHSy4DL4AP4cYYpPi`; #1 `94yEsKwZYNQYZ2djCLXbfnLFMzVdudd5Wv1uT7DaysNW`, approvals `EKumk9CZsmca2Byanmc7kXYemFaCKDx8ZuDkWuoHPiY`, `Avvrp1hnGb7hSMEp6br8h1CiBKjXhKPzPHNFyTciZuWz`, `Ge8XWpzTGL6gTru9MiEyyxfFHA6KJDiC8GSJSXvTnfmr` |
 | A proof made in Chromium by the console's own code (`proveEmailFile`) | `verify_proof` → `true` on `euthyna-recovery.testnet` | view call |
 
-The testnet contract waits **2 minutes** (v4: 10) so the whole flow can be tried in one sitting; the mainnet contract is meant to wait 48 hours.
+The testnet contract waits **1 minute** (v4: 10) so the whole flow can be tried in one sitting; the mainnet contract is meant to wait 48 hours.
 Re-run: `KEYS=<dir> DAO=<dao> pnpm --filter @euthyna/api exec tsx scripts/recovery-testnet-e2e.ts enroll|request|cancel|status|vote`.
 
 ## Tested
