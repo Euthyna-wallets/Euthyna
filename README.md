@@ -10,18 +10,6 @@ NEAR and Base Sepolia today, Ethereum and Solana in the code. Everything outside
 So a hijacked agent cannot pay the attacker, a stolen server cannot move funds, and one rogue member
 cannot change the rules: **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)).
 
-**An example, run on testnet.** A small company's founders vote a role for their bookkeeping
-agent: pay the suppliers they voted, by IBAN or in EURC on Base, within a euro budget. The
-agent pays an invoice of Atelier Dupont SAS: the vault checks the voted IBAN and the budget, and the
-supplier receives 4.78 EUR by SEPA. The same agent, prompt-injected, asks to pay another account, or
-more than its budget: the vault refuses, and the refusal is in Activity. To change the rule, the
-founders vote, then wait out a veto window during which the security council can stop it.
-
-Names used below: the **vault** (OmniRoles) is the contract that holds the rules and asks NEAR MPC to
-sign; **Nomos** creates one vault per company; the **Guard** is optional off-chain advice that can
-only refuse; **euthyna-signer** keeps an agent's key away from the AI; **Atlantis** is the launchpad
-built on Euthyna, where anyone can start an AI company owned by its shareholders.
-
 Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security & Defense,
 03 Privacy & Private AI, 04 Autonomous Business, 07 Agent Economy, 08 Real-World Money, 12 Social Money).
 Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hackathon](#built-for-the-hackathon).
@@ -30,6 +18,45 @@ Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hac
 - **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 20 minutes, each step checkable on chain
 - **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
 - The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.
+
+## Why
+
+Companies want AI agents to do the busywork: read an invoice, check it, pay it. Four things stop them.
+
+| The problem | Euthyna's answer |
+| --- | --- |
+| **An agent with a key can be talked into spending it.** In May 2026 a Morse-code reply to Grok moved about $150,000 out of its Bankr wallet [1]; in February 2026 a trading agent sent a stranger tokens worth about $440,000 after a spam message [2]. | The rules live in the company wallet, not in the agent. The owners vote each member's role, human or agent; a NEAR vault with no access key checks it on chain before anything is signed. Outside the role, it is a vote. |
+| **Keys get lost.** Chainalysis estimates that 17% to 23% of all bitcoin is lost or out of circulation [3]. | A founder who loses their wallet proves in the browser, in zero knowledge, that they hold the mailbox they enrolled. A NEAR contract verifies the proof; the address never goes on chain; the lost account can cancel during a waiting period; then the founders vote the seat back. |
+| **A company's trades are public.** An on-chain limit order publishes its price, so anyone can read the treasury's plan and trade ahead of it. | Sealed orders: price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR. |
+| **The bank stays off chain, and so does its fraud.** Business email compromise, mostly swapped bank details on invoices, cost $2.8 billion in 2024 in FBI reports alone [4]. | The company's euro IBAN obeys the same on-chain rules. Members vote each supplier's IBAN; an agent pays only voted IBANs, within its role's euro budget. The bank partner's key sits in an enclave that answers only the vault, and the IBANs never appear on chain. |
+
+Asking a human to approve every payment removes the point of an agent; Gartner expects over 40% of agentic AI
+projects to be cancelled by 2027, citing inadequate risk controls among the reasons [5].
+
+**An example.** Léa (fictional) and her two partners run a small design studio. They vote one role for their
+bookkeeping agent: pay the suppliers they voted, by IBAN or in EURC, within a euro budget. The agent pays a
+supplier's invoice by SEPA. A poisoned invoice asks it to pay another account: the vault refuses, whatever the
+agent believes. Léa loses her phone: her email gets her seat back, by a proof and a vote. The studio parks
+its cash in WETH with a limit order nobody can read. **We ran each step on testnet**: the agent paid Atelier
+Dupont SAS 4.78 EUR by SEPA ([docs/bank.md](./docs/bank.md)), a seat was recovered on chain
+([docs/recovery.md](./docs/recovery.md)), a sealed order was filled on Base Sepolia
+([docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md)), and [Rob the Agent](https://euthyna.io/rob)
+lets anyone try to make a hijacked agent pay outside its role.
+
+**Where it goes.** Today, a company wallet for teams that let agents pay. Next, **Atlantis**: anyone starts an
+AI company owned by its shareholders through a Sputnik DAO; agents do the work, and the revenue goes to the
+holders who vote.
+
+[1] [Giskard](https://giskard.ai/knowledge/how-grok-got-prompt-injected-an-x-user-drained-150-000-from-an-ai-wallet) ·
+[2] [KuCoin News](https://www.kucoin.com/news/flash/ai-agent-lobstar-wilde-loses-440-000-in-solana-transfer-error) ·
+[3] [Chainalysis via PaymentsNext](https://paymentsnext.com/chainalysis-research-shows-up-to-23-of-bitcoin-are-mia/) ·
+[4] [FBI IC3 via Nacha](https://www.nacha.org/news/fbis-ic3-finds-almost-85-billion-lost-business-email-compromise-last-three-years) ·
+[5] [Gartner](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)
+
+Names used below: the **vault** (OmniRoles) is the contract that holds the rules and asks NEAR MPC to
+sign; **Nomos** creates one vault per company; the **Guard** is optional off-chain advice that can
+only refuse; **euthyna-signer** keeps an agent's key away from the AI; **Atlantis** is the launchpad
+built on Euthyna (see Where it goes).
 
 ## Check it yourself
 
