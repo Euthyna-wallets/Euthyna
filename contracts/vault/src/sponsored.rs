@@ -433,6 +433,7 @@ pub(crate) fn log_payload_hash(
     log_index: u64,
     wallet: EvmAddress,
     op_id: &OperationId,
+    finality: u8,
 ) -> [u8; 32] {
     // `Executed(bytes32 indexed opId)` has no data: the node reports "0x".
     any_log_payload_hash(
@@ -445,6 +446,7 @@ pub(crate) fn log_payload_hash(
         wallet,
         "0x",
         &[executed_topic(), *op_id],
+        finality,
     )
 }
 
@@ -459,6 +461,7 @@ fn any_log_payload_hash(
     address: EvmAddress,
     data: &str,
     topics: &[[u8; 32]],
+    finality: u8,
 ) -> [u8; 32] {
     let mut p = vec![0, tag]; // V1; chain
     p.extend(tx);
@@ -466,7 +469,7 @@ fn any_log_payload_hash(
     p.push(0);
     p.push(1);
     p.extend(log_index.to_le_bytes());
-    p.push(2); // Finalized
+    p.push(finality); // Latest=0, Safe=1, Finalized=2
     p.extend(2u32.to_le_bytes()); // values
     p.extend([1, 0]); // Evm::BlockHash
     p.extend(block);
@@ -671,6 +674,7 @@ impl Vault {
             .and_then(|wallet| wallet.address)
             .expect("ERR_WALLET_NOT_DERIVED");
         let (name, tag) = foreign::chain(op.request.chain_id, self.settlement_config.mainnet);
+        let (finality, finality_byte) = foreign::evm_finality(self.settlement_config.mainnet);
         let expected = log_payload_hash(
             tag,
             tx_hash,
@@ -680,12 +684,13 @@ impl Vault {
             log_index.0,
             wallet,
             &op_id,
+            finality_byte,
         );
         let request = foreign::VerifyArgs::new(
             near_sdk::serde_json::json!({name: {
                 "tx_id": hex::encode(tx_hash),
                 "extractors": ["BlockHash", {"Log": {"log_index": log_index.0}}],
-                "finality": "Finalized",
+                "finality": finality,
             }}),
             self.settlement_config.foreign_tx_domain_id,
             hex::encode(expected),
@@ -853,6 +858,23 @@ mod tests {
         );
     }
 
+    /// `Safe`, as NEAR MPC signed it on 9 Nov 2026 for Base Sepolia transaction 0xbd86d63e… (block
+    /// 0xdc4cd027…), NEAR transaction 49jdajA5BAZzp1jb2mojurvM1P1s1cGDtZHRjMMVeQ38.
+    #[test]
+    fn safe_block_hash_payload_is_what_mpc_signed_on_testnet() {
+        let hash = foreign::payload_hash(
+            6,
+            h32("bd86d63ee74974f553caf69d9bb9d296656e0490725bb249c47b7c32c386f9a0"),
+            h32("dc4cd027b9c09fb9612bfdbc9397a8cc502b6cdf61bb9418a7447e399aa9d1f0"),
+            foreign::evm_finality(false).1,
+        );
+        assert_eq!(
+            hex::encode(hash),
+            "04c233fa17b054bde153f1cdd13e055fa9d962ebefabd6de6c52fb1af52c1514"
+        );
+        assert_eq!(foreign::evm_finality(true), ("Finalized", 2));
+    }
+
     /// The payload NEAR MPC (v1.signer-prod.testnet) signed on 9 Nov 2026 for a log of Base Sepolia
     /// transaction 0x0eef2dd1…: NEAR transaction GMm1Bbb3rURyjZzM8zDZiZjtPyd2wVzxafbqxpC4MFW.
     #[test]
@@ -871,6 +893,7 @@ mod tests {
                 h32("0000000000000000000000008b22b9fa3a6c541d80bf0c7e1e02a267c8c29de6"),
                 h32("00000000000000000000000053b3fd8a86f23f3d503bbc994f26e50ecfc903e3"),
             ],
+            2,
         );
         assert_eq!(
             hex::encode(hash),

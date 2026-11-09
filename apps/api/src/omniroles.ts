@@ -1859,7 +1859,16 @@ export class OmniRolesService {
     // signature from it if the vault could not store it.
     const startedBy = new Map<number, string>();
     const now = nowNs();
-    const busy = new Set(transactions.filter((item) => ["Prepared", "Queued", "PossiblySigned"].includes(item.state)).map((item) => item.request.chain_id));
+    // A chain is busy while one of its transactions is being signed, or waits on chain with a wallet
+    // nonce. A sponsored call (EIP-7702) uses no nonce of the wallet: the next one may start at once.
+    const signedSponsored = await Promise.all(transactions.filter((item) => item.state === "PossiblySigned").map(async (item) => ({
+      item,
+      sponsored: await this.near.viewFunction<{ deadline: number } | null>(treasury.vaultAccountId, "get_sponsored_operation", { op_id: item.op_id }).catch(() => null),
+    })));
+    const busy = new Set([
+      ...transactions.filter((item) => ["Prepared", "Queued"].includes(item.state)).map((item) => item.request.chain_id),
+      ...signedSponsored.filter((entry) => !entry.sponsored).map((entry) => entry.item.request.chain_id),
+    ]);
     const waiting = transactions
       .filter((item) => item.state === "Scheduled" && item.execute_after_ns !== null && BigInt(item.execute_after_ns) <= now && now <= BigInt(item.expires_at_ns))
       .reverse();

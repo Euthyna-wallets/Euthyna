@@ -46,13 +46,23 @@ pub(crate) fn attestable(chain_id: u64) -> bool {
         84532 | 8453 | 421614 | 42161 | 97 | 56 | 80002 | 137 | 43113 | 43114
     )
 }
-pub(crate) fn payload_hash(tag: u8, tx: [u8; 32], block: [u8; 32]) -> [u8; 32] {
-    // V1=0; chain tag; EvmRpcRequest; [BlockHash=0]; Finalized=2;
+/// How final a foreign block must be before NEAR MPC attests it: `Finalized` on mainnet (the L1
+/// block is final); `Safe` on testnet (the L2 block is posted on L1: minutes instead of the hour
+/// or more Base Sepolia's finalized head can trail). Name for the request, byte for the payload.
+pub(crate) fn evm_finality(mainnet: bool) -> (&'static str, u8) {
+    if mainnet {
+        ("Finalized", 2)
+    } else {
+        ("Safe", 1)
+    }
+}
+pub(crate) fn payload_hash(tag: u8, tx: [u8; 32], block: [u8; 32], finality: u8) -> [u8; 32] {
+    // V1=0; chain tag; EvmRpcRequest; [BlockHash=0]; finality (Latest=0, Safe=1, Finalized=2);
     // [ExtractedValue::EvmExtractedValue=1::BlockHash=0]. Vec lengths: u32 LE.
     let mut p = vec![0, tag];
     p.extend(tx);
     p.extend(1u32.to_le_bytes());
-    p.extend([0, 2]);
+    p.extend([0, finality]);
     p.extend(1u32.to_le_bytes());
     p.extend([1, 0]);
     p.extend(block);
@@ -159,9 +169,10 @@ impl Vault {
         .expect("ERR_SIGNED_TRANSACTION_REQUIRED");
         let tx_hash = env::keccak256_array(raw);
         let (name, tag) = chain(op.request.chain_id, self.settlement_config.mainnet);
-        let expected_payload_hash = payload_hash(tag, tx_hash, block);
+        let (finality, finality_byte) = evm_finality(self.settlement_config.mainnet);
+        let expected_payload_hash = payload_hash(tag, tx_hash, block, finality_byte);
         let request = VerifyArgs {
-            request: near_sdk::serde_json::json!({name: {"tx_id": hex::encode(tx_hash), "extractors": ["BlockHash"], "finality": "Finalized"}}),
+            request: near_sdk::serde_json::json!({name: {"tx_id": hex::encode(tx_hash), "extractors": ["BlockHash"], "finality": finality}}),
             domain_id: self.settlement_config.foreign_tx_domain_id,
             payload_version: 1,
             expected_payload_hash: hex::encode(expected_payload_hash),

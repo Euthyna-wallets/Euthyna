@@ -76,4 +76,13 @@ describe("testnet gas tank", () => {
   it("refuses to run on a mainnet", () => {
     expect(() => new GasTank(generatePrivateKey(), url, 8453, 1n)).toThrow(/testnets only/);
   });
+
+  it("gives two relays sent at once two nonces, even when the RPC has not seen the first", async () => {
+    // This stand-in always answers 0 to eth_getTransactionCount, like a lagging public RPC.
+    const tank = new GasTank(generatePrivateKey(), url, 84532, 10n ** 16n);
+    const before = sent.length;
+    await Promise.all([tank.relay(`0x${"aa".repeat(20)}`, "0x01"), tank.relay(`0x${"bb".repeat(20)}`, "0x02")]);
+    const nonces = sent.slice(before).map((raw) => parseTransaction(raw).nonce);
+    expect(nonces).toEqual([0, 1]);
+  });
 });

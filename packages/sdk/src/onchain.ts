@@ -211,7 +211,7 @@ export class OnchainAgentClient {
     // Euthyna's relayer sends it and pays the gas; the worker settles it on the Executed log.
     const sponsored = await this.vault.view<{ deadline: number } | null>("get_sponsored_operation", { op_id }).catch(() => null);
     if (sponsored) return { ...op, sponsored: true, relayedBy: "euthyna" };
-    const config = await this.vault.view<{ cancel_after_ns: string; unconfirmed_after_ns: string }>("get_settlement_config");
+    const config = await this.vault.view<{ cancel_after_ns: string; unconfirmed_after_ns: string; mainnet?: boolean }>("get_settlement_config");
     const age = BigInt(Date.now()) * 1_000_000n - BigInt(op.possibly_signed_at_ns ?? "0");
     const candidates = [
       { raw: op.signed_transaction, cancellation: false },
@@ -228,7 +228,8 @@ export class OnchainAgentClient {
     for (const candidate of inspected) {
       const receipt = candidate.receipt;
       if (receipt?.status !== "0x1") continue;
-      const finalized = await this.rpc<{ number: Hex }>("eth_getBlockByNumber", ["finalized", false]);
+      // The block the vault's attestation asks for: `safe` on testnet, `finalized` on mainnet.
+      const finalized = await this.rpc<{ number: Hex }>("eth_getBlockByNumber", [config.mainnet ? "finalized" : "safe", false]);
       const block = await this.rpc<{ number: Hex }>("eth_getBlockByHash", [receipt.blockHash, false]);
       if (BigInt(finalized.number) >= BigInt(block.number)) {
         await this.vault.action(candidate.cancellation ? "settle_cancellation" : "settle", { op_id, block_hash: Array.from(hexToBytes(receipt.blockHash)) });
