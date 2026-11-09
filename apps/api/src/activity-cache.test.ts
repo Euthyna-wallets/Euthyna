@@ -67,4 +67,30 @@ describe("activity", () => {
     await service.activity("org");
     expect(payoutReads).toEqual([opHex(2)]); // the refused payout is not read again
   });
+
+  it("keeps at most two reads in flight, so a sign-in never waits behind the whole page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("index down"); }));
+    let inFlight = 0; let peak = 0;
+    const near = {
+      viewFunction: vi.fn(async (_account: string, method: string, args: { op_id?: number[] }) => {
+        if (method !== "get_bank_payout") return null;
+        inFlight += 1; peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return payout(Number.parseInt(Buffer.from(args.op_id!).toString("hex"), 16), "Pending");
+      }),
+    } as unknown as NearClient;
+    const prisma = {
+      treasury: { findUnique: async () => ({ organizationId: "org", vaultAccountId: VAULT, daoAccountId: "dao.testnet", baseChainId: 84532 }) },
+      operation: { findMany: async () => [] },
+      auditLog: { findMany: async () => [] },
+      agent: { findMany: async () => [] },
+      supplierWallet: { findMany: async () => [] },
+      vaultTxRead: { findMany: async () => [] },
+      vaultOperationLog: { findMany: async () => Array.from({ length: 30 }, (_, n) => ({ kind: "bank", opId: opHex(n + 1), txHash: `tx-${n}`, at: new Date(Date.UTC(2026, 10, 1, 10, n)) })) },
+    } as unknown as PrismaClient;
+    const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1", txIndexerUrl: "https://index.invalid" } as OmniRolesConfig);
+    await service.activity("org");
+    expect(peak).toBe(2);
+  });
 });

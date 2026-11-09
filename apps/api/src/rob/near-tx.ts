@@ -27,16 +27,28 @@ export class RpcError extends Error {
   }
 }
 
+const isRateLimited = (error: unknown) => {
+  const text = JSON.stringify(error ?? "");
+  return /"code":-?429\b|rate limit/i.test(text);
+};
+
 export class NearRpc {
-  constructor(private readonly url: string, private readonly fetcher: typeof fetch = fetch) {}
+  /** `fallbackUrl` answers when `url` refuses for its rate (a public endpoint shared by every client of the server's IP). */
+  constructor(private readonly url: string, private readonly fetcher: typeof fetch = fetch, private readonly fallbackUrl?: string) {}
 
   async call<T>(method: string, params: unknown): Promise<T> {
-    const response = await this.fetcher(this.url, {
+    const post = (url: string) => this.fetcher(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "rob", method, params }),
     });
-    const body = (await response.json()) as { result?: T & { error?: unknown }; error?: unknown };
+    let response = await post(this.url);
+    let body = (await response.json().catch(() => ({ error: { code: response.status, message: `HTTP ${response.status}` } }))) as { result?: T & { error?: unknown }; error?: unknown };
+    // A refused rate never reached the chain, so the same request (a signed transaction included) is safe to resend.
+    if (this.fallbackUrl && this.fallbackUrl !== this.url && (response.status === 429 || isRateLimited(body.error))) {
+      response = await post(this.fallbackUrl);
+      body = (await response.json()) as typeof body;
+    }
     if (body.error) throw new RpcError(body.error);
     if (body.result && typeof body.result === "object" && "error" in body.result && body.result.error) throw new RpcError(body.result.error);
     return body.result as T;

@@ -142,7 +142,7 @@ const rob = env.ROB_RUGGY_ACCOUNT_ID && env.ROB_RUGGY_PRIVATE_KEY && env.ROB_VAU
       const [accountId, ...key] = item.trim().split(":");
       return { accountId: accountId!, secretKey: key.join(":") };
     }),
-    rpc: new NearRpc(env.ROB_RPC_URL),
+    rpc: new NearRpc(env.ROB_RPC_URL, fetch, env.NEAR_RPC_URL),
     store: prisma,
     ruggySecretKey: env.ROB_RUGGY_PRIVATE_KEY,
     clientSalt: createHash("sha256").update(`rob:${env.ROB_RUGGY_PRIVATE_KEY}`).digest("hex"),
