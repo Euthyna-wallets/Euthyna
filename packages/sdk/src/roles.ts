@@ -76,6 +76,8 @@ export type RuleChange =
   | { NearStorageDeposit: { token: string } }
   /** Fetch future versions from another Nomos; upgrades are still checked by hash. */
   | { SetCodeSource: { account_id: string } }
+  /** Sponsored execution (EIP-7702): the wallet delegates to this executor, Euthyna's relayer pays the gas. null turns it off. */
+  | { SetEvmExecutor: { chain_id: number; executor: number[] | null } }
   /** Euro payouts to voted IBANs: where the bank signer runs and how the transfer settles. */
   | { SetBankConfig: { config: BankConfig | null } }
   | { AddBankBeneficiary: { beneficiary: BankBeneficiary } }
@@ -222,6 +224,9 @@ export type ChainProfile = {
 
 /** ETH itself, for budgets on the value a call sends. */
 export const NATIVE_ETH: Token = { address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 };
+
+/** EuthynaExecutor (contracts/evm/executor), deployed once on Base Sepolia: what wallets delegate to for sponsored gas. */
+export const EUTHYNA_EXECUTOR = "0xcc74e64316a2aa8deaad0f893d216a879af86cb5";
 
 export const BASE_SEPOLIA: ChainProfile = {
   chainId: 84532,
@@ -1618,6 +1623,16 @@ export function describeChange(change: RuleChange, context: DescribeContext): { 
     return { title: `Register the vault on ${ft?.symbol ?? change.NearStorageDeposit.token} (NEAR)`, details: ["Pays the token's storage deposit (about 0.00125 NEAR) from the vault, so it can hold this token."] };
   }
   if ("Upgrade" in change) return { title: "Upgrade the vault to a published version", details: [`Code hash ${change.Upgrade.code_hash}: the vault deploys it only if the fetched code has this hash.`] };
+  if ("SetEvmExecutor" in change) {
+    const { chain_id, executor } = change.SetEvmExecutor;
+    if (!executor) return { title: `Stop sponsoring network fees on ${chainName(chain_id)}`, details: ["The wallet pays its own gas again: it needs ETH for every transaction."] };
+    const address = hexOf(executor);
+    const known = address.toLowerCase() === EUTHYNA_EXECUTOR.toLowerCase();
+    return { title: `Sponsor network fees on ${chainName(chain_id)}`, details: [
+      `The wallet delegates its code (EIP-7702) to ${known ? "EuthynaExecutor" : "an executor"} at ${address}: Euthyna's relayer sends the transactions the vault signed and pays their gas.`,
+      "The executor runs only calls the wallet's own key (NEAR MPC) signed for this vault, once each, before a deadline. It has no owner and no upgrade.",
+    ] };
+  }
   if ("SetCodeSource" in change) return { title: `Fetch future versions from ${change.SetCodeSource.account_id}`, details: ["An upgrade still deploys only code with the hash the DAO votes for."] };
   if ("SetBankConfig" in change) {
     const config = change.SetBankConfig.config;

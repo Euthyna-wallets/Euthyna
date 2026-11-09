@@ -1,4 +1,5 @@
 import {
+  hashTypedData,
   bytesToHex,
   getAddress,
   hexToBytes,
@@ -33,6 +34,32 @@ export function digestVaultTransaction(operation: VaultOperation): Hex {
     maxPriorityFeePerGas: BigInt(tx.max_priority_fee_per_gas),
   });
   return keccak256(serialized);
+}
+
+/** A sponsored operation (EIP-7702): the wallet's EIP-712 `Execute` of the same call. */
+export const EXECUTE_TYPES = {
+  Execute: [
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+    { name: "opId", type: "bytes32" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+export function digestSponsoredExecute(operation: VaultOperation, wallet: `0x${string}`, deadline: bigint): Hex {
+  return hashTypedData({
+    domain: { name: "EuthynaExecutor", version: "1", chainId: operation.request.chain_id, verifyingContract: wallet },
+    types: EXECUTE_TYPES,
+    primaryType: "Execute",
+    message: {
+      to: bytesToAddress(operation.request.target),
+      value: BigInt(operation.request.value),
+      data: bytesToHex(Uint8Array.from(operation.request.calldata)),
+      opId: bytesToHex(Uint8Array.from(operation.op_id)),
+      deadline,
+    },
+  });
 }
 
 export function signedTransaction(operation: VaultOperation): Hex {

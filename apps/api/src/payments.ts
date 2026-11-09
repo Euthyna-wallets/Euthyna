@@ -221,7 +221,9 @@ export class PaymentService {
       suppliers: await this.registry.activeSupplierWallets(organizationId, operation.transaction.chain_id),
       companyWallet: await this.companyWallet(agent.vaultAccountId, operation.transaction.chain_id),
     };
-    const result: GuardResult = await this.guard.approve(operation, context);
+    const sponsoredView = await this.near.viewFunction<{ deadline: number } | null>(agent.vaultAccountId, "get_sponsored_operation", { op_id: opId }).catch(() => null);
+    const sponsored = sponsoredView && context.companyWallet ? { wallet: context.companyWallet, deadline: BigInt(sponsoredView.deadline) } : null;
+    const result: GuardResult = await this.guard.approve(operation, context, sponsored);
     if (result.decision === "refuse") return refuse("guard_refused", result.reasons);
     await this.upsertOperation(organizationId, agent.agentId, operation);
     const stored = await this.storeVisa(

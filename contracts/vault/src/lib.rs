@@ -5,6 +5,7 @@ mod evm;
 mod foreign;
 pub mod near_tokens;
 pub mod solana;
+mod sponsored;
 mod types;
 
 use borsh::to_vec;
@@ -81,6 +82,8 @@ trait ExtSelf {
         tx_hash: [u8; 32],
         expected_payload_hash: [u8; 32],
     );
+    fn on_delegation_signature(&mut self, chain_id: u64, digest: [u8; 32]);
+    fn on_settle_sponsored_verified(&mut self, op_id: OperationId, expected_payload_hash: [u8; 32]);
 }
 
 #[near(contract_state)]
@@ -675,6 +678,11 @@ impl Vault {
         let nonce = wallet.next_nonce;
         let (transaction, tx_digest) = evm::build_transaction(&role_state.config, nonce, &request);
         let op_id = self.next_operation_id(&member, request.chain_id);
+        let expires_at_ns = now.saturating_add(self.operation_ttl_ns);
+        // A chain the members turned to sponsored execution: MPC signs the wallet's EIP-712 Execute
+        // of the same call instead of a transaction (same checks, the relayer pays the gas).
+        let tx_digest = sponsored::digest_for(&request, wallet_address, &op_id, expires_at_ns, self.settlement_config.unconfirmed_after_ns.0)
+            .unwrap_or(tx_digest);
         let risk_value = Self::threshold_value(measured_value);
         let execute_after_ns = role_state
             .config
@@ -708,7 +716,7 @@ impl Vault {
             transaction,
             tx_digest,
             created_at_ns: U64(now),
-            expires_at_ns: U64(now.saturating_add(self.operation_ttl_ns)),
+            expires_at_ns: U64(expires_at_ns),
             execute_after_ns: execute_after_ns.map(U64),
             visa_authorized: false,
             cosigned_by: None,
@@ -998,12 +1006,16 @@ impl Vault {
         require!(wallet.accepts_operation(), "ERR_WALLET_QUEUE_BUSY");
         let nonce = wallet.next_nonce;
         wallet.active_operation = Some(op_id);
+        let wallet_address = wallet.address.expect("ERR_WALLET_NOT_DERIVED");
         let (transaction, tx_digest) =
             evm::build_transaction(&Self::dao_gas_config(), nonce, &operation.request);
+        let expires_at_ns = now.saturating_add(self.operation_ttl_ns);
+        let tx_digest = sponsored::digest_for(&operation.request, wallet_address, &op_id, expires_at_ns, self.settlement_config.unconfirmed_after_ns.0)
+            .unwrap_or(tx_digest);
         operation.evm_nonce = nonce;
         operation.transaction = transaction;
         operation.tx_digest = tx_digest;
-        operation.expires_at_ns = U64(now.saturating_add(self.operation_ttl_ns));
+        operation.expires_at_ns = U64(expires_at_ns);
         operation.state = OperationState::Prepared;
         self.operations.insert(op_id, operation);
         self.dao_queue.remove(position);
@@ -1073,7 +1085,7 @@ impl Vault {
         let Some(signature) = Self::parse_mpc_signature(response) else {
             return;
         };
-        let signed_transaction = evm::signed_transaction(&operation.transaction, &signature);
+        let signed_transaction = Self::signed_payload(&operation, &signature);
         let operation = self
             .operations
             .get_mut(&op_id)
@@ -1088,6 +1100,8 @@ impl Vault {
             .get(&op_id)
             .cloned()
             .expect("ERR_OPERATION_NOT_FOUND");
+        // No nonce to replace: a sponsored call dies at its deadline (then `release_unconfirmed`).
+        require!(!sponsored::is_sponsored(&op_id), "ERR_SPONSORED_NO_CANCEL");
         require!(
             operation.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
@@ -1212,8 +1226,7 @@ impl Vault {
                 operation.signature.is_none(),
                 "ERR_SIGNATURE_ALREADY_SUBMITTED"
             );
-            operation.signed_transaction =
-                Some(evm::signed_transaction(&operation.transaction, &signature));
+            operation.signed_transaction = Some(Self::signed_payload(&operation, &signature));
             operation.signature = Some(signature);
             self.operations.insert(op_id, operation);
             return;
@@ -1405,11 +1418,14 @@ impl Vault {
             .wallets
             .get_mut(&operation.request.chain_id)
             .expect("ERR_WALLET_NOT_FOUND");
-        require!(
-            wallet.next_nonce == operation.evm_nonce,
-            "ERR_NONCE_ALREADY_CONSUMED"
-        );
-        wallet.next_nonce = wallet.next_nonce.saturating_add(1);
+        // A sponsored call does not use the wallet's nonce (the executor keys it by operation id).
+        if !sponsored::is_sponsored(&op_id) {
+            require!(
+                wallet.next_nonce == operation.evm_nonce,
+                "ERR_NONCE_ALREADY_CONSUMED"
+            );
+            wallet.next_nonce = wallet.next_nonce.saturating_add(1);
+        }
         // Signed: the nonce is used, the next operation may take the following one.
         require!(
             wallet.in_flight.len() < types::MAX_IN_FLIGHT,
@@ -1779,6 +1795,9 @@ impl Vault {
             | RuleChange::SetBankSignerSource { .. }) => {
                 self.apply_bank_rule(&change);
             }
+            RuleChange::SetEvmExecutor { chain_id, executor } => {
+                sponsored::set_executor(chain_id, executor);
+            }
             // Independent of SetRole's order in the same vote; RemoveRole clears it.
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 solana::set_permissions(&role, permissions);
@@ -1949,6 +1968,11 @@ impl Vault {
             | RuleChange::RemoveStandingOrder { .. }
             | RuleChange::SetBankSignerSource { .. }) => {
                 Self::validate_bank_rule(change);
+            }
+            RuleChange::SetEvmExecutor { chain_id, executor } => {
+                // A chain whose transactions NEAR MPC can attest, so the vault can settle.
+                require!(foreign::attestable(*chain_id), "ERR_FOREIGN_CHAIN_UNAVAILABLE");
+                require!(executor.is_none_or(|address| address != [0u8; 20]), "ERR_EVM_EXECUTOR");
             }
             RuleChange::SetSolanaPermissions { role, permissions } => {
                 require!(role != DAO_ROLE && !role.is_empty(), "ERR_RESERVED_ROLE");
@@ -2143,6 +2167,14 @@ impl Vault {
             env::ed25519_verify(&signature, &message, &self.visa_public_key),
             "ERR_VISA_SIGNATURE"
         );
+    }
+
+    /// What the relayer submits: the signed transaction, or the sponsored `execute` calldata.
+    fn signed_payload(operation: &Operation, signature: &MpcSignature) -> Vec<u8> {
+        match sponsored::operation(&operation.op_id) {
+            Some(sponsored) => sponsored::execute_calldata(&operation.request, &operation.op_id, sponsored.deadline, signature),
+            None => evm::signed_transaction(&operation.transaction, signature),
+        }
     }
 
     fn parse_mpc_signature(response: MpcSignatureResponse) -> Option<MpcSignature> {

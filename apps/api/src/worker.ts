@@ -8,6 +8,7 @@ import { EnvKmsSigner } from "./kms.js";
 import { NearClient } from "./near.js";
 import { OperationWorker, PrismaWorkerStore } from "./operation-worker.js";
 import { createBaseRelayer, createChainRelayers } from "./relayer.js";
+import { keepDelegated } from "./delegation-keeper.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -38,6 +39,18 @@ const worker = new OperationWorker(
   undefined,
   createChainRelayers(env, near, guard),
 );
+// Sponsored execution: wallets whose company voted an executor get delegated (EIP-7702), every 2 minutes.
+const DELEGATION_EVERY_MS = 120_000;
+let delegationCheckedAt = 0;
+async function keepWalletsDelegated() {
+  if (Date.now() - delegationCheckedAt < DELEGATION_EVERY_MS) return;
+  delegationCheckedAt = Date.now();
+  const treasuries = await prisma.treasury.findMany({ select: { vaultAccountId: true } });
+  for (const { vaultAccountId } of treasuries) {
+    const outcome = await keepDelegated(near, base, vaultAccountId, 84532).catch((error: unknown) => `failed: ${String(error).slice(0, 160)}`);
+    if (outcome !== "none" && outcome !== "delegated") console.log(JSON.stringify({ event: "worker.delegation", vaultAccountId, outcome }));
+  }
+}
 let running = true;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
@@ -48,6 +61,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 try {
   do {
     try {
+      await keepWalletsDelegated().catch((error: unknown) => console.warn(JSON.stringify({ event: "worker.delegation_failed", message: String(error).slice(0, 200) })));
       const result = await worker.tick();
       if (result.processed > 0 || result.adopted > 0) console.log(JSON.stringify({ event: "worker.tick", ...result }));
     } catch (error) {

@@ -266,6 +266,7 @@ export const omni = {
   walletProposal: (chainId?: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify(chainId ? { chainId } : {}) }),
   versions: () => api<VaultVersions>("/v1/console/omniroles/versions"),
   holdings: () => api<Holdings>("/v1/console/omniroles/holdings"),
+  sponsorProposal: (enable: boolean) => api<ProposalDraft>("/v1/console/omniroles/proposals/sponsor", { method: "POST", body: JSON.stringify({ enable }) }),
   upgradeProposal: (codeHash: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/upgrade", { method: "POST", body: JSON.stringify({ codeHash }) }),
   solanaWalletProposal: () => api<ProposalDraft>("/v1/console/omniroles/proposals/wallet", { method: "POST", body: JSON.stringify({ solana: true }) }),
   transactionProposal: (input: { title?: string; transactions: Array<{ chainId: number; to: string; value?: string; data?: string; gas?: string }> }) =>

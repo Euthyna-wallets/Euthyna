@@ -29,7 +29,7 @@ pub struct VerifyResponse {
     pub payload_hash: String,
     pub signature: MpcSignatureResponse,
 }
-fn chain(chain_id: u64, mainnet: bool) -> (&'static str, u8) {
+pub(crate) fn chain(chain_id: u64, mainnet: bool) -> (&'static str, u8) {
     match (mainnet, chain_id) {
         (false, 84532) | (true, 8453) => ("Base", 6),
         (false, 421614) | (true, 42161) => ("Arbitrum", 7),
@@ -38,6 +38,10 @@ fn chain(chain_id: u64, mainnet: bool) -> (&'static str, u8) {
         (false, 43113) | (true, 43114) => ("Avalanche", 13),
         _ => env::panic_str("ERR_FOREIGN_CHAIN_UNAVAILABLE"),
     }
+}
+/// An EVM chain NEAR MPC attests transactions of (testnet or mainnet id).
+pub(crate) fn attestable(chain_id: u64) -> bool {
+    matches!(chain_id, 84532 | 8453 | 421614 | 42161 | 97 | 56 | 80002 | 137 | 43113 | 43114)
 }
 pub(crate) fn payload_hash(tag: u8, tx: [u8; 32], block: [u8; 32]) -> [u8; 32] {
     // V1=0; chain tag; EvmRpcRequest; [BlockHash=0]; Finalized=2;
@@ -122,6 +126,7 @@ impl Vault {
                     .saturating_add(self.settlement_config.unconfirmed_after_ns.0),
             "ERR_UNCONFIRMED_TOO_EARLY"
         );
+        sponsored::assert_releasable(&op_id);
         self.release_operation(op_id, OperationState::Unconfirmed, false);
     }
 }
@@ -140,6 +145,7 @@ impl Vault {
             op.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
+        require!(!sponsored::is_sponsored(&op_id), "ERR_USE_SETTLE_SPONSORED");
         let raw = if cancellation {
             op.cancellation
                 .as_ref()
