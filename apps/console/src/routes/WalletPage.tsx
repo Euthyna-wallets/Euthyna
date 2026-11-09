@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { BASE_SEPOLIA, chainName, decodeVaultCalls, describeCall, describeVaultCall } from "@euthyna/sdk/roles";
-import { encodeFunctionData, erc20Abi, getAddress, parseAbi, parseEther, parseUnits, type Hex } from "viem";
+import { BASE_SEPOLIA, chainName, decodeVaultCalls, describeCall, describeVaultCall, EUTHYNA_EXECUTOR } from "@euthyna/sdk/roles";
+import { encodeFunctionData, erc20Abi, getAddress, hexToBytes, parseAbi, parseEther, parseUnits, type Hex } from "viem";
 
 import { PageState } from "../components/ui.js";
 import { chainLabel, ColumnGauge, Kicker, NightPanel, PageTitle, Seal, SectionHead, Slab } from "../components/design.js";
+import { chainView } from "../lib/chain-view.js";
 import { formatUsd } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
@@ -93,6 +94,13 @@ export function WalletPage() {
   const [preview, setPreview] = useState<{ draft: ProposalDraft; summary: Sentence[]; requested: Requested[]; request?: DappTransaction } | null>(null);
   const treasury = status.data?.treasury;
   const me = wallets.nearAccountId;
+  // Sponsored gas (EIP-7702): the voted executor, or "unsupported" on a vault older than the feature.
+  const sponsor = useQuery({
+    queryKey: ["evm-executor", treasury?.vaultAccountId],
+    enabled: Boolean(treasury && address),
+    refetchInterval: 30_000,
+    queryFn: () => chainView<string | null>(treasury!.vaultAccountId, "get_evm_executor", { chain_id: BASE_SEPOLIA.chainId }).then((executor) => executor ?? "off", () => "unsupported"),
+  });
 
   async function run(label: string, action: () => Promise<string | void>) {
     setBusy(label);
@@ -196,6 +204,26 @@ export function WalletPage() {
                       )}
                     </div>
                   ))}
+                  {treasury && sponsor.data ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr) auto", gap: 12, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(13,23,48,.12)", fontSize: 13 }}>
+                      <b style={addrLabel}>Network fees</b>
+                      <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+                        {sponsor.data === "unsupported" ? "Paid from the wallet's ETH. Sponsored fees need the latest vault version."
+                          : sponsor.data === "off" ? "Paid from the wallet's ETH on Base Sepolia."
+                          : `Sponsored: the wallet delegates to EuthynaExecutor (EIP-7702) and Euthyna's relayer pays the gas.`}
+                      </span>
+                      {sponsor.data === "off" ? (
+                        <button className="btn-line" style={{ padding: "8px 12px", fontSize: 11 }} disabled={!me || Boolean(busy)} onClick={() => void run("sponsor", async () => {
+                          const draft = await omni.sponsorProposal(true);
+                          const expected = [{ method: "queue_rule_change", change: { SetEvmExecutor: { chain_id: BASE_SEPOLIA.chainId, executor: Array.from(hexToBytes(EUTHYNA_EXECUTOR as Hex)) } } }];
+                          const decoded = decodeVaultCalls(draft.args.proposal.kind as Parameters<typeof decodeVaultCalls>[0], treasury.vaultAccountId);
+                          if (draft.receiverId !== treasury.daoAccountId || JSON.stringify(decoded) !== JSON.stringify(expected)) throw new Error("The proposal prepared by the server is not the sponsored-fees vote. Nothing was signed.");
+                          const result = await signDaoProposal(me, draft);
+                          return `Proposal #${result.proposalId} submitted: sponsor network fees.`;
+                        })}>Sponsor them</button>
+                      ) : <span />}
+                    </div>
+                  ) : null}
                   {treasury ? (
                     <div style={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr) auto", gap: 12, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(13,23,48,.12)", fontSize: 13 }}>
                       <b style={addrLabel}>NEAR</b>

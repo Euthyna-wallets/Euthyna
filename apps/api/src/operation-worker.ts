@@ -108,6 +108,7 @@ export interface WorkerNearGateway {
   transactionStatus(txHash: string, senderAccountId: string): Promise<NearTransactionStatus>;
   submitSignature(vaultAccountId: string, opId: number[], signature: MpcSignature): Promise<string>;
   settle?(vaultAccountId: string, opId: number[], blockHash: Hex, cancellation?: boolean): Promise<string>;
+  settleSponsored?(vaultAccountId: string, opId: number[], log: { txHash: Hex; blockHash: Hex; blockNumber: bigint; transactionIndex: number; logIndex: number }): Promise<string>;
   releaseUnconfirmed?(vaultAccountId: string, opId: number[]): Promise<string>;
   reportStatus(vaultAccountId: string, signedReport: unknown, mpcSignature?: MpcSignature): Promise<string>;
   expireOperation(vaultAccountId: string, opId: number[]): Promise<string>;
@@ -121,6 +122,8 @@ export interface WorkerBaseGateway {
   receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash?: Hex } | null>;
   blockNumber(): Promise<bigint>;
   finalizedBlockNumber(): Promise<bigint>;
+  relay?(wallet: Hex, calldata: number[]): Promise<Hex>;
+  executedLog?(hash: Hex, wallet: Hex, opId: Hex): Promise<{ blockHash: Hex; blockNumber: bigint; transactionIndex: number; logIndex: number } | null>;
 }
 
 export interface WorkerConfig {
@@ -580,6 +583,13 @@ export class OperationWorker {
     operation: VaultOperation,
     blockTimestampNs: bigint,
   ): Promise<void> {
+    // A vault older than sponsored execution has no such method: plain path. Any other error is raised.
+    const sponsored = await this.near.viewFunction<{ deadline: number } | null>(record.vaultAccountId, "get_sponsored_operation", { op_id: opBytes(record.opId) })
+      .catch((error: unknown) => {
+        if (/MethodResolveError|MethodNotFound|CompilationError/i.test(String(error))) return null;
+        throw error;
+      });
+    if (sponsored) return this.processSponsored(record, operation, sponsored.deadline, blockTimestampNs);
     const hash = this.base.rawTransactionHash(operation.signed_transaction);
     if (record.txHash && record.txHash.toLowerCase() !== hash.toLowerCase()) {
       throw new Error(`stored Base hash ${record.txHash} differs from signed transaction ${hash}`);
@@ -638,6 +648,69 @@ export class OperationWorker {
     }
     if (!receipt.blockHash || !this.near.settle) throw new Error("MPC settlement gateway requires a receipt block hash");
     await this.near.settle(record.vaultAccountId, opBytes(record.opId), receipt.blockHash);
+    const settled = await this.near.getOperation(record.vaultAccountId, opBytes(record.opId));
+    await this.store.update(record, {
+      state: settled.state === "Confirmed" ? "Confirmed" : "Broadcast", txHash: hash,
+      receiptBlock: receipt.blockNumber, lastAttemptAt: this.now(),
+      nextAttemptAt: settled.state === "Confirmed" ? null : new Date(this.now().getTime() + this.config.pollIntervalMs), lastError: null,
+    });
+  }
+
+  /**
+   * Sponsored execution (EIP-7702): the relayer sends the wallet's signed `execute` call and pays
+   * the gas; the vault settles on the wallet's `Executed(opId)` log, attested by NEAR MPC.
+   */
+  private async processSponsored(
+    record: WorkerOperationRecord,
+    operation: VaultOperation,
+    deadline: number,
+    blockTimestampNs: bigint,
+  ): Promise<void> {
+    if (!this.base.relay || !this.base.executedLog || !this.near.settleSponsored) throw new Error("sponsored execution gateway unavailable");
+    if (!operation.signed_transaction) throw new Error("sponsored operation has no signed call");
+    const walletView = await this.near.viewFunction<{ address: number[] | null }>(record.vaultAccountId, "get_wallet", { chain_id: operation.request.chain_id });
+    if (!walletView.address) throw new Error("wallet not derived");
+    const wallet = `0x${Buffer.from(walletView.address).toString("hex")}` as Hex;
+    const opId = `0x${record.opId.replace(/^0x/, "")}` as Hex;
+    if (!record.txHash) {
+      if (blockTimestampNs > BigInt(deadline) * 1_000_000_000n) {
+        // Too late for `execute`: once the margin is over, the budget comes back without a proof.
+        await this.near.releaseUnconfirmed?.(record.vaultAccountId, opBytes(record.opId)).catch(() => undefined);
+        await this.schedule(record, "Signed", "sponsored deadline passed");
+        return;
+      }
+      const hash = await this.base.relay(wallet, operation.signed_transaction);
+      await this.store.update(record, {
+        state: "Broadcast", txHash: hash, broadcastAt: this.now(), lastAttemptAt: this.now(),
+        nextAttemptAt: new Date(this.now().getTime() + this.config.pollIntervalMs), lastError: null,
+      });
+      return;
+    }
+    const hash = record.txHash as Hex;
+    const receipt = await this.base.receipt(hash);
+    if (!receipt) {
+      // Not mined (dropped or underpriced): send the same signed call again; `execute` runs it once.
+      if (record.broadcastAt && this.now().getTime() - record.broadcastAt.getTime() >= this.config.broadcastTimeoutMs) {
+        await this.store.update(record, { txHash: null, broadcastAt: null, nextAttemptAt: this.now(), lastError: "relay not mined, sending again" });
+        return;
+      }
+      await this.schedule(record, "Broadcast");
+      return;
+    }
+    if (receipt.status === "reverted") {
+      // The call failed (e.g. the wallet lacked the tokens): nothing ran and the id is still unused.
+      // It is not sent again; once the deadline is over, the budget comes back (release_unconfirmed).
+      await this.near.releaseUnconfirmed?.(record.vaultAccountId, opBytes(record.opId)).catch(() => undefined);
+      await this.schedule(record, "Broadcast", `sponsored call ${hash} reverted`);
+      return;
+    }
+    if (receipt.blockNumber > await this.base.finalizedBlockNumber()) {
+      await this.schedule(record, "Broadcast", "waiting for foreign-chain finality");
+      return;
+    }
+    const log = await this.base.executedLog(hash, wallet, opId);
+    if (!log) throw new Error(`no Executed(${opId}) log from ${wallet} in ${hash}`);
+    await this.near.settleSponsored(record.vaultAccountId, opBytes(record.opId), { txHash: hash, ...log });
     const settled = await this.near.getOperation(record.vaultAccountId, opBytes(record.opId));
     await this.store.update(record, {
       state: settled.state === "Confirmed" ? "Confirmed" : "Broadcast", txHash: hash,

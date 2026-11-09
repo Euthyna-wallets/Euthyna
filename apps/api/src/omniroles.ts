@@ -23,6 +23,7 @@ import {
   describeVaultCall,
   describeDaoTransactions,
   chainName,
+  EUTHYNA_EXECUTOR,
   type DaoTransactionDraft,
   councilPolicy,
   describePolicyChange,
@@ -1275,6 +1276,15 @@ export class OmniRolesService {
     const target = chainId ?? treasury.baseChainId;
     const calls: VaultCall[] = [{ method: "request_wallet", chainId: target }];
     return this.proposal(treasury, `Create the company wallet on ${chainName(target)}`, calls);
+  }
+
+  /** Sponsored gas (EIP-7702): one vote lets the wallet delegate to EuthynaExecutor, or stops it. */
+  async sponsorProposal(organizationId: string, enable: boolean) {
+    const treasury = await this.requireTreasury(organizationId);
+    const chainId = treasury.baseChainId;
+    const executor = enable ? Array.from(hexToBytes(EUTHYNA_EXECUTOR as Hex)) : null;
+    const title = enable ? `Sponsor network fees on ${chainName(chainId)}` : `Stop sponsoring network fees on ${chainName(chainId)}`;
+    return this.proposal(treasury, title, [{ method: "queue_rule_change", change: { SetEvmExecutor: { chain_id: chainId, executor } } }]);
   }
 
   /**

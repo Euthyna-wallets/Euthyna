@@ -451,6 +451,13 @@ pub enum RuleChange {
         project: Option<String>,
         follow: bool,
     },
+    /// Sponsored execution on an EVM chain (EIP-7702): the wallet delegates to this executor and
+    /// the vault signs `Execute` of each call instead of a transaction, so a relayer pays the gas.
+    /// `None` returns to plain transactions. Same role checks either way.
+    SetEvmExecutor {
+        chain_id: u64,
+        executor: Option<EvmAddress>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

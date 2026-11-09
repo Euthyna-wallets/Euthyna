@@ -223,6 +223,7 @@ class FakeNear implements WorkerNearGateway {
 
   viewFunction<T>(_accountId: string, methodName: string): Promise<T> {
     if (methodName === "get_settlement_config") return Promise.resolve({ cancel_after_ns: "10000000000", unconfirmed_after_ns: "21600000000000" } as T);
+    if (methodName === "get_sponsored_operation") return Promise.resolve(null as T);
     if (methodName === "is_paused") return Promise.resolve(true as T);
     if (methodName === "get_wallet") return Promise.resolve(this.walletState as T);
     if (methodName === "get_role") {
@@ -620,5 +621,61 @@ describe("operations an agent signed but never settled", () => {
     errors.mockRestore();
     expect(result.adopted).toBe(1);
     expect(test.store.adopted).toEqual([`vault.testnet:${opId}`]);
+  });
+});
+
+describe("sponsored execution (EIP-7702)", () => {
+  const relayHash = `0x${"33".repeat(32)}` as Hex;
+  function sponsored(deadline = 1_000) {
+    const test = harness();
+    const near = test.near as FakeNear & { settleSponsored: (...a: unknown[]) => Promise<string> };
+    const view = near.viewFunction.bind(near);
+    const settledLogs: unknown[] = [];
+    near.viewFunction = (<T>(id: string, method: string) => method === "get_sponsored_operation" ? Promise.resolve({ deadline } as T) : view<T>(id, method)) as typeof near.viewFunction;
+    near.settleSponsored = (_v: unknown, _op: unknown, log: unknown) => { settledLogs.push(log); near.operation = { ...near.operation, state: "Confirmed" }; return Promise.resolve("near-settle-sponsored"); };
+    const base = test.base as FakeBase & { relay: (w: Hex, raw: number[] | null) => Promise<Hex>; executedLog: () => Promise<unknown> };
+    const relayed: Array<[Hex, number[] | null]> = [];
+    base.relay = (w, raw) => { relayed.push([w, raw]); return Promise.resolve(relayHash); };
+    base.executedLog = () => Promise.resolve({ blockHash: `0x${"09".repeat(32)}`, blockNumber: 99n, transactionIndex: 2, logIndex: 5 });
+    return { ...test, relayed, settledLogs };
+  }
+
+  it("relays the signed execute call instead of broadcasting it, then settles on the Executed log once final", async () => {
+    const test = sponsored();
+    await test.createWorker().tick();
+    expect(test.base.broadcasts).toEqual([]);
+    expect(test.relayed).toEqual([[`0x${"11".repeat(20)}`, [2, 1]]]);
+    expect(test.store.operation).toMatchObject({ state: "Broadcast", txHash: relayHash });
+
+    test.base.receipts.set(relayHash, { status: "success", blockNumber: 99n });
+    test.base.finalized = 98n;
+    test.advance(1_000);
+    await test.createWorker().tick();
+    expect(test.settledLogs).toHaveLength(0);
+    expect(test.store.operation.lastError).toBe("waiting for foreign-chain finality");
+
+    test.base.finalized = 99n;
+    test.advance(1_000);
+    await test.createWorker().tick();
+    expect(test.settledLogs).toEqual([{ txHash: relayHash, blockHash: `0x${"09".repeat(32)}`, blockNumber: 99n, transactionIndex: 2, logIndex: 5 }]);
+    expect(test.store.operation.state).toBe("Confirmed");
+  });
+
+  it("does not relay after the deadline", async () => {
+    const test = sponsored(10); // 10 s; the NEAR block is at 20 s
+    await test.createWorker().tick();
+    expect(test.relayed).toEqual([]);
+    expect(test.store.operation.state).not.toBe("Broadcast");
+  });
+
+  it("does not resend or settle a reverted call", async () => {
+    const test = sponsored();
+    test.store.operation.txHash = relayHash;
+    test.store.operation.broadcastAt = new Date(nowStart);
+    test.base.receipts.set(relayHash, { status: "reverted", blockNumber: 99n });
+    await test.createWorker().tick();
+    expect(test.relayed).toEqual([]);
+    expect(test.settledLogs).toEqual([]);
+    expect(test.store.operation.lastError).toContain("reverted");
   });
 });
