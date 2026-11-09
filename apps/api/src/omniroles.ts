@@ -96,6 +96,15 @@ export async function untilFinal(check: () => Promise<boolean>, attempts = 10, d
   }
 }
 
+/**
+ * An RPC can answer an error ("Internal server error", a timeout) while it waits for a transaction
+ * that still lands. Before failing, look on chain for what the call was meant to create.
+ */
+export async function landedAnyway(error: unknown, created: () => Promise<boolean>): Promise<string> {
+  if (await untilFinal(created, 20, 3_000)) return "landed (the RPC answered an error)";
+  throw error;
+}
+
 /** Where the bank signer runs: what a vault votes into its bank config. */
 export interface BankSignerDeployment {
   outlayerId: string;
@@ -614,7 +623,7 @@ export class OmniRolesService {
         { name: plan.daoAccountId.split(".")[0], args: Buffer.from(JSON.stringify(daoArgs)).toString("base64") },
         "150000000000000",
         this.config.daoCreateDepositYocto,
-      );
+      ).catch((error: unknown) => landedAnyway(error, () => this.ownDao(plan.daoAccountId, council)));
       if (!(await untilFinal(() => this.ownDao(plan.daoAccountId, council)))) {
         throw new OmniRolesError(500, "dao_not_created", `${this.config.daoFactoryId} did not create ${plan.daoAccountId} (transaction ${daoTransaction})`);
       }
@@ -648,7 +657,7 @@ export class OmniRolesService {
         },
         "300000000000000",
         deposit,
-      );
+      ).catch((error: unknown) => landedAnyway(error, () => this.ownVault(plan.vaultAccountId, plan.daoAccountId)));
       if (!(await untilFinal(() => this.ownVault(plan.vaultAccountId, plan.daoAccountId)))) {
         throw new OmniRolesError(500, "vault_not_created", `${this.config.nomosId} did not create ${plan.vaultAccountId} (transaction ${vaultTransaction}); the DAO is kept, try again`);
       }
