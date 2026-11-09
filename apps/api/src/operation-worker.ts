@@ -684,6 +684,12 @@ export class OperationWorker {
       }
       // A wallet whose authorization is signed but not on chain yet gets it in the same transaction.
       const authorization = this.base.code ? await pendingAuthorization(this.near, { code: (address) => this.base.code!(address) }, record.vaultAccountId, operation.request.chain_id, wallet) : null;
+      // No code at the wallet and no authorization to send with the call: it would run nothing and the
+      // tank would pay for it. Wait for the keeper to have the authorization signed.
+      if (!authorization && this.base.code && !(await this.base.code(wallet) ?? "0x").toLowerCase().startsWith("0xef0100")) {
+        await this.schedule(record, "Signed", "waiting for the wallet's EIP-7702 delegation");
+        return;
+      }
       const hash = await this.base.relay(wallet, operation.signed_transaction, authorization ?? undefined);
       await this.store.update(record, {
         state: "Broadcast", txHash: hash, broadcastAt: this.now(), lastAttemptAt: this.now(),
