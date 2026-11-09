@@ -89,9 +89,9 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 3. **Check on chain**: `get_role` on your vault (`json-args '{"role":"payments"}'`) shows the permission tree: the
    token, the one recipient, and the budget as the hash of its key. The budget itself is `get_allowance` with that key
    as a byte array (`mandate`, in part 5, prints both). The agent's NEAR account holds one function-call key, valid
-   **only on your vault**, for the 14 agent methods (`prepare`, `authorize`, `execute_near`, `settle`, `cancel_nonce`…;
+   **only on your vault**, for the 16 agent methods (`prepare`, `authorize`, `execute_near`, `settle`, `cancel_nonce`…;
    the list and what each checks: [Architecture.md](./Architecture.md)). It cannot move NEAR, call another contract or
-   add a key, and none of the 14 pays outside the role:
+   add a key, and none of the 16 pays outside the role:
 
    ```sh
    near account list-keys <agent account> network-config testnet now

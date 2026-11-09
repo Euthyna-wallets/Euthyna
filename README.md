@@ -6,6 +6,8 @@ Euthyna is a company wallet on NEAR where **people and AI agents act under rules
 Each member, human or agent, gets a role: which chains, contracts, functions, parameters and budget.
 A vault with no access key checks the role on chain before NEAR Chain Signatures sign anything: on
 NEAR and Base Sepolia today, Ethereum and Solana in the code. Everything outside the roles is a multisig vote of the owners.
+The company wallet needs no gas: once the owners vote it, Euthyna's relayer pays its Base transactions (EIP-7702, testnet),
+and a swap's approval is granted and revoked in the same transaction.
 
 So a hijacked agent cannot pay the attacker, a stolen server cannot move funds, and one rogue member
 cannot change the rules: **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)).
@@ -76,13 +78,14 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 | --- | --- | --- |
 | 1 | **One policy engine for every chain.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base on testnet; Ethereum and Solana in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
 | 2 | **Nothing to steal.** The vault, the registry and the vault factory (Nomos) have no access key; the company wallet has no private key. No Euthyna server holds a key that moves funds, and the vault settles from an MPC attestation of the finalized transaction, not from a server. | `view_access_key_list`; `contracts/tests/tests/settlement.rs` |
-| 3 | **The key never reaches the AI.** An agent's key is a NEAR function-call key for 14 vault methods. `euthyna-signer` keeps it under another system user and signs only requests to that vault: the AI can ask for a signature, never read the key. | `signer/` (Rust, 24 tests) |
+| 3 | **The key never reaches the AI.** An agent's key is a NEAR function-call key for 16 vault methods. `euthyna-signer` keeps it under another system user and signs only requests to that vault: the AI can ask for a signature, never read the key. | `signer/` (Rust, 24 tests) |
 | 4 | **Limit orders nobody sees.** Price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR, and still goes through the swap role. | `contracts/sealed-orders`; filled on testnet |
 | 5 | **A lost key is not a lost seat.** A zero-knowledge proof that you hold the mailbox you enrolled, made in your browser and verified by a keyless NEAR contract (the address itself never goes on chain); the lost account can cancel during a waiting period; then the founders vote the seat to the new account. | `contracts/email-recovery`, `circuits/email-recovery`; testnet run |
 | 6 | **AI companies buy from each other.** An agent hires another company's agent over A2A + x402; its spending card signs a cheque that the market cashes only on delivery. | `apps/api/src/market/e2e.integration.test.ts` (sandbox, the real signer) |
 | 7 | **Owned by people, run by agents.** Investors buy shares and vote with them; each epoch, revenue goes to the holders who voted. An agent can send revenue through Omni Bridge to the shares contract, and nowhere else. | `contracts/shares`; testnet hashes in [docs/shares.md](./docs/shares.md) |
 | 8 | **Try to rob it.** Rob the Agent: each card is a real testnet transaction from a hijacked agent against a real vault. 0 USDC stolen so far, and a bounty for whoever makes it pay outside its law. | [/rob](https://euthyna.io/rob), [docs/rob-the-agent.md](./docs/rob-the-agent.md) |
 | 9 | **A euro IBAN for the company, in and out.** A SEPA transfer arrives as EURC in the company wallet, and only there: the address is read from the vault, never from a request. Out: an agent pays a supplier's **IBAN** under the vault's rule (IBAN voted by the members, amount within the role's euro budget), because the bank partner's key lives in a TEE ([OutLayer](https://outlayer.fastnear.com)) that answers only the vault. | [docs/bank.md](./docs/bank.md), `contracts/vault/src/bank.rs`, `bank-signer/` |
+| 10 | **A wallet that never needs gas, and swaps that leave no approval behind.** One vote and the company wallet delegates its code (EIP-7702) to `EuthynaExecutor`, a contract with no owner and no upgrade: Euthyna's relayer sends the calls and pays the gas, but the wallet runs only what the vault had NEAR MPC sign, once, before a deadline, and the vault settles on the `Executed` log NEAR MPC attests. A swap runs as approve + swap + revoke in one transaction, signed once: the spender is the swap's own target and the revoke is added by the vault. | [docs/sponsored-gas.md](./docs/sponsored-gas.md) (Uniswap V3 WETH → USDC from a wallet at 0 ETH on Base Sepolia), `contracts/evm/executor`, `contracts/vault/src/sponsored.rs` |
 
 ## For agents and for people
 
@@ -101,7 +104,7 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 | **03 Privacy & Private AI**<br>*private by design* | confidential computation, private finance, protecting sensitive data | **A company can trade without showing its hand.** Its limit orders live as a single hash on chain; the limit price, the total and the deadline are never published, not even after a fill, and each fill is proven correct in zero knowledge. Only the members read the terms, encrypted to keys derived from their own wallets. **A founder recovers their seat without exposing their email**: a zero-knowledge proof made in the browser, only a salted hash on chain. |
 | **04 Autonomous Business**<br>*the company of one, or none* | treasury, sales, procurement, revenue sharing, chain signatures | **A company that runs itself, under rules its owners vote.** Agents pay suppliers and swap on Base through NEAR Chain Signatures, sell their work to other companies' agents on the Market (paid only on delivery), and send revenue to the shareholders through Omni Bridge. Humans only set the roles and the budgets. |
 | **07 Agent Economy**<br>*give AI a wallet* | agents that earn, spend, negotiate and hire | **Agents hire agents.** A company's agent finds another company's agent on the Market, hires it over A2A + x402, and its spending card signs a cheque the market cashes only on delivery; the seller's vault receives exactly the price. Each agent spends from a budget its owners voted, refilled by the vault. |
-| **08 Real-World Money**<br>*bring the boring money onchain* | invoicing, merchant payments, stablecoin rails for real businesses | **A company bank account that obeys the law it voted.** Clients pay the company's euro IBAN; the euros arrive as EURC in a wallet with no private key; the members vote a supplier payment and the vault signs it, or an agent pays invoice by invoice within a role's EURC budget, including to a supplier's IBAN: the vault checks the voted IBAN and the budget on chain, and the partner's API key sits in a TEE that obeys only the vault. **Invoicing** (each invoice has an RF reference and a SEPA QR; paid automatically when the transfer lands), **Payroll** (standing orders the members vote once, paid on each date without an agent) and **remittances** (sealed payees paid in their currency: Pix and SEPA paid on testnet, ACH and Faster Payments in the code); accounts and names never on chain. Agents pay without gas (meta transactions, NEP-366). Activity exports a CSV with the transaction of every payment, for the accountant. |
+| **08 Real-World Money**<br>*bring the boring money onchain* | invoicing, merchant payments, stablecoin rails for real businesses | **A company bank account that obeys the law it voted.** Clients pay the company's euro IBAN; the euros arrive as EURC in a wallet with no private key; the members vote a supplier payment and the vault signs it, or an agent pays invoice by invoice within a role's EURC budget, including to a supplier's IBAN: the vault checks the voted IBAN and the budget on chain, and the partner's API key sits in a TEE that obeys only the vault. **Invoicing** (each invoice has an RF reference and a SEPA QR; paid automatically when the transfer lands), **Payroll** (standing orders the members vote once, paid on each date without an agent) and **remittances** (sealed payees paid in their currency: Pix and SEPA paid on testnet, ACH and Faster Payments in the code); accounts and names never on chain. Agents pay without gas (meta transactions, NEP-366), and the company wallet too: Euthyna relays its Base transactions and pays the gas (EIP-7702, by vote). Activity exports a CSV with the transaction of every payment, for the accountant. |
 | **12 Social Money**<br>*coordinate value together* | collective ownership, shared budgets, Sputnik DAO; build on the multisig, not a new one | **Sputnik becomes a company.** The DAO owns a vault that pays on NEAR and Base; members vote budgets per role instead of signing every payment; investors buy shares, vote, and earn the revenue of the epochs they voted in. A lost wallet does not cost a seat: the other founders vote it back. |
 
 ## Security model
@@ -119,6 +122,7 @@ lets the attacker make it sign anything its key can sign. So no lock depends on 
 | A bad bank enclave version | The vault runs one enclave hash. With "take updates" on, a new published version is queued as an ordinary rule: it applies after the veto window, and one council member can veto it (a vetoed version never comes back). Without it, each version is a vote | [docs/bank.md](./docs/bank.md#enclave-updates-one-vote-or-none-with-a-veto-window) (testnet run: 0.2.0 → 0.2.1 with no vote) |
 | A malicious code upgrade | Nomos publishes each vault version by its hash; a vault upgrades only on a DAO vote for that hash, after the veto window. The DAO can also vote `SetCodeSource` to fetch versions elsewhere | `contracts/tests/tests/nomos.rs` |
 | A founder loses their NEAR account | ZK Email recovery, verified on chain (see 5 above) | [docs/recovery.md](./docs/recovery.md) |
+| A malicious gas relayer | It can send a signed call or not, nothing else: the executor checks the wallet's own signature, a single use per operation and a deadline; a call that never runs gives its budget back after the deadline | `contracts/evm/executor/test`, `contracts/vault/src/onchain_tests.rs` (`sponsored_flow`) |
 | An investor majority turns hostile | The founders keep their veto on vault changes | [Owners and money](#owners-and-money) |
 
 ## Try the seat recovery
@@ -199,10 +203,11 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
-| Agent | no: a NEAR function-call key on the vault only (14 agent methods, each checked against the agent's role on chain; no NEAR transfer, no other contract, no new key) |
+| Agent | no: a NEAR function-call key on the vault only (16 agent methods, each checked against the agent's role on chain; no NEAR transfer, no other contract, no new key) |
 | API, Guard, worker | no: visa keys and broadcasting only |
 | OmniRoles vault, registry, DAO factory | no access key after deployment |
-| Company wallet | no private key exists; NEAR MPC signs only what the vault asks |
+| Company wallet | no private key exists; NEAR MPC signs only what the vault asks. Once the owners vote sponsored gas, delegated (EIP-7702) to `EuthynaExecutor`, which runs only calls signed by that key |
+| Gas relayer (testnet tank) | its own test ETH only: it sends the calls the vault signed and pays their gas; it cannot change, replay or add a call |
 
 Contract invariants and the full key model: [Architecture.md](./Architecture.md). Diagram sources: [docs/diagrams](./docs/diagrams).
 
@@ -256,6 +261,7 @@ How the cheque is checked, what the worker's agent may do, and what was tested: 
 | Keyless registry deployed; companies listed by DAO vote | [docs/registry.md](./docs/registry.md) (testnet hashes) |
 | Founder seat recovery verified on chain: enroll, a request from another mailbox refused, cancel, ready after the delay, then the founders' vote | [docs/recovery.md](./docs/recovery.md) (testnet hashes), `contracts/tests/tests/email_recovery.rs` |
 | Market end to end: an agent hires another company's agent, its card pays on delivery, the seller's vault receives exactly the price | `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox, PostgreSQL, the real euthyna-signer) |
+| Sponsored gas: a wallet at 0 ETH pays, swaps on Uniswap V3 (approve + swap + revoke in one transaction) and receives an NFT; each call settled on NEAR from the MPC-attested `Executed` log; Simple7702Account compared live | [docs/sponsored-gas.md](./docs/sponsored-gas.md) (testnet hashes) |
 
 ## Run it
 
@@ -314,6 +320,7 @@ pnpm attack:all
 | `contracts/registry` | the public directory of companies |
 | `contracts/email-recovery` | founder seat recovery: verifies ZK Email proofs on chain (UltraHonk on NEAR's BN254 host functions) |
 | `circuits/email-recovery` | the ZK Email circuit (Noir); `circuits/vendor` and `contracts/vendor` hold the patched libraries |
+| `contracts/evm/executor` | `EuthynaExecutor` (Solidity, Foundry): the code a company wallet delegates to for sponsored gas (EIP-7702) |
 | `contracts/tests` | sandbox tests and the on-chain attack suite |
 | `apps/api` | sign-in, Guard, supplier registry, proposals, worker |
 | `apps/console` | the console and the public pages (`/`, `/c/<dao>`) |
@@ -323,10 +330,10 @@ pnpm attack:all
 
 ## Built for the hackathon
 
-Work started on 20 October 2026 (the hackathon's rules open submissions on 1 November): 308 of the
-491 commits on `main` (9 November) predate 1 November. Before 1 November: the vault and its rule
+Work started on 20 October 2026 (the hackathon's rules open submissions on 1 November): 307 of the
+517 commits on `main` (9 November) predate 1 November (`git rev-list --count main --before=2026-11-01T00:00:00Z`). Before 1 November: the vault and its rule
 engine, the shares, the registry, the API, the console and the MCP server. From 1 November: ZK Email
-seat recovery verified on chain, sealed orders, the euro IBAN with its bank enclave,
+seat recovery verified on chain, sealed orders, the euro IBAN with its bank enclave, sponsored gas (EIP-7702),
 `euthyna-signer` in this repository and the bank pages of the console. `git log --before=2026-11-01` shows the rest.
 
 ## Names
