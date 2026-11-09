@@ -14,7 +14,7 @@ The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 | [8. Market](#8-market) | optional | 5 min |
 | [9. Rob the Agent](#9-rob-the-agent-no-wallet) | a browser; a NEAR testnet wallet only for the trophy | 5 min |
 | [10. A euro account](#10-a-euro-account-iban-invoices-payouts-payroll) | the company of part 3 | 10 min |
-| [11. Gas paid by vote, and a swap that leaves no approval](#11-gas-paid-by-vote-and-a-swap-that-leaves-no-approval) | the company of part 3 | 10 min, mostly waiting for Base |
+| [11. Gas paid by vote, and a swap that leaves no approval](#11-gas-paid-by-vote-and-a-swap-that-leaves-no-approval) | the company of part 3 | 10 min |
 | [12. Become a shareholder](#12-become-a-shareholder) | a fourth NEAR testnet account | 5 min |
 
 Two test stablecoins, one per chain. On **Base Sepolia**, the company wallet pays in Circle's test USDC
@@ -88,7 +88,7 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 2. **Role → Write the role**: the role `payments` opens with **Transfers** added. Token **USDC**, a budget (for
    example 10 every 1 day), one recipient (any address: **Add recipient**). Preview, submit, then approve with two
    accounts in **Votes**. (Outside the guide: **Rules → New role → + Transfers**.)
-   **You should see** the proposal approved, then the veto window (5 minutes on testnet, where any council member can
+   **You should see** the proposal approved, then the veto window (1 minute on testnet, where any council member can
    stop it), then the role applied by itself.
 3. **Check on chain**: `get_role` on your vault (`json-args '{"role":"payments"}'`) shows the permission tree: the
    token, the one recipient, and the budget as the hash of its key. The budget itself is `get_allowance` with that key
@@ -227,7 +227,7 @@ euro budget. How it works and what stays private: [docs/bank.md](./docs/bank.md)
    payment made on its date, with no agent and no new vote.
 7. **Check on chain**: `list_bank_payouts` on the vault (`json-args '{}'`) lists each payout, its beneficiary
    number and its transfer; `get_operation` of the transfer shows it `Confirmed`. The transfers of one vault leave one
-   at a time, each after Base Sepolia finalizes the previous one (about 25 minutes on testnet).
+   at a time, settled about 5 minutes after they are mined (testnet settles on Base's `safe` head); sponsored ones leave without waiting for each other.
 
 ## 11. Gas paid by vote, and a swap that leaves no approval
 
@@ -313,4 +313,4 @@ still there to inspect: DAO `judge-walk-9093.sputnikv2.testnet`, vault `judge-wa
 - **The agent says the wallet has no gas** on an allowed payment: vote sponsored gas (part 11), or fund the company
   wallet on Base Sepolia. Refusals do not need either.
 - **A euro payout stays "Transferring"**: that is its last state in the vault; its transfer's own state is what
-  moves (`get_operation`), and the transfers of one vault leave one at a time, each after Base finality.
+  moves (`get_operation`); it settles about 5 minutes after its Base transaction is mined.
