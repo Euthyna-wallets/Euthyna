@@ -44,6 +44,25 @@ export class GasTank {
     return this.account.address;
   }
 
+  /**
+   * Sponsored execution (EIP-7702): sends the wallet's signed `execute(...)` call from the tank,
+   * which pays the gas. The call itself carries the vault's signature; the tank adds nothing to it.
+   */
+  async relay(wallet: Address, data: Hex): Promise<Hex> {
+    return this.wallet.sendTransaction({ to: wallet, data, value: 0n, chain: this.chain, account: this.account });
+  }
+
+  /** Submits the wallet's EIP-7702 authorization (signed by NEAR MPC) in a type-4 transaction the tank pays for. */
+  async delegate(authorization: { chainId: number; address: Address; nonce: number; r: Hex; s: Hex; yParity: number }): Promise<Hex> {
+    return this.wallet.sendTransaction({
+      to: this.account.address,
+      value: 0n,
+      authorizationList: [authorization],
+      chain: this.chain,
+      account: this.account,
+    });
+  }
+
   /** Sends the transaction's sender what it lacks to pay for it; null when it already has enough. */
   async topUpFor(serializedTransaction: Hex): Promise<TankTopUp> {
     const tx = parseTransaction(serializedTransaction);

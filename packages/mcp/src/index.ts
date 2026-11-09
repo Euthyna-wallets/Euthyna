@@ -123,8 +123,10 @@ export class MandateMcpTools {
     });
   }
 
-  call(input: { chainId: number; to: string; data: string; value: string; allowanceAmount: string; reference: string; gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string }) {
-    return this.client.call({ chain_id:input.chainId, target:evmAddressBytes(input.to as `0x${string}`), calldata:Array.from(Buffer.from(input.data.slice(2), "hex")), value:input.value, allowance_amount:input.allowanceAmount, reference:input.reference, gas_limit:input.gasLimit, max_fee_per_gas:input.maxFeePerGas, max_priority_fee_per_gas:input.maxPriorityFeePerGas });
+  call(input: { chainId: number; to: string; data: string; value: string; allowanceAmount: string; reference: string; gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string; approveToken?: string | undefined; approveAmount?: string | undefined }) {
+    if (Boolean(input.approveToken) !== Boolean(input.approveAmount)) throw new Error("approveToken and approveAmount go together");
+    const approval = input.approveToken && input.approveAmount ? { token: evmAddressBytes(input.approveToken as `0x${string}`), amount: input.approveAmount } : undefined;
+    return this.client.call({ chain_id:input.chainId, target:evmAddressBytes(input.to as `0x${string}`), calldata:Array.from(Buffer.from(input.data.slice(2), "hex")), value:input.value, allowance_amount:input.allowanceAmount, reference:input.reference, gas_limit:input.gasLimit, max_fee_per_gas:input.maxFeePerGas, max_priority_fee_per_gas:input.maxPriorityFeePerGas }, approval);
   }
 
   mandate() {
@@ -221,8 +223,10 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.fillSealedOrders(input)));
   server.registerTool("execute_call", {
     title: "Execute a permitted contract call",
-    description: "Execute exact calldata inside your on-chain role, including DeFi calls. The vault enforces target, selector, parameters, budgets and gas caps. No API is required for an unguarded role.",
-    inputSchema: { chainId: z.number().int().positive().default(84532), to: address, data:z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/), value:uint.default("0"), allowanceAmount:uint.default("0"), reference:z.string().min(1), gasLimit:uint, maxFeePerGas:uint, maxPriorityFeePerGas:uint },
+    description: "Execute exact calldata inside your on-chain role, including DeFi calls. The vault enforces target, selector, parameters, budgets and gas caps. No API is required for an unguarded role. For a swap on a company with sponsored gas, give approveToken + approveAmount: the wallet approves `to` for that amount, runs the call and revokes the approval in one transaction (the role must allow the approve).",
+    inputSchema: { chainId: z.number().int().positive().default(84532), to: address, data:z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/), value:uint.default("0"), allowanceAmount:uint.default("0"), reference:z.string().min(1), gasLimit:uint, maxFeePerGas:uint, maxPriorityFeePerGas:uint,
+      approveToken: address.optional().describe("Token `to` may take for this call only (e.g. the swap's input); revoked right after."),
+      approveAmount: uint.optional().describe("How much of approveToken, in its smallest unit.") },
   }, async (input) => result(await tools.call(input)));
   server.registerTool("mandate", {
     title: "Read my mandate",

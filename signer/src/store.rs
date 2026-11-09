@@ -13,6 +13,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const DEFAULT_METHODS: &[&str] = &[
     "prepare",
+    "prepare_with_approval",
     "authorize",
     "cancel_prepared",
     "cancel_nonce",

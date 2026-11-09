@@ -5,6 +5,9 @@ import { Guard } from "./guard.js";
 import { NearClient } from "./near.js";
 import type { VaultOperation } from "./types.js";
 
+/** keccak256("Executed(bytes32)") */
+export const EXECUTED_TOPIC = "0xa74c8847d513feba22a0f0cb38d53081abf97562cdb293926ba243689e7c41ca";
+
 export class BaseRelayer {
   private readonly client;
 
@@ -45,6 +48,32 @@ export class BaseRelayer {
       if (!message.includes("already known") && !message.includes("already imported")) throw error;
     }
     return localHash;
+  }
+
+  /** Sponsored execution: the relayer (the gas tank) sends the wallet's signed `execute` call. */
+  async relay(wallet: Address, calldata: number[]): Promise<Hex> {
+    if (!this.gasTank) throw new Error("sponsored execution needs BASE_GAS_TANK_PRIVATE_KEY (the relayer that pays the gas)");
+    return this.gasTank.relay(wallet, bytesToHex(Uint8Array.from(calldata)));
+  }
+
+  async code(address: Address): Promise<Hex | undefined> {
+    return this.client.getCode({ address });
+  }
+
+  /** Submits a wallet's EIP-7702 authorization; the tank pays. */
+  async delegate(authorization: { chainId: number; address: Address; nonce: number; r: Hex; s: Hex; yParity: number }): Promise<Hex> {
+    if (!this.gasTank) throw new Error("delegation needs BASE_GAS_TANK_PRIVATE_KEY");
+    return this.gasTank.delegate(authorization);
+  }
+
+  /** The wallet's `Executed(opId)` log in a receipt, with what the vault binds into its MPC proof. */
+  async executedLog(hash: Hex, wallet: Address, opId: Hex): Promise<{ blockHash: Hex; blockNumber: bigint; transactionIndex: number; logIndex: number } | null> {
+    const receipt = await this.client.getTransactionReceipt({ hash }).catch(() => null);
+    if (!receipt || receipt.status !== "success") return null;
+    const log = receipt.logs.find((entry) => entry.address.toLowerCase() === wallet.toLowerCase()
+      && entry.topics[0]?.toLowerCase() === EXECUTED_TOPIC && entry.topics[1]?.toLowerCase() === opId.toLowerCase());
+    if (!log || log.logIndex === null || log.transactionIndex === null) return null;
+    return { blockHash: receipt.blockHash, blockNumber: receipt.blockNumber, transactionIndex: log.transactionIndex, logIndex: log.logIndex };
   }
 
   async receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint; blockHash: Hex } | null> {

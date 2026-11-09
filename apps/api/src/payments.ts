@@ -13,6 +13,7 @@ import { evaluateOperation, type GuardContext } from "./registry.js";
 import type { NearClient } from "./near.js";
 import type { RegistryService } from "./registry-db.js";
 import type { VaultOperation } from "./types.js";
+import type { SponsoredApproval } from "./evm.js";
 
 
 const erc20TransferAbi = [{
@@ -221,7 +222,9 @@ export class PaymentService {
       suppliers: await this.registry.activeSupplierWallets(organizationId, operation.transaction.chain_id),
       companyWallet: await this.companyWallet(agent.vaultAccountId, operation.transaction.chain_id),
     };
-    const result: GuardResult = await this.guard.approve(operation, context);
+    const sponsoredView = await this.near.viewFunction<{ deadline: number; approval?: SponsoredApproval | null } | null>(agent.vaultAccountId, "get_sponsored_operation", { op_id: opId }).catch(() => null);
+    const sponsored = sponsoredView && context.companyWallet ? { wallet: context.companyWallet, deadline: BigInt(sponsoredView.deadline), approval: sponsoredView.approval ?? null } : null;
+    const result: GuardResult = await this.guard.approve(operation, context, sponsored);
     if (result.decision === "refuse") return refuse("guard_refused", result.reasons);
     await this.upsertOperation(organizationId, agent.agentId, operation);
     const stored = await this.storeVisa(

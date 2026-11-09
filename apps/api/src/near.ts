@@ -286,6 +286,19 @@ export class NearClient {
   async settle(vaultAccountId: string, opId: number[], blockHash: Hex, cancellation = false): Promise<string> {
     return this.functionCall(vaultAccountId, cancellation ? "settle_cancellation" : "settle", { op_id: opId, block_hash: Array.from(hexToBytes(blockHash)) }, "70000000000000");
   }
+  async settleSponsored(vaultAccountId: string, opId: number[], log: { txHash: Hex; blockHash: Hex; blockNumber: bigint; transactionIndex: number; logIndex: number }): Promise<string> {
+    return this.functionCall(vaultAccountId, "settle_sponsored", {
+      op_id: opId,
+      tx_hash: Array.from(hexToBytes(log.txHash)),
+      block_hash: Array.from(hexToBytes(log.blockHash)),
+      block_number: log.blockNumber.toString(),
+      tx_index: String(log.transactionIndex),
+      log_index: String(log.logIndex),
+    }, "70000000000000");
+  }
+  async delegateWallet(vaultAccountId: string, chainId: number): Promise<string> {
+    return this.functionCall(vaultAccountId, "delegate_wallet", { chain_id: chainId }, "300000000000000");
+  }
   async releaseUnconfirmed(vaultAccountId: string, opId: number[]): Promise<string> {
     return this.functionCall(vaultAccountId, "release_unconfirmed", { op_id: opId }, "30000000000000");
   }

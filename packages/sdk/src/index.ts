@@ -11,6 +11,7 @@ import { bytesToHex, encodeFunctionData, getAddress, hexToBytes, keccak256, stri
 
 export const AGENT_FUNCTION_CALL_METHODS = [
   "prepare",
+  "prepare_with_approval",
   "authorize",
   "cancel_nonce",
   "settle",
@@ -40,6 +41,7 @@ export const AGENT_METHOD_GENERATIONS: ReadonlyArray<readonly string[]> = [
 
 export const AGENT_GAS = {
   prepare: "30000000000000",
+  prepareWithApproval: "60000000000000",
   authorize: "50000000000000",
 } as const;
 
@@ -90,6 +92,16 @@ export interface OmniRolesOperationRequest {
   max_priority_fee_per_gas: string;
 }
 
+/**
+ * A token the call's target may take, for this call only (a swap's input). With sponsored gas
+ * (EIP-7702) the wallet runs approve(target, amount), the call and approve(target, 0) as one
+ * transaction: no approval is left behind.
+ */
+export interface TokenApproval {
+  token: number[];
+  amount: string;
+}
+
 export interface AgentGasQuote {
   gas: {
     gasLimit: string;
@@ -121,7 +133,7 @@ export interface InvoiceContext {
 export interface VaultGateway {
   prepare(intent: PaymentIntent): Promise<PreparedOperation>;
   /** Any call the role allows (not only a token transfer). */
-  prepareRequest?(request: OmniRolesOperationRequest): Promise<PreparedOperation>;
+  prepareRequest?(request: OmniRolesOperationRequest, approval?: TokenApproval): Promise<PreparedOperation>;
   authorize(opId: number[], approval: GuardApproval | null): Promise<string>;
   cancelNonce(opId: number[]): Promise<string>;
   /** Release a prepared operation the Guard refused, so the wallet is free again. */
@@ -240,9 +252,9 @@ export class MandateAgentClient {
   }
 
   /** Any call the role allows: prepare, Guard visa, authorize. */
-  async call(request: OmniRolesOperationRequest): Promise<PayResult> {
+  async call(request: OmniRolesOperationRequest, approval?: TokenApproval): Promise<PayResult> {
     if (!this.vault.prepareRequest) throw new Error("this vault gateway only prepares token transfers");
-    return this.submit(await this.vault.prepareRequest(request));
+    return this.submit(await this.vault.prepareRequest(request, approval));
   }
 
   /**
@@ -621,8 +633,10 @@ export class NearVaultGateway implements VaultGateway {
     return this.prepareRequest(omniRolesPaymentRequest(intent, this.chainId));
   }
 
-  async prepareRequest(request: OmniRolesOperationRequest): Promise<PreparedOperation> {
-    const outcome = await this.call("prepare", { role: this.role, request }, AGENT_GAS.prepare);
+  async prepareRequest(request: OmniRolesOperationRequest, approval?: TokenApproval): Promise<PreparedOperation> {
+    const outcome = approval
+      ? await this.call("prepare_with_approval", { role: this.role, request, approval }, AGENT_GAS.prepareWithApproval)
+      : await this.call("prepare", { role: this.role, request }, AGENT_GAS.prepare);
     const operation = decodeNearSuccessValue(outcome);
     if (
       !operation ||

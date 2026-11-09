@@ -178,6 +178,7 @@ describe("OmniRoles SDK", () => {
     expect(proposedAgentAccountId("Compta Bot", "mandateos.testnet", "org-2")).not.toBe(first);
     expect(AGENT_FUNCTION_CALL_METHODS).toEqual([
       "prepare",
+      "prepare_with_approval",
       "authorize",
       "cancel_nonce",
       "settle",

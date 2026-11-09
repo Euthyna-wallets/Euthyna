@@ -1,7 +1,7 @@
 import { bytesToHex, keccak256, type Hex } from "viem";
 import { serializeStatusReport, serializeVisa, signDomainPayload, randomSafeNonce } from "./canonical.js";
 import type { KmsSigner } from "./kms.js";
-import { bytes32ToHex, digestVaultTransaction, hexToByteArray } from "./evm.js";
+import { bytes32ToHex, digestSponsoredBatch, digestSponsoredExecute, digestVaultTransaction, hexToByteArray, type SponsoredApproval } from "./evm.js";
 import { evaluateOperation, type GuardContext } from "./registry.js";
 import type { GuardVisa, SignedPayload, StatusReport, VaultOperation } from "./types.js";
 
@@ -20,13 +20,16 @@ export class Guard {
     private readonly statusSigner: KmsSigner,
   ) {}
 
-  async approve(operation: VaultOperation, context: GuardContext): Promise<GuardResult> {
+  /** `sponsored`: the vault signs this operation as the wallet's EIP-712 Execute (EIP-7702), not a transaction. */
+  async approve(operation: VaultOperation, context: GuardContext, sponsored?: { wallet: `0x${string}`; deadline: bigint; approval?: SponsoredApproval | null } | null): Promise<GuardResult> {
     if (operation.state !== "Prepared") {
       return { decision: "refuse", reasons: [`operation state is ${operation.state}, expected Prepared`] };
     }
-    const recomputed = digestVaultTransaction(operation);
+    const recomputed = !sponsored ? digestVaultTransaction(operation)
+      : sponsored.approval ? digestSponsoredBatch(operation, sponsored.wallet, sponsored.deadline, sponsored.approval)
+      : digestSponsoredExecute(operation, sponsored.wallet, sponsored.deadline);
     if (recomputed !== bytes32ToHex(operation.tx_digest)) {
-      return { decision: "refuse", reasons: ["Vault tx_digest does not match canonical EIP-1559 transaction"] };
+      return { decision: "refuse", reasons: [sponsored ? "Vault tx_digest does not match the wallet's EIP-712 Execute" : "Vault tx_digest does not match canonical EIP-1559 transaction"] };
     }
     const decision = evaluateOperation(context, operation);
     if (decision.decision === "refuse") return decision;
