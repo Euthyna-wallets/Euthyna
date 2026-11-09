@@ -30,6 +30,7 @@ function world(now: { ms: number }) {
   const follow: Record<string, { project: string; follow: boolean; last_queued: string | null }> = {};
   const active = { version: "ab".repeat(32) };
   const lanes: string[] = [];
+  const duringRead: Record<string, () => void> = {};
   const near = {
     viewFunction: vi.fn(async (account: string, method: string) => {
       lanes.push(currentLane());
@@ -42,6 +43,8 @@ function world(now: { ms: number }) {
       if (method === "count_bank_payouts") return (payouts[account] ?? []).length;
       if (method === "list_bank_payouts") return payouts[account] ?? [];
       reads.push(account);
+      const hook = duringRead[account];
+      if (hook) { delete duringRead[account]; hook(); return []; }
       if (account === "broken.nomos.testnet") throw new Error("CodeDoesNotExist");
       return rules[account] ?? [];
     }),
@@ -64,7 +67,7 @@ function world(now: { ms: number }) {
     operation: { findUnique: async () => null, create: async () => ({}) },
   } as unknown as PrismaClient;
   const service = new OmniRolesService(prisma, near, {} as KmsSigner, {} as KmsSigner, { proposalBondYocto: "1", proposalPeriodNs: "1" } as OmniRolesConfig);
-  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks, refuse };
+  return { service, reads, executed, lanes, rules, standing, payouts, follow, active, calls, banks, refuse, duringRead };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -94,6 +97,27 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 301_000);
     await service.activateAllReadyRules();
     expect(reads.sort()).toEqual(["idle.nomos.testnet", "later.nomos.testnet", "ready.nomos.testnet"]);
+  });
+
+  it("a vote that lands while the job reads the vault is not pushed back to the idle read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 9, 21, 1, 30) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, rules, duringRead } = world(now);
+    // The pass reads idle's rules (empty), and meanwhile a member's vote queues one and asks to refresh.
+    duringRead["idle.nomos.testnet"] = () => {
+      rules["idle.nomos.testnet"]!.push({ queue_id: [3], change: { SetRole: {} }, state: "Queued", execute_after_ns: ns(now.ms + 60_000), expires_at_ns: ns(now.ms + 86_400_000) });
+      void service.refresh("org-2");
+    };
+    await service.activateAllReadyRules();
+    await Promise.resolve();
+    // 9 s later the vault is read again and sees the veto window; it runs when the window ends.
+    vi.setSystemTime(now.ms + 9_000);
+    await service.activateAllReadyRules();
+    vi.setSystemTime(now.ms + 64_000);
+    executed.length = 0;
+    await service.activateAllReadyRules();
+    expect(executed).toContain("idle.nomos.testnet:execute_rule_change");
   });
 
   it("reads a vault right after its veto window ends, not a minute later", async () => {

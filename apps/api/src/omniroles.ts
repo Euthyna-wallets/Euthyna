@@ -185,6 +185,8 @@ const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 // vote in the console wakes the vault at once (`refresh`); known dates (a veto window's end, a
 // payroll date) wake it on time.
 const IDLE_RECHECK_MS = 300_000;
+/** After a member's transaction, the vault is read again every few seconds for this long. */
+const WAKE_FOLLOW_MS = 30_000;
 const DUE_MARGIN_MS = 3_000;
 const ERROR_RECHECK_MS = 30_000;
 const BROKEN_RECHECK_MS = 15 * 60_000;
@@ -465,6 +467,8 @@ export class OmniRolesService {
   private activationRunning = false;
   /** vault -> when the activation job reads it next (ms). Empty after a restart: every vault is read once. */
   private readonly nextActivationCheck = new Map<string, number>();
+  /** When a member's transaction last asked to read the vault again (`refresh`). */
+  private readonly wakeRequestedAt = new Map<string, number>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
@@ -1938,10 +1942,16 @@ export class OmniRolesService {
         const lane = async () => {
           while (index < due.length) {
             const treasury = due[index++]!;
+            const readAt = Date.now();
             try {
               const { nextDueMs } = await this.activateDue(treasury.organizationId);
               // A little after the window ends: the chain's clock decides, not ours.
-              const next = nextDueMs === null ? Date.now() + IDLE_RECHECK_MS : Math.min(nextDueMs + DUE_MARGIN_MS, Date.now() + IDLE_RECHECK_MS);
+              let next = nextDueMs === null ? Date.now() + IDLE_RECHECK_MS : Math.min(nextDueMs + DUE_MARGIN_MS, Date.now() + IDLE_RECHECK_MS);
+              // A vote that came in while this pass read the vault was not seen by it, and one from the
+              // last few seconds may not be final yet: read again soon instead of pushing the vault
+              // back to the idle read (5 minutes), which held a voted role for 5 minutes on 9 November.
+              const woken = this.wakeRequestedAt.get(treasury.vaultAccountId);
+              if (woken !== undefined && woken >= readAt - WAKE_FOLLOW_MS) next = Math.min(next, Math.max(woken, readAt) + 8_000);
               this.nextActivationCheck.set(treasury.vaultAccountId, Math.max(next, Date.now() + 1_000));
             } catch (error) {
               const missing = /CodeDoesNotExist|MethodNotFound|does not exist|Cannot find contract code/i.test(String(error));
@@ -2645,6 +2655,7 @@ export class OmniRolesService {
     for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
     // The vote may have queued a rule: read the vault on the next pass, once the blocks are final.
     this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
+    this.wakeRequestedAt.set(treasury.vaultAccountId, Date.now());
     this.ruleFacts.delete(treasury.vaultAccountId);
   }
 
