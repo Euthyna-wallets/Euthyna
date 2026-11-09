@@ -13,10 +13,14 @@ The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 | [7. Recover a seat](#7-recover-a-founder-seat) | one more NEAR testnet account, and a mailbox | 15 min, 10 of them waiting |
 | [8. Market](#8-market) | optional | 5 min |
 | [9. Rob the Agent](#9-rob-the-agent-no-wallet) | a browser; a NEAR testnet wallet only for the trophy | 5 min |
+| [10. A euro account](#10-a-euro-account-iban-invoices-payouts-payroll) | the company of part 3 | 10 min |
+| [11. Gas paid by vote, and a swap that leaves no approval](#11-gas-paid-by-vote-and-a-swap-that-leaves-no-approval) | the company of part 3 | 10 min, mostly waiting for Base |
+| [12. Become a shareholder](#12-become-a-shareholder) | a fourth NEAR testnet account | 5 min |
 
 Two test stablecoins, one per chain. On **Base Sepolia**, the company wallet pays in Circle's test USDC
 (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`): an honest payment that actually lands on Base needs some
-([faucet.circle.com](https://faucet.circle.com), Base Sepolia) and a little Base Sepolia ETH on the company wallet. On
+([faucet.circle.com](https://faucet.circle.com), Base Sepolia). It needs no ETH once the members vote sponsored gas
+(part 11): Euthyna's relayer pays the network fee. On
 **NEAR testnet**, Rob the Agent and the Market use **TestUSDC** (`test-ft-v4.mandateos-root-20261021.testnet`, 6
 decimals), a test token of ours; you never need to buy it: the game tops you up. **Every refusal below works without any of that**: the
 vault refuses before anything is signed, so an empty wallet is enough to see the security model work.
@@ -84,7 +88,7 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 2. **Role → Write the role**: the role `payments` opens with **Transfers** added. Token **USDC**, a budget (for
    example 10 every 1 day), one recipient (any address: **Add recipient**). Preview, submit, then approve with two
    accounts in **Votes**. (Outside the guide: **Rules → New role → + Transfers**.)
-   **You should see** the proposal approved, then the veto window (1 minute on testnet, where any council member can
+   **You should see** the proposal approved, then the veto window (5 minutes on testnet, where any council member can
    stop it), then the role applied by itself.
 3. **Check on chain**: `get_role` on your vault (`json-args '{"role":"payments"}'`) shows the permission tree: the
    token, the one recipient, and the budget as the hash of its key. The budget itself is `get_allowance` with that key
@@ -101,9 +105,9 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
 
 Put the MCP config into Claude Desktop, Claude Code, Cursor or Codex, with your paths (build the server and the SDK
 once, in the clone: `pnpm install && pnpm --filter "@euthyna/mcp..." build`). The server refuses to start if the key
-file sits in its own working directory, where the agent could read it: keep it elsewhere. It lists 18 tools; the ones
-used here are `mandate`, `check` and `pay` (the others: Market, sealed orders, NEAR and Solana transfers, revenue sharing, status
-and cancel). Every one goes through the vault. Then talk to it:
+file sits in its own working directory, where the agent could read it: keep it elsewhere. It lists 20 tools; the ones
+used here are `mandate`, `check` and `pay` (the others: contract calls, Market, sealed orders, NEAR and Solana transfers,
+euro payouts, revenue sharing, status and cancel). Every one goes through the vault. Then talk to it:
 
 | Ask the agent | You should see |
 | --- | --- |
@@ -114,8 +118,8 @@ and cancel). Every one goes through the vault. Then talk to it:
 
 It does not matter what the agent believes: its key cannot sign anything else. **Activity** lists each refusal
 with its reason, and **Ask the members to vote on it** turns one into a proposal (an agent never asks for itself).
-With USDC and ETH on the company wallet, the honest payment goes through and its Base transaction is linked in
-Activity.
+With USDC on the company wallet and sponsored gas (part 11), the honest payment goes through and its Base
+transaction is linked in Activity.
 
 ## 6. Halt every agent, then resume
 
@@ -129,8 +133,9 @@ Activity.
 Proved with ZK Email and **verified by a NEAR contract** (`euthyna-recovery-v4.testnet`, no access key); no Euthyna
 server is in the path. How it works and what is public: [docs/recovery.md](./docs/recovery.md).
 
-1. **Settings → Seat recovery**, signed in as a founder. Send yourself an email with the subject shown, paste its
-   source (Gmail: ⋮ → Show original). Your browser proves it (about 40 s), then you sign `enroll`.
+1. **Settings → Seat recovery**, signed in as a founder. From the mailbox you will recover with, send an email to
+   **another address you can open**, with the subject shown (Gmail does not sign an email you send to yourself). Open it
+   where it was received, not in Sent, and paste its source (Gmail: ⋮ → Show original → Copy to clipboard). Your browser proves it (about 40 s), then you sign `enroll`.
    **You should see** "Enrolled on chain"; the contract keeps the domain and a salted hash of the address, never
    the email.
    On testnet a [YOPmail](https://yopmail.com) inbox also works, for a throwaway mailbox. YOPmail inboxes have no
@@ -199,6 +204,63 @@ Over HTTP, for scripts and AI judges: `curl https://euthyna.io/v1/rob/cards`, th
 `curl -X POST https://euthyna.io/v1/rob/play -H 'content-type: application/json' -d '{"card":"forge-a-master-key"}'`.
 Details and every card's testnet transaction: [docs/rob-the-agent.md](./docs/rob-the-agent.md).
 
+## 10. A euro account: IBAN, invoices, payouts, payroll
+
+The company has a euro IBAN at a bank partner (Noah, sandbox on testnet). Euros that arrive become EURC in the
+company wallet, and only there. Euros that leave go only to IBANs (or Pix keys) the members voted, under a role's
+euro budget. How it works and what stays private: [docs/bank.md](./docs/bank.md).
+
+1. **Wallet → Euro bank account · IBAN**: the company's IBAN, holder and BIC. *Sandbox: send a SEPA transfer of…*
+   simulates a client paying it. **You should see** the transfer in the list, then EURC in the company wallet
+   (Base Sepolia, `0x623ef90571256F905B2Fde947dC33098BdD8F4d8`).
+2. **Invoices → NEW INVOICE**, open its **PDF · QR** (RF reference, SEPA QR), then **SIMULATE PAYMENT**. **You should
+   see** it go from Open to Paid on its own when the transfer lands. **EXPORT CSV** lists each payment with its
+   transaction, for the accountant.
+3. **Settings → suppliers**: vote a beneficiary, an IBAN or a Pix key. It is sealed in your browser: the chain only
+   holds a commitment and envelopes the bank enclave and the members can open.
+4. **Wallet → Euro payouts · Who may pay**: vote that the agent's role may pay, for example 50 EUR a day and 10 EUR
+   each.
+5. Ask the agent (MCP `bank_payout`) to pay the beneficiary 5 EUR, then 20 EUR, then to beneficiary #9. **You should
+   see** `sent` with the amount the beneficiary receives, then `refused` by the vault: `ERR_MAX_PER_PAYOUT`, then
+   `BeneficiaryNotAllowed`.
+6. **Payroll · standing orders**: vote "3 EUR to the beneficiary every 10 minutes, 2 times". **You should see** each
+   payment made on its date, with no agent and no new vote.
+7. **Check on chain**: `list_bank_payouts` on the vault (`json-args '{}'`) lists each payout, its beneficiary
+   number and its transfer; `get_operation` of the transfer shows it `Confirmed`. The transfers of one vault leave one
+   at a time, each after Base Sepolia finalizes the previous one (about 25 minutes on testnet).
+
+## 11. Gas paid by vote, and a swap that leaves no approval
+
+The company wallet needs ETH for every Base transaction, unless the members vote sponsored gas: the wallet then
+delegates its code (EIP-7702) to `EuthynaExecutor`, a contract with no owner and no upgrade, and Euthyna's relayer
+sends its calls and pays the fee. The wallet still runs only what the vault had NEAR MPC sign, once, before a
+deadline. Details and testnet hashes: [docs/sponsored-gas.md](./docs/sponsored-gas.md).
+
+1. **Wallet → Network fees → Sponsor them**, then approve with two accounts in **Votes**. (A vault made before
+   9 November first needs the upgrade offered in **Settings**.) **You should see**, after the veto window, "Sponsored".
+2. **Check on chain**: `get_evm_executor` on the vault (`json-args '{"chain_id":84532}'`) returns
+   `0x76bb5c47b0759af0300afeea954fa837a96675ed`; within two minutes the company wallet's code on Base Sepolia is
+   `0xef0100` followed by that address (`eth_getCode`).
+3. Ask the agent to pay the supplier 1 USDC. **You should see** a Base transaction sent by
+   `0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982` (the relayer) calling `execute` on the company wallet, with the USDC
+   `Transfer` and an `Executed` event; the wallet's ETH does not move.
+4. **A swap**: vote a role with a **DeFi · swap on Uniswap V3** block (WETH to USDC). The agent calls `execute_call` with the
+   router's `exactInputSingle` and `approveToken` + `approveAmount`. **You should see** one transaction that approves
+   the router, swaps and sets the approval back to 0. A failing swap undoes the approval too.
+5. **Check on chain**: `get_sponsored_operation` on the vault shows the deadline (and the approval for a swap); the
+   router's `allowance` from the wallet is 0 after the swap.
+
+## 12. Become a shareholder
+
+A company can issue shares; buyers vote with them and share the revenue of the epochs they voted in
+([docs/shares.md](./docs/shares.md)).
+
+1. Open the company's public page `/c/<dao>`, signed out. **CONNECT A NEAR WALLET TO BUY** with a fourth account,
+   choose a number of shares, **BUY**. The first purchase also pays 0.01 NEAR to register the account on the shares
+   contract. Then **LOCK … TO VOTE**.
+2. **You should see** your shares on the page; locked shares count in the DAO's shareholder votes.
+3. **Check on chain**: `ft_balance_of` on the shares contract for your account; the sale proceeds went to the DAO.
+
 ### Walked on 5 November 2026
 
 | Step | Result |
@@ -207,6 +269,28 @@ Details and every card's testnet transaction: [docs/rob-the-agent.md](./docs/rob
 | Hire him: cheque held, delivered, settled | settlement `sxk51bjBZJn3G2D6Ck9HCTc77HaRLpSLhz6MWL5fhHn` |
 | Rug O'Clock, 18:00 UTC: Ruggy (Qwen3.6 on NEAR AI Cloud) tries to pay 950 USDC to `rug-collector.testnet` | refused by the vault, tx `5ZxTUUzCnJLgpsKQiC4urQJ6Sbhu4eW6M2zWxUuUPk3R` |
 | Claim with `eut-judge-third.testnet` | plays linked, 1 LEASH minted, tx `8MatWmMLvECDTyCa1Pg8kJpa6LER2ijGvAAbQp8kZTmv` |
+
+## Walked on 9 November 2026
+
+We walked the new parts in the console against testnet, with three fresh founder accounts and a fourth for the
+shares. The company is still there to inspect: **Judge Walk 1109**, DAO `judge-walk-1109.sputnikv2.testnet`, vault
+`judge-walk-1109.euthyna-nomos.testnet`, company wallet `0x3bbA369D1441DA6eea22BF7cFB7364853d3F8B94`.
+
+| Step | Result |
+| --- | --- |
+| Parts 3 to 6: company, wallet and role votes, the agent over MCP | `parameterNotAllowed` for another recipient, `allowanceExceeded` over budget, `ERR_PAUSED` after **Halt all agents**, resumed by a vote |
+| Euro account: a simulated SEPA transfer of 30 EUR, invoice INV-2026-0001 (18 EUR) | EURC in the company wallet; the invoice Paid on its own |
+| Votes: euro payouts on, two beneficiaries (Pix and SEPA), 50 EUR a day and 10 EUR each, payroll 3 EUR every 10 minutes | applied after their veto windows |
+| Agent `bank_payout`: 5 EUR / 20 EUR / beneficiary #9 | sent (4.81 EUR received) / `ERR_MAX_PER_PAYOUT` / `BeneficiaryNotAllowed` |
+| Sponsored gas: vault upgraded (proposal #13), sponsoring voted (#12), wallet delegated | wallet code `0xef010076bb5c47b0759af0300afeea954fa837a96675ed` |
+| Agent's invoice payout WALK-INV-1, 5 EUR, sponsored | [`0x1b5fef52…`](https://base-sepolia.blockscout.com/tx/0x1b5fef52dc7d7309826c1a8a9a37919f377fba63a2dee6377e5752b906aef020), settled on NEAR |
+| Payroll SO1-2 and SO1-3, 3 EUR each to Pix, no agent, one relayed transaction each | [`0x68eafc6f…`](https://base-sepolia.blockscout.com/tx/0x68eafc6fa1f1c2c7bea4202cfc98bd63e0617349e52f6b852587aca2141863e9), [`0xcd513258…`](https://base-sepolia.blockscout.com/tx/0xcd51325882a06f130fbd5d8d6f0e8c26085d5f05e8ee88d36c21022f1177f100), settled |
+| Agent pays 1 USDC (Circle) to the voted supplier, sponsored | [`0xe1e16702…`](https://base-sepolia.blockscout.com/tx/0xe1e167022cb6a78320f39860e198e25f2af171e639961c9b934719de6ee9b1cf), settled |
+| Agent's payout of 5 EUR to Supplier A, sponsored | [`0x11393120…`](https://base-sepolia.blockscout.com/tx/0x11393120dc54b3bcf08d97a0ba90c8f1c2cbf5471648eb978371ee1c47e80477), settled |
+| Shares: 1000 JWALK issued by two votes, listed in the directory; a fourth account buys 10 and locks them | the holding and the lock on the shares contract |
+
+A Uniswap V3 swap (WETH to USDC) with its approval granted and revoked in the same transaction ran from the test
+vault of [docs/sponsored-gas.md](./docs/sponsored-gas.md): [`0x8a4729a8…`](https://base-sepolia.blockscout.com/tx/0x8a4729a8e77ab09f288ec2151fea39411186663a75ffba864e1bc3794bb64504).
 
 ## Walked on 4 November 2026
 
@@ -226,5 +310,7 @@ still there to inspect: DAO `judge-walk-9093.sputnikv2.testnet`, vault `judge-wa
 
 - **A vote does not show yet**: reads use final blocks; the page updates within a few seconds.
 - **"Not enough balance"** on a NEAR call: the account needs a little more testnet NEAR.
-- **The agent says the wallet has no gas** on an allowed payment: fund the company wallet on Base Sepolia (above).
-  Refusals do not need it.
+- **The agent says the wallet has no gas** on an allowed payment: vote sponsored gas (part 11), or fund the company
+  wallet on Base Sepolia. Refusals do not need either.
+- **A euro payout stays "Transferring"**: that is its last state in the vault; its transfer's own state is what
+  moves (`get_operation`), and the transfers of one vault leave one at a time, each after Base finality.
