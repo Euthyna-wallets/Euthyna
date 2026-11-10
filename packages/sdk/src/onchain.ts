@@ -295,6 +295,7 @@ export class OnchainAgentClient {
     if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
     // Builds the transaction (two PDA derivations for SPL) and asks MPC to sign.
     const nearTransactionHash = await this.vault.action("execute_solana", { role, request }, "150000000000000");
+    this.wake();
     let op: SolanaOperationView | null = null;
     for (let attempt = 0; attempt < 20 && !op?.signed_transaction; attempt += 1) {
       op = await this.vault.view<SolanaOperationView | null>("get_solana_operation_by_reference", { role, reference: input.reference });
