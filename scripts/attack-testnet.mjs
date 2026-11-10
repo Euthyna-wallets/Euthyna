@@ -6,7 +6,8 @@
 //   VAULT=pixel-forge.nomos.euthyna.testnet AGENT=<agent account> ROLE=payments pnpm attack:testnet
 const RPC = process.env.NEAR_RPC_URL ?? "https://rpc.testnet.fastnear.com";
 const VAULT = process.env.VAULT ?? "pixel-forge.nomos.euthyna.testnet";
-const AGENT = process.env.AGENT ?? "naomi-7e98dc-agent.mandateos.testnet";
+// Pixel Forge's active payments agent. If it ever leaves the role, change this default.
+const AGENT = process.env.AGENT ?? "naomi-pay-7e98dc-agent.mandateos.testnet";
 const ROLE = process.env.ROLE ?? "payments";
 const ATTACKER = "babababababababababababababababababababa";
 
@@ -64,6 +65,13 @@ const controlNote = control.allowed
     ? "refused: the budget is used up for this period (the attacks below are refused for their own reason)"
     : `refused (${control.reason})`;
 console.log(`Control: honest payment of 1 unit to 0x${recipient}: ${controlNote}\n`);
+// Refused for who the agent is, not for what it asks: every attack below would be refused for that
+// same reason, which proves nothing about the rules. Stop instead of printing "8 of 8 refused".
+if (!control.allowed && /MEMBERSHIP|ROLE_NOT_FOUND|ROLE_DISABLED|PAUSED/.test(String(control.reason))) {
+  console.error(`The control payment is refused (${control.reason}): ${AGENT} cannot act in role "${ROLE}" now.`);
+  console.error("Set AGENT (and ROLE) to an active agent of this vault, then run again.");
+  process.exit(2);
+}
 
 const approve = [...Buffer.from(`095ea7b3${"0".repeat(24)}${ATTACKER}${"f".repeat(64)}`, "hex")];
 const attacks = [
