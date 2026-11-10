@@ -97,6 +97,16 @@ const schema = z.object({
   NOMOS_ID: z.string().min(1).default("euthyna-nomos.testnet"),
   /** Solana RPC for the company's Solana wallet (devnet on testnet). */
   SOLANA_RPC_URL: z.string().url().default("https://api.devnet.solana.com"),
+  /**
+   * Euthyna pays Solana fees: its tank tops a company wallet up before an agent's transfer.
+   * The tank key is this secret (base58), else derived from NEAR_RELAYER_PRIVATE_KEY.
+   * Below 0.003 SOL, back to 0.01 SOL (fees and a few recipients' token accounts); 0 = off.
+   */
+  SOLANA_FEE_TANK_SECRET: z.string().optional(),
+  SOLANA_FUEL_BELOW_LAMPORTS: z.string().regex(/^\d+$/).default("3000000"),
+  SOLANA_FUEL_TO_LAMPORTS: z.string().regex(/^\d+$/).default("10000000"),
+  SOLANA_FUEL_PER_VAULT_PER_DAY: z.coerce.number().int().min(0).default(5),
+  SOLANA_FUEL_TOTAL_PER_DAY_LAMPORTS: z.string().regex(/^\d+$/).default("500000000"),
   /** NEAR transaction index used to read the vault's own logs (FastNEAR tx API). Empty disables it. */
   NEAR_TX_INDEXER_URL: z.string().optional(),
   /** NEAR the relayer gives each new DAO: sputnikv2.testnet deploys the full Sputnik code into it, so 6 (a factory-v2 DAO with global code needs 1). */

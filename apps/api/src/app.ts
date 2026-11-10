@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { AgentProvisioningError, type AgentProvisioningService } from "./agent-provisioning.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway.js";
+import type { SolanaFuel } from "./solana-fuel.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
@@ -137,6 +138,8 @@ export interface AppDependencies {
   /** Noah's webhook public key (sandbox or production): their FiatDeposit events are verified with it. */
   noahWebhookKey?: string | undefined;
   agentGasKeeper?: AgentGasKeeper | undefined;
+  /** Euthyna's SOL tank, which pays Solana fees for company wallets; absent when off. */
+  solanaFuel?: SolanaFuel | undefined;
 }
 
 /** A role draft from the console's role editor (`/proposals/role`). */
@@ -323,6 +326,7 @@ export function createApp({
   invoices,
   noahWebhookKey,
   agentGasKeeper,
+  solanaFuel,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   agentGas = agentGasKeeper;
@@ -487,6 +491,22 @@ export function createApp({
   app.post("/v1/agent/wake", requireAgent(auth, agentLimiter), async (context) => {
     omniroles?.agentActed(context.get("agent").vaultAccountId);
     return context.json({ ok: true });
+  });
+  // Before a Solana transfer the wallet could not pay for: Euthyna's tank sends it the SOL for the
+  // fee (and the recipient's token account). The company never buys SOL.
+  app.post("/v1/agent/solana/fuel", requireAgent(auth, agentLimiter), async (context) => {
+    if (!solanaFuel) return context.json({ status: "off" });
+    const agent = context.get("agent");
+    try {
+      return context.json(await solanaFuel.fuel(agent.vaultAccountId));
+    } catch (error) {
+      console.warn(JSON.stringify({ event: "solana_fuel.failed", vault: agent.vaultAccountId, message: String(error).slice(0, 200) }));
+      return context.json({ status: "failed" }, 502);
+    }
+  });
+  app.get("/v1/solana/fee-tank", async (context) => {
+    if (!solanaFuel) return context.json({ enabled: false });
+    return context.json({ enabled: true, ...(await solanaFuel.tank().catch(() => ({ address: solanaFuel.address, lamports: null }))) });
   });
   app.post("/v1/operations/gas-quote", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");

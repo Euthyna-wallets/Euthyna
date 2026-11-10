@@ -4,6 +4,8 @@
  * vault builds and signs the exact transaction (see contracts/vault/src/solana.rs).
  */
 
+import { ed25519 } from "@noble/curves/ed25519.js";
+
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 export function base58Encode(bytes: Uint8Array | number[]): string {
@@ -66,6 +68,8 @@ export const SOLANA_DEVNET: SolanaProfile = {
     { symbol: "SOL", decimals: 9, mint: null },
     // Circle's devnet USDC (faucet.circle.com).
     { symbol: "USDC", decimals: 6, mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" },
+    // Noah's sandbox EURC (EURC_TEST): what a company's euro account pays out on Solana.
+    { symbol: "EURC", decimals: 6, mint: "7D6hWbuzWmEJJmWQ7iVz3p6oxiXoQwfTCVnsqZZ4AhnF" },
   ],
 };
 
@@ -161,4 +165,31 @@ export async function signatureStatus(rpc: SolanaRpc, signature: string): Promis
   const status = result.value[0];
   if (!status) return null;
   return { finalized: status.confirmationStatus === "finalized", failed: status.err !== null, err: status.err };
+}
+
+// ---------------------------------------------------------------------------
+// Euthyna's SOL tank: tops up a company wallet so it never has to buy SOL
+// ---------------------------------------------------------------------------
+
+/** The tank's address from its 32-byte ed25519 seed. */
+export function solanaAddressOfSeed(seed: Uint8Array): string {
+  return base58Encode(ed25519.getPublicKey(seed));
+}
+
+/** A signed SystemProgram transfer from the seed's key (legacy message, one signature), as wire bytes. */
+export function systemTransferWire(seed: Uint8Array, to: string, lamports: bigint, blockhash: number[]): number[] {
+  const from = ed25519.getPublicKey(seed);
+  const data = new Uint8Array(12);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 2, true);
+  view.setBigUint64(4, lamports, true);
+  // Header: 1 signature, 0 read-only signed, 1 read-only unsigned (the system program).
+  const message = [
+    1, 0, 1,
+    3, ...from, ...solanaAddress(to), ...new Array<number>(32).fill(0),
+    ...blockhash,
+    1, 2, 2, 0, 1, data.length, ...data,
+  ];
+  const signature = ed25519.sign(Uint8Array.from(message), seed);
+  return [1, ...signature, ...message];
 }
