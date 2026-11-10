@@ -2688,6 +2688,11 @@ export class OmniRolesService {
   noticeChain(vaultAccountId: string, daoAccountId?: string): void {
     this.forget(vaultAccountId);
     if (daoAccountId) this.forget(daoAccountId);
+    else {
+      void this.prisma.treasury.findFirst({ where: { vaultAccountId }, select: { daoAccountId: true } })
+        .then((treasury) => { if (treasury) this.forget(treasury.daoAccountId); })
+        .catch(() => undefined);
+    }
     this.ruleFacts.delete(vaultAccountId);
     const now = Date.now();
     this.nextActivationCheck.set(vaultAccountId, Math.min(this.nextActivationCheck.get(vaultAccountId) ?? now, now + 1_000));

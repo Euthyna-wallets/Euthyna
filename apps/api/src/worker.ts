@@ -58,6 +58,7 @@ const TOUCH_FOLLOW_MS = 20_000;
 const touchedVaults = new Map<string, number>();
 const chainFeed = followCompanies(
   env,
+  prisma,
   () => prisma.treasury.findMany({ select: { vaultAccountId: true, daoAccountId: true } }),
   {
     touch: (vault) => { touchedVaults.set(vault, Date.now() + TOUCH_FOLLOW_MS); worker.notice(vault); },

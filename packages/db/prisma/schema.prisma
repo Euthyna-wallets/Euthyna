@@ -327,6 +327,27 @@ model WorkerLease {
   @@map("worker_lease")
 }
 
+/// The chain follower's position (one row per network), written by the process that follows the
+/// blocks: the others read it to know the chain is followed, and when blocks were skipped.
+model ChainFeed {
+  name      String   @id
+  height    BigInt
+  /// Grows each time blocks were skipped: every vault is then read once.
+  gaps      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("chain_feed")
+}
+
+/// The last final block that ran a receipt on a vault or its DAO: the jobs read that vault at once.
+model ChainTouch {
+  vaultAccountId String @id
+  height         BigInt
+
+  @@index([height])
+  @@map("chain_touch")
+}
+
 model Operation {
   organizationId          String
   opId                    String
