@@ -121,13 +121,19 @@ pub fn api_path_allowed(method: &str, path: &str) -> bool {
     if path.contains("..") || path.contains("//") {
         return false;
     }
-    let hex = |s: &str| (2..=128).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit());
+    // The SDK writes operation ids with their 0x prefix.
+    let hex = |s: &str| {
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        (2..=128).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+    };
     let segments: Vec<&str> = path.split('/').collect();
     match (method, segments.as_slice()) {
         ("POST", ["", "v1", "operations", "pay" | "gas-quote" | "check"]) => query.is_empty(),
-        ("POST", ["", "v1", "operations", id, "authorization" | "cancellation"]) => {
+        ("POST", ["", "v1", "operations", id, "authorization" | "cancellation" | "announce"]) => {
             hex(id) && query.is_empty()
         }
+        // "This agent just acted on its vault": no argument, the API reads the vault now.
+        ("POST", ["", "v1", "agent", "wake"]) => query.is_empty(),
         ("GET", ["", "v1", "operations", id]) => hex(id) && query.is_empty(),
         ("GET", ["", "v1", "agent", "mandate"]) => query.is_empty(),
         ("GET", ["", "v1", "agent", "share-revenue"]) => query
