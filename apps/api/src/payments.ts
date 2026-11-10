@@ -305,6 +305,46 @@ export class PaymentService {
     };
   }
 
+  /**
+   * An agent that signs on chain without the Guard (a swap in an unguarded role) leaves no record
+   * here, so the worker would only find the operation on its next discovery round, up to ten
+   * minutes later. The agent announces it instead; the worker relays it on its next poll.
+   */
+  async announce(
+    organizationId: string,
+    agent: { nearAccountId: string; vaultAccountId: string },
+    opId: number[],
+  ): Promise<{ opId: string; recorded: boolean }> {
+    const hex = opHex(opId);
+    const operation = await this.near.getOperation(agent.vaultAccountId, opId);
+    if (operation.member !== agent.nearAccountId) {
+      throw new PaymentError(403, "agent_mismatch", "OmniRoles operation belongs to another member");
+    }
+    if (operation.state !== "PossiblySigned") {
+      throw new PaymentError(422, "operation_not_signed", `operation state is ${operation.state}`);
+    }
+    try {
+      await this.prisma.operation.create({
+        data: {
+          organizationId,
+          opId: hex,
+          agentId: null,
+          vaultAccountId: agent.vaultAccountId,
+          reference: operation.request.reference,
+          state: "PossiblySigned",
+          txDigest: `0x${Buffer.from(operation.tx_digest).toString("hex")}`,
+          evmNonce: BigInt(operation.evm_nonce),
+          amount: operation.request.allowance_amount,
+          nextAttemptAt: new Date(),
+        },
+      });
+      return { opId: hex, recorded: true };
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") return { opId: hex, recorded: false };
+      throw error;
+    }
+  }
+
   async recordAuthorization(
     organizationId: string,
     agent: { agentId: string; nearAccountId: string; vaultAccountId: string },

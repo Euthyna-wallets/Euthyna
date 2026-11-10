@@ -55,7 +55,8 @@ function payeesOf(config: unknown) {
 
 /** Direct NEAR authorization, public RPC broadcast and MPC settlement. No API credentials. */
 export class OnchainAgentClient {
-  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation> }) {}
+  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation>; announce?: (opId: number[]) => Promise<void> }) {}
+  private readonly announced = new Set<string>();
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
     const [config, membership, suppliers, wallet, solanaWallet, solanaPermissions, nearPermissions, bankPermission, bankBeneficiaries, bankConfig] = await Promise.all([
@@ -210,7 +211,14 @@ export class OnchainAgentClient {
     // Sponsored (EIP-7702): what the vault signed is the wallet's `execute` call, not a transaction.
     // Euthyna's relayer sends it and pays the gas; the worker settles it on the Executed log.
     const sponsored = await this.vault.view<{ deadline: number } | null>("get_sponsored_operation", { op_id }).catch(() => null);
-    if (sponsored) return { ...op, sponsored: true, relayedBy: "euthyna" };
+    if (sponsored) {
+      // Without this the relayer only finds the operation on its next discovery round (ten minutes).
+      // Best effort: the API is optional here, and discovery still picks it up.
+      if (this.advisory?.announce && !this.announced.has(id)) {
+        try { await this.advisory.announce(op_id); this.announced.add(id); } catch { /* discovery will find it */ }
+      }
+      return { ...op, sponsored: true, relayedBy: "euthyna" };
+    }
     const config = await this.vault.view<{ cancel_after_ns: string; unconfirmed_after_ns: string; mainnet?: boolean }>("get_settlement_config");
     const age = BigInt(Date.now()) * 1_000_000n - BigInt(op.possibly_signed_at_ns ?? "0");
     const candidates = [
