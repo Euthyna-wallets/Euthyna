@@ -302,7 +302,12 @@ export async function signDaoProposal(
   // proposal lands first, the kinds differ, the DAO refuses the vote and the whole transaction with it.
   const kind = (proposal.args as { proposal?: { kind?: unknown } }).proposal?.kind;
   const approve = kind !== undefined && await isCouncilMember(proposal.receiverId, signerId);
-  const nextId = approve ? await daoView<number>(proposal.receiverId, "get_last_proposal_id") : null;
+  // The id is read at the chain's head, not at a final block: a final read lags a few blocks, so a
+  // second proposal sent right after the first got the first one's id (ERR_ALREADY_VOTED, 9 November).
+  // This tab's own last proposal counts too, in case the head read is behind it.
+  const nextId = approve
+    ? Math.max(await daoView<number>(proposal.receiverId, "get_last_proposal_id", {}, "optimistic"), (proposedHere.get(proposal.receiverId) ?? -1) + 1)
+    : null;
   const outcome = await wallet.signAndSendTransaction({
     signerId,
     receiverId: proposal.receiverId,
@@ -325,13 +330,17 @@ export async function signDaoProposal(
   const proposalId = nextId ??
     decodeProposalId(outcome.status?.SuccessValue) ??
     await proposalIdFromTransaction(transactionHash, signerId);
+  proposedHere.set(proposal.receiverId, Math.max(proposalId, proposedHere.get(proposal.receiverId) ?? -1));
   await refreshOmniReads();
   return { transactionHash, proposalId };
 }
 
-async function daoView<T>(daoAccountId: string, methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+/** The last proposal id this tab created, per DAO. */
+const proposedHere = new Map<string, number>();
+
+async function daoView<T>(daoAccountId: string, methodName: string, args: Record<string, unknown> = {}, finality: "final" | "optimistic" = "final"): Promise<T> {
   const result = await nearRpcMethod<{ result: number[] }>("query", {
-    request_type: "call_function", finality: "final", account_id: daoAccountId, method_name: methodName,
+    request_type: "call_function", finality, account_id: daoAccountId, method_name: methodName,
     args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
   });
   return JSON.parse(Buffer.from(result.result).toString()) as T;

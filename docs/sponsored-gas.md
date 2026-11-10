@@ -52,10 +52,12 @@ the signature covers the whole list. Only on a chain with sponsored execution
 | Executor v3 voted, wallet re-delegated | Base Sepolia | code `0xef010076bb5c47b0759af0300afeea954fa837a96675ed` |
 | approve + swap + revoke, one `executeBatch` paid by the tank (4 in, 8 out, allowance back to 0, wallet 0 ETH) | Base Sepolia | `0xbc98d6eafc398384f05097ba55f4a023a336aca6e02e218ab0ddd0a3b97a4f68` |
 | its `settle_sponsored` → `Confirmed` | NEAR testnet | `5hvSeWvAqnXMF9M3MzK3CaQwzWfVM5yyQVUCrw7bPxjk` |
+| A company's euros swapped on Uniswap V3: 0.3 EURC (Noah's sandbox euro) → 0.000155 WETH, approve + swap + revoke by the agent over MCP, relayed | Base Sepolia | `0x63c57a2405715267087c886dc905f44c60dbe6781fd5ee849076bb107430fa8e` (wallet `0x411a…3013`, Judge Timed 2054) |
 
-The swap ran on a test router and test tokens the tank deployed (`apps/api/scripts/sponsored-batch-e2e.mts`):
-the wallet holds no Base Sepolia USDC and Circle's faucet is behind a captcha. A Uniswap swap is the same
-three calls with the SwapRouter02 as target.
+The first swap ran on a test router and test tokens the tank deployed (`apps/api/scripts/sponsored-batch-e2e.mts`).
+The EURC one runs on Uniswap's SwapRouter02, in a WETH/EURC_TEST 0.3 % pool we opened on Uniswap's factory at the
+market rate, since Uniswap had none for Noah's sandbox token (`0xc68a7653ac3b5eB444BC90CfA43deeC0bB4C3722`,
+`apps/api/scripts/eurc-pool-setup.mts`; its liquidity is a small WETH-only position from the tank).
 
 Rerun: `apps/api/scripts/sponsored-testnet-e2e.mts` (then `sponsored-settle.mts` if Base Sepolia
 finality outlasts the run: it lags a few hours behind the head).

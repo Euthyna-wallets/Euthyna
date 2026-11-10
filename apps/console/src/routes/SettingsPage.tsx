@@ -113,7 +113,7 @@ export function SettingsPage() {
             <span style={{ fontSize: 13.5, color: "#4A5675", lineHeight: 1.55 }}>
               Company wallets cannot be lost: they have no private key. What you can lose is your own key, and with it your seat. Today a
               founder enrolls their mailbox with ZK Email; a new account that proves the same mailbox asks for the seat, and a NEAR contract
-              verifies both proofs. The lost account can cancel during a waiting period (10 minutes on testnet, 48 hours on mainnet), then the
+              verifies both proofs. The lost account can cancel during a waiting period (1 minute on testnet, 48 hours on mainnet), then the
               other founders vote. More factors come next.
             </span>
             <div className="g4" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>

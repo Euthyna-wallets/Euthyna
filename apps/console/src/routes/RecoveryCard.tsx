@@ -30,7 +30,8 @@ const EXPLORER = "https://testnet.nearblocks.io";
 /** "48 hours", "5 minutes". */
 function windowText(seconds: number): string {
   if (seconds >= 7200) return `${Math.round(seconds / 3600)} hours`;
-  return `${Math.round(seconds / 60)} minutes`;
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
 }
 
 /** How to make the email, and where to give it: its source pasted, or the .eml file. Proved in the browser. */
