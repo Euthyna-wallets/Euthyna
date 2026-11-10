@@ -153,6 +153,8 @@ export interface AgentApiGateway {
   announce?(opId: number[]): Promise<void>;
   /** Tells the API this agent just acted on its vault without it, so the vault is read now. */
   wake?(): Promise<void>;
+  /** Asks Euthyna's tank for the SOL the company's Solana wallet needs to pay a transfer's fee. */
+  solanaFuel?(): Promise<{ status: string; signature?: string }>;
   /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
   mandate?(): Promise<Record<string, unknown>>;
   /** The bridge call that sends `amountWei` of revenue to the company's shareholders. */
@@ -428,6 +430,11 @@ export class HttpAgentApi implements AgentApiGateway {
 
   async wake(): Promise<void> {
     await this.request("/v1/agent/wake", { method: "POST", body: "{}", signal: AbortSignal.timeout(5_000) });
+  }
+
+  async solanaFuel(): Promise<{ status: string; signature?: string }> {
+    const response = await this.request("/v1/agent/solana/fuel", { method: "POST", body: "{}", signal: AbortSignal.timeout(30_000) });
+    return { status: String(response.body.status ?? response.status), ...(typeof response.body.signature === "string" ? { signature: response.body.signature } : {}) };
   }
 
   async announce(opId: number[]): Promise<void> {

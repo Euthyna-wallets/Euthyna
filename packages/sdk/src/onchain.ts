@@ -55,7 +55,7 @@ function payeesOf(config: unknown) {
 
 /** Direct NEAR authorization, public RPC broadcast and MPC settlement. No API credentials. */
 export class OnchainAgentClient {
-  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation>; announce?: (opId: number[]) => Promise<void>; wake?: () => Promise<void> }) {}
+  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation>; announce?: (opId: number[]) => Promise<void>; wake?: () => Promise<void>; solanaFuel?: () => Promise<{ status: string; signature?: string }> }) {}
   /**
    * This agent just acted on its vault without the API. When it has an API key, it says so: the
    * company's background jobs read the vault now instead of on their next round. Best effort.
@@ -297,7 +297,24 @@ export class OnchainAgentClient {
     // keeps the role reserved for hours (no rule change on it, budget held): check first.
     const wallet = await this.vault.view<{ address: number[] | null } | null>("get_solana_wallet", {});
     if (wallet?.address) {
-      const shortfall = solanaShortfall(await solanaHoldings(rpc, base58Encode(wallet.address), token), token, BigInt(input.amount));
+      const owner = base58Encode(wallet.address);
+      let holdings = await solanaHoldings(rpc, owner, token);
+      let shortfall = solanaShortfall(holdings, token, BigInt(input.amount));
+      // Only the SOL for the fee is missing (a token transfer): Euthyna's tank pays it, so the
+      // company never has to hold SOL. A SOL transfer needs the company's own SOL.
+      const feeOnly = token.mint !== null && (holdings.tokenBalance ?? 0n) >= BigInt(input.amount);
+      if (shortfall && feeOnly && this.advisory?.solanaFuel) {
+        const fuel = await this.advisory.solanaFuel().catch(() => null);
+        if (fuel?.status === "funded" || fuel?.status === "enough") {
+          for (let attempt = 0; attempt < 20 && shortfall; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            holdings = await solanaHoldings(rpc, owner, token);
+            shortfall = solanaShortfall(holdings, token, BigInt(input.amount));
+          }
+        } else if (fuel) {
+          shortfall = `${shortfall}; Euthyna's SOL tank did not top it up (${fuel.status})`;
+        }
+      }
       if (shortfall) return { outcome: "refused" as const, reason: "WALLET_UNDERFUNDED", detail: shortfall, refusedBy: "wallet" as const };
     }
     // Builds the transaction (two PDA derivations for SPL) and asks MPC to sign.

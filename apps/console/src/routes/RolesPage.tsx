@@ -584,7 +584,7 @@ function RoleBuilder({ onClose, initialName = "", initialJob = null, initialLaw 
                   </div>
                 ))}
                 <SolanaRecipient onAdd={(recipient) => update(index, { recipients: [...block.recipients.filter((item) => item.address !== recipient.address), recipient] })} />
-                <span style={NOTE}>From the company's Solana wallet, on {SOLANA_DEVNET.name}. Token accounts of recipients are created when needed.</span>
+                <span style={NOTE}>From the company's Solana wallet, on {SOLANA_DEVNET.name}. Token accounts of recipients are created when needed. For token transfers (EURC, USDC), Euthyna pays the SOL fees: the wallet needs no SOL.</span>
               </>
             ) : block.kind === "wrap" ? (
               <>

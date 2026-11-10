@@ -1,3 +1,4 @@
+import { SolanaFuel, solanaTankSeed, solanaWalletOf } from "./solana-fuel.js";
 import { createHash } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { prisma } from "@euthyna/db";
@@ -233,6 +234,16 @@ const app = createApp({
       toYocto: BigInt(env.NEAR_AGENT_TOPUP_TO_YOCTO),
       perAgentPerDay: env.NEAR_AGENT_TOPUPS_PER_DAY,
       totalPerDayYocto: BigInt(env.NEAR_AGENT_TOPUP_TOTAL_PER_DAY_YOCTO),
+    })
+    : undefined,
+  solanaFuel: BigInt(env.SOLANA_FUEL_TO_LAMPORTS) > 0n
+    ? SolanaFuel.fromRpcUrl(env.SOLANA_RPC_URL, {
+      seed: solanaTankSeed(env.SOLANA_FEE_TANK_SECRET, env.NEAR_RELAYER_PRIVATE_KEY),
+      readWallet: (vault) => solanaWalletOf((account, method, args) => near.viewFunction(account, method, args), vault),
+      belowLamports: BigInt(env.SOLANA_FUEL_BELOW_LAMPORTS),
+      toLamports: BigInt(env.SOLANA_FUEL_TO_LAMPORTS),
+      perVaultPerDay: env.SOLANA_FUEL_PER_VAULT_PER_DAY,
+      totalPerDayLamports: BigInt(env.SOLANA_FUEL_TOTAL_PER_DAY_LAMPORTS),
     })
     : undefined,
 });

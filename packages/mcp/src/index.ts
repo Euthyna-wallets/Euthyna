@@ -277,7 +277,7 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   }, async (input) => result(await tools.shareRevenue(input)));
   server.registerTool("solana_transfer", {
     title: "Send SOL or a token on Solana",
-    description: "Send from the company's Solana wallet (Solana devnet) to a recipient your role allows, within its budget. token: \"SOL\", \"USDC\" or a mint address. amount in base units (1 SOL = 1000000000 lamports; 1 USDC = 1000000). The vault builds and signs the exact transaction; this broadcasts it, waits for finality and settles it.",
+    description: "Send from the company's Solana wallet (Solana devnet) to a recipient your role allows, within its budget. token: \"SOL\", \"USDC\", \"EURC\" (Noah's euro stablecoin) or a mint address. amount in base units (1 SOL = 1000000000 lamports; 1 USDC or EURC = 1000000). For a token, Euthyna pays the SOL fee (it tops the wallet up when needed). The vault builds and signs the exact transaction; this broadcasts it, waits for finality and settles it.",
     inputSchema: {
       token: z.string().min(3).max(64),
       to: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/).describe("Recipient wallet (base58). For tokens, its token account is created if needed."),
