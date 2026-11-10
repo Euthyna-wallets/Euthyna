@@ -181,10 +181,12 @@ const recovery = recoveryContractId
   ? new RecoveryService({
     contractId: recoveryContractId,
     // The recovery card is on pages that poll every 20 s. The contract's delay is a constant; the
-    // lists are kept 15 s and dropped when something happens on a company (a member's transaction).
-    view: (method, args) => recoveryReads.get(`${method === "delay_seconds" ? "constant" : "list"}:${method}:${JSON.stringify(args)}`, method === "delay_seconds" ? 3_600_000 : 15_000, () => near.viewFunction(recoveryContractId, method, args)),
+    // lists are kept a minute and dropped when something happens on a company (a member's transaction).
+    // A request made from /recover by someone who is not a member yet shows up to a minute late.
+    view: (method, args) => recoveryReads.get(`${method === "delay_seconds" ? "constant" : "list"}:${method}:${JSON.stringify(args)}`, method === "delay_seconds" ? 3_600_000 : 60_000, () => near.viewFunction(recoveryContractId, method, args)),
     daoOf: async (organizationId) => (await omniroles.activeTreasury(organizationId))?.daoAccountId ?? null,
     councilOf: (organizationId) => omniroles.councilOf(organizationId),
+    councilShown: (organizationId) => omniroles.councilShown(organizationId),
     membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
   }, dkimKeys({ testKeys: testDkimKeys }))
   : undefined;

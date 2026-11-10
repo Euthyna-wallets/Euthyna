@@ -25,6 +25,8 @@ export interface RecoveryDeps {
   daoOf(organizationId: string): Promise<string | null>;
   /** The DAO members of a company, as on chain. */
   councilOf(organizationId: string): Promise<string[]>;
+  /** The council for a screen (may be a few seconds old). Defaults to `councilOf`. */
+  councilShown?(organizationId: string): Promise<string[]>;
   /** Draft the votes that set these members (DAO policy and vault council). */
   membersProposals(organizationId: string, members: string[]): Promise<{ proposals: unknown[] }>;
 }
@@ -58,7 +60,7 @@ export class RecoveryService {
       this.deps.view<ChainEnrollment[]>("enrollments_of", { dao_id: dao }),
       this.deps.view<ChainRecovery[]>("recoveries_of", { dao_id: dao }),
       this.deps.view<string>("delay_seconds", {}),
-      this.deps.councilOf(organizationId),
+      (this.deps.councilShown ?? this.deps.councilOf)(organizationId),
     ]);
     return {
       contractId: this.deps.contractId,

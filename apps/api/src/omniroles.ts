@@ -196,8 +196,15 @@ const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
  * notice: the enclave's answer to a payout comes within minutes of the agent's call.
  */
 const BANK_ACTIVE_MS = 15 * 60_000;
-/** Screens' reads of a vault or its DAO: kept this long, or `QUIET_VIEW_TTL_MS` when nothing happened on the company for `ACTIVE_VIEW_MS`. */
+/**
+ * Screens' reads of a vault or its DAO are kept `ACTIVE_VIEW_TTL_MS` for `BURST_VIEW_MS` after a
+ * notice (what follows without a notice lands then: the MPC's answer, the enclave's), then
+ * `NOTICED_VIEW_TTL_MS` while the company is still active, then `QUIET_VIEW_TTL_MS` once nothing
+ * happened on it for `ACTIVE_VIEW_MS`. Measured on 10 November: two console tabs left open after
+ * some activity asked the RPC 100 times a minute, almost all of it reads kept 6 s for 5 minutes.
+ */
 const ACTIVE_VIEW_TTL_MS = 6_000;
+const BURST_VIEW_MS = 60_000;
 /**
  * Reads that only a noticed transaction changes (a vote, a rule the keeper runs, an agent's call):
  * `notice` drops them when that happens, so they are kept this long even while the company is
@@ -212,6 +219,8 @@ const CHANGED_ONLY_BY_NOTICED_TRANSACTIONS = new Set([
   "list_rule_changes", "is_paused", "get_role", "get_membership", "get_near_permissions", "get_allowance",
   "get_bank_config", "get_bank_box_key", "get_bank_signer_source", "get_bank_permission", "list_bank_beneficiaries",
   "list_standing_orders", "council", "owner_id", "code_source", "visa_public_key", "status_public_key",
+  // Shares locked to vote: 30 s late at worst for a holder who locks from the public page.
+  "delegation_total_supply",
 ]);
 const QUIET_VIEW_TTL_MS = 5 * 60_000;
 const ACTIVE_VIEW_MS = 5 * 60_000;
@@ -567,6 +576,13 @@ export class OmniRolesService {
   async councilOf(organizationId: string): Promise<string[]> {
     const treasury = await this.requireTreasury(organizationId);
     const policy = await this.near.viewFunction<{ roles: Array<{ name: string; kind: unknown }> }>(treasury.daoAccountId, "get_policy", {});
+    return policy.roles.filter((role) => role.name === "council").flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
+  }
+
+  /** The same for a screen: kept like the other reads of the DAO's policy, dropped by a notice. */
+  async councilShown(organizationId: string): Promise<string[]> {
+    const treasury = await this.requireTreasury(organizationId);
+    const policy = await this.view<{ roles: Array<{ name: string; kind: unknown }> }>(treasury.daoAccountId, "get_policy", {});
     return policy.roles.filter((role) => role.name === "council").flatMap((role) => ((role.kind as { Group?: string[] })?.Group ?? []));
   }
 
@@ -1254,11 +1270,13 @@ export class OmniRolesService {
       } catch { /* agent account not made by Euthyna: no card */ }
     }
     const assets: Array<{ symbol: string; amount: string; where: string }> = [];
+    // 30 s, or 5 minutes on a quiet company (tokens sent to it from outside show that late).
+    const balanceTtl = holders[0] && this.viewTtl(holders[0].accountId, "get_policy") === QUIET_VIEW_TTL_MS ? QUIET_VIEW_TTL_MS : 30_000;
     for (const holder of holders) {
       for (const token of NEAR_TESTNET_TOKENS) {
         // A missing card account or an unregistered holder reads as zero.
         // Kept 30 s (a notice on the company drops the vault's and the DAO's): this list is asked by every poll of the page.
-        const raw = await this.memo(`view:${token.accountId}:ft_balance_of:${holder.accountId}`, 30_000, () => this.near.viewFunction<string>(token.accountId, "ft_balance_of", { account_id: holder.accountId })).catch(() => "0");
+        const raw = await this.memo(`view:${token.accountId}:ft_balance_of:${holder.accountId}`, balanceTtl, () => this.near.viewFunction<string>(token.accountId, "ft_balance_of", { account_id: holder.accountId })).catch(() => "0");
         if (BigInt(raw || "0") > 0n) assets.push({ symbol: token.symbol, amount: formatUnits(BigInt(raw), token.decimals), where: holder.where });
       }
     }
@@ -2708,14 +2726,18 @@ export class OmniRolesService {
     const vault = this.watched.get(accountId);
     if (!vault || !this.noticesOn()) return ACTIVE_VIEW_TTL_MS;
     const activeAt = Math.max(this.noticedAt.get(vault) ?? 0, this.firstSeenAt.get(vault) ?? 0);
-    if (Date.now() - activeAt >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
-    return CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method) ? NOTICED_VIEW_TTL_MS : ACTIVE_VIEW_TTL_MS;
+    const age = Date.now() - activeAt;
+    if (age >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
+    if (age >= BURST_VIEW_MS || CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method)) return NOTICED_VIEW_TTL_MS;
+    return ACTIVE_VIEW_TTL_MS;
   }
 
   private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
   private cached(kind: "account", accountId: string): Promise<{ code_hash: string }>;
   private cached(kind: "keys" | "account", accountId: string): Promise<unknown> {
-    return this.memo<unknown>(`${kind}:${accountId}`, 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
+    // A company's own accounts follow its notices (an agent hired or fired passes through this server).
+    const quiet = this.viewTtl(accountId, "get_policy") === QUIET_VIEW_TTL_MS;
+    return this.memo<unknown>(`${kind}:${accountId}`, quiet ? QUIET_VIEW_TTL_MS : 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
   }
 
   /**
