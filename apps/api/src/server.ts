@@ -1,3 +1,4 @@
+import { AgentRelay } from "./agent-relay.js";
 import { SolanaFuel, solanaTankSeed, solanaWalletOf } from "./solana-fuel.js";
 import { createHash } from "node:crypto";
 import { serve } from "@hono/node-server";
@@ -234,6 +235,13 @@ const app = createApp({
       toYocto: BigInt(env.NEAR_AGENT_TOPUP_TO_YOCTO),
       perAgentPerDay: env.NEAR_AGENT_TOPUPS_PER_DAY,
       totalPerDayYocto: BigInt(env.NEAR_AGENT_TOPUP_TOTAL_PER_DAY_YOCTO),
+    })
+    : undefined,
+  agentRelay: env.NEAR_AGENT_RELAY_PER_DAY > 0
+    ? new AgentRelay(near, {
+      sealedOrdersId: env.SEALED_ORDERS_ACCOUNT_ID || null,
+      perAgentPerDay: env.NEAR_AGENT_RELAY_PER_DAY,
+      totalPerDay: env.NEAR_AGENT_RELAY_TOTAL_PER_DAY,
     })
     : undefined,
   solanaFuel: BigInt(env.SOLANA_FUEL_TO_LAMPORTS) > 0n

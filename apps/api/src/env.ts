@@ -103,6 +103,9 @@ const schema = z.object({
    * Below 0.003 SOL, back to 0.01 SOL (fees and a few recipients' token accounts); 0 = off.
    */
   SOLANA_FEE_TANK_SECRET: z.string().optional(),
+  /** Agents' NEAR calls relayed (NEP-366) and paid by the relayer: per agent per day, and in total (0 = off). */
+  NEAR_AGENT_RELAY_PER_DAY: z.coerce.number().int().min(0).default(200),
+  NEAR_AGENT_RELAY_TOTAL_PER_DAY: z.coerce.number().int().min(0).default(5000),
   SOLANA_FUEL_BELOW_LAMPORTS: z.string().regex(/^\d+$/).default("3000000"),
   SOLANA_FUEL_TO_LAMPORTS: z.string().regex(/^\d+$/).default("10000000"),
   SOLANA_FUEL_PER_VAULT_PER_DAY: z.coerce.number().int().min(0).default(5),

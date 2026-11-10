@@ -81,7 +81,7 @@ let sealed: SealedOrdersMcp | undefined;
 async function sealedFor(
   common: { networkId: string; rpcUrl: string; accountId: string; vaultAccountId: string; role: string },
   key: { privateKey: string } | { signer: InstanceType<typeof SocketNearSigner> },
-  api?: { gas?(): Promise<void>; announce?(opId: number[]): Promise<void> },
+  api?: { gas?(): Promise<void>; announce?(opId: number[]): Promise<void>; relay?: (signedDelegate: string) => Promise<import("@euthyna/sdk").RelayOutcome | null> },
 ): Promise<SealedOrdersMcp | undefined> {
   const sealedAccountId = process.env.SEALED_ORDERS_ACCOUNT_ID ?? (common.networkId === "testnet" ? DEFAULT_SEALED_ACCOUNT : "");
   if (!sealedAccountId) return undefined;
@@ -131,10 +131,12 @@ if (socketPath) {
   }
   console.error("euthyna: local key mode. The AI's user can read the key file; use euthyna-signer to keep it out of reach.");
   const key = await new FileAgentKeyStore(keyPath).loadOrCreate(common.networkId, common.accountId);
-  const vault = await NearVaultGateway.connect({ ...common, privateKey: key.privateKey });
   const api = env.MANDATEOS_AGENT_API_KEY ? new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY) : undefined;
+  // With the API, the agent's NEAR calls are relayed: Euthyna pays their gas (EUTHYNA_RELAY=off to pay it).
+  const relay = api && process.env.EUTHYNA_RELAY !== "off" ? (signedDelegate: string) => api.relay(signedDelegate) : undefined;
+  const vault = await NearVaultGateway.connect({ ...common, privateKey: key.privateKey, relay });
   client = new OnchainAgentClient(vault, publicRpc(rpcUrl), api);
-  sealed = await sealedFor(common, { privateKey: key.privateKey }, api);
+  sealed = await sealedFor(common, { privateKey: key.privateKey }, api ? { gas: () => api.gas(), announce: (op) => api.announce(op), ...(relay ? { relay } : {}) } : undefined);
 }
 function defaultAgentKeyPath(accountId: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");

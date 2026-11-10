@@ -243,6 +243,16 @@ export class NearClient {
     return outcome.transaction_outcome.id;
   }
 
+  /** Relays an agent's signed delegate (NEP-366): the relayer signs the transaction and pays its gas. */
+  async relayDelegate(senderId: string, action: unknown): Promise<{
+    transaction_outcome: { id: string };
+    receipts_outcome: Array<{ id: string; outcome: { executor_id: string; logs: string[]; receipt_ids: string[]; status: unknown } }>;
+    status: unknown;
+  }> {
+    const account = await this.account();
+    return await account.signAndSendTransaction({ receiverId: senderId, actions: [action as never] }) as never;
+  }
+
   /** The account that pays for companies, agents and members. */
   relayerAccountId(): string {
     return this.env.NEAR_RELAYER_ACCOUNT_ID;

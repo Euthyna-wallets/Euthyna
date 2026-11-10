@@ -9,6 +9,7 @@ import { createPublicClient, erc20Abi, getAddress, http, parseAbi, parseUnits, t
 import { baseSepolia } from "viem/chains";
 
 import { sealedKeyOf } from "./agent-keys.js";
+import { relayedCall, type DelegateRelay } from "./meta-tx.js";
 import { NearVaultGateway, operationIdHex } from "./index.js";
 import { OnchainAgentClient, publicRpc } from "./onchain.js";
 import {
@@ -64,7 +65,7 @@ async function hasKey(rpcUrl: string, accountId: string, publicKey: string): Pro
   return Boolean(body.result && !body.result.error && body.result.permission);
 }
 
-export type SealedAgentApi = { gas?(): Promise<void>; announce?(opId: number[]): Promise<void> };
+export type SealedAgentApi = { gas?(): Promise<void>; announce?(opId: number[]): Promise<void>; relay?: DelegateRelay };
 
 export class SealedAgent {
   private constructor(
@@ -77,11 +78,26 @@ export class SealedAgent {
     private readonly limitedKey = false,
     /** The agent API, when there is one: gas top-ups, and the relayer told of approvals at once. */
     private readonly api?: SealedAgentApi,
+    /** The key this agent signs sealed calls with (key file only): what a relayed delegate is signed with. */
+    private readonly keyPair?: KeyPair,
   ) {}
 
-  /** Best effort: the API tops the agent's NEAR for gas up before a 300 Tgas call. */
+  /** Best effort: the API tops the agent's NEAR for gas up before a 300 Tgas call (when it does not relay). */
   private async fuel(): Promise<void> {
+    if (this.api?.relay && this.keyPair) return;
     await this.api?.gas?.().catch(() => undefined);
+  }
+
+  /** A call to the sealed-orders contract: relayed (Euthyna pays the gas) when it can be, else sent by the agent. */
+  private async call(input: { contractId: string; methodName: string; args: Record<string, unknown>; gas: bigint; attachedDeposit: bigint }) {
+    if (this.api?.relay && this.keyPair && input.attachedDeposit === 0n) {
+      const outcome = await relayedCall({
+        rpcUrl: this.credentials.rpcUrl, senderId: this.credentials.accountId, keyPair: this.keyPair, receiverId: input.contractId,
+        methodName: input.methodName, args: input.args, gas: input.gas, relay: this.api.relay,
+      });
+      if (outcome) return outcome;
+    }
+    return this.account.functionCall(input);
   }
 
   static async connect(input: {
@@ -107,7 +123,8 @@ export class SealedAgent {
       ? { networkId, rpcUrl, accountId: input.accountId, signer: input.signer }
       : { networkId, rpcUrl, accountId: input.accountId, privateKey: input.privateKey! };
     return new SealedAgent(await near.account(input.accountId), createPublicClient({ chain: baseSepolia, transport: http(baseRpc) }) as PublicClient,
-      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc, useSealed, input.api);
+      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc, useSealed, input.api,
+      input.privateKey ? (useSealed ? sealedKeyOf(input.privateKey) : KeyPair.fromString(input.privateKey as `ed25519:${string}`)) : undefined);
   }
 
   private view<T>(methodName: string, args: object): Promise<T> {
@@ -144,7 +161,7 @@ export class SealedAgent {
     await this.fuel();
     if (input.approveUsdc) {
       const gasPrice = await this.base.getGasPrice();
-      const outcome = await this.account.functionCall({
+      const outcome = await this.call({
         contractId: this.sealedId, methodName: "approve", gas: 300n * TGAS, attachedDeposit: 0n,
         args: approveArgs({ vault: input.vault, role: input.role, chainId: U.chainId, token: U.usdc, router: U.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }),
       });
@@ -164,7 +181,7 @@ export class SealedAgent {
     if (this.limitedKey && credit < BigInt(SEALED_DEPOSIT_YOCTO)) {
       throw new Error("the vault's sealed-orders credit is empty: a member adds some from the console (Sealed orders, Add credit); an agent's key cannot attach the 0.02 NEAR deposit itself");
     }
-    const outcome = await this.account.functionCall({
+    const outcome = await this.call({
       contractId: this.sealedId, methodName: "seal", gas: 100n * TGAS, attachedDeposit: credit >= BigInt(SEALED_DEPOSIT_YOCTO) ? 0n : BigInt(SEALED_DEPOSIT_YOCTO),
       args: sealArgs({ vault: input.vault, role: input.role, chainId: U.chainId, commitment: commitment as Hex, slippageBps: input.slippageBps ?? 50, terms }),
     });
@@ -205,7 +222,7 @@ export class SealedAgent {
       fill: async (input) => {
         await this.fuel();
         const gasPrice = await this.base.getGasPrice();
-        const outcome = await this.account.functionCall({
+        const outcome = await this.call({
           contractId: file.sealedAccountId, methodName: "fill", gas: 300n * TGAS, attachedDeposit: 0n,
           args: {
             vault: file.vault, id: file.id, router: U.router, token_in: order.tokenIn, token_out: order.tokenOut, fee: order.fee,
@@ -220,7 +237,7 @@ export class SealedAgent {
 
   /** Broadcasts a signed operation to Base and settles it on the vault once its block is final. */
   async settle(vault: string, opId: number[], waitMinutes = 40): Promise<string> {
-    const gateway = await NearVaultGateway.connect({ ...this.credentials, vaultAccountId: vault, role: "sealed-orders", chainId: U.chainId } as Parameters<typeof NearVaultGateway.connect>[0]);
+    const gateway = await NearVaultGateway.connect({ ...this.credentials, vaultAccountId: vault, role: "sealed-orders", chainId: U.chainId, relay: this.api?.relay } as Parameters<typeof NearVaultGateway.connect>[0]);
     // With the API, a sponsored approval or swap is announced to the relayer now, not at its next round.
     const client = new OnchainAgentClient(gateway, publicRpc(this.baseRpc), this.api?.announce ? { preflightInvoice: async () => undefined, announce: (op) => this.api!.announce!(op) } : undefined);
     const id = operationIdHex(opId);
