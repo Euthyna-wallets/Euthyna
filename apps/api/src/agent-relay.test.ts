@@ -60,7 +60,7 @@ describe("agent calls relayed by Euthyna (NEP-366)", () => {
   it("a tampered delegate is refused before anything is sent", async () => {
     const keyPair = KeyPair.fromRandom("ed25519");
     const bytes = Buffer.from(await sign(keyPair, AGENT.vaultAccountId), "base64");
-    bytes[bytes.length - 1] ^= 1;
+    bytes[bytes.length - 1] = (bytes[bytes.length - 1] ?? 0) ^ 1;
     const relay = new AgentRelay({ relayDelegate: async () => { throw new Error("sent"); } }, { sealedOrdersId: null, perAgentPerDay: 5, totalPerDay: 5 });
     await expect(relay.relay(AGENT, bytes.toString("base64"))).rejects.toMatchObject({ code: "delegate_signature" });
   });
