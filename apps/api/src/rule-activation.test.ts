@@ -288,7 +288,7 @@ describe("rule activation job", () => {
     expect(await readsBetween(30, 40)).toBe(0);
   });
 
-  it("keeps a screen's read of a quiet company for minutes, and reads again as soon as something happens on it", async () => {
+  it("reads the chain for a screen when something can have changed, not each time the screen asks", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = { ms: Date.UTC(2026, 10, 10, 10, 0, 0) };
     vi.setSystemTime(now.ms);
@@ -296,43 +296,68 @@ describe("rule activation job", () => {
     service.withNotices(() => true, () => undefined);
     await service.activateAllReadyRules(); // learns the companies
     const vault = "idle.nomos.testnet";
-    const screen = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "list_roles");
-    const chainReads = () => calls.filter((call) => call === `${vault}:list_roles`).length;
-    // Just seen: active for five minutes, as before (kept 6 s).
-    await screen();
-    vi.setSystemTime(now.ms + 10_000);
-    await screen();
-    expect(chainReads()).toBe(2);
-    // Quiet: a console tab asking every 15 s for ten minutes reads the chain twice, not forty times.
-    for (let second = 6 * 60; second < 16 * 60; second += 15) {
+    const ask = (method: string, account = vault) => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(account, method);
+    const chainReads = (method: string, account = vault) => calls.filter((call) => call === `${account}:${method}`).length;
+    // A console tab asking every 10 s for four minutes: one read of each.
+    for (let second = 0; second < 240; second += 10) {
       vi.setSystemTime(now.ms + second * 1_000);
-      await screen();
+      await ask("get_policy"); await ask("get_allowance"); await ask("visa_public_key");
+    }
+    expect([chainReads("get_policy"), chainReads("get_allowance"), chainReads("visa_public_key")]).toEqual([1, 1, 1]);
+    // An agent pays: only what an operation changes is read again.
+    service.notice(vault, "agent");
+    await ask("get_policy"); await ask("get_allowance"); await ask("visa_public_key");
+    expect([chainReads("get_policy"), chainReads("get_allowance"), chainReads("visa_public_key")]).toEqual([1, 2, 1]);
+    // A vote: the DAO and the rules too, not what only an upgrade changes.
+    service.notice(vault, "vote");
+    await ask("get_policy"); await ask("get_allowance"); await ask("visa_public_key");
+    expect([chainReads("get_policy"), chainReads("get_allowance"), chainReads("visa_public_key")]).toEqual([2, 3, 1]);
+    // A rule ran (an upgrade, say): everything.
+    service.notice(vault, "rule");
+    await ask("get_policy"); await ask("get_allowance"); await ask("visa_public_key");
+    expect([chainReads("get_policy"), chainReads("get_allowance"), chainReads("visa_public_key")]).toEqual([3, 4, 2]);
+    // Without any notice, a read is at most five minutes old (what does not pass through this server).
+    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 1_000);
+    await ask("get_policy");
+    expect(chainReads("get_policy")).toBe(4);
+    // A page reloaded (F5), or a new tab: fresh reads, once; the same page asking again changes nothing.
+    expect(service.pageOpened("org-2", "page-a")).toBe(true);
+    await ask("get_policy"); await ask("visa_public_key");
+    expect(service.pageOpened("org-2", "page-a")).toBe(false);
+    await ask("get_policy"); await ask("visa_public_key");
+    expect([chainReads("get_policy"), chainReads("visa_public_key")]).toEqual([5, 3]);
+    // Another contract gets no notice: read as before, kept 6 s.
+    await ask("get", "registry.testnet");
+    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 10_000);
+    await ask("get", "registry.testnet");
+    expect(chainReads("get", "registry.testnet")).toBe(2);
+  });
+
+  it("keeps asking the chain every few seconds while an answer is awaited (a wallet being created)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 10, 0, 0) };
+    vi.setSystemTime(now.ms + 10 * 60_000);
+    const { service, calls } = world(now);
+    service.withNotices(() => true, () => undefined);
+    await service.activateAllReadyRules();
+    const vault = "idle.nomos.testnet";
+    const ask = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "get_wallet");
+    const chainReads = () => calls.filter((call) => call === `${vault}:get_wallet`).length;
+    // The members vote the wallet: no address yet (the mock answers an empty list, without one).
+    service.notice(vault, "vote");
+    for (let second = 0; second <= 30; second += 10) {
+      vi.setSystemTime(now.ms + 10 * 60_000 + second * 1_000);
+      await ask();
+      await Promise.resolve();
     }
     expect(chainReads()).toBe(4);
-    // A vote: the next look reads the chain, and the company is active again.
-    service.notice(vault, "vote");
-    vi.setSystemTime(now.ms + 16 * 60_000 + 1_000);
-    await screen();
-    vi.setSystemTime(now.ms + 16 * 60_000 + 10_000);
-    await screen();
-    expect(chainReads()).toBe(6);
-    // What only a noticed transaction changes (the DAO's policy) is kept 30 s even now, and a
-    // notice drops it: here the vote of a new member.
-    const policy = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "get_policy");
-    const policyReads = () => calls.filter((call) => call === `${vault}:get_policy`).length;
-    await policy();
-    vi.setSystemTime(now.ms + 16 * 60_000 + 25_000);
-    await policy();
-    expect(policyReads()).toBe(1);
-    service.notice(vault, "vote");
-    await policy();
-    expect(policyReads()).toBe(2);
-    // An account that gets no notice (another contract) is read as before.
-    const other = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view("registry.testnet", "get");
-    await other();
-    vi.setSystemTime(now.ms + 16 * 60_000 + 40_000);
-    await other();
-    expect(calls.filter((call) => call === "registry.testnet:get").length).toBe(2);
+    // Two minutes after the vote nothing is awaited any more: kept like the rest.
+    vi.setSystemTime(now.ms + 13 * 60_000);
+    await ask();
+    await Promise.resolve();
+    vi.setSystemTime(now.ms + 13 * 60_000 + 30_000);
+    await ask();
+    expect(chainReads()).toBe(5);
   });
 
   it("makes the screens read again when the rules move on chain without a notice, and when a seat is asked for", async () => {

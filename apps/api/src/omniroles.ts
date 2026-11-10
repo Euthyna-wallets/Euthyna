@@ -196,27 +196,58 @@ const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
  * notice: the enclave's answer to a payout comes within minutes of the agent's call.
  */
 const BANK_ACTIVE_MS = 15 * 60_000;
-/** Screens' reads of a vault or its DAO: kept this long, or `QUIET_VIEW_TTL_MS` when nothing happened on the company for `ACTIVE_VIEW_MS`. */
-const ACTIVE_VIEW_TTL_MS = 6_000;
 /**
- * Reads that only a noticed transaction changes (a vote, a rule the keeper runs, an agent's call):
- * `notice` drops them when that happens, so they are kept this long even while the company is
- * active. The others (a wallet waiting for its MPC answer, payouts waiting for the enclave) change
- * without a notice and keep `ACTIVE_VIEW_TTL_MS`.
+ * How long a screen's read of a company's vault or DAO is kept.
+ *
+ * A console page asks the API again every 8 to 30 s, and one page is a dozen separate contract
+ * reads (NEAR has no batch request: one HTTP request, and 50 credits, per read). Kept 6 s, every
+ * poll of every open tab read the chain again: measured on 10 November, two tabs asked the RPC
+ * 100 times a minute, whether or not anything happened.
+ *
+ * With vault notices the reads follow events instead. A read is kept until a notice that can
+ * change it (`CLASSES_OF_REASON`), and at most `MAX_VIEW_AGE_MS` for what does not pass through
+ * this server. The only reads that change without a notice are answers that come back on chain
+ * later (the MPC creating a wallet, the bank signer answering a payout): while a read shows one
+ * is awaited (`awaited`), it is kept `AWAITED_VIEW_TTL_MS`.
  */
-const NOTICED_VIEW_TTL_MS = 30_000;
-const CHANGED_ONLY_BY_NOTICED_TRANSACTIONS = new Set([
-  // DAO
-  "get_policy", "get_proposals", "get_last_proposal_id", "get_staking_contract",
-  // Vault: rules and what rules set
-  "list_rule_changes", "is_paused", "get_role", "get_membership", "get_near_permissions", "get_allowance",
-  "get_bank_config", "get_bank_box_key", "get_bank_signer_source", "get_bank_permission", "list_bank_beneficiaries",
-  "list_standing_orders", "council", "owner_id", "code_source", "visa_public_key", "status_public_key",
-  // Shares locked to vote: 30 s late at worst for a holder who locks from the public page.
-  "delegation_total_supply",
+const UNNOTICED_VIEW_TTL_MS = 6_000;
+const AWAITED_VIEW_TTL_MS = 6_000;
+const MAX_VIEW_AGE_MS = 5 * 60_000;
+/** Reads use final blocks, a few seconds behind a transaction, and a vote reaches the vault a block or two after the DAO. */
+const FINAL_AFTER_MS = 4_000;
+const STATIC_VIEW_AGE_MS = 60 * 60_000;
+/** An answer is awaited at most this long after the notice that asked for it. */
+const AWAITED_AFTER_NOTICE_MS = 2 * 60_000;
+
+type ViewClass = "static" | "governance" | "operations";
+/** What only a vault upgrade or a rule changes, and the accounts' keys and code. */
+const STATIC_VIEWS = new Set(["code_source", "visa_public_key", "status_public_key", "get_bank_box_key", "get_bank_signer_source", "get_staking_contract", "#keys", "#account"]);
+/** What a vote or a rule changes: the DAO, the rule queue, roles, the bank's settings. */
+const GOVERNANCE_VIEWS = new Set([
+  "get_policy", "get_proposals", "get_last_proposal_id", "delegation_total_supply", "delegation_balance_of",
+  "list_rule_changes", "is_paused", "council", "owner_id", "get_role", "get_membership", "get_near_permissions",
+  "get_bank_config", "get_bank_permission", "list_bank_beneficiaries", "get_evm_executor",
 ]);
-const QUIET_VIEW_TTL_MS = 5 * 60_000;
-const ACTIVE_VIEW_MS = 5 * 60_000;
+/** Everything else is an operation's state: wallets, transactions, payouts, budgets left, balances. */
+const classOfView = (method: string): ViewClass => (STATIC_VIEWS.has(method) ? "static" : GOVERNANCE_VIEWS.has(method) ? "governance" : "operations");
+const ALL_CLASSES: ViewClass[] = ["static", "governance", "operations"];
+/** Which reads a notice can have changed. */
+const CLASSES_OF_REASON: Record<NoticeReason, ViewClass[]> = {
+  vote: ["governance", "operations"],
+  rule: ALL_CLASSES,
+  agent: ["operations"],
+  settled: ["operations"],
+  delegation: ["governance", "operations"],
+  recovery: [],
+  created: ALL_CLASSES,
+  block: ALL_CLASSES,
+};
+/** A read whose value says an answer is still awaited on chain. */
+const AWAITED: Record<string, (value: unknown) => boolean> = {
+  get_wallet: (value) => !(value as { address?: unknown } | null)?.address,
+  get_solana_wallet: (value) => !(value as { address?: unknown } | null)?.address,
+  list_bank_payouts: (value) => Array.isArray(value) && value.some((payout: { state?: string }) => payout.state === "Requested"),
+};
 /** After a member's transaction, the vault is read again every few seconds for this long. */
 const WAKE_FOLLOW_MS = 30_000;
 const DUE_MARGIN_MS = 3_000;
@@ -509,6 +540,9 @@ export class OmniRolesService {
   /** Each company's vault and DAO → its vault: the accounts notices are published for. */
   private readonly watched = new Map<string, string>();
   private readonly firstSeenAt = new Map<string, number>();
+  private readonly vaultOfOrganization = new Map<string, string>();
+  /** The last pages seen per company (see `pageOpened`). */
+  private readonly pagesSeen = new Map<string, string[]>();
   private readonly solanaAddresses = new Map<string, { address: number[] | null }>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
@@ -1263,8 +1297,8 @@ export class OmniRolesService {
       } catch { /* agent account not made by Euthyna: no card */ }
     }
     const assets: Array<{ symbol: string; amount: string; where: string }> = [];
-    // 30 s, or 5 minutes on a quiet company (tokens sent to it from outside show that late).
-    const balanceTtl = holders[0] && this.viewTtl(holders[0].accountId, "get_policy") === QUIET_VIEW_TTL_MS ? QUIET_VIEW_TTL_MS : 30_000;
+    // Dropped by a notice on the company; tokens sent to it from outside show up to 5 minutes late.
+    const balanceTtl = holders[0] && this.followed(holders[0].accountId) ? MAX_VIEW_AGE_MS : 30_000;
     for (const holder of holders) {
       for (const token of NEAR_TESTNET_TOKENS) {
         // A missing card account or an unregistered holder reads as zero.
@@ -1810,8 +1844,7 @@ export class OmniRolesService {
     // The rules moved on chain, whoever moved them (a vote signed outside the console too): the
     // screens read again. Not on the first read after a start, when nothing is kept yet.
     if (known) {
-      this.forget(vaultAccountId);
-      for (const [account, vault] of this.watched) if (vault === vaultAccountId) this.forget(account);
+      this.forgetClasses(vaultAccountId, ALL_CLASSES);
       this.noticedAt.set(vaultAccountId, Date.now());
     }
   }
@@ -2003,6 +2036,7 @@ export class OmniRolesService {
       return await inBackground(async () => {
         const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true, daoAccountId: true } });
         for (const treasury of treasuries) {
+          this.vaultOfOrganization.set(treasury.organizationId, treasury.vaultAccountId);
           // A company seen for the first time (just created, or this server just started) counts as active.
           if (!this.watched.has(treasury.vaultAccountId)) this.firstSeenAt.set(treasury.vaultAccountId, Date.now());
           this.watched.set(treasury.vaultAccountId, treasury.vaultAccountId);
@@ -2686,58 +2720,86 @@ export class OmniRolesService {
   // in-flight requests so a console page does not queue dozens of calls.
   // Past the TTL, a settled value is still served for up to STALE_MS while one
   // refresh runs in the background; writes call forget() to drop it at once.
-  private readonly cache = new Map<string, { at: number; value: Promise<unknown>; settled: boolean; refreshing?: boolean }>();
+  private readonly cache = new Map<string, { at: number; value: Promise<unknown>; settled: boolean; refreshing?: boolean; awaited?: boolean }>();
   private static readonly STALE_MS = 90_000;
 
-  private memo<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  private memo<T>(key: string, ttlMs: number, load: () => Promise<T>, awaited?: (value: T) => boolean): Promise<T> {
     const hit = this.cache.get(key);
     const age = hit ? Date.now() - hit.at : Infinity;
-    if (hit && age < ttlMs) return hit.value as Promise<T>;
+    if (hit && age < (hit.awaited ? Math.min(ttlMs, AWAITED_VIEW_TTL_MS) : ttlMs)) return hit.value as Promise<T>;
     if (hit && hit.settled && age < OmniRolesService.STALE_MS) {
       if (!hit.refreshing) {
         hit.refreshing = true;
         load().then(
-          (fresh) => { if (this.cache.get(key) === hit) this.cache.set(key, { at: Date.now(), value: Promise.resolve(fresh), settled: true }); },
+          (fresh) => { if (this.cache.get(key) === hit) this.cache.set(key, { at: Date.now(), value: Promise.resolve(fresh), settled: true, awaited: awaited?.(fresh) ?? false }); },
           () => { hit.refreshing = false; },
         );
       }
       return hit.value as Promise<T>;
     }
     const value = load();
-    const entry = { at: Date.now(), value: value as Promise<unknown>, settled: false };
+    const entry: { at: number; value: Promise<unknown>; settled: boolean; awaited?: boolean } = { at: Date.now(), value: value as Promise<unknown>, settled: false };
     this.cache.set(key, entry);
-    value.then(() => { entry.settled = true; }, () => { if (this.cache.get(key) === entry) this.cache.delete(key); });
+    value.then((result) => { entry.settled = true; entry.awaited = awaited?.(result) ?? false; }, () => { if (this.cache.get(key) === entry) this.cache.delete(key); });
     return value;
   }
 
   private view<T>(accountId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
-    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, this.viewTtl(accountId, method), () => this.near.viewFunction<T>(accountId, method, args));
+    const vault = this.followed(accountId);
+    const awaited = vault ? AWAITED[method] : undefined;
+    return this.memo(
+      `view:${accountId}:${method}:${JSON.stringify(args)}`,
+      this.viewTtl(accountId, method),
+      () => this.near.viewFunction<T>(accountId, method, args),
+      // An answer is awaited only for a while after the transaction that asked for it.
+      awaited && vault ? (value) => awaited(value) && Date.now() - (this.noticedAt.get(vault) ?? this.firstSeenAt.get(vault) ?? 0) < AWAITED_AFTER_NOTICE_MS : undefined,
+    );
+  }
+
+  /** The vault of this account when notices tell us what happens on it (a company's vault or DAO), else null. */
+  private followed(accountId: string): string | null {
+    return this.noticesOn() ? this.watched.get(accountId) ?? null : null;
+  }
+
+  /** See `MAX_VIEW_AGE_MS`. An account without notices (another contract) is read as before. */
+  private viewTtl(accountId: string, method: string): number {
+    if (!this.followed(accountId)) return UNNOTICED_VIEW_TTL_MS;
+    return classOfView(method) === "static" ? STATIC_VIEW_AGE_MS : MAX_VIEW_AGE_MS;
   }
 
   /**
-   * How long a screen's read of this account is kept. A console page left open asks again every
-   * 10 to 30 s, and each time used to read the chain again (kept 6 s): thousands of reads an hour
-   * per open tab, for a company where nothing happens.
-   *
-   * With vault notices, the server knows when a company's vault or DAO changes: `notice` drops
-   * what is kept. So for those accounts a read is kept 5 minutes while the company is quiet, and
-   * 6 s as before for a few minutes after a notice, when more changes follow without one (the
-   * enclave answering a payout, a transfer being mined).
+   * A console page says which page load it is (a random id made when the page loads). The first
+   * request of a page the server has not seen drops what is kept for that company: a new tab or a
+   * reload (F5) always reads the chain as it is, whatever happened outside this server. True when
+   * the page is new.
    */
-  private viewTtl(accountId: string, method: string): number {
-    const vault = this.watched.get(accountId);
-    if (!vault || !this.noticesOn()) return ACTIVE_VIEW_TTL_MS;
-    const activeAt = Math.max(this.noticedAt.get(vault) ?? 0, this.firstSeenAt.get(vault) ?? 0);
-    if (Date.now() - activeAt >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
-    return CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method) ? NOTICED_VIEW_TTL_MS : ACTIVE_VIEW_TTL_MS;
+  pageOpened(organizationId: string, pageId: string): boolean {
+    const id = pageId.slice(0, 64);
+    const seen = this.pagesSeen.get(organizationId) ?? [];
+    if (seen.includes(id)) return false;
+    this.pagesSeen.set(organizationId, [...seen, id].slice(-50));
+    const vault = this.vaultOfOrganization.get(organizationId);
+    if (vault) this.forgetClasses(vault, ALL_CLASSES);
+    return true;
+  }
+
+  /** Drops what is kept of these classes for a company's vault and DAO. */
+  private forgetClasses(vaultAccountId: string, classes: ViewClass[]): void {
+    if (!classes.length) return;
+    const accounts = [...this.watched].filter(([, vault]) => vault === vaultAccountId).map(([account]) => account);
+    if (!accounts.includes(vaultAccountId)) accounts.push(vaultAccountId);
+    for (const key of this.cache.keys()) {
+      if (!accounts.some((account) => key.includes(account))) continue;
+      const [kind, , method] = key.split(":");
+      const name = kind === "view" ? method ?? "" : kind === "keys" || kind === "account" ? `#${kind}` : "";
+      if (classes.includes(classOfView(name))) this.cache.delete(key);
+    }
   }
 
   private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
   private cached(kind: "account", accountId: string): Promise<{ code_hash: string }>;
   private cached(kind: "keys" | "account", accountId: string): Promise<unknown> {
-    // A company's own accounts follow its notices (an agent hired or fired passes through this server).
-    const quiet = this.viewTtl(accountId, "get_policy") === QUIET_VIEW_TTL_MS;
-    return this.memo<unknown>(`${kind}:${accountId}`, quiet ? QUIET_VIEW_TTL_MS : 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
+    return this.memo<unknown>(`${kind}:${accountId}`, this.followed(accountId) ? STATIC_VIEW_AGE_MS : 30_000, () => (kind === "keys" ? this.near.getAccessKeys(accountId) : this.near.getAccount(accountId)));
   }
 
   /**
@@ -2748,12 +2810,16 @@ export class OmniRolesService {
   async refresh(organizationId: string): Promise<void> {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return;
-    const forget = () => {
-      this.forget(treasury.vaultAccountId);
-      this.forget(treasury.daoAccountId);
-    };
-    forget();
-    for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
+    if (!this.noticesOn()) {
+      const forget = () => {
+        this.forget(treasury.vaultAccountId);
+        this.forget(treasury.daoAccountId);
+      };
+      forget();
+      for (const delay of [3_000, 7_000]) setTimeout(forget, delay).unref?.();
+    }
+    // With notices, the notice published below drops what a member's transaction can change, now
+    // and once the blocks are final.
     // The vote may have queued a rule: read the vault on the next pass, once the blocks are final.
     this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
     this.wakeRequestedAt.set(treasury.vaultAccountId, Date.now());
@@ -2791,12 +2857,10 @@ export class OmniRolesService {
   notice(vaultAccountId: string, reason: NoticeReason): void {
     // Reads use "final" blocks, a few seconds behind the transaction, and a vote reaches the vault
     // a block or two after the DAO: forget now, and again once all of that is final.
-    const forget = () => {
-      this.forget(vaultAccountId);
-      for (const [account, vault] of this.watched) if (vault === vaultAccountId) this.forget(account);
-    };
+    // Twice: each drop makes every open page read again, and one read after finality is enough.
+    const forget = () => this.forgetClasses(vaultAccountId, CLASSES_OF_REASON[reason] ?? ALL_CLASSES);
     forget();
-    for (const delay of [3_000, 7_000, 15_000]) setTimeout(forget, delay).unref?.();
+    setTimeout(forget, FINAL_AFTER_MS).unref?.();
     this.ruleFacts.delete(vaultAccountId);
     const now = Date.now();
     // A payment of the vault ended: the role and the budget it held are free. A rule the vault

@@ -25,6 +25,8 @@ export interface RecoveryDeps {
   daoOf(organizationId: string): Promise<string | null>;
   /** The DAO members of a company, as on chain. */
   councilOf(organizationId: string): Promise<string[]>;
+  /** Drops the kept lists of enrollments and requests (a page was reloaded). */
+  forgetLists?(): void;
   /** The council for a screen (may be a few seconds old). Defaults to `councilOf`. */
   councilShown?(organizationId: string): Promise<string[]>;
   /** Draft the votes that set these members (DAO policy and vault council). */
@@ -51,6 +53,11 @@ export class RecoveryService {
     const dao = await this.deps.daoOf(organizationId);
     if (!dao) throw new RecoveryError(404, "company_not_found", "this company has no active DAO");
     return dao;
+  }
+
+  /** A reloaded page reads the contract again. */
+  forgetLists(): void {
+    this.deps.forgetLists?.();
   }
 
   /** Enrolled founders and recoveries, as the contract has them. A voted recovery shows as done. */

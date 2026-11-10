@@ -191,6 +191,7 @@ const recovery = recoveryContractId
     daoOf: async (organizationId) => (await omniroles.activeTreasury(organizationId))?.daoAccountId ?? null,
     councilOf: (organizationId) => omniroles.councilOf(organizationId),
     councilShown: (organizationId) => omniroles.councilShown(organizationId),
+    forgetLists: () => recoveryReads.clear("list:"),
     membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
   }, dkimKeys({ testKeys: testDkimKeys }))
   : undefined;

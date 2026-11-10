@@ -380,7 +380,7 @@ export function createApp({
   const consoleCors = cors({
     origin: consoleOrigin,
     credentials: true,
-    allowHeaders: ["content-type", "x-api-key"],
+    allowHeaders: ["content-type", "x-api-key", "x-euthyna-page"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
   const isPublicMarket = (path: string) => path.startsWith("/a2a/") || path.startsWith("/v1/market/") || path === "/.well-known/x402";
@@ -831,7 +831,13 @@ export function createApp({
       action: z.enum(["grant", "revoke"]),
       maxUses: z.number().int().positive().nullable().optional(),
     });
-    const orgOf = (context: AppContext) => context.get("console").organizationId;
+    // A page the server has not seen (a new tab, F5) reads the chain again: see pageOpened.
+    const orgOf = (context: AppContext) => {
+      const organizationId = context.get("console").organizationId;
+      const page = context.req.header("x-euthyna-page");
+      if (page && omniroles.pageOpened(organizationId, page)) recovery?.forgetLists();
+      return organizationId;
+    };
     app.get("/v1/console/omniroles/status", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.status(orgOf(context))));
     app.post("/v1/console/omniroles/plan", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -1123,8 +1129,11 @@ export function createApp({
     };
     // Enrollments, recoveries and cancellations are transactions on the recovery contract, signed
     // in the browser. Here: what the contract holds, for the console, and the members' vote.
-    app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) =>
-      context.json(await recovery.list(context.get("console").organizationId)));
+    app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) => {
+      const page = context.req.header("x-euthyna-page");
+      if (page && omniroles?.pageOpened(context.get("console").organizationId, page)) recovery.forgetLists();
+      return context.json(await recovery.list(context.get("console").organizationId));
+    });
     app.post("/v1/console/recovery/proposals", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ lostAccountId: z.string().min(2).max(64) }));
       return context.json(await recovery.proposals(context.get("console").organizationId, input.lostAccountId));
