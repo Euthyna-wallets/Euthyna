@@ -224,20 +224,20 @@ export class NearClient {
     methodNames: string[];
     reserveYocto: string;
     allowanceYocto: null;
+    /** More function-call keys, each limited to its own contract (an agent's sealed-orders key). */
+    extraKeys?: Array<{ publicKey: string; receiverId: string; methodNames: string[] }>;
   }): Promise<string> {
     const account = await this.account();
+    const keys = [{ publicKey: input.publicKey, receiverId: input.receiverId, methodNames: input.methodNames }, ...(input.extraKeys ?? [])];
     const outcome = await account.signAndSendTransaction({
       receiverId: input.accountId,
       actions: [
         transactions.createAccount(),
         transactions.transfer(BigInt(input.reserveYocto)),
-        transactions.addKey(
-          utils.PublicKey.fromString(input.publicKey),
-          transactions.functionCallAccessKey(
-            input.receiverId,
-            input.methodNames,
-          ),
-        ),
+        ...keys.map((key) => transactions.addKey(
+          utils.PublicKey.fromString(key.publicKey),
+          transactions.functionCallAccessKey(key.receiverId, key.methodNames),
+        )),
       ],
     });
     return outcome.transaction_outcome.id;

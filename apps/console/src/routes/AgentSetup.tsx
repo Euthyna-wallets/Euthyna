@@ -1,3 +1,4 @@
+import { sealedPublicKeyOf } from "@euthyna/sdk/agent-keys";
 import { KeyPair } from "near-api-js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -9,7 +10,13 @@ import { readAgentAccessKeyRpc } from "../wallets.js";
 type CreatedAgent = { apiKey: string; agent: { id: string; name: string; role: string; nearAccountId: string } };
 type Provisioning = {
   status: string;
-  attestation: { valid: boolean; expected: { accountId: string; publicKey: string; vaultAccountId: string; methodNames: string[]; allowanceYocto: null } } | null;
+  attestation: {
+    valid: boolean;
+    expected: {
+      accountId: string; publicKey: string; vaultAccountId: string; methodNames: string[]; allowanceYocto: null;
+      sealed: { publicKey: string; receiverId: string; methodNames: string[] } | null;
+    };
+  } | null;
 };
 
 /** apiKey is empty with euthyna-signer: the API key went to the signer, never to this page. */
@@ -99,7 +106,8 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
       setStep("Registering the agent…");
       const created = await api<CreatedAgent>("/v1/console/agents", {
         method: "POST",
-        body: JSON.stringify({ name: name.trim(), role, nearPublicKey: publicKey, vaultAccountId: props.vaultAccountId, mpcPath: `agents/${role}/base` }),
+        // The second key, for sealed orders, is derived from the same private key: the file holds both.
+        body: JSON.stringify({ name: name.trim(), role, nearPublicKey: publicKey, nearSealedPublicKey: sealedPublicKeyOf(keyPair.toString()), vaultAccountId: props.vaultAccountId, mpcPath: `agents/${role}/base` }),
       });
       agentId = created.agent.id;
       const keyFile = `${slug(name) || "agent"}-key.json`;
@@ -197,7 +205,7 @@ export function NewAgent(props: { vaultAccountId: string; defaultRole?: string; 
           The private key is generated in this browser and downloaded as a file. Euthyna only receives the public key.
         </p>
       )}
-      <p className="small muted">The agent's NEAR account can only call the vault: it cannot move NEAR or call another contract.</p>
+      <p className="small muted">The agent's NEAR account can only call the vault (and, with a key file, the sealed-orders contract, for orders its role allows): it cannot move NEAR or call another contract.</p>
       {error ? <div className="alert error">{error}</div> : null}
       {locked && keyMode === "signer" ? null : (
         <div className="row">

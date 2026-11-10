@@ -59,6 +59,10 @@
       "types": "./dist/sealed-orders.d.ts",
       "default": "./dist/sealed-orders.js"
     },
+    "./agent-keys": {
+      "types": "./dist/agent-keys.d.ts",
+      "default": "./dist/agent-keys.js"
+    },
     "./sealed-prover": {
       "types": "./dist/sealed-prover.d.ts",
       "default": "./dist/sealed-prover.js"

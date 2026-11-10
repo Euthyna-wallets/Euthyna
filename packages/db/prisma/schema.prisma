@@ -197,6 +197,8 @@ model Agent {
   role            String
   nearAccountId   String
   nearPublicKey   String
+  /// Its second key, limited to the sealed-orders contract (null: an agent hired without one).
+  nearSealedPublicKey String?
   vaultAccountId  String
   mpcPath         String
   evmAddress      String?

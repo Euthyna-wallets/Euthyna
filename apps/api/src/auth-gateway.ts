@@ -34,6 +34,7 @@ export interface AgentView {
   role: string;
   nearAccountId: string;
   nearPublicKey: string;
+  nearSealedPublicKey: string | null;
   vaultAccountId: string;
   evmAddress: string | null;
   mpcPath: string;
@@ -62,6 +63,8 @@ export interface CreateAgentInput {
   role: string;
   nearAccountId: string;
   nearPublicKey: string;
+  /** The agent's sealed-orders key (derived from its main key by whoever holds it). */
+  nearSealedPublicKey?: string | null;
   vaultAccountId: string;
   mpcPath: string;
   createdByUserId: string;
@@ -123,6 +126,7 @@ function toAgentView(agent: {
   role: string;
   nearAccountId: string;
   nearPublicKey: string;
+  nearSealedPublicKey?: string | null;
   vaultAccountId: string;
   evmAddress: string | null;
   mpcPath: string;
@@ -136,6 +140,7 @@ function toAgentView(agent: {
     role: agent.role,
     nearAccountId: agent.nearAccountId,
     nearPublicKey: agent.nearPublicKey,
+    nearSealedPublicKey: agent.nearSealedPublicKey ?? null,
     vaultAccountId: agent.vaultAccountId,
     evmAddress: agent.evmAddress,
     mpcPath: agent.mpcPath,
@@ -406,6 +411,7 @@ export class BetterAuthGateway implements AuthGateway {
           role: input.role,
           nearAccountId: input.nearAccountId,
           nearPublicKey: input.nearPublicKey,
+          nearSealedPublicKey: input.nearSealedPublicKey ?? null,
           vaultAccountId: input.vaultAccountId,
           mpcPath: input.mpcPath,
           createdByUserId: input.createdByUserId,

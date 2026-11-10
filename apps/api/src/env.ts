@@ -188,6 +188,8 @@ const schema = z.object({
   RECOVERY_CONTRACT_ID: z.string().optional(),
   /** contracts/sealed-orders; unset turns sealed orders off in the console. */
   SEALED_ORDERS_ACCOUNT_ID: z.string().optional(),
+  /** Storage the relayer prepays for a vault's sealed orders when it hires an agent (0.1 NEAR: 5 orders; 0 = off). */
+  NEAR_SEALED_CREDIT_YOCTO: z.string().regex(/^\d+$/).default("100000000000000000000000"),
   /**
    * Testnet only: DKIM keys of test mail domains, as JSON {"<selector>._domainkey.<domain>": "v=DKIM1; k=rsa; p=…"}.
    * Lets tests sign their own emails. Ignored unless NEAR_NETWORK_ID is testnet.

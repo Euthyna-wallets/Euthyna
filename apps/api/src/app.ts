@@ -39,6 +39,7 @@ const createAgentSchema = z.object({
   role: z.string().min(1).max(80),
   nearAccountId: z.string().min(2).max(64).regex(/^[a-z0-9._-]+$/).optional(),
   nearPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]+$/),
+  nearSealedPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/).optional(),
   vaultAccountId: z.string().min(2).max(64),
   mpcPath: z.string().min(1).max(200),
 });
@@ -54,6 +55,7 @@ const createPairingSchema = z.object({
 const redeemPairingSchema = z.object({
   code: z.string().min(10).max(64),
   publicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/),
+  sealedPublicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/).optional(),
   hostname: z.string().max(64).transform((value) => value.replace(/[^\w.-]/g, "").slice(0, 64)).default(""),
 });
 
@@ -681,6 +683,7 @@ export function createApp({
         role: pairing.role,
         nearAccountId: pairing.nearAccountId,
         nearPublicKey: input.publicKey,
+        nearSealedPublicKey: input.sealedPublicKey && input.sealedPublicKey !== input.publicKey ? input.sealedPublicKey : null,
         vaultAccountId: pairing.vaultAccountId,
         mpcPath: pairing.mpcPath,
         createdByUserId: pairing.createdByUserId,
@@ -794,6 +797,7 @@ export function createApp({
       role: input.role,
       nearAccountId: expectedAccountId,
       nearPublicKey: input.nearPublicKey,
+      nearSealedPublicKey: input.nearSealedPublicKey && input.nearSealedPublicKey !== input.nearPublicKey ? input.nearSealedPublicKey : null,
       vaultAccountId: input.vaultAccountId,
       mpcPath: input.mpcPath,
       createdByUserId: consoleIdentity.userId,
