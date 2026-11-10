@@ -59,7 +59,7 @@ function world(now: { ms: number }) {
   const prisma = {
     treasury: {
       findMany: async () => vaults.map((vaultAccountId, index) => ({ organizationId: `org-${index}`, vaultAccountId })),
-      findFirst: async () => ({ daoAccountId: "dao.testnet" }),
+      findFirst: async () => ({ daoAccountId: "dao.testnet", vaultAccountId: "vault-of-dao.testnet" }),
       findUnique: async ({ where }: { where: { organizationId_environment: { organizationId: string } } }) => {
         const index = Number(where.organizationId_environment.organizationId.slice(4));
         return { organizationId: `org-${index}`, vaultAccountId: vaults[index], daoAccountId: "dao.testnet" };
@@ -333,6 +333,35 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 16 * 60_000 + 40_000);
     await other();
     expect(calls.filter((call) => call === "registry.testnet:get").length).toBe(2);
+  });
+
+  it("makes the screens read again when the rules move on chain without a notice, and when a seat is asked for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 13, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls, rules } = world(now);
+    const published: string[] = [];
+    service.withNotices(() => true, (vault, reason) => published.push(`${vault}:${reason}`));
+    await service.activateAllReadyRules();
+    const vault = "idle.nomos.testnet";
+    const screen = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "get_role");
+    const chainReads = () => calls.filter((call) => call === `${vault}:get_role`).length;
+    // Quiet for ten minutes: the read is kept.
+    vi.setSystemTime(now.ms + 10 * 60_000);
+    await screen();
+    vi.setSystemTime(now.ms + 11 * 60_000);
+    await screen();
+    expect(chainReads()).toBe(1);
+    // A vote signed with a CLI queues a rule: no notice. The keeper's next read of the vault sees
+    // the rules moved, and the screen reads the chain again.
+    rules[vault]!.push({ queue_id: [7], change: { SetRole: {} }, state: "Queued", execute_after_ns: ns(now.ms + 86_400_000), expires_at_ns: ns(now.ms + 2 * 86_400_000) });
+    vi.setSystemTime(now.ms + 61 * 60_000);
+    await service.activateAllReadyRules();
+    await screen();
+    expect(chainReads()).toBe(2);
+    // Someone asks for a seat from the recovery page: the company's processes are told.
+    expect(await service.recoveryRequested("dao.testnet")).toBe(true);
+    expect(published).toContain("vault-of-dao.testnet:recovery");
   });
 
   it("tries a refused rule at once when a payment of the vault ends, and tells the other process what it ran", async () => {

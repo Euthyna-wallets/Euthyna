@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
+import { api } from "../../api.js";
 import { authClient } from "../../auth.js";
 import { Kicker, PageTitle, Slab } from "../../components/design.js";
 import { type ContractProof, enrollmentOf, proveEmailFile, RECOVERY_CONTRACT_ID, recoverySubject } from "../../lib/email-proof.js";
@@ -93,6 +94,8 @@ export function RecoverPage() {
   async function send(target: Seat, proof: ContractProof): Promise<string> {
     await signContractCall(me, RECOVERY_CONTRACT_ID, "request", { dao_id: target.daoId, lost_account_id: target.lostId, ...proof }, { deposit: RECOVERY_DEPOSIT, gas: RECOVERY_GAS });
     setProved(null);
+    // The founders did not sign this: tell the server, so that their screens show the request now.
+    void api("/v1/recovery/requested", { method: "POST", body: JSON.stringify({ daoId: target.daoId }) }).catch(() => undefined);
     // Views read final blocks: the request shows up a few seconds after the transaction.
     let open: { not_before_ns: string } | null = null;
     for (let attempt = 0; attempt < 6 && !open; attempt += 1) {

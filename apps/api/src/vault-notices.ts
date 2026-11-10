@@ -16,7 +16,7 @@
  * once when the block feed is on (chain-follower.ts), which publishes here too.
  */
 
-export type NoticeReason = "vote" | "agent" | "rule" | "settled" | "delegation" | "created" | "block";
+export type NoticeReason = "vote" | "agent" | "rule" | "settled" | "delegation" | "recovery" | "created" | "block";
 
 export interface NoticeRow { id: bigint; vaultAccountId: string; reason: string }
 

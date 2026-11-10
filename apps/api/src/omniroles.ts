@@ -196,15 +196,8 @@ const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
  * notice: the enclave's answer to a payout comes within minutes of the agent's call.
  */
 const BANK_ACTIVE_MS = 15 * 60_000;
-/**
- * Screens' reads of a vault or its DAO are kept `ACTIVE_VIEW_TTL_MS` for `BURST_VIEW_MS` after a
- * notice (what follows without a notice lands then: the MPC's answer, the enclave's), then
- * `NOTICED_VIEW_TTL_MS` while the company is still active, then `QUIET_VIEW_TTL_MS` once nothing
- * happened on it for `ACTIVE_VIEW_MS`. Measured on 10 November: two console tabs left open after
- * some activity asked the RPC 100 times a minute, almost all of it reads kept 6 s for 5 minutes.
- */
+/** Screens' reads of a vault or its DAO: kept this long, or `QUIET_VIEW_TTL_MS` when nothing happened on the company for `ACTIVE_VIEW_MS`. */
 const ACTIVE_VIEW_TTL_MS = 6_000;
-const BURST_VIEW_MS = 60_000;
 /**
  * Reads that only a noticed transaction changes (a vote, a rule the keeper runs, an agent's call):
  * `notice` drops them when that happens, so they are kept this long even while the company is
@@ -1811,7 +1804,16 @@ export class OmniRolesService {
   /** The rule list moved (a rule queued, applied, vetoed): forget what rules decide. */
   private noteRules(vaultAccountId: string, rules: QueuedRule[]): void {
     const fingerprint = rules.map((rule) => `${hexOf(rule.queue_id)}:${rule.state}`).join(",");
-    if (this.ruleFacts.get(vaultAccountId)?.fingerprint !== fingerprint) this.ruleFacts.set(vaultAccountId, { fingerprint, values: new Map() });
+    const known = this.ruleFacts.get(vaultAccountId);
+    if (known?.fingerprint === fingerprint) return;
+    this.ruleFacts.set(vaultAccountId, { fingerprint, values: new Map() });
+    // The rules moved on chain, whoever moved them (a vote signed outside the console too): the
+    // screens read again. Not on the first read after a start, when nothing is kept yet.
+    if (known) {
+      this.forget(vaultAccountId);
+      for (const [account, vault] of this.watched) if (vault === vaultAccountId) this.forget(account);
+      this.noticedAt.set(vaultAccountId, Date.now());
+    }
   }
 
   /** A read that only a rule changes: from the last read while the rule list has not moved. */
@@ -2726,10 +2728,8 @@ export class OmniRolesService {
     const vault = this.watched.get(accountId);
     if (!vault || !this.noticesOn()) return ACTIVE_VIEW_TTL_MS;
     const activeAt = Math.max(this.noticedAt.get(vault) ?? 0, this.firstSeenAt.get(vault) ?? 0);
-    const age = Date.now() - activeAt;
-    if (age >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
-    if (age >= BURST_VIEW_MS || CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method)) return NOTICED_VIEW_TTL_MS;
-    return ACTIVE_VIEW_TTL_MS;
+    if (Date.now() - activeAt >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
+    return CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method) ? NOTICED_VIEW_TTL_MS : ACTIVE_VIEW_TTL_MS;
   }
 
   private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
@@ -2760,6 +2760,17 @@ export class OmniRolesService {
     this.noticedAt.set(treasury.vaultAccountId, Date.now());
     this.ruleFacts.delete(treasury.vaultAccountId);
     this.publishNotice(treasury.vaultAccountId, "vote");
+  }
+
+  /**
+   * Someone who is not a member of the company asked for one of its seats (the recovery page):
+   * its founders' screens read again. False when no company has this DAO.
+   */
+  async recoveryRequested(daoAccountId: string): Promise<boolean> {
+    const treasury = await this.prisma.treasury.findFirst({ where: { daoAccountId, status: "active" }, select: { vaultAccountId: true } });
+    if (!treasury) return false;
+    this.publishNotice(treasury.vaultAccountId, "recovery");
+    return true;
   }
 
   /** An agent acted on its vault (a payment, a call, a payout): the jobs of both processes read it now. */

@@ -1129,6 +1129,14 @@ export function createApp({
       const input = await parseJson(context, z.object({ lostAccountId: z.string().min(2).max(64) }));
       return context.json(await recovery.proposals(context.get("console").organizationId, input.lostAccountId));
     });
+    // The recovery page, after its request is on the contract: the company's founders are not the
+    // ones who signed, so their screens would not know. Nothing is trusted from this call, it only
+    // makes the server read the chain again.
+    app.post("/v1/recovery/requested", async (context) => {
+      const input = await parseJson(context, z.object({ daoId: z.string().min(2).max(64) }));
+      limited(`recovery-requested:${input.daoId}`);
+      return context.json({ ok: (await omniroles?.recoveryRequested(input.daoId)) ?? false });
+    });
     // The browser needs the domain's DKIM key to build a proof (it cannot query DNS); the
     // contract only accepts keys in its own registry.
     app.get("/v1/recovery/dkim-key", async (context) => {
