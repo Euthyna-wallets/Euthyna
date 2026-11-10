@@ -9,7 +9,6 @@ import { chainLabel, ColumnGauge, Kicker, NightPanel, PageTitle, Seal, SectionHe
 import { chainView } from "../lib/chain-view.js";
 import { formatUsd } from "../lib/money.js";
 import { useWallets } from "../lib/wallet-context.js";
-import { useWalletConnect, type DappTransaction } from "../lib/walletconnect.js";
 import { formatAmount, omni, type ProposalDraft, type Sentence } from "../omniroles-api.js";
 import { signDaoProposal } from "../wallets.js";
 import { BankAccountCard, EuroPayoutsCard, PayrollCard } from "./BankAccountCard.js";
@@ -85,13 +84,11 @@ export function WalletPage() {
   const status = useQuery({ queryKey: ["omni-status"], queryFn: omni.status, refetchInterval: 15_000 });
   const governance = useQuery({ queryKey: ["omni-governance"], queryFn: omni.governance, enabled: Boolean(status.data?.treasury), refetchInterval: 15_000 });
   const address = status.data?.wallet?.address ?? null;
-  const chains = (status.data?.chains ?? []).filter((chain) => chain.enabled).map((chain) => chain.chainId);
-  const walletConnect = useWalletConnect({ address, chains });
   const [basket, setBasket] = useState<Requested[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ draft: ProposalDraft; summary: Sentence[]; requested: Requested[]; request?: DappTransaction } | null>(null);
+  const [preview, setPreview] = useState<{ draft: ProposalDraft; summary: Sentence[]; requested: Requested[] } | null>(null);
   const treasury = status.data?.treasury;
   const me = wallets.nearAccountId;
   // Sponsored gas (EIP-7702): the voted executor, or "unsupported" on a vault older than the feature.
@@ -118,11 +115,11 @@ export function WalletPage() {
     }
   }
 
-  async function prepare(requested: Requested[], title: string | undefined, request?: DappTransaction) {
+  async function prepare(requested: Requested[], title: string | undefined) {
     if (!treasury) return;
     const draft = await omni.transactionProposal({ ...(title ? { title } : {}), transactions: requested });
     const summary = verifyTransactions(draft, requested, treasury.daoAccountId, treasury.vaultAccountId);
-    setPreview({ draft, summary, requested, ...(request ? { request } : {}) });
+    setPreview({ draft, summary, requested });
   }
 
   const describe = (item: Requested) => describeCall(getAddress(item.to), (item.data || "0x") as Hex, BigInt(item.value), { profile: BASE_SEPOLIA, labels: address ? { [address]: "company wallet" } : {} });
@@ -281,55 +278,6 @@ export function WalletPage() {
 
           <div className="g2" style={{ display: "grid", gridTemplateColumns: preview ? "minmax(0, .9fr) minmax(0, 1.1fr)" : "minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-              {/* Without a WalletConnect project id the block has nothing to offer a member: hide it. */}
-              {address && walletConnect.enabled ? (
-                <Slab style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
-                  <Kicker>Connect an app</Kicker>
-                  {!walletConnect.enabled ? <div className="empty-state">WalletConnect is not configured on this console.</div> : (
-                    <>
-                      <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
-                        In the app (Aave, Uniswap, a bridge…), choose WalletConnect, copy the connection link and paste it here.
-                        Each transaction the app asks for becomes a proposal; signatures are refused.
-                      </span>
-                      <ConnectForm busy={Boolean(busy)} onPair={(uri) => run("pair", async () => { await walletConnect.pair(uri); })} />
-                      {walletConnect.notice ? (
-                        <div style={{ border: "1px solid rgba(13,23,48,.14)", background: "rgba(255,255,255,.6)", padding: "10px 14px", fontSize: 12.5, color: "var(--ink-2)" }}>
-                          {walletConnect.notice}
-                        </div>
-                      ) : null}
-                      {walletConnect.proposal ? (
-                        <div style={{ border: "1px solid rgba(13,23,48,.14)", background: "rgba(255,255,255,.6)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                          <Kicker color="var(--aegean-ink)">Connection request</Kicker>
-                          <b style={{ fontSize: 15 }}>{walletConnect.proposal.params.proposer.metadata.name}</b>
-                          <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{walletConnect.proposal.params.proposer.metadata.url}</span>
-                          <div className="row wrap" style={{ justifyContent: "flex-end" }}>
-                            <button className="btn-line" onClick={() => void run("reject", walletConnect.reject)}>Reject</button>
-                            <button className="btn-ori" onClick={() => void run("approve", async () => { await walletConnect.approve(); return "Connected. Transactions the app asks for will appear below."; })}>Connect the company wallet</button>
-                          </div>
-                        </div>
-                      ) : null}
-                      {walletConnect.sessions.map((session) => (
-                        <div key={session.topic} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderTop: "1px solid rgba(13,23,48,.1)", fontSize: 13, flexWrap: "wrap" }}>
-                          <span>Connected to <strong>{session.name}</strong> <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{session.url}</span> · {session.chains.map(chainName).join(", ")}</span>
-                          <div className="spacer" />
-                          <button className="btn-line" style={{ padding: "6px 12px", fontSize: 10.5 }} onClick={() => void run("disconnect", () => walletConnect.disconnect(session.topic))}>Disconnect</button>
-                        </div>
-                      ))}
-                      {walletConnect.requests.map((request) => (
-                        <div key={request.id} style={{ border: "1px solid rgba(13,23,48,.14)", background: "rgba(255,255,255,.6)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                          <Kicker color="var(--aegean-ink)">{request.app.name} asks</Kicker>
-                          <b style={{ fontSize: 15 }}>{describe(request)} on {chainName(request.chainId)}</b>
-                          <div className="row wrap" style={{ justifyContent: "flex-end" }}>
-                            <button className="btn-line" style={{ padding: "8px 12px", fontSize: 10.5 }} onClick={() => void run("decline", () => walletConnect.answer(request, "Euthyna: declined by the member."))}>Decline</button>
-                            <button className="btn-ori" style={{ padding: "9px 12px", fontSize: 10.5 }} disabled={!me || Boolean(busy)} onClick={() => void run("prepare", () => prepare([request], `${request.app.name}: ${describe(request)}`, request))}>Propose to the members</button>
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </Slab>
-              ) : null}
-
               {address ? (
                 <Slab style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
                   <Kicker>New transaction</Kicker>
@@ -393,11 +341,7 @@ export function WalletPage() {
                     <button className="btn-line on-dark" onClick={() => setPreview(null)}>Cancel</button>
                     <button className="btn-ori" disabled={!me || Boolean(busy)} onClick={() => void run("submit", async () => {
                       const result = await signDaoProposal(me, preview.draft);
-                      if (preview.request) {
-                        await walletConnect.answer(preview.request, `Euthyna: submitted to the company's vote as proposal #${result.proposalId}. It runs after the vote and the veto window.`);
-                      } else {
-                        setBasket([]);
-                      }
+                      setBasket([]);
                       setPreview(null);
                       return `Proposal #${result.proposalId} submitted. Members vote in Decisions.`;
                     })}>Submit to the members' vote</button>
@@ -409,22 +353,6 @@ export function WalletPage() {
         </div>
       </PageState>
     </div>
-  );
-}
-
-function ConnectForm(props: { busy: boolean; onPair: (uri: string) => void }) {
-  const [uri, setUri] = useState("");
-  return (
-    <form style={{ display: "flex", gap: 8, flexWrap: "wrap" }} onSubmit={(event) => { event.preventDefault(); props.onPair(uri); setUri(""); }}>
-      <input
-        className="mono"
-        placeholder="wc:…"
-        value={uri}
-        onChange={(event) => setUri(event.target.value)}
-        style={{ flex: 1, minWidth: 200, padding: "10px 12px", border: "1px solid rgba(13,23,48,.2)", background: "rgba(255,255,255,.7)", borderRadius: 2, fontSize: 12.5, color: "var(--ink)" }}
-      />
-      <button className="btn-line" style={{ padding: "9px 14px" }} type="submit" disabled={props.busy || !uri.startsWith("wc:")}>CONNECT</button>
-    </form>
   );
 }
 

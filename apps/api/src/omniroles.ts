@@ -1389,7 +1389,7 @@ export class OmniRolesService {
   }
 
   /**
-   * A transaction outside any role (from a dApp through WalletConnect, or typed
+   * A transaction outside any role (typed
    * by a member): the DAO votes on the exact calls, which run after the veto window.
    */
   async transactionProposal(

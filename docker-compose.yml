@@ -72,7 +72,6 @@ services:
         VITE_NEAR_RPC_URL: ${PUBLIC_NEAR_RPC_URL:-https://rpc.testnet.fastnear.com}
         VITE_BASE_SEPOLIA_RPC_URL: ${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
         VITE_ETHEREUM_SEPOLIA_RPC_URL: ${ETHEREUM_SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}
-        VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
         VITE_MANDATEOS_REGISTRY_ID: ${OMNIROLES_REGISTRY_ID:-euthyna-directory.testnet}
         VITE_MANDATEOS_PREVIOUS_REGISTRY_IDS: ${OMNIROLES_PREVIOUS_REGISTRY_IDS:-atlantis-registry.testnet}
         VITE_EUTHYNA_RECOVERY_ID: ${RECOVERY_CONTRACT_ID:-euthyna-recovery-v6.testnet}
