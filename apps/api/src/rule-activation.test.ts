@@ -324,11 +324,20 @@ describe("rule activation job", () => {
     expect(service.pageOpened("org-2", "page-a")).toBe(true);
     await ask("get_policy"); await ask("visa_public_key");
     expect(service.pageOpened("org-2", "page-a")).toBe(false);
+    // A second reload three seconds later is served what the first one just read.
+    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 4_000);
+    expect(service.pageOpened("org-2", "page-b")).toBe(false);
     await ask("get_policy"); await ask("visa_public_key");
-    expect([chainReads("get_policy"), chainReads("visa_public_key")]).toEqual([5, 3]);
+    // What only an upgrade changes is not read again by a reload.
+    expect([chainReads("get_policy"), chainReads("visa_public_key")]).toEqual([5, 2]);
+    // A reload later reads again.
+    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 20_000);
+    expect(service.pageOpened("org-2", "page-c")).toBe(true);
+    await ask("get_policy");
+    expect(chainReads("get_policy")).toBe(6);
     // Another contract gets no notice: read as before, kept 6 s.
     await ask("get", "registry.testnet");
-    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 10_000);
+    vi.setSystemTime(now.ms + 240_000 + 5 * 60_000 + 40_000);
     await ask("get", "registry.testnet");
     expect(chainReads("get", "registry.testnet")).toBe(2);
   });

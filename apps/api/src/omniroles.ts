@@ -215,6 +215,8 @@ const AWAITED_VIEW_TTL_MS = 6_000;
 const MAX_VIEW_AGE_MS = 5 * 60_000;
 /** Reads use final blocks, a few seconds behind a transaction, and a vote reaches the vault a block or two after the DAO. */
 const FINAL_AFTER_MS = 4_000;
+/** Page loads of one company closer than this share one fresh read of the chain. */
+const RELOAD_READS_ONCE_MS = 10_000;
 const STATIC_VIEW_AGE_MS = 60 * 60_000;
 /** An answer is awaited at most this long after the notice that asked for it. */
 const AWAITED_AFTER_NOTICE_MS = 2 * 60_000;
@@ -543,6 +545,7 @@ export class OmniRolesService {
   private readonly vaultOfOrganization = new Map<string, string>();
   /** The last pages seen per company (see `pageOpened`). */
   private readonly pagesSeen = new Map<string, string[]>();
+  private readonly pageOpenedAt = new Map<string, number>();
   private readonly solanaAddresses = new Map<string, { address: number[] | null }>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
@@ -2770,16 +2773,23 @@ export class OmniRolesService {
   /**
    * A console page says which page load it is (a random id made when the page loads). The first
    * request of a page the server has not seen drops what is kept for that company: a new tab or a
-   * reload (F5) always reads the chain as it is, whatever happened outside this server. True when
-   * the page is new.
+   * reload (F5) reads the chain as it is, whatever happened outside this server. True when the
+   * kept reads were dropped.
    */
   pageOpened(organizationId: string, pageId: string): boolean {
     const id = pageId.slice(0, 64);
     const seen = this.pagesSeen.get(organizationId) ?? [];
     if (seen.includes(id)) return false;
     this.pagesSeen.set(organizationId, [...seen, id].slice(-50));
+    // A reload reads the company again: about 25 reads, paced one after the other. Reloading again
+    // within a few seconds (or two tabs opened together) is served what the first one just read,
+    // or the reads would queue behind each other and every page would wait.
+    const now = Date.now();
+    if (now - (this.pageOpenedAt.get(organizationId) ?? 0) < RELOAD_READS_ONCE_MS) return false;
+    this.pageOpenedAt.set(organizationId, now);
     const vault = this.vaultOfOrganization.get(organizationId);
-    if (vault) this.forgetClasses(vault, ALL_CLASSES);
+    // Not what only a vault upgrade changes: a rule's notice drops that.
+    if (vault) this.forgetClasses(vault, ["governance", "operations"]);
     return true;
   }
 
