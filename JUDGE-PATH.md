@@ -226,12 +226,16 @@ euro budget. How it works and what stays private: [docs/bank.md](./docs/bank.md)
    holds a commitment and envelopes the bank enclave and the members can open.
 4. **Wallet → Euro payouts**: **Propose: enable euro payouts**, approve with a second account. Once they are on,
    **Who may pay** appears: vote that the agent's role may pay, for example 50 EUR a day and 10 EUR each.
-5. Ask the agent (MCP `bank_payout`) to pay the beneficiary 5 EUR, then 20 EUR, then to beneficiary #9. **You should
+5. If you will do the swap of part 11, vote its rule now: **Rules → payments → Edit → + DeFi… → Uniswap V3**, sell
+   **EURC**, buy **WETH** (budget 5 a day, largest approval 5), submit, approve with a second account. The vault
+   refuses a change to a role while one of its payments is in flight (`ERR_ROLE_IN_USE`), and the payout of the next
+   step stays in flight for about 5 minutes: voted after it, the rule waits that long.
+6. Ask the agent (MCP `bank_payout`) to pay the beneficiary 5 EUR, then 20 EUR, then to beneficiary #9. **You should
    see** `sent` with the amount the beneficiary receives, then `refused` by the vault: `ERR_MAX_PER_PAYOUT`, then
    `BeneficiaryNotAllowed`.
-6. **Payroll · standing orders**: vote "3 EUR to the beneficiary every 10 minutes, 2 times". **You should see** each
+7. **Payroll · standing orders**: vote "3 EUR to the beneficiary every 10 minutes, 2 times". **You should see** each
    payment made on its date, with no agent and no new vote.
-7. **Check on chain**: `list_bank_payouts` on the vault (`json-args '{}'`) lists each payout, its beneficiary
+8. **Check on chain**: `list_bank_payouts` on the vault (`json-args '{}'`) lists each payout, its beneficiary
    number and its transfer; `get_operation` of the transfer shows it `Confirmed`. The transfers of one vault leave one
    at a time, settled about 5 minutes after they are mined (testnet settles on Base's `safe` head); sponsored ones leave without waiting for each other.
 
@@ -250,12 +254,12 @@ deadline. Details and testnet hashes: [docs/sponsored-gas.md](./docs/sponsored-g
 3. Ask the agent to pay the supplier 1 USDC. **You should see** a Base transaction sent by
    `0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982` (the relayer) calling `execute` on the company wallet, with the USDC
    `Transfer` and an `Executed` event; the wallet's ETH does not move.
-4. **A swap of the company's euros**: **Rules → payments → Edit → + DeFi… → Uniswap V3**, sell **EURC**, buy
-   **WETH** (budget 5 a day, largest approval 5), submit, approve with a second account. Then ask the agent to swap
+4. **A swap of the company's euros**, under the Uniswap V3 rule voted in part 10, step 5. Ask the agent to swap
    0.3 EURC for WETH: `execute_call` to the router (`0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`) with
    `exactInputSingle` (fee 3000, recipient the company wallet), `allowanceAmount` and `approveAmount` 300000,
    `approveToken` the EURC. **You should see** one transaction, sent by the relayer, that approves the router, swaps
-   and sets the approval back to 0; WETH in the company wallet. A failing swap undoes the approval too.
+   and sets the approval back to 0; WETH in the company wallet, a few seconds after the agent's call. A failing swap
+   undoes the approval too.
    Uniswap had no pool for Noah's sandbox euro: we opened WETH/EURC 0.3 % on Uniswap's factory at the market rate
    (`0xc68a7653ac3b5eB444BC90CfA43deeC0bB4C3722`, `apps/api/scripts/eurc-pool-setup.mts`). Its liquidity is small:
    swap less than 0.5 EURC.
@@ -320,6 +324,24 @@ page and typing are not counted.
 (*) Both waited 5 minutes for the keeper instead of 1, a bug fixed since (#175): a vote that landed while the keeper
 was reading the vault was pushed to its next idle read. With the fix each is about 1 min 30 s, and the core path
 (parts 3 to 6, 10 and 11) takes **about 16 minutes**, plus the time to read and type.
+
+### Timed again on 10 November 2026
+
+The core path on a new company, **Judge Timed 0111** (vault `judge-timed-0111.euthyna-nomos.testnet`, company wallet
+`0x83dfa91e09b72f5905f17862783f4036d6282806`), after the keeper fix: **14 min 54 s**.
+
+| Part | Step | Time |
+| --- | --- | --- |
+| 3 | Create treasury (DAO and vault) | 17 s |
+| 4 | Write the role, approved, veto window, role on chain | 1 min 53 s |
+| 10 | Enable euro payouts, approved, applied | 1 min 43 s |
+| 11 | Uniswap V3 rule, voted right after the agent's payout | 3 min 59 s: refused with `ERR_ROLE_IN_USE` until the payout settled |
+| 11 | Agent swaps 0.05 EURC for WETH | mined 10 s after the vault signed: [`0x5ac31f8f…`](https://base-sepolia.blockscout.com/tx/0x5ac31f8f09fca23730b2c9bce645ea9dfd337cf1850f3cad6ce3844e2ca02767) |
+
+Two things changed after this run. The Uniswap rule is now voted before the agent's payout (part 10, step 5); that
+order has not been timed, and the other votes of this run took under 2 minutes. And the agent now tells the relayer
+about a call it signed without the Guard (#177): before, the relayer found it on a round it makes every ten minutes,
+and the first swap of this run waited 4 min 40 s.
 
 Part 7 used emails signed by `mail.euthyna-test.dev`, the test domain registered on the recovery contract, because a
 script cannot pass YOPmail's captcha; sending the two emails yourself adds about 2 minutes.
