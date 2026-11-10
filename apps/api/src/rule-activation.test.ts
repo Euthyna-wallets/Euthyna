@@ -316,10 +316,21 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 16 * 60_000 + 10_000);
     await screen();
     expect(chainReads()).toBe(6);
+    // What only a noticed transaction changes (the DAO's policy) is kept 30 s even now, and a
+    // notice drops it: here the vote of a new member.
+    const policy = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "get_policy");
+    const policyReads = () => calls.filter((call) => call === `${vault}:get_policy`).length;
+    await policy();
+    vi.setSystemTime(now.ms + 16 * 60_000 + 25_000);
+    await policy();
+    expect(policyReads()).toBe(1);
+    service.notice(vault, "vote");
+    await policy();
+    expect(policyReads()).toBe(2);
     // An account that gets no notice (another contract) is read as before.
     const other = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view("registry.testnet", "get");
     await other();
-    vi.setSystemTime(now.ms + 16 * 60_000 + 20_000);
+    vi.setSystemTime(now.ms + 16 * 60_000 + 40_000);
     await other();
     expect(calls.filter((call) => call === "registry.testnet:get").length).toBe(2);
   });

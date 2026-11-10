@@ -198,6 +198,21 @@ const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
 const BANK_ACTIVE_MS = 15 * 60_000;
 /** Screens' reads of a vault or its DAO: kept this long, or `QUIET_VIEW_TTL_MS` when nothing happened on the company for `ACTIVE_VIEW_MS`. */
 const ACTIVE_VIEW_TTL_MS = 6_000;
+/**
+ * Reads that only a noticed transaction changes (a vote, a rule the keeper runs, an agent's call):
+ * `notice` drops them when that happens, so they are kept this long even while the company is
+ * active. The others (a wallet waiting for its MPC answer, payouts waiting for the enclave) change
+ * without a notice and keep `ACTIVE_VIEW_TTL_MS`.
+ */
+const NOTICED_VIEW_TTL_MS = 30_000;
+const CHANGED_ONLY_BY_NOTICED_TRANSACTIONS = new Set([
+  // DAO
+  "get_policy", "get_proposals", "get_last_proposal_id", "get_staking_contract",
+  // Vault: rules and what rules set
+  "list_rule_changes", "is_paused", "get_role", "get_membership", "get_near_permissions", "get_allowance",
+  "get_bank_config", "get_bank_box_key", "get_bank_signer_source", "get_bank_permission", "list_bank_beneficiaries",
+  "list_standing_orders", "council", "owner_id", "code_source", "visa_public_key", "status_public_key",
+]);
 const QUIET_VIEW_TTL_MS = 5 * 60_000;
 const ACTIVE_VIEW_MS = 5 * 60_000;
 /** After a member's transaction, the vault is read again every few seconds for this long. */
@@ -492,6 +507,7 @@ export class OmniRolesService {
   /** Each company's vault and DAO → its vault: the accounts notices are published for. */
   private readonly watched = new Map<string, string>();
   private readonly firstSeenAt = new Map<string, number>();
+  private readonly solanaAddresses = new Map<string, { address: number[] | null }>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
@@ -1241,7 +1257,8 @@ export class OmniRolesService {
     for (const holder of holders) {
       for (const token of NEAR_TESTNET_TOKENS) {
         // A missing card account or an unregistered holder reads as zero.
-        const raw = await this.near.viewFunction<string>(token.accountId, "ft_balance_of", { account_id: holder.accountId }).catch(() => "0");
+        // Kept 30 s (a notice on the company drops the vault's and the DAO's): this list is asked by every poll of the page.
+        const raw = await this.memo(`view:${token.accountId}:ft_balance_of:${holder.accountId}`, 30_000, () => this.near.viewFunction<string>(token.accountId, "ft_balance_of", { account_id: holder.accountId })).catch(() => "0");
         if (BigInt(raw || "0") > 0n) assets.push({ symbol: token.symbol, amount: formatUnits(BigInt(raw), token.decimals), where: holder.where });
       }
     }
@@ -2674,7 +2691,7 @@ export class OmniRolesService {
   }
 
   private view<T>(accountId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
-    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, this.viewTtl(accountId), () => this.near.viewFunction<T>(accountId, method, args));
+    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, this.viewTtl(accountId, method), () => this.near.viewFunction<T>(accountId, method, args));
   }
 
   /**
@@ -2687,11 +2704,12 @@ export class OmniRolesService {
    * 6 s as before for a few minutes after a notice, when more changes follow without one (the
    * enclave answering a payout, a transfer being mined).
    */
-  private viewTtl(accountId: string): number {
+  private viewTtl(accountId: string, method: string): number {
     const vault = this.watched.get(accountId);
     if (!vault || !this.noticesOn()) return ACTIVE_VIEW_TTL_MS;
     const activeAt = Math.max(this.noticedAt.get(vault) ?? 0, this.firstSeenAt.get(vault) ?? 0);
-    return Date.now() - activeAt < ACTIVE_VIEW_MS ? ACTIVE_VIEW_TTL_MS : QUIET_VIEW_TTL_MS;
+    if (Date.now() - activeAt >= ACTIVE_VIEW_MS) return QUIET_VIEW_TTL_MS;
+    return CHANGED_ONLY_BY_NOTICED_TRANSACTIONS.has(method) ? NOTICED_VIEW_TTL_MS : ACTIVE_VIEW_TTL_MS;
   }
 
   private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
@@ -2738,10 +2756,14 @@ export class OmniRolesService {
 
   /** Something happened on this vault: read it on the next pass, then every few seconds for a while. */
   notice(vaultAccountId: string, reason: NoticeReason): void {
-    this.forget(vaultAccountId);
-    void this.prisma.treasury.findFirst({ where: { vaultAccountId }, select: { daoAccountId: true } })
-      .then((treasury) => { if (treasury) this.forget(treasury.daoAccountId); })
-      .catch(() => undefined);
+    // Reads use "final" blocks, a few seconds behind the transaction, and a vote reaches the vault
+    // a block or two after the DAO: forget now, and again once all of that is final.
+    const forget = () => {
+      this.forget(vaultAccountId);
+      for (const [account, vault] of this.watched) if (vault === vaultAccountId) this.forget(account);
+    };
+    forget();
+    for (const delay of [3_000, 7_000, 15_000]) setTimeout(forget, delay).unref?.();
     this.ruleFacts.delete(vaultAccountId);
     const now = Date.now();
     // A payment of the vault ended: the role and the budget it held are free. A rule the vault
@@ -2827,7 +2849,12 @@ export class OmniRolesService {
    * { address: null } until the members vote it.
    */
   private async solanaWallet(vaultAccountId: string): Promise<{ supported: boolean; address: string | null; sol: string | null; network: string } | null> {
-    const wallet = await this.near.viewFunction<{ address: number[] | null } | null>(vaultAccountId, "get_solana_wallet").then(
+    // Asked by every page's poll. Once voted, the address never changes: kept for an hour.
+    const known = this.solanaAddresses.get(vaultAccountId);
+    const wallet = await (known ? Promise.resolve(known) : this.view<{ address: number[] | null } | null>(vaultAccountId, "get_solana_wallet").then((value) => {
+      if (value?.address) this.solanaAddresses.set(vaultAccountId, value);
+      return value;
+    })).then(
       (value) => ({ value }),
       () => null,
     );

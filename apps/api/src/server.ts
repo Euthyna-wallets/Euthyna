@@ -16,6 +16,7 @@ import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
 import { vaultNotices } from "./vault-notices.js";
+import { TtlCache } from "./ttl-cache.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
 import { NearRpc } from "./rob/near-tx.js";
@@ -101,8 +102,10 @@ setInterval(() => void omniroles.activateAllReadyRules().catch((error: unknown) 
 // Vault notices: a vote, an agent's call, a rule run here or a payment the worker settled wakes the
 // vault concerned at once, in this process and in the worker; the timed read of every vault is an
 // hourly net (vault-notices.ts).
+const recoveryReads = new TtlCache();
 const notices = vaultNotices(env, prisma);
 if (notices) {
+  notices.subscribe(() => recoveryReads.clear("list:"));
   notices.subscribe((vault, reason) => omniroles.notice(vault, reason));
   omniroles.withNotices(() => true, (vault, reason) => notices.publish(vault, reason));
 }
@@ -177,7 +180,9 @@ const recoveryContractId = env.RECOVERY_CONTRACT_ID ?? (env.NEAR_NETWORK_ID === 
 const recovery = recoveryContractId
   ? new RecoveryService({
     contractId: recoveryContractId,
-    view: (method, args) => near.viewFunction(recoveryContractId, method, args),
+    // The recovery card is on pages that poll every 20 s. The contract's delay is a constant; the
+    // lists are kept 15 s and dropped when something happens on a company (a member's transaction).
+    view: (method, args) => recoveryReads.get(`${method === "delay_seconds" ? "constant" : "list"}:${method}:${JSON.stringify(args)}`, method === "delay_seconds" ? 3_600_000 : 15_000, () => near.viewFunction(recoveryContractId, method, args)),
     daoOf: async (organizationId) => (await omniroles.activeTreasury(organizationId))?.daoAccountId ?? null,
     councilOf: (organizationId) => omniroles.councilOf(organizationId),
     membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
