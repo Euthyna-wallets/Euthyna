@@ -38,6 +38,13 @@ const schema = z.object({
    */
   NEAR_RPC_URLS: z.string().optional(),
   /**
+   * The feed of final blocks the jobs follow instead of reading every vault on a timer
+   * (chain-follower.ts). Default: FastNEAR's feed of the network. "off" goes back to the timers.
+   */
+  NEAR_BLOCK_FEED_URL: z.union([z.literal("off"), z.string().url()]).optional(),
+  /** Optional FastNEAR key for the feed. Server only. */
+  NEAR_BLOCK_FEED_API_KEY: z.string().optional(),
+  /**
    * Testnet only: a key holding test ETH on Base Sepolia that pays the network fee a company wallet
    * lacks, just before its transaction is broadcast (judges and new companies start with no ETH).
    * It moves only its own test ETH. Ignored on mainnet.

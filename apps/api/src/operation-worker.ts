@@ -13,6 +13,9 @@ import type { MpcSignature, VaultOperation } from "./types.js";
 
 /** How often the worker looks in every vault for operations an agent left signed. */
 const DISCOVER_EVERY_MS = 10 * 60_000;
+const NOTICE_AGAIN_MS = 10_000;
+/** The same round while the chain is followed: a touched vault is looked at on the next tick (`notice`). */
+const FOLLOWED_DISCOVER_EVERY_MS = 60 * 60_000;
 /** How long a vault without a wallet on a chain is not asked again. */
 const NO_WALLET_RECHECK_MS = 60 * 60_000;
 
@@ -365,6 +368,25 @@ export class OperationWorker {
 
   private lastDiscoveryAt = Number.NEGATIVE_INFINITY;
   private readonly noWalletUntil = new Map<string, number>();
+  private readonly noticed = new Map<string, { first: boolean; again: number }>();
+  private chainFollowed: () => boolean = () => false;
+
+  /** While `healthy()`, the chain is followed and `notice` reports every vault a block touched. */
+  followChain(healthy: () => boolean): void {
+    this.chainFollowed = healthy;
+  }
+
+  /** A block touched this vault (the chain follower): look for operations nobody recorded on the next tick. */
+  notice(vaultAccountId: string): void {
+    this.noticed.set(vaultAccountId, { first: true, again: 0 });
+    // The transaction may be the one that created its wallet.
+    for (const key of this.noWalletUntil.keys()) if (key.startsWith(`${vaultAccountId}:`)) this.noWalletUntil.delete(key);
+  }
+
+  /** Blocks were not followed for a while: a full round on the next tick. */
+  noticeGap(): void {
+    this.lastDiscoveryAt = Number.NEGATIVE_INFINITY;
+  }
 
   /**
    * Agents sign through the vault themselves; nothing guarantees they come back to settle. An
@@ -378,10 +400,21 @@ export class OperationWorker {
     if (!listVaults || !tracked || !adopt) return 0;
     // An abandoned operation waits minutes anyway (the agent left it): every 10 minutes is enough,
     // and keeps the RPC quota for the work that is due.
-    if (now.getTime() - this.lastDiscoveryAt < (this.config.discoverIntervalMs ?? DISCOVER_EVERY_MS)) return 0;
-    this.lastDiscoveryAt = now.getTime();
+    const every = this.config.discoverIntervalMs ?? (this.chainFollowed() ? FOLLOWED_DISCOVER_EVERY_MS : DISCOVER_EVERY_MS);
+    const all = now.getTime() - this.lastDiscoveryAt >= every;
+    // Between two rounds, only the vaults a block touched (`notice`), once right away and once a
+    // little later: an RPC node's final block can be a little behind the feed's.
+    const noticed = new Set<string>();
+    for (const [vault, state] of this.noticed) {
+      if (state.again > now.getTime()) continue;
+      noticed.add(vault);
+      if (state.first) this.noticed.set(vault, { first: false, again: now.getTime() + NOTICE_AGAIN_MS });
+      else this.noticed.delete(vault);
+    }
+    if (!all && noticed.size === 0) return 0;
+    if (all) this.lastDiscoveryAt = now.getTime();
     let adopted = 0;
-    for (const vault of await listVaults.call(this.store)) {
+    for (const vault of (await listVaults.call(this.store)).filter((vault) => all || noticed.has(vault.vaultAccountId))) {
       try {
         const chainIds = [...new Set([...vault.chainIds, ...Object.keys(this.chains).map(Number)])];
         for (const chainId of chainIds) {

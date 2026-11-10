@@ -15,6 +15,7 @@ import { NearClient } from "./near.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
+import { followCompanies } from "./chain-follower.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
 import { NearRpc } from "./rob/near-tx.js";
@@ -97,6 +98,14 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
 // Rule changes activate by themselves once their veto window has passed.
 // The job reads each vault only when it is due (see activateAllReadyRules); a pass never overlaps the last one.
 setInterval(() => void omniroles.activateAllReadyRules().catch((error: unknown) => console.error("rule activation pass failed:", error)), 5_000).unref();
+// The chain is followed block by block: a vault is read when a block touches it or its DAO, and the
+// timed read of every vault becomes an hourly net (chain-follower.ts).
+const chainFeed = followCompanies(
+  env,
+  () => prisma.treasury.findMany({ select: { vaultAccountId: true, daoAccountId: true } }),
+  { touch: (vault, dao) => omniroles.noticeChain(vault, dao), gap: () => omniroles.noticeChainGap() },
+);
+if (chainFeed) omniroles.followChain(() => chainFeed.healthy());
 
 // Euthyna Market: only with its own relayer account.
 const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY && env.MARKET_WEBHOOK_SECRET

@@ -120,6 +120,61 @@ describe("rule activation job", () => {
     expect(executed).toContain("idle.nomos.testnet:execute_rule_change");
   });
 
+  it("while the chain is followed, an idle vault is read hourly, and at once when a block touches it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 8, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, reads, executed, rules } = world(now);
+    let followed = true;
+    service.followChain(() => followed);
+    await service.activateAllReadyRules();
+
+    // Six minutes later the idle vault is not read: nothing happened on it.
+    reads.length = 0;
+    vi.setSystemTime(now.ms + 360_000);
+    await service.activateAllReadyRules();
+    expect(reads).not.toContain("idle.nomos.testnet");
+
+    // A vote queues a rule: the block that ran it reports the vault, read on the next pass.
+    rules["idle.nomos.testnet"]!.push({ queue_id: [3], change: { SetRole: {} }, state: "Queued", execute_after_ns: ns(now.ms + 420_000), expires_at_ns: ns(now.ms + 86_400_000) });
+    service.noticeChain("idle.nomos.testnet", "dao.testnet");
+    vi.setSystemTime(now.ms + 362_000);
+    await service.activateAllReadyRules();
+    expect(reads).toContain("idle.nomos.testnet");
+    vi.setSystemTime(now.ms + 424_000);
+    executed.length = 0;
+    await service.activateAllReadyRules();
+    expect(executed).toContain("idle.nomos.testnet:execute_rule_change");
+  });
+
+  it("goes back to the five-minute read when the chain feed stops, and reads every vault after a gap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 8, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, reads } = world(now);
+    let followed = true;
+    service.followChain(() => followed);
+    await service.activateAllReadyRules();
+
+    followed = false;
+    reads.length = 0;
+    vi.setSystemTime(now.ms + 200_000);
+    await service.activateAllReadyRules();
+    expect(reads).not.toContain("idle.nomos.testnet");
+    vi.setSystemTime(now.ms + 301_000);
+    await service.activateAllReadyRules();
+    expect(reads).toContain("idle.nomos.testnet");
+
+    followed = true;
+    reads.length = 0;
+    vi.setSystemTime(now.ms + 320_000);
+    await service.activateAllReadyRules();
+    expect(reads).not.toContain("idle.nomos.testnet");
+    service.noticeChainGap();
+    await service.activateAllReadyRules();
+    expect(reads).toContain("idle.nomos.testnet");
+  });
+
   it("reads a vault right after its veto window ends, not a minute later", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = { ms: Date.UTC(2026, 9, 31, 21, 0, 0) };
