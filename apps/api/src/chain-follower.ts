@@ -4,9 +4,9 @@
  * or its DAO), the vault is reported, and the jobs read that vault alone, at once.
  *
  * The cost is one block per block (about 8 kB, from FastNEAR's block feed), whatever the number of
- * companies. The feed allows 180 requests a minute per IP without a key: one process follows it
- * (the worker), paced under that limit, and shares what it sees through the database
- * (`ChainFeedReader`). The timers stay as a net: slow while the feed is `healthy`, as before when it is not
+ * companies. The feed allows 180 requests a minute per IP without a key, which did not let our
+ * server keep up (10 November 2026): it is off unless `NEAR_BLOCK_FEED_URL` is set, with a key.
+ * One process follows it (the worker) and publishes what it sees as notices (vault-notices.ts). The timers stay as a net: slow while the feed is `healthy`, as before when it is not
  * (feed down, or this process too far behind). A gap (start, restart, falling behind) is reported
  * with `onGap`, and the jobs read every vault once.
  */
@@ -52,12 +52,6 @@ const REQUEST_TIMEOUT_MS = 20_000;
  * 180 a minute per IP. Testnet makes a block about every 0.8 s, so this still catches up.
  */
 const MIN_REQUEST_INTERVAL_MS = 400;
-
-export function defaultBlockFeedUrl(networkId: string): string | undefined {
-  if (networkId === "testnet") return "https://testnet.neardata.xyz";
-  if (networkId === "mainnet") return "https://mainnet.neardata.xyz";
-  return undefined;
-}
 
 /** The watched vaults a block touched. */
 export function touchedVaults(block: FeedBlock, accounts: Map<string, string>): Set<string> {
@@ -224,15 +218,10 @@ export class ChainFollower {
   }
 }
 
-/** What the follower's process writes, and the others read. */
+/** The follower's position, written every few seconds: a sign of life to look at when in doubt. */
 export interface ChainFeedTable {
   chainFeed: {
     upsert(args: { where: { name: string }; create: { name: string; height: bigint; gaps: number }; update: { height: bigint; gaps?: { increment: number } } }): Promise<unknown>;
-    findUnique(args: { where: { name: string } }): Promise<{ height: bigint; gaps: number; updatedAt: Date } | null>;
-  };
-  chainTouch: {
-    upsert(args: { where: { vaultAccountId: string }; create: { vaultAccountId: string; height: bigint }; update: { height: bigint } }): Promise<unknown>;
-    findMany(args: { where: { height: { gt: bigint } }; orderBy: { height: "asc" } }): Promise<Array<{ vaultAccountId: string; height: bigint }>>;
   };
 }
 
@@ -241,9 +230,9 @@ type Treasuries = () => Promise<Array<{ vaultAccountId: string; daoAccountId: st
 const HEARTBEAT_MS = 5_000;
 
 /**
- * The follower, in the one process that runs it (the worker). It acts on what it sees (`on`) and
- * writes it to the database for the other processes: each touched vault, and its own position
- * every few seconds as a sign of life. Null when the feed is off.
+ * The follower, in the one process that runs it (the worker): off unless `NEAR_BLOCK_FEED_URL` is
+ * set, because the feed's public limit does not let a server keep up without a key. It reports
+ * what this server cannot know by itself (a vote signed elsewhere) as notices, like any other.
  */
 export function followCompanies(
   env: FeedEnv,
@@ -251,7 +240,7 @@ export function followCompanies(
   treasuries: Treasuries,
   on: { touch: (vaultAccountId: string) => void; gap: () => void },
 ): ChainFollower | null {
-  const baseUrl = env.NEAR_BLOCK_FEED_URL ?? defaultBlockFeedUrl(env.NEAR_NETWORK_ID);
+  const baseUrl = env.NEAR_BLOCK_FEED_URL;
   if (!baseUrl || baseUrl === "off") return null;
   const name = env.NEAR_NETWORK_ID;
   const failed = (error: unknown) => console.warn(JSON.stringify({ event: "chain_feed.write_failed", message: String(error).slice(0, 160) }));
@@ -267,10 +256,7 @@ export function followCompanies(
       }
       return watched;
     },
-    onTouch: (vaultAccountId, height) => {
-      on.touch(vaultAccountId);
-      void db.chainTouch.upsert({ where: { vaultAccountId }, create: { vaultAccountId, height: BigInt(height) }, update: { height: BigInt(height) } }).catch(failed);
-    },
+    onTouch: (vaultAccountId) => on.touch(vaultAccountId),
     onGap: () => {
       pendingGaps += 1;
       on.gap();
@@ -278,7 +264,6 @@ export function followCompanies(
   });
   const heartbeat = async () => {
     const height = follower.height();
-    // Only while blocks arrive: a stale position tells the readers to go back to their timers.
     if (height === null || !follower.healthy()) return;
     const gaps = pendingGaps;
     pendingGaps = 0;
@@ -288,56 +273,4 @@ export function followCompanies(
   setInterval(() => void heartbeat(), HEARTBEAT_MS).unref();
   follower.start();
   return follower;
-}
-
-/**
- * The other processes (the API): they read from the database what the follower saw. `poll` reports
- * the vaults touched since the last call and the gaps; `healthy` is true while the follower wrote
- * its position in the last minute.
- */
-export class ChainFeedReader {
-  private cursor: bigint | null = null;
-  private gaps: number | null = null;
-  private seenAt = Number.NEGATIVE_INFINITY;
-
-  constructor(
-    private readonly db: ChainFeedTable,
-    private readonly name: string,
-    private readonly on: { touch: (vaultAccountId: string) => void; gap: () => void },
-    private readonly now: () => number = () => Date.now(),
-  ) {}
-
-  healthy(): boolean {
-    return this.now() - this.seenAt < FEED_STALE_MS;
-  }
-
-  async poll(): Promise<void> {
-    const feed = await this.db.chainFeed.findUnique({ where: { name: this.name } });
-    if (!feed) return;
-    this.seenAt = feed.updatedAt.getTime();
-    if (this.cursor === null) {
-      // First read: this process reads every vault at its start anyway.
-      this.cursor = feed.height;
-      this.gaps = feed.gaps;
-      return;
-    }
-    if (feed.gaps !== this.gaps) {
-      this.gaps = feed.gaps;
-      this.on.gap();
-    }
-    const touches = await this.db.chainTouch.findMany({ where: { height: { gt: this.cursor } }, orderBy: { height: "asc" } });
-    for (const touch of touches) {
-      this.on.touch(touch.vaultAccountId);
-      if (touch.height > this.cursor) this.cursor = touch.height;
-    }
-  }
-}
-
-/** The API's side of the feed; null when the feed is off. */
-export function readCompaniesFeed(env: FeedEnv, db: ChainFeedTable, on: { touch: (vaultAccountId: string) => void; gap: () => void }): ChainFeedReader | null {
-  const baseUrl = env.NEAR_BLOCK_FEED_URL ?? defaultBlockFeedUrl(env.NEAR_NETWORK_ID);
-  if (!baseUrl || baseUrl === "off") return null;
-  const reader = new ChainFeedReader(db, env.NEAR_NETWORK_ID, on);
-  setInterval(() => void reader.poll().catch((error: unknown) => console.warn(JSON.stringify({ event: "chain_feed.read_failed", message: String(error).slice(0, 160) }))), 2_000).unref();
-  return reader;
 }

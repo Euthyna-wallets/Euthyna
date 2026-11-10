@@ -582,7 +582,7 @@ describe("operations an agent signed but never settled", () => {
   it("are found on the next tick when a block touched the vault, without waiting for the round", async () => {
     const test = scanning();
     test.near.walletState = { address: Array(20).fill(0x11), in_flight: [] };
-    test.worker.followChain(() => true);
+    test.worker.withNotices(() => true);
     expect((await test.worker.tick()).adopted).toBe(0);
     const rounds = test.store.vaultCalls;
     // Nothing touched, round not due: the vaults are not even listed.
@@ -599,7 +599,7 @@ describe("operations an agent signed but never settled", () => {
   it("look at a touched vault a second time a little later, then leave it alone", async () => {
     const test = scanning();
     test.near.walletState = { address: Array(20).fill(0x11), in_flight: [] };
-    test.worker.followChain(() => true);
+    test.worker.withNotices(() => true);
     await test.worker.tick();
     test.worker.notice("vault.testnet");
     test.advance(5_000);

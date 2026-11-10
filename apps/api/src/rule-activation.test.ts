@@ -59,6 +59,7 @@ function world(now: { ms: number }) {
   const prisma = {
     treasury: {
       findMany: async () => vaults.map((vaultAccountId, index) => ({ organizationId: `org-${index}`, vaultAccountId })),
+      findFirst: async () => ({ daoAccountId: "dao.testnet" }),
       findUnique: async ({ where }: { where: { organizationId_environment: { organizationId: string } } }) => {
         const index = Number(where.organizationId_environment.organizationId.slice(4));
         return { organizationId: `org-${index}`, vaultAccountId: vaults[index], daoAccountId: "dao.testnet" };
@@ -120,13 +121,13 @@ describe("rule activation job", () => {
     expect(executed).toContain("idle.nomos.testnet:execute_rule_change");
   });
 
-  it("while the chain is followed, an idle vault is read hourly, and at once when a block touches it", async () => {
+  it("with notices on, an idle vault is read hourly, and at once when something happens on it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = { ms: Date.UTC(2026, 10, 10, 8, 0, 0) };
     vi.setSystemTime(now.ms);
     const { service, reads, executed, rules } = world(now);
     let followed = true;
-    service.followChain(() => followed);
+    service.withNotices(() => followed, () => undefined);
     await service.activateAllReadyRules();
 
     // Six minutes later the idle vault is not read: nothing happened on it.
@@ -135,9 +136,9 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(reads).not.toContain("idle.nomos.testnet");
 
-    // A vote queues a rule: the block that ran it reports the vault, read on the next pass.
+    // A vote queues a rule: the notice makes the vault read on the next pass.
     rules["idle.nomos.testnet"]!.push({ queue_id: [3], change: { SetRole: {} }, state: "Queued", execute_after_ns: ns(now.ms + 420_000), expires_at_ns: ns(now.ms + 86_400_000) });
-    service.noticeChain("idle.nomos.testnet", "dao.testnet");
+    service.notice("idle.nomos.testnet", "vote");
     vi.setSystemTime(now.ms + 362_000);
     await service.activateAllReadyRules();
     expect(reads).toContain("idle.nomos.testnet");
@@ -147,13 +148,13 @@ describe("rule activation job", () => {
     expect(executed).toContain("idle.nomos.testnet:execute_rule_change");
   });
 
-  it("goes back to the five-minute read when the chain feed stops, and reads every vault after a gap", async () => {
+  it("goes back to the five-minute read when notices are turned off", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = { ms: Date.UTC(2026, 10, 10, 8, 0, 0) };
     vi.setSystemTime(now.ms);
     const { service, reads } = world(now);
     let followed = true;
-    service.followChain(() => followed);
+    service.withNotices(() => followed, () => undefined);
     await service.activateAllReadyRules();
 
     followed = false;
@@ -162,15 +163,6 @@ describe("rule activation job", () => {
     await service.activateAllReadyRules();
     expect(reads).not.toContain("idle.nomos.testnet");
     vi.setSystemTime(now.ms + 301_000);
-    await service.activateAllReadyRules();
-    expect(reads).toContain("idle.nomos.testnet");
-
-    followed = true;
-    reads.length = 0;
-    vi.setSystemTime(now.ms + 320_000);
-    await service.activateAllReadyRules();
-    expect(reads).not.toContain("idle.nomos.testnet");
-    service.noticeChainGap();
     await service.activateAllReadyRules();
     expect(reads).toContain("idle.nomos.testnet");
   });
@@ -266,6 +258,55 @@ describe("rule activation job", () => {
     vi.setSystemTime(now.ms + 24 * 60_000);
     await service.activateAllReadyRules();
     expect(orderReads()).toBe(2);
+  });
+
+  it("with notices on, reads a vault that pays IBANs every minute only while something happens on it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, reads, banks } = world(now);
+    const vault = "idle.nomos.testnet";
+    banks.add(vault);
+    service.withNotices(() => true, () => undefined);
+    await service.activateAllReadyRules();
+    const readsBetween = async (fromMinute: number, toMinute: number) => {
+      reads.length = 0;
+      for (let minute = fromMinute; minute <= toMinute; minute += 1) {
+        vi.setSystemTime(now.ms + minute * 60_000 + 5_000);
+        await service.activateAllReadyRules();
+      }
+      return reads.filter((read) => read === vault).length;
+    };
+    // Nothing happens: not read for the next ten minutes.
+    expect(await readsBetween(1, 10)).toBe(0);
+    // The agent asks for a payout: read at once, then every minute while the enclave may answer.
+    service.notice(vault, "agent");
+    // (This test looks once a minute and the read is due after 63 s: every other look.)
+    expect(await readsBetween(11, 20)).toBeGreaterThanOrEqual(4);
+    // Quiet again a quarter of an hour after the last notice.
+    await readsBetween(21, 29);
+    expect(await readsBetween(30, 40)).toBe(0);
+  });
+
+  it("tries a refused rule at once when a payment of the vault ends, and tells the other process what it ran", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 9, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, executed, refuse } = world(now);
+    const published: string[] = [];
+    service.withNotices(() => true, (vault, reason) => published.push(`${vault}:${reason}`));
+    refuse.add("ready.nomos.testnet"); // its role is held by a payment in flight
+    await service.activateAllReadyRules();
+    expect(published).toEqual([]);
+    // 20 s later the payment settles: the worker's notice makes the keeper try again, without the 2-minute wait.
+    vi.setSystemTime(now.ms + 20_000);
+    refuse.delete("ready.nomos.testnet");
+    executed.length = 0;
+    service.notice("ready.nomos.testnet", "settled");
+    vi.setSystemTime(now.ms + 22_000);
+    await service.activateAllReadyRules();
+    expect(executed).toEqual(["ready.nomos.testnet:execute_rule_change"]);
+    expect(published).toEqual(["ready.nomos.testnet:rule"]);
   });
 
   it("reads a vault that pays IBANs every minute, so an agent's payout transfer starts at once", async () => {

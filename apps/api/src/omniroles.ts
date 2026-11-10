@@ -72,6 +72,7 @@ import { chainClient, estimateCalls, GasEstimateError, rpcUrls, type GasCall } f
 import type { KmsSigner } from "./kms.js";
 import type { NearClient } from "./near.js";
 import { inBackground } from "./rpc-limiter.js";
+import type { NoticeReason } from "./vault-notices.js";
 import { NEAR_ACCOUNT_ID, NEAR_PROVIDER_ID, nearUserEmail } from "./near-auth.js";
 
 export class OmniRolesError extends Error {
@@ -186,10 +187,15 @@ const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 // payroll date) wake it on time.
 const IDLE_RECHECK_MS = 300_000;
 /**
- * The same read while the chain is followed (`followChain`): any transaction on the vault or its
- * DAO wakes the vault within seconds, so this read is only a net.
+ * The same read with vault notices on (vault-notices.ts): a vote, an agent's call or a settled
+ * payment wakes the vault within seconds, so this read is only a net.
  */
-const FOLLOWED_IDLE_RECHECK_MS = 60 * 60_000;
+const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
+/**
+ * With notices on, a vault that pays IBANs is read every minute only this long after its last
+ * notice: the enclave's answer to a payout comes within minutes of the agent's call.
+ */
+const BANK_ACTIVE_MS = 15 * 60_000;
 /** After a member's transaction, the vault is read again every few seconds for this long. */
 const WAKE_FOLLOW_MS = 30_000;
 const DUE_MARGIN_MS = 3_000;
@@ -474,9 +480,11 @@ export class OmniRolesService {
   private readonly nextActivationCheck = new Map<string, number>();
   /** When a member's transaction last asked to read the vault again (`refresh`). */
   private readonly wakeRequestedAt = new Map<string, number>();
-  /** Vaults left to the idle read, and when they were read: the net tightens again if the chain feed stops. */
+  /** Vaults left to the idle read, and when they were read: the net tightens again if notices are turned off. */
   private readonly idleReadAt = new Map<string, number>();
-  private chainFollowed: () => boolean = () => false;
+  private noticesOn: () => boolean = () => false;
+  private publishNotice: (vaultAccountId: string, reason: NoticeReason) => void = () => undefined;
+  private readonly noticedAt = new Map<string, number>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
@@ -1739,13 +1747,19 @@ export class OmniRolesService {
     // A vault that pays IBANs: an agent's payout queues its EURC transfer when the enclave answers,
     // without any call to this server. Read such a vault every minute so the transfer starts at once.
     const banking = await this.ruleFact<unknown>(treasury.vaultAccountId, "get_bank_config", () => this.near.viewFunction<unknown>(treasury.vaultAccountId, "get_bank_config", {}).catch(() => null));
-    if (hashes.length) this.forget(treasury.vaultAccountId);
+    if (hashes.length) {
+      this.forget(treasury.vaultAccountId);
+      // The worker's jobs too: a rule may have voted sponsored gas (the wallet is delegated next).
+      this.publishNotice(treasury.vaultAccountId, "rule");
+    }
+    // Every minute, or with notices on only while something happens on the vault.
+    const bankActive = !this.noticesOn() || Date.now() - (this.noticedAt.get(treasury.vaultAccountId) ?? 0) < BANK_ACTIVE_MS;
     const waitingNs = [
       ...queued.filter((rule) => BigInt(rule.execute_after_ns) > now).map((rule) => BigInt(rule.execute_after_ns)),
       ...dao.nextDueNs,
       ...orders.nextDueNs,
       ...follow.nextDueNs,
-      ...(banking ? [nowNs() + BANK_RECHECK_NS] : []),
+      ...(banking && bankActive ? [nowNs() + BANK_RECHECK_NS] : []),
       ...retries,
     ];
     const nextDueMs = waitingNs.length ? Number(waitingNs.reduce((a, b) => (a < b ? a : b)) / 1_000_000n) : null;
@@ -1945,10 +1959,10 @@ export class OmniRolesService {
       return await inBackground(async () => {
         const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true } });
         const now = Date.now();
-        const followed = this.chainFollowed();
+        const followed = this.noticesOn();
         const due = treasuries.filter((treasury) => {
           if ((this.nextActivationCheck.get(treasury.vaultAccountId) ?? 0) <= now) return true;
-          // Scheduled an hour away while the chain was followed, and it no longer is: the usual idle read.
+          // Scheduled an hour away while notices were on, and they no longer are: the usual idle read.
           const idleRead = this.idleReadAt.get(treasury.vaultAccountId);
           return !followed && idleRead !== undefined && idleRead + IDLE_RECHECK_MS <= now;
         });
@@ -1960,7 +1974,7 @@ export class OmniRolesService {
             try {
               const { nextDueMs } = await this.activateDue(treasury.organizationId);
               // A little after the window ends: the chain's clock decides, not ours.
-              const idleAt = Date.now() + (this.chainFollowed() ? FOLLOWED_IDLE_RECHECK_MS : IDLE_RECHECK_MS);
+              const idleAt = Date.now() + (this.noticesOn() ? NOTIFIED_IDLE_RECHECK_MS : IDLE_RECHECK_MS);
               let next = nextDueMs === null ? idleAt : Math.min(nextDueMs + DUE_MARGIN_MS, idleAt);
               if (next === idleAt) this.idleReadAt.set(treasury.vaultAccountId, readAt);
               else this.idleReadAt.delete(treasury.vaultAccountId);
@@ -2673,35 +2687,41 @@ export class OmniRolesService {
     // The vote may have queued a rule: read the vault on the next pass, once the blocks are final.
     this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
     this.wakeRequestedAt.set(treasury.vaultAccountId, Date.now());
+    this.noticedAt.set(treasury.vaultAccountId, Date.now());
     this.ruleFacts.delete(treasury.vaultAccountId);
+    this.publishNotice(treasury.vaultAccountId, "vote");
   }
 
-  /** While `healthy()`, the chain is followed and `noticeChain` reports every vault a block touched. */
-  followChain(healthy: () => boolean): void {
-    this.chainFollowed = healthy;
+  /** An agent acted on its vault (a payment, a call, a payout): the jobs of both processes read it now. */
+  agentActed(vaultAccountId: string): void {
+    this.publishNotice(vaultAccountId, "agent");
   }
 
   /**
-   * A final block ran a receipt on this vault or its DAO (a vote, a queued rule, an agent's call):
-   * read the vault on the next pass. The block is final, so there is nothing to wait for.
+   * Vault notices (vault-notices.ts): while `on()`, `notice` reports each vault something happened
+   * on, and the timed read of every vault is only a net. `publish` tells the other process.
    */
-  noticeChain(vaultAccountId: string, daoAccountId?: string): void {
-    this.forget(vaultAccountId);
-    if (daoAccountId) this.forget(daoAccountId);
-    else {
-      void this.prisma.treasury.findFirst({ where: { vaultAccountId }, select: { daoAccountId: true } })
-        .then((treasury) => { if (treasury) this.forget(treasury.daoAccountId); })
-        .catch(() => undefined);
-    }
-    this.ruleFacts.delete(vaultAccountId);
-    const now = Date.now();
-    this.nextActivationCheck.set(vaultAccountId, Math.min(this.nextActivationCheck.get(vaultAccountId) ?? now, now + 1_000));
-    this.wakeRequestedAt.set(vaultAccountId, now);
+  withNotices(on: () => boolean, publish: (vaultAccountId: string, reason: NoticeReason) => void): void {
+    this.noticesOn = on;
+    this.publishNotice = publish;
   }
 
-  /** Blocks were not followed for a while: read every vault on the next pass. */
-  noticeChainGap(): void {
-    this.nextActivationCheck.clear();
+  /** Something happened on this vault: read it on the next pass, then every few seconds for a while. */
+  notice(vaultAccountId: string, reason: NoticeReason): void {
+    this.forget(vaultAccountId);
+    void this.prisma.treasury.findFirst({ where: { vaultAccountId }, select: { daoAccountId: true } })
+      .then((treasury) => { if (treasury) this.forget(treasury.daoAccountId); })
+      .catch(() => undefined);
+    this.ruleFacts.delete(vaultAccountId);
+    const now = Date.now();
+    // A payment of the vault ended: the role and the budget it held are free. A rule the vault
+    // refused for that (ERR_ROLE_IN_USE) is tried now, not at the end of its wait.
+    if (reason === "settled") {
+      for (const [key, refused] of this.refusedRules) if (key.startsWith(`${vaultAccountId}:`)) this.refusedRules.set(key, { ...refused, retryAt: now });
+    }
+    this.noticedAt.set(vaultAccountId, now);
+    this.nextActivationCheck.set(vaultAccountId, Math.min(this.nextActivationCheck.get(vaultAccountId) ?? now, now + 1_000));
+    this.wakeRequestedAt.set(vaultAccountId, now);
   }
 
   private forget(accountId: string): void {

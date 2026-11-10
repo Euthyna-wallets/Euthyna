@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChainFeedReader, ChainFollower, FEED_STALE_MS, touchedVaults, type ChainFeedTable } from "./chain-follower.js";
+import { ChainFollower, FEED_STALE_MS, touchedVaults } from "./chain-follower.js";
 
 const accounts = new Map([["acme.vault.testnet", "acme.vault.testnet"], ["acme.dao.testnet", "acme.vault.testnet"]]);
 function block(height: number, receivers: string[], atMs: number) {
@@ -145,47 +145,5 @@ describe("following the chain instead of reading each vault", () => {
     expect(urls[0]).toBe("https://feed.test/v0/last_block/final?apiKey=secret-key");
     expect(logged.length).toBeGreaterThan(0);
     expect(logged.join()).not.toContain("secret-key");
-  });
-});
-
-describe("the other processes read what the follower saw", () => {
-  function table() {
-    const state = { feed: null as { height: bigint; gaps: number; updatedAt: Date } | null, touches: [] as Array<{ vaultAccountId: string; height: bigint }> };
-    const db = {
-      chainFeed: { upsert: async () => undefined, findUnique: async () => state.feed },
-      chainTouch: { upsert: async () => undefined, findMany: async ({ where }: { where: { height: { gt: bigint } } }) => state.touches.filter((touch) => touch.height > where.height.gt) },
-    } as ChainFeedTable;
-    return { state, db };
-  }
-
-  it("reports each touched vault once, and a gap when the follower skipped blocks", async () => {
-    const { state, db } = table();
-    const clock = { now: 1_000_000 };
-    const touched: string[] = [];
-    let gaps = 0;
-    const reader = new ChainFeedReader(db, "testnet", { touch: (vault) => touched.push(vault), gap: () => { gaps += 1; } }, () => clock.now);
-    await reader.poll();
-    expect(reader.healthy()).toBe(false); // no follower yet
-
-    state.feed = { height: 100n, gaps: 0, updatedAt: new Date(clock.now) };
-    state.touches.push({ vaultAccountId: "old.vault.testnet", height: 90n });
-    await reader.poll();
-    expect(reader.healthy()).toBe(true);
-    expect(touched).toEqual([]); // before this process started: its own first pass reads every vault
-
-    state.touches.push({ vaultAccountId: "acme.vault.testnet", height: 105n });
-    state.feed = { height: 106n, gaps: 0, updatedAt: new Date(clock.now) };
-    await reader.poll();
-    await reader.poll();
-    expect(touched).toEqual(["acme.vault.testnet"]);
-
-    state.feed = { height: 500n, gaps: 1, updatedAt: new Date(clock.now) };
-    await reader.poll();
-    expect(gaps).toBe(1);
-
-    // The follower stops writing: after a minute the timers are on their own again.
-    clock.now += FEED_STALE_MS + 1;
-    await reader.poll();
-    expect(reader.healthy()).toBe(false);
   });
 });

@@ -10,6 +10,7 @@ import { OperationWorker, PrismaWorkerStore } from "./operation-worker.js";
 import { createBaseRelayer, createChainRelayers } from "./relayer.js";
 import { keepDelegated } from "./delegation-keeper.js";
 import { followCompanies } from "./chain-follower.js";
+import { vaultNotices } from "./vault-notices.js";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -36,43 +37,55 @@ const worker = new OperationWorker(
     retryMaxMs: env.WORKER_RETRY_MAX_MS,
     cancellationSenderAccountId: env.NEAR_RELAYER_ACCOUNT_ID,
     agentGasLowYocto: env.NEAR_AGENT_GAS_LOW_YOCTO,
+    // The API's rule keeper: a rule the vault refused while this payment held its role is tried now.
+    onFinished: (vaultAccountId) => notices?.publish(vaultAccountId, "settled"),
   },
   undefined,
   createChainRelayers(env, near, guard),
 );
 // Sponsored execution: wallets whose company voted an executor get delegated (EIP-7702). A vault is
-// looked at when a block touches it (the vote's rule running on it), then every 5 s while it is on
-// its way (signing, submitted). Every vault is also looked at on a timer: once an hour while the
-// chain is followed, every 30 s when it is not (one view when nothing is voted).
+// looked at when something happens on it (a notice: the vote's rule ran), then every 5 s while it
+// is on its way (signing, submitted). Every vault is also looked at on a timer: once an hour with
+// notices on, every 30 s without (one view when nothing is voted).
 const DELEGATION_SCAN_MS = 30_000;
-const FOLLOWED_DELEGATION_SCAN_MS = 60 * 60_000;
+const NOTIFIED_DELEGATION_SCAN_MS = 60 * 60_000;
 const DELEGATION_FOLLOW_MS = 5_000;
 let delegationScannedAt = 0;
 let delegationFollowedAt = 0;
 let delegating = new Set<string>();
 /**
- * Vaults a block touched, and until when they are looked at: an RPC node's final block can be a
- * little behind the feed's, so one look right away is not enough.
+ * Vaults with a notice, and until when they are looked at: an RPC node's final block can be a
+ * little behind the transaction that caused the notice, so one look right away is not enough.
  */
 const TOUCH_FOLLOW_MS = 20_000;
 const touchedVaults = new Map<string, number>();
-const chainFeed = followCompanies(
+const notices = vaultNotices(env, prisma);
+if (notices) {
+  notices.subscribe((vault, reason) => {
+    // Its own notices (a payment it settled) concern the API's jobs, not these.
+    if (reason === "settled" || reason === "delegation") return;
+    touchedVaults.set(vault, Date.now() + TOUCH_FOLLOW_MS);
+    worker.notice(vault);
+  });
+  worker.withNotices(() => true);
+}
+// Optional: a block feed, for what does not pass through this server (chain-follower.ts).
+followCompanies(
   env,
   prisma,
   () => prisma.treasury.findMany({ select: { vaultAccountId: true, daoAccountId: true } }),
   {
-    touch: (vault) => { touchedVaults.set(vault, Date.now() + TOUCH_FOLLOW_MS); worker.notice(vault); },
+    touch: (vault) => notices?.publish(vault, "block"),
     gap: () => { delegationScannedAt = 0; worker.noticeGap(); },
   },
 );
-if (chainFeed) worker.followChain(() => chainFeed.healthy());
 async function keepWalletsDelegated() {
   const now = Date.now();
   for (const [vault, until] of touchedVaults) {
     delegating.add(vault);
     if (until <= now) touchedVaults.delete(vault);
   }
-  const scan = now - delegationScannedAt >= (chainFeed?.healthy() ? FOLLOWED_DELEGATION_SCAN_MS : DELEGATION_SCAN_MS);
+  const scan = now - delegationScannedAt >= (notices ? NOTIFIED_DELEGATION_SCAN_MS : DELEGATION_SCAN_MS);
   if (!scan && (delegating.size === 0 || now - delegationFollowedAt < DELEGATION_FOLLOW_MS)) return;
   delegationFollowedAt = now;
   if (scan) delegationScannedAt = now;
@@ -86,6 +99,8 @@ async function keepWalletsDelegated() {
     if (outcome === "signing" || outcome === "submitted" || outcome.startsWith("failed")) next.add(vaultAccountId);
     else next.delete(vaultAccountId);
     if (outcome !== "none" && outcome !== "delegated") console.log(JSON.stringify({ event: "worker.delegation", vaultAccountId, outcome }));
+    // The console's screens: "Sponsored" shows without waiting for their cache.
+    if (outcome === "submitted") notices?.publish(vaultAccountId, "delegation");
   }
   delegating = next;
 }
