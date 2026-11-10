@@ -1,3 +1,4 @@
+import { relayedCall, type DelegateRelay, type RelayOutcome } from "./meta-tx.js";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -438,6 +439,14 @@ export class HttpAgentApi implements AgentApiGateway {
     await this.request("/v1/agent/gas", { method: "POST", body: "{}", signal: AbortSignal.timeout(20_000) });
   }
 
+  /** Has the relayer send a signed delegate and pay its gas; null when it does not (off, quota): the agent sends it. */
+  async relay(signedDelegate: string): Promise<RelayOutcome | null> {
+    const response = await this.request("/v1/agent/relay", { method: "POST", body: JSON.stringify({ signedDelegate }), signal: AbortSignal.timeout(90_000) });
+    if (response.status === 200 && response.body.outcome) return response.body.outcome as RelayOutcome;
+    if (response.status === 503 || response.status === 429 || response.status === 404) return null;
+    throw new Error(`relay refused: ${String(response.body.error ?? response.status)} ${String(response.body.message ?? "")}`.trim());
+  }
+
   async solanaFuel(): Promise<{ status: string; signature?: string }> {
     const response = await this.request("/v1/agent/solana/fuel", { method: "POST", body: "{}", signal: AbortSignal.timeout(30_000) });
     return { status: String(response.body.status ?? response.status), ...(typeof response.body.signature === "string" ? { signature: response.body.signature } : {}) };
@@ -624,6 +633,8 @@ export class NearVaultGateway implements VaultGateway {
     private readonly vaultAccountId: string,
     private readonly role: string,
     private readonly chainId: number,
+    /** With a key file and the agent API: calls relayed (NEP-366), Euthyna pays the gas. */
+    private readonly relayed?: { keyPair: KeyPair; rpcUrl: string; relay: DelegateRelay },
   ) {}
 
   static async connect(input: {
@@ -633,6 +644,7 @@ export class NearVaultGateway implements VaultGateway {
     vaultAccountId: string;
     role: string;
     chainId: number;
+    relay?: DelegateRelay | undefined;
   } & ({ privateKey: string; signer?: undefined } | { signer: AgentNearSigner; privateKey?: undefined })): Promise<NearVaultGateway> {
     let near: Near;
     if (input.signer) {
@@ -652,6 +664,9 @@ export class NearVaultGateway implements VaultGateway {
       input.vaultAccountId,
       input.role,
       input.chainId,
+      input.relay && input.privateKey
+        ? { keyPair: KeyPair.fromString(input.privateKey as `ed25519:${string}`), rpcUrl: input.rpcUrl, relay: input.relay }
+        : undefined,
     );
   }
 
@@ -708,7 +723,13 @@ export class NearVaultGateway implements VaultGateway {
   }
   identity() { return { member: this.account.accountId, role: this.role, chain_id: this.chainId }; }
 
-  private call(methodName: string, args: Record<string, unknown>, gas: string) {
+  private async call(methodName: string, args: Record<string, unknown>, gas: string) {
+    if (this.relayed) {
+      const outcome = await relayedCall({
+        ...this.relayed, senderId: this.account.accountId, receiverId: this.vaultAccountId, methodName, args, gas: BigInt(gas),
+      });
+      if (outcome) return outcome as unknown as Awaited<ReturnType<Account["functionCall"]>>;
+    }
     return this.account.functionCall({
       contractId: this.vaultAccountId,
       methodName,
@@ -721,6 +742,7 @@ export class NearVaultGateway implements VaultGateway {
 
 
 export { OnchainAgentClient, publicRpc } from "./onchain.js";
+export { relayedCall, callOutcome, type DelegateRelay, type RelayOutcome } from "./meta-tx.js";
 export * from "./solana.js";
 export * from "./market.js";
 export * from "./sealed-orders.js";

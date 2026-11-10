@@ -20,6 +20,7 @@ import { z } from "zod";
 import { AgentProvisioningError, type AgentProvisioningService } from "./agent-provisioning.js";
 import type { AgentIdentity, AuthGateway, ConsoleIdentity } from "./auth-gateway.js";
 import type { SolanaFuel } from "./solana-fuel.js";
+import { AgentRelayError, type AgentRelay } from "./agent-relay.js";
 import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
@@ -138,6 +139,8 @@ export interface AppDependencies {
   /** Noah's webhook public key (sandbox or production): their FiatDeposit events are verified with it. */
   noahWebhookKey?: string | undefined;
   agentGasKeeper?: AgentGasKeeper | undefined;
+  /** Agents' NEAR gas paid by the relayer (NEP-366); absent when off. */
+  agentRelay?: AgentRelay | undefined;
   /** Euthyna's SOL tank, which pays Solana fees for company wallets; absent when off. */
   solanaFuel?: SolanaFuel | undefined;
 }
@@ -329,6 +332,7 @@ export function createApp({
   noahWebhookKey,
   agentGasKeeper,
   solanaFuel,
+  agentRelay,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   agentGas = agentGasKeeper;
@@ -490,6 +494,22 @@ export function createApp({
   });
   // An agent that acts on its vault without this server (a payout, a call in an unguarded role)
   // says so: the jobs read that vault now instead of on their next round.
+  // The agent's call to its vault or to the sealed-orders contract, as a signed delegate: the
+  // relayer sends it and pays the gas. 503 when off: the agent then sends it itself.
+  app.post("/v1/agent/relay", requireAgent(auth, agentLimiter), async (context) => {
+    if (!agentRelay) return context.json({ error: "relay_off" }, 503);
+    const agent = context.get("agent");
+    const input = await parseJson(context, z.object({ signedDelegate: z.string().min(16).max(16_384) }));
+    try {
+      const { outcome } = await agentRelay.relay(agent, input.signedDelegate);
+      // Whatever the call did, the vault is read now (a sponsored approval, a signed operation).
+      omniroles?.agentActed(agent.vaultAccountId);
+      return context.json({ outcome });
+    } catch (error) {
+      if (error instanceof AgentRelayError) return context.json({ error: error.code, message: error.message }, error.status);
+      throw error;
+    }
+  });
   // Before a heavy call it signs itself (a sealed order's 300 Tgas): its NEAR for gas, topped up first.
   app.post("/v1/agent/gas", requireAgent(auth, agentLimiter), (context) => context.json({ ok: true }));
   app.post("/v1/agent/wake", requireAgent(auth, agentLimiter), async (context) => {

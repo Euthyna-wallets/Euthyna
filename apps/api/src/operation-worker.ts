@@ -605,7 +605,9 @@ export class OperationWorker {
     nearTransactionHash: string,
     senderAccountId: string,
   ): Promise<void> {
-    const status = await this.near.transactionStatus(nearTransactionHash, senderAccountId);
+    // An agent's call relayed by Euthyna (NEP-366) is a transaction of the relayer.
+    const status = await this.near.transactionStatus(nearTransactionHash, senderAccountId)
+      .catch(() => this.near.transactionStatus(nearTransactionHash, this.config.cancellationSenderAccountId));
     const candidates = extractMpcSignatures(status);
     if (candidates.length === 0) throw new Error(`no secp256k1 MPC response in ${nearTransactionHash}`);
     let lastError: unknown;
