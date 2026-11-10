@@ -79,6 +79,13 @@ const schema = z.object({
   UAT_DEMO_WALLETS_ENABLED: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   NEAR_AGENT_GAS_RESERVE_YOCTO: z.string().regex(/^\d+$/).default("300000000000000000000000"),
   NEAR_AGENT_GAS_LOW_YOCTO: z.string().regex(/^\d+$/).default("50000000000000000000000"),
+  /** Agents below this much available NEAR are topped up by the relayer when they call the API (agent-gas.ts). "0": off. */
+  NEAR_AGENT_TOPUP_BELOW_YOCTO: z.string().regex(/^\d+$/).default("350000000000000000000000"),
+  /** ... up to this much. */
+  NEAR_AGENT_TOPUP_TO_YOCTO: z.string().regex(/^\d+$/).default("600000000000000000000000"),
+  NEAR_AGENT_TOPUPS_PER_DAY: z.coerce.number().int().min(0).max(24).default(3),
+  /** All agents together, per day. */
+  NEAR_AGENT_TOPUP_TOTAL_PER_DAY_YOCTO: z.string().regex(/^\d+$/).default("20000000000000000000000000"),
   /**
    * Where company DAOs are created: the official Sputnik factory, sputnikv2.testnet on testnet.
    * The Euthyna directory (euthyna-directory.testnet) lists DAOs from this factory with a vault from
