@@ -55,7 +55,14 @@ function payeesOf(config: unknown) {
 
 /** Direct NEAR authorization, public RPC broadcast and MPC settlement. No API credentials. */
 export class OnchainAgentClient {
-  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation>; announce?: (opId: number[]) => Promise<void> }) {}
+  constructor(private readonly vault: DirectVault, private readonly rpc: Rpc, private readonly advisory?: { preflightInvoice: (request: import("./index.js").OmniRolesOperationRequest, invoice?: InvoiceContext) => Promise<void>; check?: (request: import("./index.js").OmniRolesOperationRequest) => Promise<OperationCheckResult>; shareRevenue?: (amountWei: string) => Promise<import("./index.js").ShareRevenueOperation>; announce?: (opId: number[]) => Promise<void>; wake?: () => Promise<void> }) {}
+  /**
+   * This agent just acted on its vault without the API. When it has an API key, it says so: the
+   * company's background jobs read the vault now instead of on their next round. Best effort.
+   */
+  private wake(): void {
+    void this.advisory?.wake?.().catch(() => undefined);
+  }
   private readonly announced = new Set<string>();
   async mandate(): Promise<Record<string, unknown>> {
     const { role, chain_id, member } = this.vault.identity();
@@ -136,6 +143,7 @@ export class OnchainAgentClient {
       }
       throw error;
     }
+    this.wake();
     return { outcome: "sent" as const, nearTransactionHash, ...(await this.bankStatus(input.reference)) };
   }
 
@@ -170,6 +178,7 @@ export class OnchainAgentClient {
     if (refused) return refused;
     const prepared = await this.vault.prepareRequest(request);
     const nearTransactionHash = await this.vault.authorize(prepared.op_id, null);
+    this.wake();
     const opId = operationIdHex(prepared.op_id);
     const operation = await this.status(opId);
     // Delayed operations remain queued; the caller can resume through status.
@@ -258,6 +267,7 @@ export class OnchainAgentClient {
   }
   async cancel(id: Hex) {
     await this.vault.cancelNonce(operationIdBytes(id));
+    this.wake();
     return this.status(id);
   }
   async call(request: import("./index.js").OmniRolesOperationRequest, approval?: import("./index.js").TokenApproval) {
@@ -266,6 +276,7 @@ export class OnchainAgentClient {
     if (refused) return refused;
     const prepared = await this.vault.prepareRequest(request, approval);
     const nearTransactionHash = await this.vault.authorize(prepared.op_id, null);
+    this.wake();
     const opId = operationIdHex(prepared.op_id);
     const operation = await this.status(opId);
     return { outcome: "authorized" as const, opId, nearTransactionHash, state: operation.state };
@@ -347,6 +358,7 @@ export class OnchainAgentClient {
       }
       throw error;
     }
+    this.wake();
     return { outcome: "sent" as const, nearTransactionHash, ...(await this.nearStatus(input.reference)) };
   }
 

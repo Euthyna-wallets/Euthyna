@@ -38,8 +38,14 @@ const schema = z.object({
    */
   NEAR_RPC_URLS: z.string().optional(),
   /**
-   * The feed of final blocks the jobs follow instead of reading every vault on a timer
-   * (chain-follower.ts). Default: FastNEAR's feed of the network. "off" goes back to the timers.
+   * "off": the background jobs read every vault on their timers alone, as before vault notices
+   * (vault-notices.ts). Default: notices on, timers hourly.
+   */
+  VAULT_NOTICES: z.enum(["on", "off"]).optional(),
+  /**
+   * A feed of final blocks (FastNEAR's, for example https://testnet.neardata.xyz) the worker follows
+   * to see what does not pass through this server. Off unless set: without a key the feed's public
+   * limit is too low (chain-follower.ts). "off" is accepted, and means unset.
    */
   NEAR_BLOCK_FEED_URL: z.union([z.literal("off"), z.string().url()]).optional(),
   /** Optional FastNEAR key for the feed. Server only. */

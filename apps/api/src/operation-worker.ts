@@ -14,8 +14,8 @@ import type { MpcSignature, VaultOperation } from "./types.js";
 /** How often the worker looks in every vault for operations an agent left signed. */
 const DISCOVER_EVERY_MS = 10 * 60_000;
 const NOTICE_AGAIN_MS = 10_000;
-/** The same round while the chain is followed: a touched vault is looked at on the next tick (`notice`). */
-const FOLLOWED_DISCOVER_EVERY_MS = 60 * 60_000;
+/** The same round with vault notices on: a vault is looked at on the next tick after a notice (`notice`). */
+const NOTIFIED_DISCOVER_EVERY_MS = 60 * 60_000;
 /** How long a vault without a wallet on a chain is not asked again. */
 const NO_WALLET_RECHECK_MS = 60 * 60_000;
 
@@ -144,6 +144,8 @@ export interface WorkerConfig {
   agentGasLowYocto: string;
   /** How often to scan the vaults for signed operations without a record (default one minute). */
   discoverIntervalMs?: number;
+  /** An operation reached its end on the vault (settled, cancelled, expired): its role and budget are free again. */
+  onFinished?: (vaultAccountId: string) => void;
 }
 
 function opBytes(opId: string): number[] {
@@ -369,14 +371,14 @@ export class OperationWorker {
   private lastDiscoveryAt = Number.NEGATIVE_INFINITY;
   private readonly noWalletUntil = new Map<string, number>();
   private readonly noticed = new Map<string, { first: boolean; again: number }>();
-  private chainFollowed: () => boolean = () => false;
+  private noticesOn: () => boolean = () => false;
 
-  /** While `healthy()`, the chain is followed and `notice` reports every vault a block touched. */
-  followChain(healthy: () => boolean): void {
-    this.chainFollowed = healthy;
+  /** While `on()`, `notice` reports each vault something happened on (vault-notices.ts): the round is only a net. */
+  withNotices(on: () => boolean): void {
+    this.noticesOn = on;
   }
 
-  /** A block touched this vault (the chain follower): look for operations nobody recorded on the next tick. */
+  /** Something happened on this vault: look for operations nobody recorded on the next tick. */
   notice(vaultAccountId: string): void {
     this.noticed.set(vaultAccountId, { first: true, again: 0 });
     // The transaction may be the one that created its wallet.
@@ -400,7 +402,7 @@ export class OperationWorker {
     if (!listVaults || !tracked || !adopt) return 0;
     // An abandoned operation waits minutes anyway (the agent left it): every 10 minutes is enough,
     // and keeps the RPC quota for the work that is due.
-    const every = this.config.discoverIntervalMs ?? (this.chainFollowed() ? FOLLOWED_DISCOVER_EVERY_MS : DISCOVER_EVERY_MS);
+    const every = this.config.discoverIntervalMs ?? (this.noticesOn() ? NOTIFIED_DISCOVER_EVERY_MS : DISCOVER_EVERY_MS);
     const all = now.getTime() - this.lastDiscoveryAt >= every;
     // Between two rounds, only the vaults a block touched (`notice`), once right away and once a
     // little later: an RPC node's final block can be a little behind the feed's.
@@ -491,10 +493,12 @@ export class OperationWorker {
         lastError: null,
         nextAttemptAt: null,
       });
+      this.config.onFinished?.(record.vaultAccountId);
       return;
     }
     if (operation.state === "Unconfirmed") {
       await this.store.update(record, { state: "Unconfirmed", nextAttemptAt: null, lastError: null });
+      this.config.onFinished?.(record.vaultAccountId);
       return;
     }
     if (operation.state === "Cancelled") {
@@ -510,10 +514,12 @@ export class OperationWorker {
         nextAttemptAt: null,
       });
       await this.store.releaseReference(record, "Cancelled");
+      this.config.onFinished?.(record.vaultAccountId);
       return;
     }
     if (operation.state === "Expired" || operation.state === "Failed" || operation.state === "Vetoed") {
       await this.store.releaseReference(record, operation.state);
+      this.config.onFinished?.(record.vaultAccountId);
       return;
     }
     if (operation.state === "Prepared") {

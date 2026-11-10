@@ -151,6 +151,8 @@ export interface AgentApiGateway {
   check?(request: OmniRolesOperationRequest): Promise<OperationCheckResult>;
   /** Tells the API about an operation signed on chain without it, so the relayer sends it now. */
   announce?(opId: number[]): Promise<void>;
+  /** Tells the API this agent just acted on its vault without it, so the vault is read now. */
+  wake?(): Promise<void>;
   /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
   mandate?(): Promise<Record<string, unknown>>;
   /** The bridge call that sends `amountWei` of revenue to the company's shareholders. */
@@ -422,6 +424,10 @@ export class HttpAgentApi implements AgentApiGateway {
       },
       warnings,
     };
+  }
+
+  async wake(): Promise<void> {
+    await this.request("/v1/agent/wake", { method: "POST", body: "{}", signal: AbortSignal.timeout(5_000) });
   }
 
   async announce(opId: number[]): Promise<void> {

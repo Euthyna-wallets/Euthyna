@@ -464,6 +464,12 @@ export function createApp({
     const result = await payments.pay(agent.organizationId, agent, input.opId, input.invoice);
     return context.json(result.body, result.status);
   });
+  // An agent that acts on its vault without this server (a payout, a call in an unguarded role)
+  // says so: the jobs read that vault now instead of on their next round.
+  app.post("/v1/agent/wake", requireAgent(auth, agentLimiter), async (context) => {
+    omniroles?.agentActed(context.get("agent").vaultAccountId);
+    return context.json({ ok: true });
+  });
   app.post("/v1/operations/gas-quote", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
     const input = await parseJson(context, paymentGasQuoteSchema);
@@ -474,7 +480,9 @@ export function createApp({
     const agent = context.get("agent");
     const raw = context.req.param("opId") ?? "";
     if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
-    return context.json(await payments.announce(agent.organizationId, agent, Array.from(Buffer.from(raw.slice(2), "hex"))));
+    const announced = await payments.announce(agent.organizationId, agent, Array.from(Buffer.from(raw.slice(2), "hex")));
+    omniroles?.agentActed(agent.vaultAccountId);
+    return context.json(announced);
   });
 
   app.post("/v1/operations/:opId/authorization", requireAgent(auth, agentLimiter), async (context) => {
@@ -483,12 +491,14 @@ export function createApp({
     if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
     const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
     const input = await parseJson(context, authorizationSchema);
-    return context.json(await payments.recordAuthorization(
+    const recorded = await payments.recordAuthorization(
       agent.organizationId,
       agent,
       opId,
       input.nearTransactionHash,
-    ));
+    );
+    omniroles?.agentActed(agent.vaultAccountId);
+    return context.json(recorded);
   });
 
   app.post("/v1/operations/:opId/cancellation", requireAgent(auth, agentLimiter), async (context) => {
@@ -497,12 +507,14 @@ export function createApp({
     if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
     const opId = Array.from(Buffer.from(raw.slice(2), "hex"));
     const input = await parseJson(context, authorizationSchema);
-    return context.json(await payments.recordCancellation(
+    const cancelled = await payments.recordCancellation(
       agent.organizationId,
       agent,
       opId,
       input.nearTransactionHash,
-    ));
+    );
+    omniroles?.agentActed(agent.vaultAccountId);
+    return context.json(cancelled);
   });
 
   app.get("/v1/operations/:opId", requireAgent(auth, agentLimiter), async (context) => {

@@ -15,7 +15,7 @@ import { NearClient } from "./near.js";
 import { RegistryService } from "./registry-db.js";
 import { PaymentService } from "./payments.js";
 import { OmniRolesService } from "./omniroles.js";
-import { readCompaniesFeed } from "./chain-follower.js";
+import { vaultNotices } from "./vault-notices.js";
 import { chequeChain, finalTransaction, NearChequeRelayer, storageRegistered } from "./market/near-market.js";
 import { MarketService } from "./market/service.js";
 import { NearRpc } from "./rob/near-tx.js";
@@ -98,10 +98,14 @@ const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
 // Rule changes activate by themselves once their veto window has passed.
 // The job reads each vault only when it is due (see activateAllReadyRules); a pass never overlaps the last one.
 setInterval(() => void omniroles.activateAllReadyRules().catch((error: unknown) => console.error("rule activation pass failed:", error)), 5_000).unref();
-// The worker follows the chain block by block and writes what it sees: a vault is read when a block
-// touches it or its DAO, and the timed read of every vault becomes an hourly net (chain-follower.ts).
-const chainFeed = readCompaniesFeed(env, prisma, { touch: (vault) => omniroles.noticeChain(vault), gap: () => omniroles.noticeChainGap() });
-if (chainFeed) omniroles.followChain(() => chainFeed.healthy());
+// Vault notices: a vote, an agent's call, a rule run here or a payment the worker settled wakes the
+// vault concerned at once, in this process and in the worker; the timed read of every vault is an
+// hourly net (vault-notices.ts).
+const notices = vaultNotices(env, prisma);
+if (notices) {
+  notices.subscribe((vault, reason) => omniroles.notice(vault, reason));
+  omniroles.withNotices(() => true, (vault, reason) => notices.publish(vault, reason));
+}
 
 // Euthyna Market: only with its own relayer account.
 const market = env.MARKET_RELAYER_ACCOUNT_ID && env.MARKET_RELAYER_PRIVATE_KEY && env.MARKET_WEBHOOK_SECRET
