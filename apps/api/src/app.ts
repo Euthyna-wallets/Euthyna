@@ -235,7 +235,9 @@ function requireAgent(auth: AuthGateway, limiter: RateLimiter) {
       throw new HTTPException(429, { message: "rate limit exceeded" });
     }
     // In the background: an agent low on NEAR for gas is topped up before it is stuck.
-    if (identity.nearAccountId) void agentGas?.check(identity.nearAccountId);
+    const gas = identity.nearAccountId ? agentGas?.check(identity.nearAccountId) : undefined;
+    // Asked before a call the agent makes on chain without this server (sealed orders): wait for it.
+    if (context.req.path === "/v1/agent/gas") await gas;
     context.set("agent", identity);
     await next();
   };
@@ -488,6 +490,8 @@ export function createApp({
   });
   // An agent that acts on its vault without this server (a payout, a call in an unguarded role)
   // says so: the jobs read that vault now instead of on their next round.
+  // Before a heavy call it signs itself (a sealed order's 300 Tgas): its NEAR for gas, topped up first.
+  app.post("/v1/agent/gas", requireAgent(auth, agentLimiter), (context) => context.json({ ok: true }));
   app.post("/v1/agent/wake", requireAgent(auth, agentLimiter), async (context) => {
     omniroles?.agentActed(context.get("agent").vaultAccountId);
     return context.json({ ok: true });

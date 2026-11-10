@@ -4,7 +4,7 @@ import { PaymentService } from "./payments.js";
 const opId = Array<number>(32).fill(0x11);
 const agent = { nearAccountId: "agent.testnet", vaultAccountId: "vault.testnet" };
 
-function fixture(operation: Record<string, unknown>, existing = false) {
+function fixture(operation: Record<string, unknown>, existing = false, sealed: string | null = null) {
   const created: Array<Record<string, unknown>> = [];
   const prisma = {
     operation: {
@@ -16,7 +16,7 @@ function fixture(operation: Record<string, unknown>, existing = false) {
     },
   };
   const near = { getOperation: async () => operation };
-  const service = new PaymentService(prisma as never, near as never, {} as never, {} as never, {} as never);
+  const service = new PaymentService(prisma as never, near as never, {} as never, {} as never, {} as never, sealed);
   return { service, created };
 }
 
@@ -62,5 +62,12 @@ describe("an agent announces an operation it signed on chain without the Guard",
     const { service, created } = fixture({ ...signed, state: "Queued" });
     await expect(service.announce("org", agent, opId)).rejects.toMatchObject({ status: 422, code: "operation_not_signed" });
     expect(created).toHaveLength(0);
+  });
+
+  it("takes the sealed-orders contract's operations (an agent's approval or fill), not another member's", async () => {
+    const viaSealed = fixture({ ...signed, member: "sealed.testnet" }, false, "sealed.testnet");
+    await expect(viaSealed.service.announce("org", agent, opId)).resolves.toMatchObject({ recorded: true });
+    const unknown = fixture({ ...signed, member: "sealed.testnet" });
+    await expect(unknown.service.announce("org", agent, opId)).rejects.toMatchObject({ code: "agent_mismatch" });
   });
 });

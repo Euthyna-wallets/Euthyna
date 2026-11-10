@@ -133,7 +133,7 @@ pub fn api_path_allowed(method: &str, path: &str) -> bool {
             hex(id) && query.is_empty()
         }
         // "This agent just acted on its vault": no argument, the API reads the vault now.
-        ("POST", ["", "v1", "agent", "wake"]) => query.is_empty(),
+        ("POST", ["", "v1", "agent", "wake" | "gas"]) => query.is_empty(),
         // The SOL for a Solana transfer's fee, from Euthyna's tank: no argument either.
         ("POST", ["", "v1", "agent", "solana", "fuel"]) => query.is_empty(),
         ("GET", ["", "v1", "operations", id]) => hex(id) && query.is_empty(),

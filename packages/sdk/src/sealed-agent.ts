@@ -64,6 +64,8 @@ async function hasKey(rpcUrl: string, accountId: string, publicKey: string): Pro
   return Boolean(body.result && !body.result.error && body.result.permission);
 }
 
+export type SealedAgentApi = { gas?(): Promise<void>; announce?(opId: number[]): Promise<void> };
+
 export class SealedAgent {
   private constructor(
     private readonly account: Account,
@@ -73,10 +75,17 @@ export class SealedAgent {
     private readonly baseRpc: string,
     /** Signing with the agent's sealed key, a function-call key: no deposit possible. */
     private readonly limitedKey = false,
+    /** The agent API, when there is one: gas top-ups, and the relayer told of approvals at once. */
+    private readonly api?: SealedAgentApi,
   ) {}
 
+  /** Best effort: the API tops the agent's NEAR for gas up before a 300 Tgas call. */
+  private async fuel(): Promise<void> {
+    await this.api?.gas?.().catch(() => undefined);
+  }
+
   static async connect(input: {
-    networkId?: string; nearRpc?: string; baseRpc?: string; sealedAccountId?: string; accountId: string;
+    networkId?: string; nearRpc?: string; baseRpc?: string; sealedAccountId?: string; accountId: string; api?: SealedAgentApi;
   } & ({ privateKey: string; signer?: undefined } | { signer: AgentNearSigner; privateKey?: undefined })) {
     const networkId = input.networkId ?? "testnet";
     const rpcUrl = input.nearRpc ?? "https://rpc.testnet.fastnear.com";
@@ -98,7 +107,7 @@ export class SealedAgent {
       ? { networkId, rpcUrl, accountId: input.accountId, signer: input.signer }
       : { networkId, rpcUrl, accountId: input.accountId, privateKey: input.privateKey! };
     return new SealedAgent(await near.account(input.accountId), createPublicClient({ chain: baseSepolia, transport: http(baseRpc) }) as PublicClient,
-      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc, useSealed);
+      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc, useSealed, input.api);
   }
 
   private view<T>(methodName: string, args: object): Promise<T> {
@@ -132,6 +141,7 @@ export class SealedAgent {
     };
     const transactions: string[] = [];
     const pending: number[][] = [];
+    await this.fuel();
     if (input.approveUsdc) {
       const gasPrice = await this.base.getGasPrice();
       const outcome = await this.account.functionCall({
@@ -193,6 +203,7 @@ export class SealedAgent {
       balance: () => this.base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(wallet)] }),
       prove: (fill) => proveFill(order, fill),
       fill: async (input) => {
+        await this.fuel();
         const gasPrice = await this.base.getGasPrice();
         const outcome = await this.account.functionCall({
           contractId: file.sealedAccountId, methodName: "fill", gas: 300n * TGAS, attachedDeposit: 0n,
@@ -210,7 +221,8 @@ export class SealedAgent {
   /** Broadcasts a signed operation to Base and settles it on the vault once its block is final. */
   async settle(vault: string, opId: number[], waitMinutes = 40): Promise<string> {
     const gateway = await NearVaultGateway.connect({ ...this.credentials, vaultAccountId: vault, role: "sealed-orders", chainId: U.chainId } as Parameters<typeof NearVaultGateway.connect>[0]);
-    const client = new OnchainAgentClient(gateway, publicRpc(this.baseRpc));
+    // With the API, a sponsored approval or swap is announced to the relayer now, not at its next round.
+    const client = new OnchainAgentClient(gateway, publicRpc(this.baseRpc), this.api?.announce ? { preflightInvoice: async () => undefined, announce: (op) => this.api!.announce!(op) } : undefined);
     const id = operationIdHex(opId);
     const deadline = Date.now() + waitMinutes * 60_000;
     let state = String((await client.status(id)).state);

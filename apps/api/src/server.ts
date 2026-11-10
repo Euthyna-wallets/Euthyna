@@ -72,7 +72,7 @@ const agentProvisioning = new AgentProvisioningService(
   env.NEAR_SEALED_CREDIT_YOCTO,
 );
 const registryService = new RegistryService(prisma);
-const payments = new PaymentService(prisma, near, guard, registryService, gasEstimator);
+const payments = new PaymentService(prisma, near, guard, registryService, gasEstimator, env.SEALED_ORDERS_ACCOUNT_ID || null);
 const omniroles = new OmniRolesService(prisma, near, visaSigner, statusSigner, {
   nearNetwork: env.NEAR_NETWORK_ID,
   daoFactoryId: env.DAO_FACTORY_ID,
