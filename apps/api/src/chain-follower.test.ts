@@ -86,7 +86,7 @@ describe("following the chain instead of reading each vault", () => {
   it("is not trusted for five minutes when it falls behind twice in a row: the feed does not let it keep up", async () => {
     const head = { value: 100 };
     const blocks = new Map<number, unknown>();
-    const { follower, clock } = fixture(blocks, head);
+    const { follower, clock, gaps } = fixture(blocks, head);
     await follower.step();
     for (const next of [101, 301]) {
       blocks.set(next, block(next, [], clock.now));
@@ -95,13 +95,13 @@ describe("following the chain instead of reading each vault", () => {
       await follower.step();
     }
     expect(follower.healthy()).toBe(false);
-    // Blocks arrive again, but the timers keep their pace until the five minutes are over.
-    blocks.set(501, block(501, [], clock.now));
-    await follower.step();
-    expect(follower.healthy()).toBe(false);
+    // The second time reports no gap: the timers are back, every vault must not be read again.
+    expect(gaps()).toBe(2);
+    // After the five minutes it starts again from the head.
     clock.now += 5 * 60_000;
-    blocks.set(502, block(502, [], clock.now));
+    head.value = 900;
     await follower.step();
+    expect(gaps()).toBe(3);
     expect(follower.healthy()).toBe(true);
   });
 
