@@ -255,14 +255,14 @@ deadline. Details and testnet hashes: [docs/sponsored-gas.md](./docs/sponsored-g
    `0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982` (the relayer) calling `execute` on the company wallet, with the USDC
    `Transfer` and an `Executed` event; the wallet's ETH does not move.
 4. **A swap of the company's euros**, under the Uniswap V3 rule voted in part 10, step 5. Ask the agent to swap
-   0.3 EURC for WETH: `execute_call` to the router (`0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`) with
-   `exactInputSingle` (fee 3000, recipient the company wallet), `allowanceAmount` and `approveAmount` 300000,
+   0.05 EURC for WETH: `execute_call` to the router (`0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`) with
+   `exactInputSingle` (fee 3000, recipient the company wallet), `allowanceAmount` and `approveAmount` 50000,
    `approveToken` the EURC. **You should see** one transaction, sent by the relayer, that approves the router, swaps
    and sets the approval back to 0; WETH in the company wallet, a few seconds after the agent's call. A failing swap
    undoes the approval too.
    Uniswap had no pool for Noah's sandbox euro: we opened WETH/EURC 0.3 % on Uniswap's factory at the market rate
    (`0xc68a7653ac3b5eB444BC90CfA43deeC0bB4C3722`, `apps/api/scripts/eurc-pool-setup.mts`). Its liquidity is small:
-   swap less than 0.5 EURC.
+   please swap 0.05 EURC, so that it lasts for the judges after you.
 5. **Check on chain**: `get_sponsored_operation` on the vault shows the deadline (and the approval for a swap); the
    router's `allowance` from the wallet is 0 after the swap.
 
