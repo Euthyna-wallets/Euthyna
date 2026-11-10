@@ -26,6 +26,7 @@ import { dkimKeys } from "./recovery/email.js";
 import { RecoveryService } from "./recovery/service.js";
 import { InvoiceService, NOAH_WEBHOOK_KEYS } from "./bank/invoices.js";
 import { NoahClient } from "./bank/noah.js";
+import { AgentGasKeeper } from "./agent-gas.js";
 import { BankService } from "./bank/service.js";
 
 const env = loadEnv();
@@ -223,6 +224,14 @@ const app = createApp({
   bank,
   invoices,
   noahWebhookKey: noah ? (noah.sandbox ? NOAH_WEBHOOK_KEYS.sandbox : NOAH_WEBHOOK_KEYS.production) : undefined,
+  agentGasKeeper: BigInt(env.NEAR_AGENT_TOPUP_BELOW_YOCTO) > 0n
+    ? new AgentGasKeeper(near, {
+      belowYocto: BigInt(env.NEAR_AGENT_TOPUP_BELOW_YOCTO),
+      toYocto: BigInt(env.NEAR_AGENT_TOPUP_TO_YOCTO),
+      perAgentPerDay: env.NEAR_AGENT_TOPUPS_PER_DAY,
+      totalPerDayYocto: BigInt(env.NEAR_AGENT_TOPUP_TOTAL_PER_DAY_YOCTO),
+    })
+    : undefined,
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

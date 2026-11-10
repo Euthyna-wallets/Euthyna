@@ -24,6 +24,7 @@ import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
 import { routeLabel, rpcUsage, withOrigin } from "./rpc-usage.js";
+import type { AgentGasKeeper } from "./agent-gas.js";
 import { PAIRING_TTL_MS, newPairingCode, pairingCodeHash, type PairingRecord, type PairingStore } from "./pairings.js";
 
 const requestSchema = z.object({
@@ -133,6 +134,7 @@ export interface AppDependencies {
   invoices?: InvoiceService | undefined;
   /** Noah's webhook public key (sandbox or production): their FiatDeposit events are verified with it. */
   noahWebhookKey?: string | undefined;
+  agentGasKeeper?: AgentGasKeeper | undefined;
 }
 
 /** A role draft from the console's role editor (`/proposals/role`). */
@@ -217,6 +219,9 @@ function canManageAgent(identity: ConsoleIdentity, agent: { createdByUserId: str
   return isAdmin(identity) || agent.createdByUserId === identity.userId;
 }
 
+/** Set by createApp when the relayer tops agents up (agent-gas.ts). */
+let agentGas: AgentGasKeeper | undefined;
+
 function requireAgent(auth: AuthGateway, limiter: RateLimiter) {
   return async (context: AppContext, next: Next) => {
     const identity = await auth.identifyAgent(context.req.header("x-api-key"));
@@ -224,6 +229,8 @@ function requireAgent(auth: AuthGateway, limiter: RateLimiter) {
     if (!limiter.allow(`agent:${identity.agentId}`)) {
       throw new HTTPException(429, { message: "rate limit exceeded" });
     }
+    // In the background: an agent low on NEAR for gas is topped up before it is stuck.
+    if (identity.nearAccountId) void agentGas?.check(identity.nearAccountId);
     context.set("agent", identity);
     await next();
   };
@@ -313,8 +320,10 @@ export function createApp({
   bank,
   invoices,
   noahWebhookKey,
+  agentGasKeeper,
 }: AppDependencies): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
+  agentGas = agentGasKeeper;
   const agentLimiter = new MemoryRateLimiter(120, 60_000);
   const consoleLimiter = new MemoryRateLimiter(600, 60_000);
   const agentProvisionLimiter = new MemoryRateLimiter(10, 60 * 60_000);
