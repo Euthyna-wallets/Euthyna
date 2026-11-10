@@ -63,7 +63,7 @@ const notices = vaultNotices(env, prisma);
 if (notices) {
   notices.subscribe((vault, reason) => {
     // Its own notices (a payment it settled) concern the API's jobs, not these.
-    if (reason === "settled" || reason === "delegation") return;
+    if (reason === "settled" || reason === "delegation" || reason === "recovery") return;
     touchedVaults.set(vault, Date.now() + TOUCH_FOLLOW_MS);
     worker.notice(vault);
   });

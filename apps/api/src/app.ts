@@ -23,6 +23,7 @@ import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
+import { routeLabel, rpcUsage, withOrigin } from "./rpc-usage.js";
 import { PAIRING_TTL_MS, newPairingCode, pairingCodeHash, type PairingRecord, type PairingStore } from "./pairings.js";
 
 const requestSchema = z.object({
@@ -379,10 +380,16 @@ export function createApp({
   const consoleCors = cors({
     origin: consoleOrigin,
     credentials: true,
-    allowHeaders: ["content-type", "x-api-key"],
+    allowHeaders: ["content-type", "x-api-key", "x-euthyna-page"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
   const isPublicMarket = (path: string) => path.startsWith("/a2a/") || path.startsWith("/v1/market/") || path === "/.well-known/x402";
+  // The RPC usage log says which route asked (rpc-usage.ts).
+  app.use("*", (context, next) => {
+    const route = routeLabel(context.req.method, context.req.path);
+    rpcUsage.served(route);
+    return withOrigin(route, next);
+  });
   app.use("*", (context, next) => (isPublicMarket(context.req.path) ? publicCors(context, next) : consoleCors(context, next)));
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
@@ -824,7 +831,13 @@ export function createApp({
       action: z.enum(["grant", "revoke"]),
       maxUses: z.number().int().positive().nullable().optional(),
     });
-    const orgOf = (context: AppContext) => context.get("console").organizationId;
+    // A page the server has not seen (a new tab, F5) reads the chain again: see pageOpened.
+    const orgOf = (context: AppContext) => {
+      const organizationId = context.get("console").organizationId;
+      const page = context.req.header("x-euthyna-page");
+      if (page && omniroles.pageOpened(organizationId, page)) recovery?.forgetLists();
+      return organizationId;
+    };
     app.get("/v1/console/omniroles/status", requireConsole(auth, consoleLimiter), async (context) =>
       context.json(await omniroles.status(orgOf(context))));
     app.post("/v1/console/omniroles/plan", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
@@ -1116,11 +1129,22 @@ export function createApp({
     };
     // Enrollments, recoveries and cancellations are transactions on the recovery contract, signed
     // in the browser. Here: what the contract holds, for the console, and the members' vote.
-    app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) =>
-      context.json(await recovery.list(context.get("console").organizationId)));
+    app.get("/v1/console/recovery", requireConsole(auth, consoleLimiter), async (context) => {
+      const page = context.req.header("x-euthyna-page");
+      if (page && omniroles?.pageOpened(context.get("console").organizationId, page)) recovery.forgetLists();
+      return context.json(await recovery.list(context.get("console").organizationId));
+    });
     app.post("/v1/console/recovery/proposals", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ lostAccountId: z.string().min(2).max(64) }));
       return context.json(await recovery.proposals(context.get("console").organizationId, input.lostAccountId));
+    });
+    // The recovery page, after its request is on the contract: the company's founders are not the
+    // ones who signed, so their screens would not know. Nothing is trusted from this call, it only
+    // makes the server read the chain again.
+    app.post("/v1/recovery/requested", async (context) => {
+      const input = await parseJson(context, z.object({ daoId: z.string().min(2).max(64) }));
+      limited(`recovery-requested:${input.daoId}`);
+      return context.json({ ok: (await omniroles?.recoveryRequested(input.daoId)) ?? false });
     });
     // The browser needs the domain's DKIM key to build a proof (it cannot query DNS); the
     // contract only accepts keys in its own registry.

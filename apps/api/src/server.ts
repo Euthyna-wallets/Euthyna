@@ -105,7 +105,11 @@ setInterval(() => void omniroles.activateAllReadyRules().catch((error: unknown) 
 const recoveryReads = new TtlCache();
 const notices = vaultNotices(env, prisma);
 if (notices) {
-  notices.subscribe(() => recoveryReads.clear("list:"));
+  // Now, and again once the transaction behind the notice is final.
+  notices.subscribe(() => {
+    recoveryReads.clear("list:");
+    for (const delay of [3_000, 7_000, 15_000]) setTimeout(() => recoveryReads.clear("list:"), delay).unref();
+  });
   notices.subscribe((vault, reason) => omniroles.notice(vault, reason));
   omniroles.withNotices(() => true, (vault, reason) => notices.publish(vault, reason));
 }
@@ -181,10 +185,13 @@ const recovery = recoveryContractId
   ? new RecoveryService({
     contractId: recoveryContractId,
     // The recovery card is on pages that poll every 20 s. The contract's delay is a constant; the
-    // lists are kept 15 s and dropped when something happens on a company (a member's transaction).
-    view: (method, args) => recoveryReads.get(`${method === "delay_seconds" ? "constant" : "list"}:${method}:${JSON.stringify(args)}`, method === "delay_seconds" ? 3_600_000 : 15_000, () => near.viewFunction(recoveryContractId, method, args)),
+    // lists are kept a minute and dropped when something happens on a company: a member's transaction,
+    // or a seat asked for from the recovery page, which says so (POST /v1/recovery/requested).
+    view: (method, args) => recoveryReads.get(`${method === "delay_seconds" ? "constant" : "list"}:${method}:${JSON.stringify(args)}`, method === "delay_seconds" ? 3_600_000 : 60_000, () => near.viewFunction(recoveryContractId, method, args)),
     daoOf: async (organizationId) => (await omniroles.activeTreasury(organizationId))?.daoAccountId ?? null,
     councilOf: (organizationId) => omniroles.councilOf(organizationId),
+    councilShown: (organizationId) => omniroles.councilShown(organizationId),
+    forgetLists: () => recoveryReads.clear("list:"),
     membersProposals: (organizationId, members) => omniroles.membersProposals(organizationId, members),
   }, dkimKeys({ testKeys: testDkimKeys }))
   : undefined;

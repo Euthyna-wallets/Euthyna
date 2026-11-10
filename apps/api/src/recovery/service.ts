@@ -25,6 +25,10 @@ export interface RecoveryDeps {
   daoOf(organizationId: string): Promise<string | null>;
   /** The DAO members of a company, as on chain. */
   councilOf(organizationId: string): Promise<string[]>;
+  /** Drops the kept lists of enrollments and requests (a page was reloaded). */
+  forgetLists?(): void;
+  /** The council for a screen (may be a few seconds old). Defaults to `councilOf`. */
+  councilShown?(organizationId: string): Promise<string[]>;
   /** Draft the votes that set these members (DAO policy and vault council). */
   membersProposals(organizationId: string, members: string[]): Promise<{ proposals: unknown[] }>;
 }
@@ -51,6 +55,11 @@ export class RecoveryService {
     return dao;
   }
 
+  /** A reloaded page reads the contract again. */
+  forgetLists(): void {
+    this.deps.forgetLists?.();
+  }
+
   /** Enrolled founders and recoveries, as the contract has them. A voted recovery shows as done. */
   async list(organizationId: string) {
     const dao = await this.dao(organizationId);
@@ -58,7 +67,7 @@ export class RecoveryService {
       this.deps.view<ChainEnrollment[]>("enrollments_of", { dao_id: dao }),
       this.deps.view<ChainRecovery[]>("recoveries_of", { dao_id: dao }),
       this.deps.view<string>("delay_seconds", {}),
-      this.deps.councilOf(organizationId),
+      (this.deps.councilShown ?? this.deps.councilOf)(organizationId),
     ]);
     return {
       contractId: this.deps.contractId,
