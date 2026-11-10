@@ -33,9 +33,11 @@ import { baseGasPrice, fillNow } from "../lib/sealed-fill.js";
 import { readerKey } from "../lib/reader-key.js";
 import { useWallets } from "../lib/wallet-context.js";
 import { omni, type ProposalDraft, type SealedView } from "../omniroles-api.js";
-import { signContractCall, signDaoProposal } from "../wallets.js";
+import { signContractCall, signDaoProposal, viewContract } from "../wallets.js";
 
 const SLIPPAGE_BPS = 50;
+/** What "Add credit" prepays: five orders' storage, for the role's agents. */
+const CREDIT_YOCTO = (5n * BigInt(SEALED_DEPOSIT_YOCTO)).toString();
 const label: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6 };
 const num = (width: number): React.CSSProperties => ({ width, minWidth: 0, padding: "6px 10px" });
 const small: React.CSSProperties = { fontSize: 12.5, color: "var(--ink-2)" };
@@ -70,6 +72,13 @@ export function SealedOrdersCard() {
     queryFn: () => pendingSettlements(view!.vaultAccountId),
     enabled: Boolean(view?.vaultAccountId),
     refetchInterval: 60_000,
+  });
+  // An agent's NEAR key cannot attach the 0.02 NEAR an order's storage takes: it draws on this credit.
+  const credit = useQuery({
+    queryKey: ["sealed-credit", view?.sealedAccountId, view?.vaultAccountId],
+    queryFn: () => viewContract<string>(view!.sealedAccountId!, "credit_of", { vault: view!.vaultAccountId }),
+    enabled: Boolean(view?.enabled && view.sealedAccountId && view.vaultAccountId),
+    retry: false,
   });
   if (!view?.enabled || !view.sealedAccountId) return null;
   const me = wallets.nearAccountId;
@@ -134,6 +143,13 @@ export function SealedOrdersCard() {
     setCap("");
     return `Order sealed: hash ${commitment.slice(0, 10)}….${routed} Terms encrypted for ${view.readers.length} member key${view.readers.length === 1 ? "" : "s"}. `
       + "Show the terms, then execute it here or give it to the role's agent.";
+  });
+
+  const prepaid = credit.data ? Number(BigInt(credit.data) / BigInt(SEALED_DEPOSIT_YOCTO)) : null;
+  const addCredit = () => run(async () => {
+    await signContractCall(me!, sealedId, "add_credit", { vault: view.vaultAccountId }, { deposit: CREDIT_YOCTO, gas: "30000000000000" });
+    await credit.refetch();
+    return "Five more orders prepaid for the role's agents.";
   });
 
   const ready = (settlements.data ?? []).filter((item) => item.state === "ready");
@@ -242,6 +258,16 @@ export function SealedOrdersCard() {
           </div>
         </>
       )}
+
+      {view.roles.length && prepaid !== null ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 10 }}>
+          <span style={small}>
+            Orders by agents: {prepaid === 0 ? "none prepaid" : `${prepaid} prepaid`}. An agent's key cannot attach the 0.02 NEAR each order stores;
+            the company prepays it here (refunded to the credit if an order is refused).
+          </span>
+          {me ? <button className={prepaid ? "btn-line" : "btn"} disabled={busy} onClick={() => void addCredit()}>Prepay 5 orders · 0.1 NEAR</button> : null}
+        </div>
+      ) : null}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(13,23,48,.12)", paddingTop: 10 }}>
         <span style={small}>

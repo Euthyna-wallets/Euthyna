@@ -10,6 +10,7 @@ const expected = {
   vaultAccountId: "vault.testnet",
   methodNames: [...AGENT_FUNCTION_CALL_METHODS],
   allowanceYocto: null,
+  sealed: null,
 };
 
 const restrictedKey = {
@@ -69,5 +70,23 @@ describe("attestAgentAccessKeys", () => {
     // Any other list stays refused, more or fewer methods alike.
     expect(attestAgentAccessKeys([key(legacy.slice(1))], expected).valid).toBe(false);
     expect(attestAgentAccessKeys([key([...AGENT_FUNCTION_CALL_METHODS, "ft_transfer"])], expected).valid).toBe(false);
+  });
+
+  it("with a sealed key: both keys, each limited to its own contract, and nothing else", () => {
+    const sealed = { publicKey: "ed25519:22222222222222222222222222222222", receiverId: "sealed.testnet", methodNames: ["seal", "approve", "fill", "cancel"] };
+    const withSealed = { ...expected, sealed };
+    const sealedKey = (patch: Record<string, unknown> = {}) => ({
+      public_key: sealed.publicKey,
+      access_key: { nonce: 0, permission: { FunctionCall: { allowance: null, receiver_id: sealed.receiverId, method_names: [...sealed.methodNames], ...patch } } },
+    });
+    expect(attestAgentAccessKeys([sealedKey(), restrictedKey], withSealed)).toMatchObject({ valid: true, sealedValid: true, keyCount: 2, publicKey: expected.publicKey });
+    // Missing, widened or redirected sealed key; or a third key.
+    expect(attestAgentAccessKeys([restrictedKey], withSealed).valid).toBe(false);
+    expect(attestAgentAccessKeys([restrictedKey, sealedKey({ method_names: ["seal", "register_reader"] })], withSealed)).toMatchObject({ valid: false, sealedValid: false });
+    expect(attestAgentAccessKeys([restrictedKey, sealedKey({ receiver_id: "vault.testnet" })], withSealed).valid).toBe(false);
+    expect(attestAgentAccessKeys([restrictedKey, { ...sealedKey(), access_key: { nonce: 0, permission: "FullAccess" } }], withSealed).valid).toBe(false);
+    expect(attestAgentAccessKeys([restrictedKey, sealedKey(), { ...restrictedKey, public_key: "ed25519:3333" }], withSealed).valid).toBe(false);
+    // An agent without a sealed key is still held to exactly one key.
+    expect(attestAgentAccessKeys([restrictedKey, sealedKey()], expected).valid).toBe(false);
   });
 });

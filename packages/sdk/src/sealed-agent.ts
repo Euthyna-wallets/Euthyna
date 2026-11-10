@@ -8,6 +8,7 @@ import { KeyPair, keyStores, Near, type Account } from "near-api-js";
 import { createPublicClient, erc20Abi, getAddress, http, parseAbi, parseUnits, type Hex, type PublicClient } from "viem";
 import { baseSepolia } from "viem/chains";
 
+import { sealedKeyOf } from "./agent-keys.js";
 import { NearVaultGateway, operationIdHex } from "./index.js";
 import { OnchainAgentClient, publicRpc } from "./onchain.js";
 import {
@@ -26,7 +27,7 @@ import { commitmentOf, proveFill } from "./sealed-prover.js";
 import { fillOutcome, tick, type Tick } from "./sealed-watcher.js";
 import type { AgentNearSigner } from "./signer-socket.js";
 
-export const DEFAULT_SEALED_ACCOUNT = "euthyna-sealed-orders-v2.testnet";
+export const DEFAULT_SEALED_ACCOUNT = "euthyna-sealed-orders-v3.testnet";
 const TGAS = 1_000_000_000_000n;
 
 /** What the order's holder keeps: the terms (secret) and where the order lives. */
@@ -53,6 +54,16 @@ const eventOf = (outcome: unknown, name: string) => logsOf(outcome)
   .map((line) => line.startsWith("EVENT_JSON:") ? JSON.parse(line.slice(11)) as { standard?: string; event: string; data: Array<Record<string, unknown>> } : null)
   .find((event) => event?.standard === "euthyna-sealed-orders" && event.event === name)?.data[0];
 
+/** Whether `publicKey` is an access key of `accountId` (final). */
+async function hasKey(rpcUrl: string, accountId: string, publicKey: string): Promise<boolean> {
+  const response = await fetch(rpcUrl, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "k", method: "query", params: { request_type: "view_access_key", finality: "final", account_id: accountId, public_key: publicKey } }),
+  });
+  const body = await response.json() as { result?: { error?: string; permission?: unknown } };
+  return Boolean(body.result && !body.result.error && body.result.permission);
+}
+
 export class SealedAgent {
   private constructor(
     private readonly account: Account,
@@ -60,6 +71,8 @@ export class SealedAgent {
     private readonly sealedId: string,
     private readonly credentials: { networkId: string; rpcUrl: string; accountId: string } & ({ privateKey: string } | { signer: AgentNearSigner }),
     private readonly baseRpc: string,
+    /** Signing with the agent's sealed key, a function-call key: no deposit possible. */
+    private readonly limitedKey = false,
   ) {}
 
   static async connect(input: {
@@ -69,18 +82,23 @@ export class SealedAgent {
     const rpcUrl = input.nearRpc ?? "https://rpc.testnet.fastnear.com";
     const baseRpc = input.baseRpc ?? "https://sepolia.base.org";
     let near: Near;
+    let useSealed = false;
     if (input.signer) {
       near = new Near({ networkId, nodeUrl: rpcUrl, signer: input.signer as never });
     } else {
+      // A hired agent's main key only calls the vault: its sealed key (derived from it) calls this
+      // contract. A member's full-access key, or an agent hired before, signs with the main key.
       const keyStore = new keyStores.InMemoryKeyStore();
-      await keyStore.setKey(networkId, input.accountId, KeyPair.fromString(input.privateKey as `ed25519:${string}`));
+      const sealedKey = sealedKeyOf(input.privateKey);
+      useSealed = await hasKey(rpcUrl, input.accountId, sealedKey.getPublicKey().toString());
+      await keyStore.setKey(networkId, input.accountId, useSealed ? sealedKey : KeyPair.fromString(input.privateKey as `ed25519:${string}`));
       near = new Near({ networkId, nodeUrl: rpcUrl, keyStore });
     }
     const credentials = input.signer
       ? { networkId, rpcUrl, accountId: input.accountId, signer: input.signer }
       : { networkId, rpcUrl, accountId: input.accountId, privateKey: input.privateKey! };
     return new SealedAgent(await near.account(input.accountId), createPublicClient({ chain: baseSepolia, transport: http(baseRpc) }) as PublicClient,
-      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc);
+      input.sealedAccountId ?? DEFAULT_SEALED_ACCOUNT, credentials, baseRpc, useSealed);
   }
 
   private view<T>(methodName: string, args: object): Promise<T> {
@@ -131,8 +149,13 @@ export class SealedAgent {
     const commitment = await commitmentOf(order);
     const readers = await this.view<Array<{ account: string; public_key: string }>>("readers", { vault: input.vault });
     const terms = readers.length ? await encryptTerms(order, readers.map((reader) => ({ account: reader.account, publicKey: reader.public_key }))) : null;
+    // The vault's credit pays the storage when it can: an agent's key cannot attach a deposit.
+    const credit = BigInt(await this.view<string>("credit_of", { vault: input.vault }).catch(() => "0"));
+    if (this.limitedKey && credit < BigInt(SEALED_DEPOSIT_YOCTO)) {
+      throw new Error("the vault's sealed-orders credit is empty: a member adds some from the console (Sealed orders, Add credit); an agent's key cannot attach the 0.02 NEAR deposit itself");
+    }
     const outcome = await this.account.functionCall({
-      contractId: this.sealedId, methodName: "seal", gas: 100n * TGAS, attachedDeposit: BigInt(SEALED_DEPOSIT_YOCTO),
+      contractId: this.sealedId, methodName: "seal", gas: 100n * TGAS, attachedDeposit: credit >= BigInt(SEALED_DEPOSIT_YOCTO) ? 0n : BigInt(SEALED_DEPOSIT_YOCTO),
       args: sealArgs({ vault: input.vault, role: input.role, chainId: U.chainId, commitment: commitment as Hex, slippageBps: input.slippageBps ?? 50, terms }),
     });
     transactions.push(hashOf(outcome));

@@ -65,6 +65,9 @@ const agentProvisioning = new AgentProvisioningService(
   env.NEAR_ACCOUNT_PARENT,
   env.NEAR_SPONSOR_DAILY_WALLET_LIMIT,
   env.NEAR_AGENT_GAS_RESERVE_YOCTO,
+  undefined,
+  env.SEALED_ORDERS_ACCOUNT_ID || null,
+  env.NEAR_SEALED_CREDIT_YOCTO,
 );
 const registryService = new RegistryService(prisma);
 const payments = new PaymentService(prisma, near, guard, registryService, gasEstimator);

@@ -20,6 +20,10 @@
 //! registers an X25519 key derived from a signature of their own wallet, and whoever seals encrypts
 //! the terms to those keys. This contract stores the ciphertext and never reads it.
 //!
+//! Storage: whoever seals or registers a key attaches the deposit, or a seal draws it from the
+//! vault's credit, which anyone can add to (`add_credit`). An agent's NEAR key is a function-call
+//! key, and those cannot attach a deposit: the credit is how an agent seals.
+//!
 //! The account is deployed without access keys and has no owner.
 
 use near_sdk::json_types::{Base64VecU8, U64, U128};
@@ -73,6 +77,7 @@ enum Key {
     Orders,
     NextIds,
     Readers,
+    Credits,
 }
 
 #[near(serializers = [borsh, json])]
@@ -139,6 +144,8 @@ pub struct SealedOrders {
     orders: LookupMap<(AccountId, u64), Order>,
     next_ids: LookupMap<AccountId, u64>,
     readers: LookupMap<AccountId, Vec<Reader>>,
+    /// Prepaid storage per vault, in yoctoNEAR: what a seal without a deposit draws from.
+    credits: LookupMap<AccountId, u128>,
 }
 
 fn view(account: &AccountId, method: &str, args: Value) -> Promise {
@@ -158,6 +165,7 @@ impl SealedOrders {
             orders: LookupMap::new(Key::Orders),
             next_ids: LookupMap::new(Key::NextIds),
             readers: LookupMap::new(Key::Readers),
+            credits: LookupMap::new(Key::Credits),
         }
     }
 
@@ -176,10 +184,21 @@ impl SealedOrders {
         slippage_bps: u16,
         terms: Option<String>,
     ) -> Promise {
-        require!(
-            env::attached_deposit() >= STORAGE_DEPOSIT,
-            "ERR_STORAGE_DEPOSIT"
-        );
+        // The deposit, or the vault's credit (refunded to where it came from when refused).
+        let from_credit = env::attached_deposit() < STORAGE_DEPOSIT;
+        if from_credit {
+            require!(
+                env::attached_deposit().is_zero(),
+                "ERR_STORAGE_DEPOSIT"
+            );
+            let credit = self.credits.get(&vault).copied().unwrap_or(0);
+            require!(
+                credit >= STORAGE_DEPOSIT.as_yoctonear(),
+                "ERR_STORAGE_DEPOSIT"
+            );
+            self.credits
+                .insert(vault.clone(), credit - STORAGE_DEPOSIT.as_yoctonear());
+        }
         require!(slippage_bps <= MAX_SLIPPAGE_BPS, "ERR_SLIPPAGE");
         require!(!role.is_empty() && role.len() <= 64, "ERR_ROLE");
         require!(
@@ -207,6 +226,7 @@ impl SealedOrders {
                     .with_static_gas(ON_SEAL_GAS)
                     .on_seal(
                         caller,
+                        from_credit,
                         vault,
                         role,
                         chain_id,
@@ -222,6 +242,7 @@ impl SealedOrders {
     pub fn on_seal(
         &mut self,
         caller: AccountId,
+        from_credit: bool,
         vault: AccountId,
         role: String,
         chain_id: u64,
@@ -249,13 +270,13 @@ impl SealedOrders {
             None
         };
         if let Some(reason) = refusal {
-            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            self.refund_seal(caller, from_credit, &vault);
             env::log_str(reason);
             return None;
         }
         let id = self.next_ids.get(&vault).copied().unwrap_or(0);
         if id >= MAX_ORDERS_PER_VAULT {
-            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+            self.refund_seal(caller, from_credit, &vault);
             env::log_str("ERR_TOO_MANY_ORDERS");
             return None;
         }
@@ -641,7 +662,28 @@ impl SealedOrders {
         true
     }
 
+    // ---------------------------------------------------------------- credit
+
+    /// Prepays storage for `vault`'s seals (anyone: a member, the company's relayer). It only
+    /// pays for orders; it cannot be withdrawn.
+    #[payable]
+    pub fn add_credit(&mut self, vault: AccountId) -> U128 {
+        let amount = env::attached_deposit().as_yoctonear();
+        require!(amount > 0, "ERR_NO_DEPOSIT");
+        let credit = self.credits.get(&vault).copied().unwrap_or(0) + amount;
+        self.credits.insert(vault.clone(), credit);
+        event(
+            "credit",
+            &json!({ "vault": vault, "amount": U128(amount), "credit": U128(credit) }),
+        );
+        U128(credit)
+    }
+
     // ------------------------------------------------------------------ views
+
+    pub fn credit_of(&self, vault: AccountId) -> U128 {
+        U128(self.credits.get(&vault).copied().unwrap_or(0))
+    }
 
     pub fn order(&self, vault: AccountId, id: u64) -> Option<Order> {
         self.orders.get(&(vault, id)).cloned()
@@ -678,6 +720,17 @@ impl SealedOrders {
 }
 
 impl SealedOrders {
+    /// A refused seal's storage goes back where it came from.
+    fn refund_seal(&mut self, caller: AccountId, from_credit: bool, vault: &AccountId) {
+        if from_credit {
+            let credit = self.credits.get(vault).copied().unwrap_or(0);
+            self.credits
+                .insert(vault.clone(), credit + STORAGE_DEPOSIT.as_yoctonear());
+        } else {
+            Promise::new(caller).transfer(STORAGE_DEPOSIT).detach();
+        }
+    }
+
     fn mark_cancelled(&mut self, vault: &AccountId, id: u64) {
         if let Some(order) = self.orders.get_mut(&(vault.clone(), id)) {
             order.cancelled = true;

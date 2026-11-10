@@ -75,3 +75,31 @@ Seen on the way, fixed in the same branch: `sealed place` printed near-api-js re
 (stdout now carries only the file); the agent's router approval was signed but not broadcast (`place` now
 broadcasts it and keeps it pending in the order file until settled); the watcher no longer sends a fill the router
 allowance cannot cover (`needs-approval`).
+
+## v3: an agent hired from the console seals with its own limited key
+
+A NEAR function-call key has one receiver and cannot attach a deposit. v2 needed the agent to call the
+sealed-orders contract (a second receiver) with 0.02 NEAR of storage, so only an agent holding a
+full-access key could seal. v3 removes both obstacles:
+
+- **A second key per agent.** When the console hires an agent with a key file, it derives a second
+  ed25519 key from the agent's private key (`packages/sdk/src/agent-keys.ts`, `sealedKeyOf`) and sends
+  only its public key. The server creates the account with two function-call keys: the vault
+  (the agent methods, as before) and `euthyna-sealed-orders-v3.testnet` (`seal`, `approve`, `fill`,
+  `cancel`). The server and the browser both check that the account holds exactly these two keys. The MCP
+  server derives the same key from the key file.
+- **Storage paid from the vault's credit.** `add_credit(vault)` (anyone) prepays storage; a `seal` with
+  no deposit draws 0.02 NEAR from it, and a refused seal gives it back to the credit. The relayer adds
+  0.1 NEAR (5 orders) when it hires an agent with that key (`NEAR_SEALED_CREDIT_YOCTO`); members add
+  more from the Sealed orders card.
+
+`contracts/sealed-orders` built with `cargo near build non-reproducible-wasm` (sha256
+`ba1865e9ea9bf6903e11ecbecb8d32fc3be16c393b1453bf67f3c1cbe8b69107`, on-chain code hash
+`DXSQkrR1dTFxkSZfRU2yjonMnc183WYn6xpiY1LyPexE`), deployed, initialised and keyless in one transaction
+[`B4RQz933…`](https://testnet.nearblocks.io/txns/B4RQz933JcXdF9h7iWidk8eWP4zXPHijjd7eKFRNriT2):
+`view_access_key_list` returns no key. The sandbox test
+`an_agent_with_a_function_call_key_seals_from_the_vault_credit` seals with a function-call key limited to
+the contract, checks the refund to the credit, and that the key cannot call another method.
+
+A company that turned sealed orders on with v2 turns them on again in its swap role (the role's member
+becomes v3) and registers its reading keys again. Agents paired with euthyna-signer keep one key for now.

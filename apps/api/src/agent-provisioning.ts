@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@euthyna/db";
 import { AGENT_FUNCTION_CALL_METHODS, AGENT_METHOD_GENERATIONS, proposedAgentAccountId } from "@euthyna/sdk";
+import { SEALED_KEY_METHODS } from "@euthyna/sdk/agent-keys";
 
 import type { NearClient } from "./near.js";
 
@@ -9,6 +10,8 @@ export interface AgentAccessKeyExpectation {
   vaultAccountId: string;
   methodNames: string[];
   allowanceYocto: null;
+  /** The second key, limited to the sealed-orders contract (null: none for this agent). */
+  sealed: { publicKey: string; receiverId: string; methodNames: string[] } | null;
 }
 
 export interface AgentAccessKeyAttestation {
@@ -21,7 +24,27 @@ export interface AgentAccessKeyAttestation {
   allowanceYocto: string | null;
   /** Valid key from an earlier generation: works, but cannot call the newer methods (NEAR transfers, euro payouts): pair again. */
   outdated: boolean;
+  /** The sealed-orders key as expected (null when the agent has none). */
+  sealedValid: boolean | null;
   expected: AgentAccessKeyExpectation;
+}
+
+type KeyEntry = { public_key?: unknown; access_key?: { permission?: unknown } };
+
+function functionCallOf(entry: KeyEntry | null) {
+  const permission = entry?.access_key?.permission;
+  const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
+    ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
+    : null;
+  return {
+    permission,
+    functionCall,
+    methodNames: Array.isArray(functionCall?.method_names)
+      ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
+      : [],
+    receiverId: typeof functionCall?.receiver_id === "string" ? functionCall.receiver_id : null,
+    allowanceYocto: typeof functionCall?.allowance === "string" ? functionCall.allowance : null,
+  };
 }
 
 export class AgentProvisioningError extends Error {
@@ -38,16 +61,12 @@ export function attestAgentAccessKeys(
   keys: unknown[],
   expected: AgentAccessKeyExpectation,
 ): AgentAccessKeyAttestation {
-  const entry = keys.length === 1 && keys[0] && typeof keys[0] === "object"
-    ? keys[0] as { public_key?: unknown; access_key?: { permission?: unknown } }
-    : null;
-  const permission = entry?.access_key?.permission;
-  const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
-    ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
-    : null;
-  const methodNames = Array.isArray(functionCall?.method_names)
-    ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
-    : [];
+  const entries = keys.filter((key): key is KeyEntry => Boolean(key) && typeof key === "object");
+  const byKey = (publicKey: string) => entries.find((entry) => entry.public_key === publicKey) ?? null;
+  // The main key, then the sealed one when expected: nothing else on the account.
+  const expectedCount = expected.sealed ? 2 : 1;
+  const entry = expected.sealed ? byKey(expected.publicKey) : keys.length === 1 ? entries[0] ?? null : null;
+  const { permission, functionCall, methodNames, receiverId, allowanceYocto } = functionCallOf(entry);
   const expectedMethods = [...expected.methodNames].sort();
   // Keys from an earlier generation of the method list stay valid: they only have fewer rights.
   const sameAsCurrent = JSON.stringify(methodNames) === JSON.stringify(expectedMethods);
@@ -55,15 +74,22 @@ export function attestAgentAccessKeys(
     && JSON.stringify(expectedMethods) === JSON.stringify([...AGENT_METHOD_GENERATIONS[0]!].sort())
     && AGENT_METHOD_GENERATIONS.slice(1).some((generation) => JSON.stringify([...generation].sort()) === JSON.stringify(methodNames));
   const publicKey = typeof entry?.public_key === "string" ? entry.public_key : null;
-  const receiverId = typeof functionCall?.receiver_id === "string" ? functionCall.receiver_id : null;
-  const allowanceYocto = typeof functionCall?.allowance === "string" ? functionCall.allowance : null;
+  let sealedValid: boolean | null = null;
+  if (expected.sealed) {
+    const sealed = functionCallOf(byKey(expected.sealed.publicKey));
+    sealedValid = Boolean(sealed.functionCall)
+      && sealed.receiverId === expected.sealed.receiverId
+      && sealed.allowanceYocto === null
+      && JSON.stringify(sealed.methodNames) === JSON.stringify([...expected.sealed.methodNames].sort());
+  }
   return {
     valid:
-      keys.length === 1 &&
+      keys.length === expectedCount &&
       publicKey === expected.publicKey &&
       receiverId === expected.vaultAccountId &&
       allowanceYocto === expected.allowanceYocto &&
-      (sameAsCurrent || earlier),
+      (sameAsCurrent || earlier) &&
+      sealedValid !== false,
     keyCount: keys.length,
     publicKey,
     permission: permission === "FullAccess" ? "FullAccess" : functionCall ? "FunctionCall" : "unknown",
@@ -71,6 +97,7 @@ export function attestAgentAccessKeys(
     methodNames,
     allowanceYocto,
     outdated: earlier,
+    sealedValid,
     expected,
   };
 }
@@ -83,6 +110,10 @@ export class AgentProvisioningService {
     private readonly dailyLimit: number,
     private readonly reserveYocto: string,
     private readonly attestationRetryMs = 1_500,
+    /** The sealed-orders contract an agent's second key may call (unset: no second key). */
+    private readonly sealedAccountId: string | null = null,
+    /** Storage the relayer prepays for a vault's seals when it hires an agent with that key. */
+    private readonly sealedCreditYocto = "0",
   ) {}
 
   async provision(organizationId: string, agentId: string): Promise<{
@@ -114,6 +145,7 @@ export class AgentProvisioningService {
         methodNames: expectation.methodNames,
         reserveYocto: this.reserveYocto,
         allowanceYocto: null,
+        ...(expectation.sealed ? { extraKeys: [expectation.sealed] } : {}),
       });
     } catch (error) {
       const attestation = await this.attestation(expectation).catch(() => null);
@@ -133,6 +165,7 @@ export class AgentProvisioningService {
       throw new AgentProvisioningError(422, "agent_key_attestation_failed", "provisioned account key does not match the restricted policy");
     }
     await this.complete(agent.id, true, transactionHash);
+    if (expectation.sealed) await this.creditSeals(expectation.vaultAccountId, expectation.sealed.receiverId);
     return { status: "provisioned", transactionHash, attestation };
   }
 
@@ -193,6 +226,7 @@ export class AgentProvisioningService {
   private expectation(agent: {
     nearAccountId: string;
     nearPublicKey: string;
+    nearSealedPublicKey?: string | null;
     vaultAccountId: string;
   }): AgentAccessKeyExpectation {
     return {
@@ -201,7 +235,26 @@ export class AgentProvisioningService {
       vaultAccountId: agent.vaultAccountId,
       methodNames: [...AGENT_FUNCTION_CALL_METHODS],
       allowanceYocto: null,
+      sealed: agent.nearSealedPublicKey && this.sealedAccountId
+        ? { publicKey: agent.nearSealedPublicKey, receiverId: this.sealedAccountId, methodNames: [...SEALED_KEY_METHODS] }
+        : null,
     };
+  }
+
+  /**
+   * An agent's key cannot attach a deposit, so its seals draw on the vault's credit: the relayer
+   * brings it up to `sealedCreditYocto` (a few orders) once the agent exists. Best effort.
+   */
+  private async creditSeals(vaultAccountId: string, sealedAccountId: string): Promise<void> {
+    const target = BigInt(this.sealedCreditYocto);
+    if (target <= 0n) return;
+    try {
+      const current = BigInt(await this.near.viewFunction<string>(sealedAccountId, "credit_of", { vault: vaultAccountId }));
+      if (current >= target) return;
+      await this.near.callFunction(sealedAccountId, "add_credit", { vault: vaultAccountId }, "10000000000000", (target - current).toString());
+    } catch (error) {
+      console.warn(JSON.stringify({ event: "sealed_credit.failed", vault: vaultAccountId, message: String(error).slice(0, 160) }));
+    }
   }
 
   private async attestation(expectation: AgentAccessKeyExpectation): Promise<AgentAccessKeyAttestation> {

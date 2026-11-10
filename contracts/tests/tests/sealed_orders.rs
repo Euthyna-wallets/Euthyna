@@ -620,3 +620,85 @@ async fn the_role_still_decides_and_members_register_reading_keys() -> Result<()
     );
     Ok(())
 }
+
+/// An agent's key is a function-call key, which cannot attach a deposit: it seals from the vault's
+/// credit. A refused seal gives the credit back; without credit, no seal.
+#[tokio::test]
+#[serial]
+async fn an_agent_with_a_function_call_key_seals_from_the_vault_credit() -> Result<()> {
+    use near_workspaces::types::{AccessKey, KeyType, SecretKey};
+
+    let s = setup_sealed(true).await?;
+    let now = now_s(&s).await?;
+    let commitment = commitment(&s.f.vault, now + 86_400)?;
+    let key = SecretKey::from_random(KeyType::ED25519);
+    s.agent
+        .batch(s.agent.id())
+        .add_key(
+            key.public_key(),
+            AccessKey::function_call_access(
+                s.sealed.id(),
+                &["seal", "approve", "fill", "cancel"],
+                None,
+            ),
+        )
+        .transact()
+        .await?
+        .into_result()?;
+    let limited = Account::from_secret_key(s.agent.id().clone(), key, &s.f.worker);
+    let seal_free = |who: &Account| {
+        who.call(s.sealed.id(), "seal")
+            .args_json(seal_args(&s, &commitment, None))
+            .gas(Gas::from_tgas(100))
+            .transact()
+    };
+    let credit = |s: &Setup| {
+        let sealed = s.sealed.clone();
+        let vault = s.f.vault.id().clone();
+        async move {
+            let value: Value = sealed
+                .view("credit_of")
+                .args_json(json!({ "vault": vault }))
+                .await?
+                .json()?;
+            anyhow::Ok(value.as_str().unwrap().parse::<u128>()?)
+        }
+    };
+
+    // No credit yet: refused before anything is read.
+    let refused = seal_free(&limited).await?;
+    assert!(
+        format!("{:?}", refused.into_result().err()).contains("ERR_STORAGE_DEPOSIT")
+    );
+
+    // Anyone adds credit for the vault: two orders' worth.
+    s.f.outsider
+        .call(s.sealed.id(), "add_credit")
+        .args_json(json!({ "vault": s.f.vault.id() }))
+        .deposit(NearToken::from_millinear(40))
+        .transact()
+        .await?
+        .into_result()?;
+    assert_eq!(credit(&s).await?, 40_000_000_000_000_000_000_000);
+
+    // A stranger without a deposit is refused, and the credit comes back.
+    let stranger: Option<Value> = seal_free(&s.f.outsider).await?.into_result()?.json()?;
+    assert!(stranger.is_none());
+    assert_eq!(credit(&s).await?, 40_000_000_000_000_000_000_000);
+
+    // The agent's function-call key seals; the storage comes from the credit.
+    let order: Option<Value> = seal_free(&limited).await?.into_result()?.json()?;
+    let order = order.context("agent seal from credit")?;
+    assert_eq!(order["sealer"], s.agent.id().as_str());
+    assert_eq!(credit(&s).await?, 20_000_000_000_000_000_000_000);
+
+    // The same key cannot call another method, nor attach a deposit.
+    let other = limited
+        .call(s.sealed.id(), "register_reader")
+        .args_json(json!({ "vault": s.f.vault.id(), "public_key": STANDARD.encode([7u8; 32]) }))
+        .deposit(DEPOSIT)
+        .transact()
+        .await;
+    assert!(other.map(|outcome| outcome.into_result().is_err()).unwrap_or(true));
+    Ok(())
+}

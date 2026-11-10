@@ -235,29 +235,46 @@ export async function readAgentAccessKeyRpc(input: {
   vaultAccountId: string;
   methodNames: string[];
   allowanceYocto: null;
+  /** The agent's second key, limited to the sealed-orders contract (null: none). */
+  sealed?: { publicKey: string; receiverId: string; methodNames: string[] } | null;
 }): Promise<AgentAccessKeyRpcAttestation> {
   const result = await nearRpc<{ keys: unknown[] }>({
     request_type: "view_access_key_list",
     account_id: input.accountId,
   });
-  const entry = result.keys.length === 1 && result.keys[0] && typeof result.keys[0] === "object"
-    ? result.keys[0] as { public_key?: unknown; access_key?: { permission?: unknown } }
-    : null;
-  const permission = entry?.access_key?.permission;
-  const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
-    ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
-    : null;
-  const methods = Array.isArray(functionCall?.method_names)
-    ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
-    : [];
+  type Entry = { public_key?: unknown; access_key?: { permission?: unknown } };
+  const entries = result.keys.filter((key): key is Entry => Boolean(key) && typeof key === "object");
+  const read = (entry: Entry | null) => {
+    const permission = entry?.access_key?.permission;
+    const functionCall = permission && typeof permission === "object" && "FunctionCall" in permission
+      ? (permission as { FunctionCall?: { allowance?: unknown; receiver_id?: unknown; method_names?: unknown } }).FunctionCall
+      : null;
+    const methods = Array.isArray(functionCall?.method_names)
+      ? functionCall.method_names.filter((value): value is string => typeof value === "string").sort()
+      : [];
+    return { permission, functionCall, methods };
+  };
+  const main = input.sealed
+    ? entries.find((entry) => entry.public_key === input.publicKey) ?? null
+    : result.keys.length === 1 ? entries[0] ?? null : null;
+  const { permission, functionCall, methods } = read(main);
   const values: Array<[string, unknown, unknown]> = [
-    ["Access key count", 1, result.keys.length],
-    ["Public key", input.publicKey, entry?.public_key ?? null],
+    ["Access key count", input.sealed ? 2 : 1, result.keys.length],
+    ["Public key", input.publicKey, main?.public_key ?? null],
     ["Permission", "FunctionCall", functionCall ? "FunctionCall" : permission === "FullAccess" ? "FullAccess" : "unknown"],
     ["Receiver", input.vaultAccountId, functionCall?.receiver_id ?? null],
     ["Methods", JSON.stringify([...input.methodNames].sort()), JSON.stringify(methods)],
     ["Allowance", input.allowanceYocto, functionCall?.allowance ?? null],
   ];
+  if (input.sealed) {
+    const sealed = read(entries.find((entry) => entry.public_key === input.sealed!.publicKey) ?? null);
+    values.push(
+      ["Sealed-orders key", "FunctionCall", sealed.functionCall ? "FunctionCall" : sealed.permission === "FullAccess" ? "FullAccess" : "missing"],
+      ["Sealed-orders receiver", input.sealed.receiverId, sealed.functionCall?.receiver_id ?? null],
+      ["Sealed-orders methods", JSON.stringify([...input.sealed.methodNames].sort()), JSON.stringify(sealed.methods)],
+      ["Sealed-orders allowance", null, sealed.functionCall?.allowance ?? null],
+    );
+  }
   const checks = values.map(([label, expected, actual]) => ({
     label,
     expected: String(expected),
