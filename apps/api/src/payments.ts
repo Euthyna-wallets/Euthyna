@@ -110,6 +110,8 @@ export class PaymentService {
     private readonly guard: Guard,
     private readonly registry: RegistryService,
     private readonly gasEstimator: BaseGasQuoter,
+    /** The sealed-orders contract: the member of the operations it asks the vault for (an agent's approvals and fills). */
+    private readonly sealedOrdersId: string | null = null,
   ) {}
 
   async gasQuote(
@@ -317,7 +319,10 @@ export class PaymentService {
   ): Promise<{ opId: string; recorded: boolean }> {
     const hex = opHex(opId);
     const operation = await this.near.getOperation(agent.vaultAccountId, opId);
-    if (operation.member !== agent.nearAccountId) {
+    // An agent's sealed order: the contract asked the vault, on the agent's call. It is this company's
+    // vault either way, and announcing only gets a signed operation relayed sooner.
+    const viaSealed = this.sealedOrdersId !== null && operation.member === this.sealedOrdersId;
+    if (operation.member !== agent.nearAccountId && !viaSealed) {
       throw new PaymentError(403, "agent_mismatch", "OmniRoles operation belongs to another member");
     }
     if (operation.state !== "PossiblySigned") {

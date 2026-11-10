@@ -81,10 +81,11 @@ let sealed: SealedOrdersMcp | undefined;
 async function sealedFor(
   common: { networkId: string; rpcUrl: string; accountId: string; vaultAccountId: string; role: string },
   key: { privateKey: string } | { signer: InstanceType<typeof SocketNearSigner> },
+  api?: { gas?(): Promise<void>; announce?(opId: number[]): Promise<void> },
 ): Promise<SealedOrdersMcp | undefined> {
   const sealedAccountId = process.env.SEALED_ORDERS_ACCOUNT_ID ?? (common.networkId === "testnet" ? DEFAULT_SEALED_ACCOUNT : "");
   if (!sealedAccountId) return undefined;
-  const agent = await SealedAgent.connect({ networkId: common.networkId, nearRpc: common.rpcUrl, baseRpc: rpcUrl, sealedAccountId, accountId: common.accountId, ...key } as Parameters<typeof SealedAgent.connect>[0]);
+  const agent = await SealedAgent.connect({ networkId: common.networkId, nearRpc: common.rpcUrl, baseRpc: rpcUrl, sealedAccountId, accountId: common.accountId, ...key, ...(api ? { api } : {}) } as Parameters<typeof SealedAgent.connect>[0]);
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   return new SealedOrdersMcp(agent, common.vaultAccountId, common.role, join(base, "euthyna", "sealed", common.accountId));
 }
@@ -112,8 +113,9 @@ if (socketPath) {
     networkId: typeof info.network === "string" ? info.network : undefined,
   });
   const vault = await NearVaultGateway.connect({ ...common, signer: new SocketNearSigner(socket, accountId) });
-  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), new SignerAgentApi(socket, accountId));
-  sealed = await sealedFor(common, { signer: new SocketNearSigner(socket, accountId) });
+  const signerApi = new SignerAgentApi(socket, accountId);
+  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), signerApi);
+  sealed = await sealedFor(common, { signer: new SocketNearSigner(socket, accountId) }, signerApi);
   // The market, when the agent has a spending card in the signer.
   const card = new SignerCard(socket, accountId);
   if (await card.info().then(() => true, () => false)) {
@@ -130,8 +132,9 @@ if (socketPath) {
   console.error("euthyna: local key mode. The AI's user can read the key file; use euthyna-signer to keep it out of reach.");
   const key = await new FileAgentKeyStore(keyPath).loadOrCreate(common.networkId, common.accountId);
   const vault = await NearVaultGateway.connect({ ...common, privateKey: key.privateKey });
-  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), env.MANDATEOS_AGENT_API_KEY ? new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY) : undefined);
-  sealed = await sealedFor(common, { privateKey: key.privateKey });
+  const api = env.MANDATEOS_AGENT_API_KEY ? new HttpAgentApi(env.MANDATEOS_API_URL, env.MANDATEOS_AGENT_API_KEY) : undefined;
+  client = new OnchainAgentClient(vault, publicRpc(rpcUrl), api);
+  sealed = await sealedFor(common, { privateKey: key.privateKey }, api);
 }
 function defaultAgentKeyPath(accountId: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
