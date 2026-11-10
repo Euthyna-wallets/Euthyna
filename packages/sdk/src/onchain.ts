@@ -1,4 +1,4 @@
-import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaRpc, solanaTokenOf, type SolanaProfile } from "./solana.js";
+import { base58Encode, broadcast, latestBlockhash, SOLANA_DEVNET, signatureStatus, solanaAddress, solanaAsset, solanaHoldings, solanaRpc, solanaShortfall, solanaTokenOf, type SolanaProfile } from "./solana.js";
 import { bytesToHex, encodeFunctionData, erc20Abi, getAddress, hexToBytes, type Hex } from "viem";
 import { NEAR_TESTNET_TOKENS, Operator, type BankConfig, type BankPayout, type BankPermission, type SealedBeneficiary } from "./roles.js";
 import { omniRolesPaymentRequest, operationIdBytes, operationIdHex, type NearVaultGateway, type PaymentRequest, type InvoiceContext, type CallRequest, type OperationCheckResult } from "./index.js";
@@ -293,6 +293,13 @@ export class OnchainAgentClient {
     const request = { asset: solanaAsset(token), to: solanaAddress(input.to), amount: input.amount, recent_blockhash: await latestBlockhash(rpc), reference: input.reference };
     const check = await this.vault.view<{ allowed: boolean; reason: string | null }>("check_solana", { role, member: this.vault.identity().member, request });
     if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    // The vault cannot see the wallet's balance on Solana. Signed and never landed, a transfer
+    // keeps the role reserved for hours (no rule change on it, budget held): check first.
+    const wallet = await this.vault.view<{ address: number[] | null } | null>("get_solana_wallet", {});
+    if (wallet?.address) {
+      const shortfall = solanaShortfall(await solanaHoldings(rpc, base58Encode(wallet.address), token), token, BigInt(input.amount));
+      if (shortfall) return { outcome: "refused" as const, reason: "WALLET_UNDERFUNDED", detail: shortfall, refusedBy: "wallet" as const };
+    }
     // Builds the transaction (two PDA derivations for SPL) and asks MPC to sign.
     const nearTransactionHash = await this.vault.action("execute_solana", { role, request }, "150000000000000");
     this.wake();
