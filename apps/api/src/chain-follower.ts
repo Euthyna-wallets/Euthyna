@@ -118,6 +118,11 @@ export class ChainFollower {
   private async run(): Promise<void> {
     while (this.running) {
       try {
+        const paused = this.distrustedUntil - this.now();
+        if (paused > 0) {
+          await this.sleep(Math.min(paused, 30_000));
+          continue;
+        }
         const advanced = await this.step();
         this.failures = 0;
         if (!advanced) await this.sleep(1_000);
@@ -167,8 +172,13 @@ export class ChainFollower {
     const ageMs = this.now() - Number(BigInt(block.block.header.timestamp_nanosec ?? "0") / 1_000_000n);
     if (block.block.header.timestamp_nanosec && ageMs > MAX_LAG_MS) {
       if (this.now() - this.fellBehindAt < CANNOT_KEEP_UP_MS) {
+        // Stop asking the feed for a while, and report no gap: the timers are back at their own
+        // pace, and reading every vault after each jump would cost more than they do.
         this.distrustedUntil = this.now() + CANNOT_KEEP_UP_MS;
-        this.log({ event: "chain_feed.cannot_keep_up", height });
+        this.fellBehindAt = Number.NEGATIVE_INFINITY;
+        this.next = null;
+        this.log({ event: "chain_feed.cannot_keep_up", height, pausedMs: CANNOT_KEEP_UP_MS });
+        return false;
       }
       this.fellBehindAt = this.now();
       this.jump(await this.head());
