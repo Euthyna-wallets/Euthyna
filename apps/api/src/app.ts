@@ -23,6 +23,7 @@ import type { NearClient } from "./near.js";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { RegistryError, type RegistryService } from "./registry-db.js";
 import { PaymentError, type PaymentService } from "./payments.js";
+import { routeLabel, rpcUsage, withOrigin } from "./rpc-usage.js";
 import { PAIRING_TTL_MS, newPairingCode, pairingCodeHash, type PairingRecord, type PairingStore } from "./pairings.js";
 
 const requestSchema = z.object({
@@ -383,6 +384,12 @@ export function createApp({
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
   const isPublicMarket = (path: string) => path.startsWith("/a2a/") || path.startsWith("/v1/market/") || path === "/.well-known/x402";
+  // The RPC usage log says which route asked (rpc-usage.ts).
+  app.use("*", (context, next) => {
+    const route = routeLabel(context.req.method, context.req.path);
+    rpcUsage.served(route);
+    return withOrigin(route, next);
+  });
   app.use("*", (context, next) => (isPublicMarket(context.req.path) ? publicCors(context, next) : consoleCors(context, next)));
   app.use("/v1/console/*", requireConsoleRequest(consoleOrigin));
   app.use("/v1/emergency/*", requireConsoleRequest(consoleOrigin));
