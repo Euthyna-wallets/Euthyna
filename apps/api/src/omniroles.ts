@@ -1600,14 +1600,32 @@ export class OmniRolesService {
     return { proposals: [policyDraft, councilDraft] };
   }
 
-  /** Console seats follow the DAO: every DAO member has one, removed members lose theirs. */
+  /**
+   * Console seats follow the DAO: every DAO member has one, removed members lose theirs, the owner
+   * too. A seat recovered by email replaces the lost account in the DAO; that account may be in
+   * someone else's hands, so it must not keep the owner's rights in the console. The owner role
+   * passes to the account that joined the DAO in its place, or else to the longest-standing
+   * founder left, so the company always has one.
+   */
   private async syncSeats(organizationId: string, daoMembers: string[]) {
-    const seats = await this.prisma.member.findMany({ where: { organizationId } });
+    const seats = await this.prisma.member.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } });
+    const joined: string[] = [];
     for (const accountId of daoMembers) {
-      if (!seats.some((seat) => seat.nearAccountId === accountId)) await this.createSeat(organizationId, accountId);
+      if (!seats.some((seat) => seat.nearAccountId === accountId) && await this.createSeat(organizationId, accountId)) joined.push(accountId);
     }
-    const stale = seats.filter((seat) => seat.role !== "owner" && seat.nearAccountId && !daoMembers.includes(seat.nearAccountId));
-    if (stale.length) await this.prisma.member.deleteMany({ where: { id: { in: stale.map((seat) => seat.id) } } });
+    const stale = seats.filter((seat) => seat.nearAccountId && !daoMembers.includes(seat.nearAccountId));
+    if (!stale.length) return;
+    // Only when the DAO has members to hand the company to: never leave it without a seat.
+    if (!daoMembers.length) return;
+    await this.prisma.member.deleteMany({ where: { id: { in: stale.map((seat) => seat.id) } } });
+    if (!stale.some((seat) => seat.role === "owner")) return;
+    const remaining = await this.prisma.member.findMany({ where: { organizationId, nearAccountId: { in: daoMembers } }, orderBy: { createdAt: "asc" } });
+    if (remaining.some((seat) => seat.role === "owner")) return;
+    const successor = remaining.find((seat) => joined.includes(seat.nearAccountId ?? "")) ?? remaining[0];
+    if (successor) {
+      await this.prisma.member.update({ where: { id: successor.id }, data: { role: "owner" } });
+      console.log(JSON.stringify({ event: "omniroles.owner_moved", organizationId, from: stale.find((seat) => seat.role === "owner")?.nearAccountId, to: successor.nearAccountId }));
+    }
   }
 
   private async createSeat(organizationId: string, accountId: string, name?: string) {
