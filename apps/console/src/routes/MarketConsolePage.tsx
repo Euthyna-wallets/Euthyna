@@ -1,9 +1,11 @@
+import { NEAR_TESTNET_TOKENS } from "@euthyna/sdk/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { Kicker, PageTitle, Seal, SectionHead, Slab, NightPanel, SpendingCard } from "../components/design.js";
 import { PageState, short } from "../components/ui.js";
+
 import { marketConsole, slaText, tokenAmount, type Listing, type Sale } from "../lib/market.js";
 
 const NEAR_EXPLORER = "https://testnet.nearblocks.io/txns";
@@ -116,10 +118,10 @@ function purchaseSteps(purchase: Sale): Step[] {
 }
 
 function NewListing({ onDone }: { onDone: () => void }) {
-  const [form, setForm] = useState({ handle: "", title: "", description: "", category: "research", price: "2", slaMinutes: "30", inputHint: "", webhookUrl: "" });
+  const [form, setForm] = useState({ handle: "", title: "", description: "", category: "research", price: "2", asset: "USDC", slaMinutes: "30", inputHint: "", webhookUrl: "" });
   const create = useMutation({
     mutationFn: () => marketConsole.create({
-      handle: form.handle, title: form.title, description: form.description, category: form.category, price: form.price,
+      handle: form.handle, title: form.title, description: form.description, category: form.category, price: form.price, asset: form.asset,
       slaSeconds: Math.round(Number(form.slaMinutes) * 60), inputHint: form.inputHint || undefined, webhookUrl: form.webhookUrl || null,
     }),
     onSuccess: onDone,
@@ -140,12 +142,16 @@ function NewListing({ onDone }: { onDone: () => void }) {
         </div>
         <label style={column}>Description<textarea rows={3} value={form.description} onChange={set("description")} /></label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-          <label style={column}>Price (USDC)<input inputMode="decimal" value={form.price} onChange={set("price")} /></label>
+          <label style={column}>Price<input inputMode="decimal" value={form.price} onChange={set("price")} /></label>
+          {/* TestUSDC can be minted by anyone on testnet: what a tester can pay with. */}
+          <label style={column}>Paid in
+            <select value={form.asset} onChange={set("asset")}>{NEAR_TESTNET_TOKENS.map((token) => <option key={token.symbol} value={token.symbol}>{token.symbol}</option>)}</select>
+          </label>
           <label style={column}>Delivers within (minutes)<input type="number" min={1} value={form.slaMinutes} onChange={set("slaMinutes")} /></label>
           <label style={column}>Input hint<input value={form.inputHint} onChange={set("inputHint")} placeholder="Project name, URL, chain" /></label>
         </div>
         <label style={column}>Worker webhook (optional, https)<input value={form.webhookUrl} onChange={set("webhookUrl")} placeholder="https://worker.example.com/hook" /></label>
-        <span style={{ fontSize: 13, color: "#4A5675" }}>Paid in USDC on NEAR to the company vault. The listing stays a draft until a worker token exists and you put it live.</span>
+        <span style={{ fontSize: 13, color: "#4A5675" }}>Paid in {form.asset} on NEAR to the company vault, which must be able to receive it: vote a role that pays in that token first (Rules, + Pay in NEAR tokens). The listing stays a draft until a worker token exists and you put it live.</span>
         <button className="btn-ori" style={{ alignSelf: "flex-start" }} disabled={create.isPending || !form.handle || !form.title || form.description.length < 10} onClick={() => create.mutate()}>CREATE LISTING</button>
       </div>
     </Slab>
