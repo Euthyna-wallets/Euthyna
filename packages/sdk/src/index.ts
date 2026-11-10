@@ -149,6 +149,8 @@ export interface AgentApiGateway {
   status(opId: number[]): Promise<Record<string, unknown>>;
   /** Dry run: the vault's verdict, then the Guard's. Nothing is reserved. */
   check?(request: OmniRolesOperationRequest): Promise<OperationCheckResult>;
+  /** Tells the API about an operation signed on chain without it, so the relayer sends it now. */
+  announce?(opId: number[]): Promise<void>;
   /** The agent's role, what is left of its budgets, and the recipients the Guard accepts. */
   mandate?(): Promise<Record<string, unknown>>;
   /** The bridge call that sends `amountWei` of revenue to the company's shareholders. */
@@ -420,6 +422,11 @@ export class HttpAgentApi implements AgentApiGateway {
       },
       warnings,
     };
+  }
+
+  async announce(opId: number[]): Promise<void> {
+    const response = await this.request(`/v1/operations/${operationIdHex(opId)}/announce`, { method: "POST", body: "{}", signal: AbortSignal.timeout(10_000) });
+    if (response.status >= 300) throw new Error(`announce refused: ${String(response.body.error ?? response.status)}`);
   }
 
   async recordAuthorization(opId: number[], nearTransactionHash: string): Promise<Record<string, unknown>> {

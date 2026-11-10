@@ -470,6 +470,13 @@ export function createApp({
     return context.json(await payments.gasQuote(agent.organizationId, agent, input));
   });
 
+  app.post("/v1/operations/:opId/announce", requireAgent(auth, agentLimiter), async (context) => {
+    const agent = context.get("agent");
+    const raw = context.req.param("opId") ?? "";
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new HTTPException(400, { message: "invalid opId" });
+    return context.json(await payments.announce(agent.organizationId, agent, Array.from(Buffer.from(raw.slice(2), "hex"))));
+  });
+
   app.post("/v1/operations/:opId/authorization", requireAgent(auth, agentLimiter), async (context) => {
     const agent = context.get("agent");
     const raw = context.req.param("opId") ?? "";

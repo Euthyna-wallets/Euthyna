@@ -5,7 +5,7 @@ type Hex = `0x${string}`;
 
 const id = Array<number>(32).fill(1);
 const block = `0x${"09".repeat(32)}` as Hex;
-function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean; vaultRefuses?: boolean; api?: boolean; sponsored?: boolean } = {}) {
+function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?: boolean; originalWins?: boolean; proofPending?: boolean; vaultRefuses?: boolean; api?: boolean; sponsored?: boolean; announce?: "ok" | "down" } = {}) {
   const calls: Array<{ method: string; args?: Record<string, unknown> }> = [];
   let state = "Prepared";
   const vault = {
@@ -39,6 +39,7 @@ function fixture(options: { cancellation?: boolean; timeout?: boolean; refused?:
   const reported: unknown[] = [];
   const advisory = options.refused ? { preflightInvoice: async () => { throw new Error("Invoice refused"); } }
     : options.api ? { preflightInvoice: async () => {}, check: async (request: unknown) => { reported.push(request); return { allowed: false } as never; } }
+    : options.announce ? { preflightInvoice: async () => {}, announce: async (opId: number[]) => { calls.push({ method: "announce", args: { opId } }); if (options.announce === "down") throw new Error("api down"); } }
     : undefined;
   return { tools: new MandateMcpTools(new OnchainAgentClient(vault, rpc, advisory)), calls, reported };
 }
@@ -48,6 +49,19 @@ describe("direct MCP without an API", () => {
     const result = await tools.pay({ token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" });
     expect(result.outcome).toBe("authorized");
     expect(calls.some((c) => c.method === "eth_sendRawTransaction" || c.method === "settle")).toBe(false);
+  });
+  it("announces a sponsored call to the API once, so the relayer does not wait for discovery", async () => {
+    const { tools, calls } = fixture({ sponsored: true, announce: "ok" });
+    const result = await tools.pay({ token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" });
+    expect(result.outcome).toBe("authorized");
+    await tools.status({ opId: `0x${"01".repeat(32)}` });
+    expect(calls.filter((c) => c.method === "announce")).toEqual([{ method: "announce", args: { opId: id } }]);
+  });
+  it("still authorizes a sponsored call when the API cannot be told", async () => {
+    const { tools, calls } = fixture({ sponsored: true, announce: "down" });
+    const result = await tools.pay({ token: `0x${"01".repeat(20)}`, recipient: `0x${"02".repeat(20)}`, amount: "10", reference: "invoice", gasLimit: "21000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" });
+    expect(result.outcome).toBe("authorized");
+    expect(calls.some((c) => c.method === "announce")).toBe(true);
   });
   it("prepares and authorizes without a visa, then verifies finalized receipt", async () => {
     const { tools, calls } = fixture();
