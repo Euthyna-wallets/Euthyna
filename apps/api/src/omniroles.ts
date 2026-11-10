@@ -185,6 +185,11 @@ const STORAGE_TOP_UP_YOCTO = 1_000_000_000_000_000_000_000_000n;
 // vote in the console wakes the vault at once (`refresh`); known dates (a veto window's end, a
 // payroll date) wake it on time.
 const IDLE_RECHECK_MS = 300_000;
+/**
+ * The same read while the chain is followed (`followChain`): any transaction on the vault or its
+ * DAO wakes the vault within seconds, so this read is only a net.
+ */
+const FOLLOWED_IDLE_RECHECK_MS = 60 * 60_000;
 /** After a member's transaction, the vault is read again every few seconds for this long. */
 const WAKE_FOLLOW_MS = 30_000;
 const DUE_MARGIN_MS = 3_000;
@@ -469,6 +474,9 @@ export class OmniRolesService {
   private readonly nextActivationCheck = new Map<string, number>();
   /** When a member's transaction last asked to read the vault again (`refresh`). */
   private readonly wakeRequestedAt = new Map<string, number>();
+  /** Vaults left to the idle read, and when they were read: the net tightens again if the chain feed stops. */
+  private readonly idleReadAt = new Map<string, number>();
+  private chainFollowed: () => boolean = () => false;
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
@@ -1937,7 +1945,13 @@ export class OmniRolesService {
       return await inBackground(async () => {
         const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true } });
         const now = Date.now();
-        const due = treasuries.filter((treasury) => (this.nextActivationCheck.get(treasury.vaultAccountId) ?? 0) <= now);
+        const followed = this.chainFollowed();
+        const due = treasuries.filter((treasury) => {
+          if ((this.nextActivationCheck.get(treasury.vaultAccountId) ?? 0) <= now) return true;
+          // Scheduled an hour away while the chain was followed, and it no longer is: the usual idle read.
+          const idleRead = this.idleReadAt.get(treasury.vaultAccountId);
+          return !followed && idleRead !== undefined && idleRead + IDLE_RECHECK_MS <= now;
+        });
         let index = 0;
         const lane = async () => {
           while (index < due.length) {
@@ -1946,7 +1960,10 @@ export class OmniRolesService {
             try {
               const { nextDueMs } = await this.activateDue(treasury.organizationId);
               // A little after the window ends: the chain's clock decides, not ours.
-              let next = nextDueMs === null ? Date.now() + IDLE_RECHECK_MS : Math.min(nextDueMs + DUE_MARGIN_MS, Date.now() + IDLE_RECHECK_MS);
+              const idleAt = Date.now() + (this.chainFollowed() ? FOLLOWED_IDLE_RECHECK_MS : IDLE_RECHECK_MS);
+              let next = nextDueMs === null ? idleAt : Math.min(nextDueMs + DUE_MARGIN_MS, idleAt);
+              if (next === idleAt) this.idleReadAt.set(treasury.vaultAccountId, readAt);
+              else this.idleReadAt.delete(treasury.vaultAccountId);
               // A vote that came in while this pass read the vault was not seen by it, and one from the
               // last few seconds may not be final yet: read again soon instead of pushing the vault
               // back to the idle read (5 minutes), which held a voted role for 5 minutes on 9 November.
@@ -2657,6 +2674,29 @@ export class OmniRolesService {
     this.nextActivationCheck.set(treasury.vaultAccountId, Date.now() + 8_000);
     this.wakeRequestedAt.set(treasury.vaultAccountId, Date.now());
     this.ruleFacts.delete(treasury.vaultAccountId);
+  }
+
+  /** While `healthy()`, the chain is followed and `noticeChain` reports every vault a block touched. */
+  followChain(healthy: () => boolean): void {
+    this.chainFollowed = healthy;
+  }
+
+  /**
+   * A final block ran a receipt on this vault or its DAO (a vote, a queued rule, an agent's call):
+   * read the vault on the next pass. The block is final, so there is nothing to wait for.
+   */
+  noticeChain(vaultAccountId: string, daoAccountId?: string): void {
+    this.forget(vaultAccountId);
+    if (daoAccountId) this.forget(daoAccountId);
+    this.ruleFacts.delete(vaultAccountId);
+    const now = Date.now();
+    this.nextActivationCheck.set(vaultAccountId, Math.min(this.nextActivationCheck.get(vaultAccountId) ?? now, now + 1_000));
+    this.wakeRequestedAt.set(vaultAccountId, now);
+  }
+
+  /** Blocks were not followed for a while: read every vault on the next pass. */
+  noticeChainGap(): void {
+    this.nextActivationCheck.clear();
   }
 
   private forget(accountId: string): void {

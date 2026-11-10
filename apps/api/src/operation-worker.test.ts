@@ -579,6 +579,40 @@ describe("operations an agent signed but never settled", () => {
     expect(test.store.operation.state).toBe("Confirmed");
   });
 
+  it("are found on the next tick when a block touched the vault, without waiting for the round", async () => {
+    const test = scanning();
+    test.near.walletState = { address: Array(20).fill(0x11), in_flight: [] };
+    test.worker.followChain(() => true);
+    expect((await test.worker.tick()).adopted).toBe(0);
+    const rounds = test.store.vaultCalls;
+    // Nothing touched, round not due: the vaults are not even listed.
+    test.advance(5_000);
+    await test.worker.tick();
+    expect(test.store.vaultCalls).toBe(rounds);
+    // An agent signs: the block reports the vault.
+    test.near.walletState = { address: Array(20).fill(0x11), in_flight: [Array(32).fill(1)] };
+    test.worker.notice("vault.testnet");
+    test.advance(5_000);
+    expect((await test.worker.tick()).adopted).toBe(1);
+  });
+
+  it("look at a touched vault a second time a little later, then leave it alone", async () => {
+    const test = scanning();
+    test.near.walletState = { address: Array(20).fill(0x11), in_flight: [] };
+    test.worker.followChain(() => true);
+    await test.worker.tick();
+    test.worker.notice("vault.testnet");
+    test.advance(5_000);
+    await test.worker.tick(); // the RPC node's final block is behind: nothing in flight yet
+    test.near.walletState = { address: Array(20).fill(0x11), in_flight: [Array(32).fill(1)] };
+    test.advance(11_000);
+    expect((await test.worker.tick()).adopted).toBe(1);
+    const rounds = test.store.vaultCalls;
+    test.advance(30_000);
+    await test.worker.tick();
+    expect(test.store.vaultCalls).toBe(rounds);
+  });
+
   it("leave alone what the worker already follows", async () => {
     const test = scanning(undefined, new Set([opId]));
     const result = await test.worker.tick();
