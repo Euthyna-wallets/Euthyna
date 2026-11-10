@@ -288,6 +288,42 @@ describe("rule activation job", () => {
     expect(await readsBetween(30, 40)).toBe(0);
   });
 
+  it("keeps a screen's read of a quiet company for minutes, and reads again as soon as something happens on it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = { ms: Date.UTC(2026, 10, 10, 10, 0, 0) };
+    vi.setSystemTime(now.ms);
+    const { service, calls } = world(now);
+    service.withNotices(() => true, () => undefined);
+    await service.activateAllReadyRules(); // learns the companies
+    const vault = "idle.nomos.testnet";
+    const screen = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view(vault, "list_roles");
+    const chainReads = () => calls.filter((call) => call === `${vault}:list_roles`).length;
+    // Just seen: active for five minutes, as before (kept 6 s).
+    await screen();
+    vi.setSystemTime(now.ms + 10_000);
+    await screen();
+    expect(chainReads()).toBe(2);
+    // Quiet: a console tab asking every 15 s for ten minutes reads the chain twice, not forty times.
+    for (let second = 6 * 60; second < 16 * 60; second += 15) {
+      vi.setSystemTime(now.ms + second * 1_000);
+      await screen();
+    }
+    expect(chainReads()).toBe(4);
+    // A vote: the next look reads the chain, and the company is active again.
+    service.notice(vault, "vote");
+    vi.setSystemTime(now.ms + 16 * 60_000 + 1_000);
+    await screen();
+    vi.setSystemTime(now.ms + 16 * 60_000 + 10_000);
+    await screen();
+    expect(chainReads()).toBe(6);
+    // An account that gets no notice (another contract) is read as before.
+    const other = () => (service as unknown as { view(account: string, method: string): Promise<unknown> }).view("registry.testnet", "get");
+    await other();
+    vi.setSystemTime(now.ms + 16 * 60_000 + 20_000);
+    await other();
+    expect(calls.filter((call) => call === "registry.testnet:get").length).toBe(2);
+  });
+
   it("tries a refused rule at once when a payment of the vault ends, and tells the other process what it ran", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = { ms: Date.UTC(2026, 10, 10, 9, 0, 0) };

@@ -196,6 +196,10 @@ const NOTIFIED_IDLE_RECHECK_MS = 60 * 60_000;
  * notice: the enclave's answer to a payout comes within minutes of the agent's call.
  */
 const BANK_ACTIVE_MS = 15 * 60_000;
+/** Screens' reads of a vault or its DAO: kept this long, or `QUIET_VIEW_TTL_MS` when nothing happened on the company for `ACTIVE_VIEW_MS`. */
+const ACTIVE_VIEW_TTL_MS = 6_000;
+const QUIET_VIEW_TTL_MS = 5 * 60_000;
+const ACTIVE_VIEW_MS = 5 * 60_000;
 /** After a member's transaction, the vault is read again every few seconds for this long. */
 const WAKE_FOLLOW_MS = 30_000;
 const DUE_MARGIN_MS = 3_000;
@@ -485,6 +489,9 @@ export class OmniRolesService {
   private noticesOn: () => boolean = () => false;
   private publishNotice: (vaultAccountId: string, reason: NoticeReason) => void = () => undefined;
   private readonly noticedAt = new Map<string, number>();
+  /** Each company's vault and DAO → its vault: the accounts notices are published for. */
+  private readonly watched = new Map<string, string>();
+  private readonly firstSeenAt = new Map<string, number>();
   private readonly storageCheckedAt = new Map<string, number>();
   /** Per vault: what only rules change, read once and kept until the rule list moves (see RULE_FACTS_TTL_MS). */
   private readonly ruleFacts = new Map<string, { fingerprint: string; values: Map<string, { value: unknown; readAt: number }> }>();
@@ -1957,7 +1964,13 @@ export class OmniRolesService {
     this.activationRunning = true;
     try {
       return await inBackground(async () => {
-        const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true } });
+        const treasuries = await this.prisma.treasury.findMany({ select: { organizationId: true, vaultAccountId: true, daoAccountId: true } });
+        for (const treasury of treasuries) {
+          // A company seen for the first time (just created, or this server just started) counts as active.
+          if (!this.watched.has(treasury.vaultAccountId)) this.firstSeenAt.set(treasury.vaultAccountId, Date.now());
+          this.watched.set(treasury.vaultAccountId, treasury.vaultAccountId);
+          if (treasury.daoAccountId) this.watched.set(treasury.daoAccountId, treasury.vaultAccountId);
+        }
         const now = Date.now();
         const followed = this.noticesOn();
         const due = treasuries.filter((treasury) => {
@@ -2661,7 +2674,24 @@ export class OmniRolesService {
   }
 
   private view<T>(accountId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
-    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, 6_000, () => this.near.viewFunction<T>(accountId, method, args));
+    return this.memo(`view:${accountId}:${method}:${JSON.stringify(args)}`, this.viewTtl(accountId), () => this.near.viewFunction<T>(accountId, method, args));
+  }
+
+  /**
+   * How long a screen's read of this account is kept. A console page left open asks again every
+   * 10 to 30 s, and each time used to read the chain again (kept 6 s): thousands of reads an hour
+   * per open tab, for a company where nothing happens.
+   *
+   * With vault notices, the server knows when a company's vault or DAO changes: `notice` drops
+   * what is kept. So for those accounts a read is kept 5 minutes while the company is quiet, and
+   * 6 s as before for a few minutes after a notice, when more changes follow without one (the
+   * enclave answering a payout, a transfer being mined).
+   */
+  private viewTtl(accountId: string): number {
+    const vault = this.watched.get(accountId);
+    if (!vault || !this.noticesOn()) return ACTIVE_VIEW_TTL_MS;
+    const activeAt = Math.max(this.noticedAt.get(vault) ?? 0, this.firstSeenAt.get(vault) ?? 0);
+    return Date.now() - activeAt < ACTIVE_VIEW_MS ? ACTIVE_VIEW_TTL_MS : QUIET_VIEW_TTL_MS;
   }
 
   private cached(kind: "keys", accountId: string): Promise<{ keys: unknown[] }>;
