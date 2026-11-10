@@ -7,6 +7,7 @@
  * connection failure. An answer from the chain (a contract error, an unknown account) is the
  * answer, from any endpoint.
  */
+import { rpcUsage } from "./rpc-usage.js";
 import { KeyPair, keyStores, Near, providers, type Account } from "near-api-js";
 
 const RATE_REST_FIRST_MS = 30_000;
@@ -92,6 +93,7 @@ export class PooledJsonRpcProvider extends providers.JsonRpcProvider {
       const url = this.pool.pick(tried);
       if (!url) throw new Error(`NEAR RPC: every endpoint refused ${method} for its rate or quota`);
       tried.add(url);
+      rpcUsage.record(this.pool.urls.indexOf(url), method, params);
       try {
         const result = await this.on(url).sendJsonRpc<T>(method, params);
         this.pool.ok(url);

@@ -3,6 +3,7 @@ import { transactions, utils, type Account } from "near-api-js";
 import type { Env } from "./env.js";
 import { RpcLimiter } from "./rpc-limiter.js";
 import { isRateRefusal, pooledAccount, RpcPool } from "./rpc-pool.js";
+import { rpcUsage } from "./rpc-usage.js";
 import type { MpcSignature, VaultOperation } from "./types.js";
 
 interface RpcResponse<T> {
@@ -83,6 +84,8 @@ export class NearClient {
     this.accountPromise = pooledAccount(this.pool, env.NEAR_NETWORK_ID, env.NEAR_RELAYER_ACCOUNT_ID, env.NEAR_RELAYER_PRIVATE_KEY);
     // Several calls at once, paced, and screens before the background job (it used to be one call per 500 ms for everything).
     this.limiter = new RpcLimiter(env.NEAR_RPC_CONCURRENCY ?? 3, env.NEAR_RPC_MIN_INTERVAL_MS ?? 150);
+    // What this process asks the RPC, logged once a minute (`near.rpc_usage`).
+    rpcUsage.start();
   }
 
   /** The relayer account; its views and transactions go through the pool too. */
@@ -101,6 +104,7 @@ export class NearClient {
         url = this.pool.pick()!;
       }
       tried.add(url);
+      rpcUsage.record(this.pool.urls.indexOf(url), method, params);
       let response: Response;
       try {
         response = await fetch(url, {
