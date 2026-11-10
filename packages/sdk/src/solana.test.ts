@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BASE_SEPOLIA, budgetsOf, compileRole, describeChange, hexOf, type RuleChange } from "./roles.js";
-import { base58Decode, base58Encode, isSolanaAddress, solanaAddress } from "./solana.js";
+import { base58Decode, base58Encode, isSolanaAddress, solanaAddress, solanaShortfall } from "./solana.js";
 
 const RECIPIENT = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
@@ -47,5 +47,21 @@ describe("Solana transfer role", () => {
     const text = all.map((change) => describeChange(change, { profile: BASE_SEPOLIA, budgets: budgetsOf(all, BASE_SEPOLIA) })).flatMap((item) => [item.title, ...item.details]).join("\n");
     expect(text).toContain('Let role "payouts" send on Solana');
     expect(text).toContain(`Send USDC on Solana to ${RECIPIENT}`);
+  });
+});
+
+describe("the wallet can pay a Solana transfer before the vault signs it", () => {
+  const SOL = { symbol: "SOL", decimals: 9, mint: null };
+  const USDC = { symbol: "USDC", decimals: 6, mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" };
+  it("refuses SOL the wallet does not have, or that would leave it under the rent floor", () => {
+    expect(solanaShortfall({ lamports: 0n, tokenBalance: null }, SOL, 10_000_000n)).toMatch(/holds 0 lamports/);
+    expect(solanaShortfall({ lamports: 10_100_000n, tokenBalance: null }, SOL, 10_000_000n)).toMatch(/at least 890880/);
+    expect(solanaShortfall({ lamports: 10_005_000n, tokenBalance: null }, SOL, 10_000_000n)).toBeNull();
+    expect(solanaShortfall({ lamports: 5_000_000_000n, tokenBalance: null }, SOL, 10_000_000n)).toBeNull();
+  });
+  it("refuses a token the wallet does not hold, or without SOL for the fee and the recipient's account", () => {
+    expect(solanaShortfall({ lamports: 1_000_000_000n, tokenBalance: 0n }, USDC, 1_000_000n)).toMatch(/holds 0 of this token/);
+    expect(solanaShortfall({ lamports: 1_000n, tokenBalance: 5_000_000n }, USDC, 1_000_000n)).toMatch(/lamports/);
+    expect(solanaShortfall({ lamports: 1_000_000_000n, tokenBalance: 5_000_000n }, USDC, 1_000_000n)).toBeNull();
   });
 });

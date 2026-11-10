@@ -112,6 +112,45 @@ export async function broadcast(rpc: SolanaRpc, wire: number[]): Promise<string>
   return rpc<string>("sendTransaction", [base64, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed" }]);
 }
 
+/** One signature's fee. */
+export const SOLANA_FEE_LAMPORTS = 5_000n;
+/** A system account left with less than this (and more than zero) makes the transfer fail. */
+export const SOLANA_RENT_EXEMPT_LAMPORTS = 890_880n;
+/** Creating the recipient's token account, which the wallet pays when it does not exist yet. */
+export const SOLANA_TOKEN_ACCOUNT_RENT_LAMPORTS = 2_039_280n;
+
+/**
+ * Why the wallet cannot pay this transfer, or null. Checked before the vault signs: a transfer
+ * signed but never landed keeps the role's budget, and the role itself, reserved until it can be
+ * declared unconfirmed (hours later).
+ */
+export function solanaShortfall(input: { lamports: bigint; tokenBalance: bigint | null }, token: SolanaToken, amount: bigint): string | null {
+  if (token.mint === null) {
+    const left = input.lamports - amount - SOLANA_FEE_LAMPORTS;
+    if (left < 0n || (left > 0n && left < SOLANA_RENT_EXEMPT_LAMPORTS)) {
+      return `the wallet holds ${input.lamports} lamports: it needs the amount, ${SOLANA_FEE_LAMPORTS} for the fee, and to keep at least ${SOLANA_RENT_EXEMPT_LAMPORTS} (or nothing)`;
+    }
+    return null;
+  }
+  if ((input.tokenBalance ?? 0n) < amount) return `the wallet holds ${input.tokenBalance ?? 0n} of this token, under ${amount}`;
+  if (input.lamports < SOLANA_FEE_LAMPORTS + SOLANA_TOKEN_ACCOUNT_RENT_LAMPORTS) {
+    return `the wallet holds ${input.lamports} lamports: it needs ${SOLANA_FEE_LAMPORTS + SOLANA_TOKEN_ACCOUNT_RENT_LAMPORTS} for the fee and, if needed, the recipient's token account`;
+  }
+  return null;
+}
+
+/** What the wallet holds: SOL, and the token when there is one. */
+export async function solanaHoldings(rpc: SolanaRpc, owner: string, token: SolanaToken): Promise<{ lamports: bigint; tokenBalance: bigint | null }> {
+  const balance = await rpc<{ value: number }>("getBalance", [owner, { commitment: "confirmed" }]);
+  if (!token.mint) return { lamports: BigInt(balance.value), tokenBalance: null };
+  const accounts = await rpc<{ value: Array<{ account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }> }>(
+    "getTokenAccountsByOwner",
+    [owner, { mint: token.mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
+  );
+  const tokenBalance = accounts.value.reduce((sum, item) => sum + BigInt(item.account.data.parsed.info.tokenAmount.amount), 0n);
+  return { lamports: BigInt(balance.value), tokenBalance };
+}
+
 export type SolanaStatus = { finalized: boolean; failed: boolean; err: unknown };
 
 export async function signatureStatus(rpc: SolanaRpc, signature: string): Promise<SolanaStatus | null> {
