@@ -77,9 +77,20 @@ export function sealedApprovalsIn(logs: string[], vaultAccountId: string, events
 
 /** After a vote, a seal or a fill: posts what it had signed to Base. Returns the Base transaction hashes. */
 export async function sendSealedApprovals(transactionHash: string, signerId: string, vaultAccountId: string): Promise<Hex[]> {
-  const outcome = await nearRpcMethod<Outcome>("tx", { tx_hash: transactionHash, sender_account_id: signerId, wait_until: "FINAL" });
+  // A final outcome can take longer than one RPC call waits (HTTP 408): ask again for a minute.
+  let outcome: Outcome | null = null;
+  for (let attempt = 0; attempt < 6 && !outcome; attempt++) {
+    outcome = await nearRpcMethod<Outcome>("tx", { tx_hash: transactionHash, sender_account_id: signerId, wait_until: "FINAL" }).catch((error: unknown) => {
+      if (attempt === 5) throw error;
+      return null;
+    });
+    if (!outcome) await new Promise((resolve) => setTimeout(resolve, 5_000));
+  }
   const sent: Hex[] = [];
-  for (const opId of sealedApprovalsIn(outcome.receipts_outcome.flatMap((receipt) => receipt.outcome.logs), vaultAccountId)) {
+  for (const opId of sealedApprovalsIn(outcome!.receipts_outcome.flatMap((receipt) => receipt.outcome.logs), vaultAccountId)) {
+    // A company with sponsored gas: the vault signed an authorization for its executor, not a raw
+    // transaction; Euthyna's relayer sends it (the vault tells it). Nothing to send from here.
+    if (await viewContract<unknown>(vaultAccountId, "get_sponsored_operation", { op_id: opId }).catch(() => null)) continue;
     // Read from the vault itself, not from the log: the bytes MPC signed.
     const operation = await viewContract<Operation | null>(vaultAccountId, "get_operation", { op_id: opId });
     if (!operation?.signed_transaction || operation.state !== "PossiblySigned") continue;

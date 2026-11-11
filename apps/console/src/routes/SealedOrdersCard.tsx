@@ -172,7 +172,7 @@ export function SealedOrdersCard() {
     const result = await fillNow({ me: me!, sealedId, id, order });
     const sell = sellSymbol(order.tokenIn);
     switch (result.status) {
-      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} ${sell}.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : ""}`;
+      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} ${sell}.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : " Euthyna's relayer sends the swap to Base (sponsored gas); the vault settles it once the block is final."}`;
       case "waiting": return `Not yet: the market gives ${priceOf(result.marketRate)} ${sell}/WETH, above your limit of ${priceOf(order.limitRate)}.`;
       case "no-funds": return `The wallet holds ${formatUnits(result.balance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: nothing was sent.`;
       case "needs-approval": return `The router may take ${formatUnits(result.allowance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: place an approval within the role first.`;
