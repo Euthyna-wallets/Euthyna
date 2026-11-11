@@ -223,10 +223,13 @@ const AWAITED_AFTER_NOTICE_MS = 2 * 60_000;
 
 type ViewClass = "static" | "governance" | "operations";
 /** What only a vault upgrade or a rule changes, and the accounts' keys and code. */
-const STATIC_VIEWS = new Set(["code_source", "visa_public_key", "status_public_key", "get_bank_box_key", "get_bank_signer_source", "get_staking_contract", "#keys", "#account"]);
+const STATIC_VIEWS = new Set(["code_source", "visa_public_key", "status_public_key", "get_bank_box_key", "get_bank_signer_source", "#keys", "#account"]);
 /** What a vote or a rule changes: the DAO, the rule queue, roles, the bank's settings. */
 const GOVERNANCE_VIEWS = new Set([
   "get_policy", "get_proposals", "get_last_proposal_id", "delegation_total_supply", "delegation_balance_of",
+  // Set by the owners' vote "Count locked shares as votes": kept an hour, the Shares page stayed
+  // "not ready" after that vote passed (judge-timed-1114, 11 November).
+  "get_staking_contract",
   "list_rule_changes", "is_paused", "council", "owner_id", "get_role", "get_membership", "get_near_permissions",
   "get_bank_config", "get_bank_permission", "list_bank_beneficiaries", "get_evm_executor",
 ]);
