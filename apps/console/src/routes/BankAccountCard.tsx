@@ -15,7 +15,7 @@ const ENTITY_TYPES: Array<[string, string]> = [
 const ROW = { display: "grid", gridTemplateColumns: "120px minmax(0, 1fr) auto", gap: 12, alignItems: "center", padding: "9px 0", borderTop: "1px solid rgba(13,23,48,.12)", fontSize: 13 } as const;
 const LABEL = { font: "700 11px var(--font-brand)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink-3)" } as const;
 
-const NETWORKS: Record<string, string> = { BaseTestSepolia: "Base Sepolia", Base: "Base" };
+const NETWORKS: Record<string, string> = { BaseTestSepolia: "Base Sepolia", Base: "Base", SolanaDevnet: "Solana devnet", Solana: "Solana" };
 
 /** "MT49CFTE1987…" → "MT49 CFTE 1987 …". */
 const groupIban = (iban: string) => iban.replace(/(.{4})/g, "$1 ").trim();
@@ -31,6 +31,7 @@ export function BankAccountCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("25");
+  const [rail, setRail] = useState<"base" | "solana">("base");
   const [form, setForm] = useState<BankBusiness>({
     registeredName: "", registrationNumber: "", entityType: "LimitedLiabilityCompany", country: "FR", street: "", city: "",
     postCode: "", state: "", incorporationDate: "", taxId: "",
@@ -72,6 +73,16 @@ export function BankAccountCard() {
           <div style={ROW}><b style={LABEL}>Holder</b><span>{account.accountHolder}</span><span /></div>
           <div style={ROW}><b style={LABEL}>Bank</b><span>{account.bankName}</span><span /></div>
           <div style={ROW}><b style={LABEL}>Settles</b><span>as {account.settlesAs.replace(/_TEST$/, "")} into <span className="mono">{account.destinationAddress.slice(0, 6)}…{account.destinationAddress.slice(-4)}</span> on {NETWORKS[account.network] ?? account.network}</span><span /></div>
+          {bank.data.solana ? (
+            <div style={ROW}><b style={LABEL}>On Solana</b>
+              <span>IBAN <span className="mono">{groupIban(bank.data.solana.iban)}</span>: as {bank.data.solana.settlesAs.replace(/_TEST$/, "")} into the Solana wallet <span className="mono">{bank.data.solana.destinationAddress.slice(0, 4)}…{bank.data.solana.destinationAddress.slice(-4)}</span> on {NETWORKS[bank.data.solana.network] ?? bank.data.solana.network}</span>
+              <button className="btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => void navigator.clipboard.writeText(bank.data!.solana!.iban)}>Copy</button></div>
+          ) : (
+            <div style={ROW}><b style={LABEL}>On Solana</b>
+              <span style={{ color: "var(--ink-2)" }}>A second IBAN whose euros arrive as EURC in the company's Solana wallet (Euthyna pays the SOL fees of its transfers).</span>
+              <button className="btn" style={{ padding: "6px 12px", fontSize: 12 }} disabled={busy}
+                onClick={() => run(async () => { await bankApi.openSolana(); return "Solana IBAN open: its euros settle as EURC in the company's Solana wallet."; })}>Open</button></div>
+          )}
 
           {bank.data.sandbox ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 0 4px", borderTop: "1px solid rgba(13,23,48,.12)" }}>
@@ -79,8 +90,15 @@ export function BankAccountCard() {
               <input aria-label="Amount in EUR" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={busy}
                 style={{ width: 90, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
               <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR</span>
+              {bank.data.solana ? (
+                <select aria-label="Received on" value={rail} onChange={(event) => setRail(event.target.value as "base" | "solana")} disabled={busy}
+                  style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-ui)" }}>
+                  <option value="base">to the Base IBAN</option>
+                  <option value="solana">to the Solana IBAN</option>
+                </select>
+              ) : null}
               <button type="button" className="btn-ori" style={{ padding: "10px 16px" }} disabled={busy || !/^\d{1,4}(\.\d{1,2})?$/.test(amount)}
-                onClick={() => run(async () => { await bankApi.simulate(amount); return `Transfer of ${amount} EUR sent. The EURC reaches the company wallet in about a minute.`; })}>
+                onClick={() => run(async () => { await bankApi.simulate(amount, rail); return `Transfer of ${amount} EUR sent. The EURC reaches the company's ${rail === "solana" ? "Solana " : ""}wallet in about a minute.`; })}>
                 {busy ? "SENDING…" : "SIMULATE A TRANSFER"}
               </button>
             </div>

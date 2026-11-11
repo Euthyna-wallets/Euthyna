@@ -1288,8 +1288,16 @@ export function createApp({
   });
   app.post("/v1/console/bank/simulate", requireConsole(auth, consoleLimiter), async (context) => {
     if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });
-    const input = await parseJson(context, z.object({ amount: z.string().regex(/^\d{1,4}(\.\d{1,2})?$/).refine((value) => Number(value) > 0 && Number(value) <= 1000, "between 0.01 and 1000 EUR") }));
-    return context.json(await bank.simulateDeposit(context.get("console").organizationId, input.amount));
+    const input = await parseJson(context, z.object({
+      amount: z.string().regex(/^\d{1,4}(\.\d{1,2})?$/).refine((value) => Number(value) > 0 && Number(value) <= 1000, "between 0.01 and 1000 EUR"),
+      rail: z.enum(["base", "solana"]).default("base"),
+    }));
+    return context.json(await bank.simulateDeposit(context.get("console").organizationId, input.amount, input.rail));
+  });
+  // A second IBAN: the same euros, as EURC in the company's Solana wallet.
+  app.post("/v1/console/bank/solana", requireConsoleAdmin(auth, consoleLimiter), async (context) => {
+    if (!bank) throw new HTTPException(404, { message: "no bank partner is configured" });
+    return context.json(await bank.openSolana(context.get("console").organizationId));
   });
 
   app.onError((error, context) => {
