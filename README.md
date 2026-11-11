@@ -17,7 +17,7 @@ Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security
 Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hackathon](#built-for-the-hackathon).
 
 - **Demo:** <link to the X post>
-- **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 20 minutes, each step checkable on chain
+- **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 18 minutes, each step checkable on chain
 - **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
 - The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.
 
@@ -331,10 +331,24 @@ pnpm attack:all
 ## Built for the hackathon
 
 Work started on 20 October 2026 (the hackathon's rules open submissions on 1 November): 307 of the
-517 commits on `main` (9 November) predate 1 November (`git rev-list --count main --before=2026-11-01T00:00:00Z`). Before 1 November: the vault and its rule
-engine, the shares, the registry, the API, the console and the MCP server. From 1 November: ZK Email
-seat recovery verified on chain, sealed orders, the euro IBAN with its bank enclave, sponsored gas (EIP-7702),
-`euthyna-signer` in this repository and the bank pages of the console. `git log --before=2026-11-01` shows the rest.
+609 commits on `main` (11 November) predate 1 November (`git rev-list --count main --before=2026-11-01T00:00:00Z`).
+Before 1 November: the vault and its rule engine, the shares, the registry, the API, the console and the MCP server.
+From 1 November, on NEAR:
+
+- ZK Email seat recovery verified by a NEAR contract (`euthyna-recovery-v6.testnet`);
+- sealed orders with zero-knowledge fills verified on NEAR, and agents that seal from the vault's credit with a
+  second function-call key (`euthyna-sealed-orders-v3.testnet`);
+- agents' NEAR gas paid by Euthyna: calls relayed as NEP-366 delegates;
+- the vault's veto window set by a vote (`SetRuleDelay`), euro payouts, payroll and sealed beneficiaries;
+- on Solana (transfers signed by NEAR MPC since October): Token-2022 mints such as Noah's EURC, SOL fees paid by
+  Euthyna, transfers settled when final and freed when lost;
+- sponsored gas on Base (EIP-7702) for what the vault had NEAR MPC sign;
+- the revenue cycle (shares and epochs date from October) in the console and on the public company page: lock,
+  vote, prove the vote, claim;
+- the chain feed that reads a vault when something happens on it, `euthyna-signer` in this repository, and the bank
+  pages of the console.
+
+`git log --since=2026-11-01` lists the rest.
 
 ## Names
 
