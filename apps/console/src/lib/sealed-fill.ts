@@ -44,7 +44,7 @@ export async function fillNow(input: { me: string; sealedId: string; id: number;
       const { result: quoted } = await base.simulateContract({ address: U.quoter, abi: quoter, functionName: "quoteExactInputSingle", args: [[order.tokenIn, order.tokenOut, amountIn, order.fee, 0n]] });
       return quoted[0];
     },
-    allowance: () => base.readContract({ address: U.usdc, abi: erc20Abi, functionName: "allowance", args: [wallet, U.router] }),
+    allowance: () => base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "allowance", args: [wallet, U.router] }),
     balance: () => base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [wallet] }),
     // 4,096 gates: 2^13 points from this site.
     prove: async (fill) => proveSealedFill(await loadCircuit(), order, fill, () => openProver(1, 2 ** 13)),

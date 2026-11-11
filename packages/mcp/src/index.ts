@@ -28,7 +28,7 @@ export class MandateMcpTools {
     return this.sealedOrders;
   }
 
-  placeSealedOrder(input: { maxPriceUsdc: number; capUsdc: string; days: number; approveUsdc?: string | undefined }) {
+  placeSealedOrder(input: { maxPriceUsdc: number; capUsdc: string; days: number; approveUsdc?: string | undefined; sell?: "USDC" | "EURC" | undefined }) {
     return this.sealed().place(input);
   }
 
@@ -202,8 +202,9 @@ export function createMandateMcpServer(tools: MandateMcpTools): McpServer {
   });
   server.registerTool("place_sealed_order", {
     title: "Place a sealed limit order",
-    description: "Buy WETH with USDC on Uniswap when 1 WETH costs at most maxPriceUsdc, for at most capUsdc in all, within days. Only a hash goes on chain; the vault still checks your role's router, pair and budget at each fill. approveUsdc first lets the router take that much USDC (within the role).",
-    inputSchema: { maxPriceUsdc: z.number().positive(), capUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/), days: z.number().positive().max(365), approveUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/).optional() },
+    description: "Buy WETH with `sell` (USDC, or EURC: the company's euros) on Uniswap when 1 WETH costs at most maxPriceUsdc of it, for at most capUsdc of it in all, within days (the amounts are in the token sold, despite their names). Only a hash goes on chain; the vault still checks your role's router, pair and budget at each fill. approveUsdc first lets the router take that much of it (within the role).",
+    inputSchema: { maxPriceUsdc: z.number().positive(), capUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/), days: z.number().positive().max(365), approveUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/).optional(),
+      sell: z.enum(["USDC", "EURC"]).optional().describe("The token sold for WETH; USDC when omitted.") },
   }, async (input) => result(await tools.placeSealedOrder(input)));
   server.registerTool("sealed_orders", {
     title: "List sealed orders",

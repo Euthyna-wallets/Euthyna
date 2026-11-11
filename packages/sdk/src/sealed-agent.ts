@@ -20,6 +20,8 @@ import {
   randomSalt,
   rateFromPrice,
   SEALED_DEPOSIT_YOCTO,
+  SEALED_SELL,
+  type SealedSell,
   sealArgs,
   serializeOrder,
   type SealedOrder,
@@ -139,20 +141,23 @@ export class SealedAgent {
     return this.view("order", { vault, id });
   }
 
-  /** How much USDC the router may take from the wallet now. */
-  async allowance(wallet: Hex): Promise<bigint> {
-    return this.base.readContract({ address: U.usdc, abi: erc20Abi, functionName: "allowance", args: [getAddress(wallet), U.router] });
+  /** How much of `token` (USDC by default) the router may take from the wallet now. */
+  async allowance(wallet: Hex, token: Hex = U.usdc): Promise<bigint> {
+    return this.base.readContract({ address: token, abi: erc20Abi, functionName: "allowance", args: [getAddress(wallet), U.router] });
   }
 
   /**
-   * Places an order: buy WETH with USDC on Uniswap when 1 WETH costs at most `maxPriceUsdc`, for at
-   * most `capUsdc` in all, within `days`. `approveUsdc` approves the router first (within the role).
+   * Places an order: buy WETH with `sell` (USDC by default, or EURC) on Uniswap when 1 WETH costs at
+   * most `maxPriceUsdc` of it, for at most `capUsdc` of it in all, within `days`. `approveUsdc`
+   * approves the router first for that much of it (within the role). The amounts keep their USDC
+   * names; both tokens have 6 decimals.
    */
   async place(input: {
-    vault: string; role: string; maxPriceUsdc: number; capUsdc: string; days: number; fee?: number; slippageBps?: number; approveUsdc?: string;
+    vault: string; role: string; maxPriceUsdc: number; capUsdc: string; days: number; fee?: number; slippageBps?: number; approveUsdc?: string; sell?: SealedSell;
   }): Promise<{ file: OrderFile; transactions: string[] }> {
+    const tokenIn = SEALED_SELL[input.sell ?? "USDC"];
     const order: SealedOrder = {
-      vaultId: input.vault, chainId: U.chainId, tokenIn: U.usdc, tokenOut: U.weth, fee: input.fee ?? 3000,
+      vaultId: input.vault, chainId: U.chainId, tokenIn, tokenOut: U.weth, fee: input.fee ?? 3000,
       limitRate: rateFromPrice(input.maxPriceUsdc, 6, 18), cap: parseUnits(input.capUsdc, 6),
       expiry: Math.floor(Date.now() / 1000) + Math.round(input.days * 86_400), salt: randomSalt(),
     };
@@ -163,7 +168,7 @@ export class SealedAgent {
       const gasPrice = await this.base.getGasPrice();
       const outcome = await this.call({
         contractId: this.sealedId, methodName: "approve", gas: 300n * TGAS, attachedDeposit: 0n,
-        args: approveArgs({ vault: input.vault, role: input.role, chainId: U.chainId, token: U.usdc, router: U.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }),
+        args: approveArgs({ vault: input.vault, role: input.role, chainId: U.chainId, token: tokenIn, router: U.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }),
       });
       transactions.push(hashOf(outcome));
       const approved = eventOf(outcome, "approved");
@@ -216,7 +221,7 @@ export class SealedAgent {
         const { result } = await this.base.simulateContract({ address: U.quoter, abi: quoter, functionName: "quoteExactInputSingle", args: [[order.tokenIn, order.tokenOut, amountIn, order.fee, 0n]] });
         return result[0];
       },
-      allowance: () => this.allowance(wallet),
+      allowance: () => this.allowance(wallet, order.tokenIn),
       balance: () => this.base.readContract({ address: order.tokenIn, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(wallet)] }),
       prove: (fill) => proveFill(order, fill),
       fill: async (input) => {
