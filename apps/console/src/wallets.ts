@@ -312,7 +312,7 @@ async function proposalIdFromTransaction(transactionHash: string, signerId: stri
 export async function signDaoProposal(
   signerId: string,
   proposal: { receiverId: string; args: Record<string, unknown>; deposit: string },
-): Promise<{ transactionHash: string; proposalId: number }> {
+): Promise<{ transactionHash: string; proposalId: number; voteHash: string | null }> {
   const wallet = await transactionWallet();
   // A council member who proposes also approves, in the same transaction: the proposal then needs one
   // more founder, not two. The vote names the id the proposal will get and its kind: if another
@@ -356,9 +356,10 @@ export async function signDaoProposal(
     decodeProposalId(outcome.status?.SuccessValue) ??
     await proposalIdFromTransaction(transactionHash, signerId);
   proposedHere.set(proposal.receiverId, Math.max(proposalId, proposedHere.get(proposal.receiverId) ?? -1));
-  if (approve && !inline) await signDaoAction(signerId, proposal.receiverId, proposalId, kind, "VoteApprove");
+  // The transaction holding the proposer's vote: when that vote decided, it also ran the proposal.
+  const voteHash = inline ? transactionHash : approve ? await signDaoAction(signerId, proposal.receiverId, proposalId, kind, "VoteApprove") : null;
   await refreshOmniReads();
-  return { transactionHash, proposalId };
+  return { transactionHash, proposalId, voteHash };
 }
 
 /** The most gas a proposal's calls may take for the proposer's vote to ride in the proposing transaction. */
