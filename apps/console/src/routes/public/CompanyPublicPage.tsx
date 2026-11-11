@@ -15,7 +15,7 @@ import { companyProfile, REGISTRY_ID, treasuryOf, type CompanyProfile, type Empl
 import { market, slaText, tokenAmount, type MarketAgent } from "../../lib/market.js";
 import "../../styles/site.css";
 import { displayAccount } from "../../components/ui.js";
-import { connectNearWallet, nearAccounts, signContractCall, viewContract } from "../../wallets.js";
+import { connectNearWallet, nearAccounts, signContractCall, signDaoAction, viewContract } from "../../wallets.js";
 import { Kicker, SiteFooter, SiteHeader } from "./site/SiteChrome.js";
 
 const BRAND = "Cinzel, serif";
@@ -288,7 +288,7 @@ export function CompanyPublicPage() {
                         .
                       </span>
                       <span style={{ fontSize: 13, color: "#A9B6D6" }}>Locked shares vote on company calls and transfers. Each epoch, revenue goes to the holders who voted.</span>
-                      <BuyShares sharesId={company.shares.accountId} priceYocto={company.shares.priceYocto} />
+                      <BuyShares daoId={dao} sharesId={company.shares.accountId} priceYocto={company.shares.priceYocto} revenueToken={company.shares.revenueToken} />
                     </>
                   ) : (
                     <span style={{ fontSize: 15, color: "#C9D3EA" }}>This company has not issued shares yet, so it shares no revenue.</span>
@@ -378,15 +378,49 @@ async function listEntry(dao: string) {
 const REGISTRATION_FEE_YOCTO = 10n ** 22n;
 const formatYocto = (yocto: bigint) => `${Number(formatUnits(yocto, 24)).toLocaleString("en-US", { maximumFractionDigits: 4 })} NEAR`;
 
-/** Anyone buys from their own wallet, then locks shares to vote: no Euthyna account needed. */
-function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: string }) {
+type HolderView = {
+  balance: string; locked: string; transferable: string; claimable_near: string; claimable_token: string;
+  steady_now: string; provable_last_epoch: string; proofs: Array<{ epoch: number; shares: string; verified: boolean }>;
+};
+type SharesInfo = { current_epoch: number; current_epoch_ends_ns: string; epoch_ns: string };
+type Proposal = { id: number; description: string; kind: Record<string, unknown> | string; status: string; submission_time: string; votes: Record<string, string> };
+/** What shareholders vote on (the shareholders role): company calls and NEAR transfers. */
+const SHAREHOLDER_KINDS: Record<string, string> = { FunctionCall: "call", Transfer: "transfer" };
+const kindOf = (kind: Proposal["kind"]) => (typeof kind === "string" ? kind : Object.keys(kind)[0] ?? "");
+const TOKEN_REGISTRATION = "1250000000000000000000";
+
+/**
+ * Anyone buys from their own wallet, locks shares to vote, votes on the company's calls and
+ * transfers, proves that vote the next epoch and claims the revenue: no Euthyna account needed.
+ */
+function BuyShares({ daoId, sharesId, priceYocto, revenueToken }: { daoId: string; sharesId: string; priceYocto: string; revenueToken: string | null }) {
   const [account, setAccount] = useState<string | null>(null);
   const [shares, setShares] = useState("10");
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const holder = useQuery({
     queryKey: ["shares-holder", sharesId, account],
-    queryFn: () => viewContract<{ balance: string; locked: string; transferable: string } | null>(sharesId, "holder_of", { account_id: account }),
+    queryFn: () => viewContract<HolderView | null>(sharesId, "holder_of", { account_id: account }),
+    enabled: Boolean(account),
+  });
+  // Locked shares only vote once the owners made this contract the DAO's staking contract.
+  const counted = useQuery({
+    queryKey: ["shares-counted", daoId, sharesId],
+    queryFn: async () => (await viewContract<string>(daoId, "get_staking_contract").catch(() => "")) === sharesId,
+  });
+  const info = useQuery({ queryKey: ["shares-info", sharesId], queryFn: () => viewContract<SharesInfo>(sharesId, "info") });
+  const tokenMeta = useQuery({
+    queryKey: ["ft-metadata", revenueToken],
+    queryFn: () => viewContract<{ symbol: string; decimals: number }>(revenueToken!, "ft_metadata"),
+    enabled: Boolean(revenueToken),
+  });
+  const tokenText = (atomic: string) => (tokenMeta.data ? `${formatUnits(BigInt(atomic), tokenMeta.data.decimals)} ${tokenMeta.data.symbol}` : `${atomic} (${revenueToken})`);
+  const proposals = useQuery({
+    queryKey: ["shares-proposals", daoId],
+    queryFn: async () => {
+      const last = await viewContract<number>(daoId, "get_last_proposal_id");
+      return last ? viewContract<Proposal[]>(daoId, "get_proposals", { from_index: Math.max(0, last - 50), limit: 50 }) : [];
+    },
     enabled: Boolean(account),
   });
   useEffect(() => {
@@ -394,15 +428,19 @@ function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: str
   }, []);
   const count = /^\d+$/.test(shares) ? BigInt(shares) : 0n;
   const deposit = count * BigInt(priceYocto) + (holder.data ? 0n : REGISTRATION_FEE_YOCTO);
-  const run = async (label: string, work: () => Promise<string>) => {
+  const refresh = async () => {
+    // Views read final blocks, a few seconds behind the transaction: read again until they catch up.
+    await Promise.all([holder.refetch(), proposals.refetch(), info.refetch()]);
+    for (const wait of [3_000, 8_000]) setTimeout(() => void Promise.all([holder.refetch(), proposals.refetch()]), wait);
+  };
+  const run = async (label: string, work: () => Promise<string>, check?: () => Promise<string | null>) => {
     setBusy(label); setNote(null);
     try {
       const tx = await work();
       setNote(`Done: transaction ${tx.slice(0, 10)}…`);
-      // Views read final blocks, a few seconds behind the transaction: read again until they catch up,
-      // or LOCK only shows after a reload.
-      await holder.refetch();
-      for (const wait of [3_000, 8_000]) setTimeout(() => void holder.refetch(), wait);
+      await refresh();
+      // A call can succeed and its effect be refused further on (a lock the DAO does not count): say so.
+      if (check) { await new Promise((resolve) => setTimeout(resolve, 5_000)); const refused = await check(); if (refused) setNote(refused); }
     } catch (cause) {
       setNote(String(cause instanceof Error ? cause.message : cause).slice(0, 200));
     } finally {
@@ -416,7 +454,20 @@ function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: str
       </button>
     );
   }
-  const transferable = BigInt(holder.data?.transferable ?? "0");
+  const mine = holder.data;
+  const transferable = BigInt(mine?.transferable ?? "0");
+  const locked = BigInt(mine?.locked ?? "0");
+  // Proposals shareholders vote on, still open, where this account has not voted.
+  const open = (proposals.data ?? []).filter((proposal) => proposal.status === "InProgress" && SHAREHOLDER_KINDS[kindOf(proposal.kind)] && !(account in proposal.votes));
+  // prove_vote: a proposal submitted during the last epoch that this account voted on.
+  const lastVote = (() => {
+    const epoch = info.data;
+    if (!epoch || epoch.current_epoch === 0 || !mine || mine.provable_last_epoch === "0") return null;
+    const end = BigInt(epoch.current_epoch_ends_ns) - BigInt(epoch.epoch_ns);
+    const start = end - BigInt(epoch.epoch_ns);
+    return (proposals.data ?? []).find((proposal) => BigInt(proposal.submission_time) >= start && BigInt(proposal.submission_time) < end && account in proposal.votes)?.id ?? null;
+  })();
+  const claimable = mine && (mine.claimable_near !== "0" || mine.claimable_token !== "0");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -424,16 +475,76 @@ function BuyShares({ sharesId, priceYocto }: { sharesId: string; priceYocto: str
         <button className="ori btno" disabled={Boolean(busy) || count === 0n} onClick={() => void run("buy", () => signContractCall(account, sharesId, "buy", {}, { deposit: deposit.toString() }))}>
           {busy === "buy" ? "SIGNING…" : `BUY ${count} · ${formatYocto(deposit)}`}
         </button>
-        {transferable > 0n ? (
-          <button className="ori btno" disabled={Boolean(busy)} onClick={() => void run("lock", () => signContractCall(account, sharesId, "lock", { amount: transferable.toString() }))}>
+        {transferable > 0n && counted.data ? (
+          <button className="ori btno" disabled={Boolean(busy)} onClick={() => void run(
+            "lock",
+            () => signContractCall(account, sharesId, "lock", { amount: transferable.toString() }),
+            async () => {
+              const after = await viewContract<HolderView | null>(sharesId, "holder_of", { account_id: account });
+              return after && BigInt(after.locked) <= locked ? "The DAO refused the lock: your shares are back, free. Try again in a minute." : null;
+            },
+          )}>
             {busy === "lock" ? "SIGNING…" : `LOCK ${transferable} TO VOTE`}
           </button>
         ) : null}
+        {locked > 0n ? (
+          <button className="ori btno" disabled={Boolean(busy)} onClick={() => void run("unlock", () => signContractCall(account, sharesId, "unlock", { amount: locked.toString() }))}>
+            {busy === "unlock" ? "SIGNING…" : "UNLOCK"}
+          </button>
+        ) : null}
       </div>
+      {transferable > 0n && counted.data === false ? (
+        <span style={{ fontSize: 12, color: "#F2B544" }}>Locking opens once the owners' vote "Count locked shares as votes" has passed.</span>
+      ) : null}
       <span style={{ fontSize: 12, color: "#A9B6D6" }}>
-        {account}: {holder.data ? `${holder.data.balance} held, ${holder.data.locked} locked to vote` : "no shares yet"}
-        {holder.data ? "" : " · the first purchase includes 0.01 NEAR of storage"}
+        {account}: {mine ? `${mine.balance} held, ${mine.locked} locked to vote` : "no shares yet"}
+        {mine ? "" : " · the first purchase includes 0.01 NEAR of storage"}
+        {mine && mine.steady_now !== "0" ? ` · ${mine.steady_now} count this epoch: vote on a proposal before it ends` : ""}
       </span>
+
+      {locked > 0n && open.length ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ font: `700 10px ${BRAND}`, letterSpacing: ".18em", color: "#F2B544" }}>VOTE WITH YOUR SHARES</span>
+          {open.slice(0, 5).map((proposal) => (
+            <div key={proposal.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, color: "#E7ECF6", flex: "1 1 220px" }}>#{proposal.id} · {proposal.description.replace(/^\[mandateos\]\s*/, "").slice(0, 90)}</span>
+              {(["VoteApprove", "VoteReject"] as const).map((action) => (
+                <button key={action} className="ori btno" style={{ padding: "6px 10px", fontSize: 11 }} disabled={Boolean(busy)}
+                  onClick={() => void run(`${action}-${proposal.id}`, () => signDaoAction(account, daoId, proposal.id, proposal.kind, action))}>
+                  {busy === `${action}-${proposal.id}` ? "SIGNING…" : action === "VoteApprove" ? "APPROVE" : "REJECT"}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {mine && mine.provable_last_epoch !== "0" ? (
+        lastVote !== null ? (
+          <button className="ori btno" style={{ alignSelf: "flex-start" }} disabled={Boolean(busy)}
+            onClick={() => void run("prove", () => signContractCall(account, sharesId, "prove_vote", { proposal_id: lastVote }))}>
+            {busy === "prove" ? "SIGNING…" : `PROVE MY VOTE ON #${lastVote} · ${mine.provable_last_epoch} SHARES`}
+          </button>
+        ) : (
+          <span style={{ fontSize: 12, color: "#A9B6D6" }}>No vote from you last epoch: its revenue goes to the holders who voted.</span>
+        )
+      ) : null}
+      {mine?.proofs.filter((proof) => proof.verified).map((proof) => (
+        <span key={proof.epoch} style={{ fontSize: 12, color: "#A9B6D6" }}>✓ Vote proved for epoch {proof.epoch} ({proof.shares} shares): its revenue is yours to claim from epoch {proof.epoch + 2}.</span>
+      ))}
+      {claimable ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="ori btno" disabled={Boolean(busy)} onClick={() => void run("claim", () => signContractCall(account, sharesId, "claim", {}))}>
+            {busy === "claim" ? "SIGNING…" : `CLAIM ${formatYocto(BigInt(mine!.claimable_near))}${mine!.claimable_token !== "0" ? ` + ${tokenText(mine!.claimable_token)}` : ""}`}
+          </button>
+          {revenueToken && mine!.claimable_token !== "0" ? (
+            <button className="ori btno" disabled={Boolean(busy)}
+              onClick={() => void run("register", () => signContractCall(account, revenueToken, "storage_deposit", { account_id: account, registration_only: true }, { deposit: TOKEN_REGISTRATION, gas: "30000000000000" }))}>
+              {busy === "register" ? "SIGNING…" : "REGISTER FOR THE REVENUE TOKEN FIRST"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {note ? <span role="status" style={{ fontSize: 12, color: "#F2B544" }}>{note}</span> : null}
     </div>
   );
