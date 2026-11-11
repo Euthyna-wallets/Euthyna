@@ -155,6 +155,23 @@ export async function solanaHoldings(rpc: SolanaRpc, owner: string, token: Solan
   return { lamports: BigInt(balance.value), tokenBalance };
 }
 
+export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+/**
+ * The decimals of a Token-2022 mint (Noah's sandbox EURC is one), or null for a classic SPL mint:
+ * the vault then builds TransferChecked under the Token-2022 program. Read on Solana; a wrong
+ * answer only makes the transaction fail.
+ */
+export async function token2022Decimals(rpc: SolanaRpc, mint: string): Promise<number | null> {
+  const info = await rpc<{ value: { owner: string; data: { parsed?: { info?: { decimals?: number } } } } | null }>(
+    "getAccountInfo", [mint, { encoding: "jsonParsed", commitment: "confirmed" }],
+  );
+  if (info.value?.owner !== TOKEN_2022_PROGRAM) return null;
+  const decimals = info.value.data.parsed?.info?.decimals;
+  if (typeof decimals !== "number") throw new Error(`Token-2022 mint ${mint}: decimals unreadable`);
+  return decimals;
+}
+
 export type SolanaStatus = { finalized: boolean; failed: boolean; err: unknown };
 
 export async function signatureStatus(rpc: SolanaRpc, signature: string): Promise<SolanaStatus | null> {
