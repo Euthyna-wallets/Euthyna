@@ -25,6 +25,31 @@ pub const TOKEN_PROGRAM: SolanaAddress = [
     6, 221, 246, 225, 215, 101, 161, 147, 217, 203, 225, 70, 206, 235, 121, 172, 28, 180, 133, 237,
     95, 91, 55, 145, 58, 140, 245, 133, 126, 255, 0, 169,
 ];
+/// TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
+pub const TOKEN_2022_PROGRAM: SolanaAddress = [
+    6, 221, 246, 225, 238, 117, 143, 222, 24, 66, 93, 188, 228, 108, 205, 218, 182, 26, 252, 77,
+    131, 185, 13, 39, 254, 189, 249, 40, 216, 161, 139, 252,
+];
+
+/// The program of an SPL mint. A Token-2022 mint (Noah's sandbox EURC) takes TransferChecked,
+/// with its decimals: plain Transfer is refused when the mint has a transfer-fee config. Given by
+/// the caller (the vault cannot read Solana): a wrong program or decimals only makes the
+/// transaction fail, it cannot send elsewhere (the accounts are derived from the recipient).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenProgram {
+    Classic,
+    Token2022 { decimals: u8 },
+}
+
+impl TokenProgram {
+    fn id(self) -> SolanaAddress {
+        match self {
+            TokenProgram::Classic => TOKEN_PROGRAM,
+            TokenProgram::Token2022 { .. } => TOKEN_2022_PROGRAM,
+        }
+    }
+}
+
 /// ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL
 pub const ASSOCIATED_TOKEN_PROGRAM: SolanaAddress = [
     140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218,
@@ -195,10 +220,15 @@ fn on_curve(bytes: &[u8; 32]) -> bool {
 }
 
 pub fn associated_token_account(owner: &SolanaAddress, mint: &SolanaAddress) -> SolanaAddress {
+    associated_token_account_of(owner, mint, TOKEN_PROGRAM)
+}
+
+/// The associated token account for a given token program (its id is one of the seeds).
+pub fn associated_token_account_of(owner: &SolanaAddress, mint: &SolanaAddress, program: SolanaAddress) -> SolanaAddress {
     for bump in (0..=255u8).rev() {
         let mut seed = Vec::with_capacity(32 * 4 + 1 + 21);
         seed.extend_from_slice(owner);
-        seed.extend_from_slice(&TOKEN_PROGRAM);
+        seed.extend_from_slice(&program);
         seed.extend_from_slice(mint);
         seed.push(bump);
         seed.extend_from_slice(&ASSOCIATED_TOKEN_PROGRAM);
@@ -213,6 +243,10 @@ pub fn associated_token_account(owner: &SolanaAddress, mint: &SolanaAddress) -> 
 
 /// The exact message for a transfer from `from`.
 pub fn transfer_message(from: SolanaAddress, request: &SolanaTransferRequest) -> Vec<u8> {
+    transfer_message_with(from, request, TokenProgram::Classic)
+}
+
+pub fn transfer_message_with(from: SolanaAddress, request: &SolanaTransferRequest, program: TokenProgram) -> Vec<u8> {
     let amount = request.amount.0.to_le_bytes();
     match &request.asset {
         SolanaAsset::Sol => {
@@ -230,10 +264,23 @@ pub fn transfer_message(from: SolanaAddress, request: &SolanaTransferRequest) ->
             )
         }
         SolanaAsset::Spl { mint } => {
-            let destination = associated_token_account(&request.to, mint);
-            let source = associated_token_account(&from, mint);
-            let mut data = vec![3];
-            data.extend_from_slice(&amount);
+            let destination = associated_token_account_of(&request.to, mint, program.id());
+            let source = associated_token_account_of(&from, mint, program.id());
+            // Transfer (3): source, destination, owner. TransferChecked (12): source, mint,
+            // destination, owner, and the decimals after the amount.
+            let (data, accounts) = match program {
+                TokenProgram::Classic => {
+                    let mut data = vec![3];
+                    data.extend_from_slice(&amount);
+                    (data, vec![2, 1, 0])
+                }
+                TokenProgram::Token2022 { decimals } => {
+                    let mut data = vec![12];
+                    data.extend_from_slice(&amount);
+                    data.push(decimals);
+                    (data, vec![2, 4, 1, 0])
+                }
+            };
             message(
                 &[
                     from,
@@ -242,7 +289,7 @@ pub fn transfer_message(from: SolanaAddress, request: &SolanaTransferRequest) ->
                     request.to,
                     *mint,
                     SYSTEM_PROGRAM,
-                    TOKEN_PROGRAM,
+                    program.id(),
                     ASSOCIATED_TOKEN_PROGRAM,
                 ],
                 5,
@@ -254,10 +301,9 @@ pub fn transfer_message(from: SolanaAddress, request: &SolanaTransferRequest) ->
                         accounts: vec![0, 1, 3, 4, 5, 6],
                         data: vec![1],
                     },
-                    // Token Transfer: source, destination, owner.
                     Instruction {
                         program: 6,
-                        accounts: vec![2, 1, 0],
+                        accounts,
                         data,
                     },
                 ],
@@ -393,7 +439,12 @@ impl Vault {
 
     /// Agent: checked, charged to the budget and signed in one call, so the
     /// blockhash is still fresh when the signature comes back.
-    pub fn execute_solana(&mut self, role: String, request: SolanaTransferRequest) -> Promise {
+    pub fn execute_solana(
+        &mut self,
+        role: String,
+        request: SolanaTransferRequest,
+        token_2022_decimals: Option<u8>,
+    ) -> Promise {
         self.assert_not_paused();
         let member = env::predecessor_account_id();
         let now = env::block_timestamp();
@@ -434,7 +485,11 @@ impl Vault {
 
         let op_id = self.next_operation_id(&member, 0);
         self.references.insert(reference_key, op_id);
-        let message = transfer_message(from, &request);
+        let program = match (token_2022_decimals, &request.asset) {
+            (Some(decimals), SolanaAsset::Spl { .. }) => TokenProgram::Token2022 { decimals },
+            _ => TokenProgram::Classic,
+        };
+        let message = transfer_message_with(from, &request, program);
         require!(message.len() <= 1232 - 65, "ERR_SOLANA_TX_TOO_LARGE");
         store(&SolanaOperation {
             op_id,
@@ -680,6 +735,37 @@ mod tests {
             bs58::encode(SYSTEM_PROGRAM).into_string(),
             "11111111111111111111111111111111"
         );
+    }
+
+    /// Noah's sandbox EURC is a Token-2022 mint: the account the company wallet holds it in on
+    /// devnet (read on chain) is the associated account under the Token-2022 program.
+    #[test]
+    fn token_2022_accounts_and_transfer_checked() {
+        let decode = |text: &str| -> SolanaAddress { bs58::decode(text).into_vec().unwrap().try_into().unwrap() };
+        let wallet = decode("D5Yc5dRE2odPFG9kKTj2rxFL6E1fvxiuSEUyvtSfgdrW");
+        let mint = decode("7D6hWbuzWmEJJmWQ7iVz3p6oxiXoQwfTCVnsqZZ4AhnF");
+        assert_eq!(bs58::encode(TOKEN_2022_PROGRAM).into_string(), "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+        assert_eq!(
+            bs58::encode(associated_token_account_of(&wallet, &mint, TOKEN_2022_PROGRAM)).into_string(),
+            "DKEGUNxfn5wzo9TE6jYBKyPZtdP97DpZBm8RTh8z9owX"
+        );
+        let request = SolanaTransferRequest {
+            asset: SolanaAsset::Spl { mint },
+            to: [9; 32],
+            amount: U64(1_000_000),
+            recent_blockhash: [3; 32],
+            reference: "r".into(),
+        };
+        let message = transfer_message_with(wallet, &request, TokenProgram::Token2022 { decimals: 6 });
+        // Keys: wallet, destination, source, recipient, mint, system, Token-2022, ATA program.
+        assert_eq!(&message[..4], &[1, 0, 5, 8]);
+        assert_eq!(&message[4 + 32 * 6..4 + 32 * 7], &TOKEN_2022_PROGRAM);
+        // Last instruction: program 6, accounts [source, mint, destination, owner],
+        // TransferChecked (12), the amount, the decimals.
+        let tail: Vec<u8> = [vec![6, 4, 2, 4, 1, 0, 10, 12], 1_000_000u64.to_le_bytes().to_vec(), vec![6]].concat();
+        assert!(message.ends_with(&tail));
+        // A classic mint is unchanged.
+        assert_eq!(transfer_message_with(wallet, &request, TokenProgram::Classic), transfer_message(wallet, &request));
     }
 
     #[test]

@@ -877,7 +877,7 @@ mod solana_flow {
     fn signs_settles_and_spends_the_budget() {
         let (mut v, key) = setup();
         context(AGENT, 3);
-        drop(v.execute_solana("payments".into(), request(OK_TO, 400_000_000, "pay-1")));
+        drop(v.execute_solana("payments".into(), request(OK_TO, 400_000_000, "pay-1"), None));
         let op = last_op(&v, "pay-1");
         assert_eq!(
             v.allowances.get(&BUDGET_KEY).unwrap().reserved.0,
@@ -976,14 +976,14 @@ mod solana_flow {
     fn a_reference_is_used_once() {
         let (mut v, _) = setup();
         context(AGENT, 3);
-        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same")));
-        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same")));
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same"), None));
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same"), None));
     }
 
     /// A transfer signed at t=3 that never lands: its op id, from the vault's log.
     fn unlanded(v: &mut Vault) -> [u8; 32] {
         context(AGENT, 3);
-        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "lost")));
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "lost"), None));
         let log = near_sdk::test_utils::get_logs()
             .into_iter()
             .find_map(|line| line.strip_prefix("OMNIROLES_SOLANA_OPERATION:").map(str::to_owned))

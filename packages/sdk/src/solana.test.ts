@@ -86,3 +86,12 @@ describe("systemTransferWire", () => {
     expect(new DataView(Uint8Array.from(instruction.slice(6)).buffer).getBigUint64(4, true)).toBe(1_234_567n);
   });
 });
+
+describe("token2022Decimals", () => {
+  it("reads a Token-2022 mint's decimals; null for a classic mint", async () => {
+    const { token2022Decimals, TOKEN_2022_PROGRAM } = await import("./solana.js");
+    const rpc = (owner: string) => (async () => ({ value: { owner, data: { parsed: { info: { decimals: 6 } } } } })) as never;
+    await expect(token2022Decimals(rpc(TOKEN_2022_PROGRAM), "mint")).resolves.toBe(6);
+    await expect(token2022Decimals(rpc("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), "mint")).resolves.toBeNull();
+  });
+});
