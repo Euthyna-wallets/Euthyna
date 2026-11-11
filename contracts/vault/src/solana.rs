@@ -10,6 +10,10 @@ use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 
 pub type SolanaAddress = [u8; 32];
 
+/// When a Solana transaction that has not landed can be released: its blockhash (older than the
+/// signature) is long expired by then, with margin for slow slots (150 blocks is 1-2 minutes).
+pub const SOLANA_EXPIRED_AFTER_NS: u64 = 15 * 60 * 1_000_000_000;
+
 pub const SOLANA_DOMAIN_ID: u64 = 1;
 const SOLANA_PATH: &str = "omniroles/solana";
 const MAX_RECIPIENTS: usize = 32;
@@ -536,19 +540,25 @@ impl Vault {
         }
     }
 
-    /// Anyone, after the unconfirmed timeout: the budget stays spent.
+    /// Anyone, once the transaction can no longer land: the budget stays spent.
+    ///
+    /// A Solana transaction is valid for 150 blocks after its blockhash (one to two minutes), and the
+    /// blockhash existed before the vault signed: the message has no durable nonce (the vault builds
+    /// it). So `SOLANA_EXPIRED_AFTER_NS` after signing, a transaction that has not landed never
+    /// will, and the role is freed then rather than after the settlement timeout.
     pub fn release_solana_unconfirmed(&mut self, op_id: OperationId) {
         let op = operation(&op_id);
         require!(
             op.state == OperationState::PossiblySigned,
             "ERR_NOT_POSSIBLY_SIGNED"
         );
+        let after = self
+            .settlement_config
+            .unconfirmed_after_ns
+            .0
+            .min(SOLANA_EXPIRED_AFTER_NS);
         require!(
-            env::block_timestamp()
-                >= op
-                    .signed_at_ns
-                    .0
-                    .saturating_add(self.settlement_config.unconfirmed_after_ns.0),
+            env::block_timestamp() >= op.signed_at_ns.0.saturating_add(after),
             "ERR_UNCONFIRMED_TOO_EARLY"
         );
         self.release_solana(op, OperationState::Unconfirmed);

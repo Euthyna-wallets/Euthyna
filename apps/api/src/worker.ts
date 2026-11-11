@@ -11,6 +11,8 @@ import { createBaseRelayer, createChainRelayers } from "./relayer.js";
 import { keepDelegated } from "./delegation-keeper.js";
 import { followCompanies } from "./chain-follower.js";
 import { vaultNotices } from "./vault-notices.js";
+import { SolanaFollower } from "./solana-follower.js";
+import { solanaRpc } from "@euthyna/sdk/solana";
 
 const env = loadEnv();
 const visaSigner = new EnvKmsSigner(
@@ -60,8 +62,37 @@ let delegating = new Set<string>();
 const TOUCH_FOLLOW_MS = 20_000;
 const touchedVaults = new Map<string, number>();
 const notices = vaultNotices(env, prisma);
+// Solana transfers followed to the end, agent online or not: settled when final, freed when lost.
+const solana = new SolanaFollower(
+  near,
+  solanaRpc(env.SOLANA_RPC_URL),
+  env.NEAR_TX_INDEXER_URL ?? (env.NEAR_NETWORK_ID === "mainnet" ? "https://tx.main.fastnear.com" : "https://tx.test.fastnear.com"),
+);
+const SOLANA_SWEEP_MS = 60 * 60_000;
+let solanaSweptAt = 0;
+const solanaWallets = new Map<string, boolean>();
+async function hasSolanaWallet(vault: string): Promise<boolean> {
+  if (solanaWallets.get(vault)) return true;
+  const wallet = await near.viewFunction<{ address: number[] | null } | null>(vault, "get_solana_wallet").catch(() => null);
+  const has = Boolean(wallet?.address);
+  solanaWallets.set(vault, has);
+  return has;
+}
+async function followSolana() {
+  const now = Date.now();
+  if (now - solanaSweptAt >= SOLANA_SWEEP_MS) {
+    solanaSweptAt = now;
+    for (const { vaultAccountId } of await prisma.treasury.findMany({ select: { vaultAccountId: true } })) {
+      if (await hasSolanaWallet(vaultAccountId)) await solana.scan(vaultAccountId).catch(() => undefined);
+    }
+  }
+  await solana.tick();
+}
 if (notices) {
   notices.subscribe((vault, reason) => {
+    if (reason === "agent" || reason === "rule" || reason === "block") {
+      void hasSolanaWallet(vault).then((has) => (has ? solana.scan(vault) : undefined)).catch(() => undefined);
+    }
     // Its own notices (a payment it settled) concern the API's jobs, not these.
     if (reason === "settled" || reason === "delegation" || reason === "recovery") return;
     touchedVaults.set(vault, Date.now() + TOUCH_FOLLOW_MS);
@@ -115,6 +146,7 @@ try {
   do {
     try {
       await keepWalletsDelegated().catch((error: unknown) => console.warn(JSON.stringify({ event: "worker.delegation_failed", message: String(error).slice(0, 200) })));
+      await followSolana().catch((error: unknown) => console.warn(JSON.stringify({ event: "worker.solana_sweep_failed", message: String(error).slice(0, 200) })));
       const result = await worker.tick();
       if (result.processed > 0 || result.adopted > 0) console.log(JSON.stringify({ event: "worker.tick", ...result }));
     } catch (error) {
