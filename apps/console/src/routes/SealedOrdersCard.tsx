@@ -22,6 +22,7 @@ import {
   sealArgs,
   SEALED_DEPOSIT_YOCTO,
   sealedOrderKind,
+  SEALED_SELL,
   sellSymbol,
   serializeOrder,
   type SealedOrder,
@@ -88,6 +89,10 @@ export function SealedOrdersCard() {
   const registered = Boolean(me && view.readers.some((reader) => reader.account === me));
   // A member of the role places orders directly, like an agent: no vote, within the role.
   const inRole = Boolean(me && view.roles.find((item) => item.name === roleName)?.agents.includes(me));
+  // The token the role's swap rule sells (EURC when the company's euros are what it swaps).
+  const sellOf = (name: string) => view.roles.find((item) => item.name === name)?.sells?.[0] ?? "USDC";
+  const sell = sellOf(roleName);
+  const allowanceOf = (symbol: "USDC" | "EURC") => (view.allowances ? view.allowances[symbol] ?? null : symbol === "USDC" ? view.allowance : null);
 
   async function run(work: () => Promise<string>) {
     setBusy(true);
@@ -120,11 +125,12 @@ export function SealedOrdersCard() {
   });
 
   const newOrder = (): SealedOrder => ({
-    vaultId: view.vaultAccountId, chainId: U.chainId, tokenIn: U.usdc, tokenOut: U.weth, fee: 3000,
+    vaultId: view.vaultAccountId, chainId: U.chainId, tokenIn: SEALED_SELL[sell], tokenOut: U.weth, fee: 3000,
     limitRate: rateFromPrice(Number(price), 6, 18), cap: parseUnits(cap, 6),
     expiry: Math.floor(Date.now() / 1000) + Math.round(Number(days) * 86_400), salt: randomSalt(),
   });
-  const roleBudget = () => view.roles.find((item) => item.name === roleName)?.budgets.find((item) => item.token === "USDC")?.max ?? cap;
+  // The router may take what this order sells, no more: a role's approval limit is usually under its budgets.
+  const approvalFor = () => cap;
 
   const placeNow = () => run(async () => {
     if (!registered) throw new Error("Register your reading key first: the terms are kept encrypted for you, so you can execute the order from any browser.");
@@ -132,9 +138,10 @@ export function SealedOrdersCard() {
     const commitment = await commitmentOf(order);
     const encrypted = await encryptTerms(order, view.readers.map((reader) => ({ account: reader.account, publicKey: reader.public_key })));
     let routed = "";
-    if (view.allowance === null || BigInt(view.allowance) < order.cap) {
+    const current = allowanceOf(sell);
+    if (current === null || BigInt(current) < order.cap) {
       const gasPrice = await baseGasPrice();
-      const approval = await signContractCall(me!, sealedId, "approve", approveArgs({ vault: view.vaultAccountId, role: roleName, chainId: U.chainId, token: U.usdc, router: U.router, amount: parseUnits(roleBudget(), 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }), { gas: "300000000000000" });
+      const approval = await signContractCall(me!, sealedId, "approve", approveArgs({ vault: view.vaultAccountId, role: roleName, chainId: U.chainId, token: SEALED_SELL[sell], router: U.router, amount: parseUnits(approvalFor(), 6), maxFeePerGas: gasPrice * 3n + 1_000_000n }), { gas: "300000000000000" });
       const sent = await sendSealedApprovals(approval, me!, view.vaultAccountId);
       if (!sent.length) throw new Error("The role refused the router approval: check the role's approval limit.");
       routed = ` Router approval sent to Base (${sent[0]!.slice(0, 10)}…).`;
@@ -186,9 +193,9 @@ export function SealedOrdersCard() {
       ? await encryptTerms(order, view.readers.map((reader) => ({ account: reader.account, publicKey: reader.public_key })))
       : null;
     // The router needs an approval when the wallet's is under the order: the role's budget, a public number.
-    const budget = roleBudget();
-    const needsApproval = view.allowance === null || BigInt(view.allowance) < order.cap;
-    const draft = await omni.sealedOrder({ role: roleName, commitment, slippageBps: SLIPPAGE_BPS, terms: encrypted, approveUsdc: needsApproval ? budget : null });
+    const current = allowanceOf(sell);
+    const needsApproval = current === null || BigInt(current) < order.cap;
+    const draft = await omni.sealedOrder({ role: roleName, commitment, slippageBps: SLIPPAGE_BPS, terms: encrypted, approveUsdc: needsApproval ? approvalFor() : null, ...(sell === "USDC" ? {} : { sell }) });
     const seal = { vault: view.vaultAccountId, role: roleName, chainId: U.chainId, commitment, slippageBps: SLIPPAGE_BPS, terms: encrypted };
     const expectedApprove = (draft.args.proposal.kind as { FunctionCall: { actions: unknown[] } }).FunctionCall.actions.length === 2;
     if (needsApproval !== expectedApprove) throw new Error("The server returned an unexpected proposal: nothing was signed.");
@@ -227,9 +234,9 @@ export function SealedOrdersCard() {
         <>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, fontSize: 15 }}>
             <span>Buy <strong>WETH</strong> with up to</span>
-            <span style={label}><input value={cap} inputMode="decimal" placeholder="50" style={num(80)} onChange={(event) => setCap(event.target.value)} /> USDC</span>
+            <span style={label}><input value={cap} inputMode="decimal" placeholder="5" style={num(80)} onChange={(event) => setCap(event.target.value)} /> {sell}</span>
             <span>when 1 WETH costs at most</span>
-            <span style={label}><input value={price} inputMode="decimal" placeholder="1800" style={num(90)} onChange={(event) => setPrice(event.target.value)} /> USDC,</span>
+            <span style={label}><input value={price} inputMode="decimal" placeholder={sell === "EURC" ? "2200" : "2500"} style={num(90)} onChange={(event) => setPrice(event.target.value)} /> {sell},</span>
             <span>within</span>
             <span style={label}><input value={days} inputMode="numeric" style={num(54)} onChange={(event) => setDays(event.target.value)} /> days</span>
             {view.roles.length > 1 ? (
@@ -288,7 +295,7 @@ export function SealedOrdersCard() {
               <div key={order.id} style={{ display: "flex", flexDirection: "column", gap: 4, borderTop: "1px solid rgba(13,23,48,.12)", padding: "8px 0", fontSize: 13 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <span className="mono">#{order.id} · {order.commitment.slice(0, 10)}…{order.commitment.slice(-4)}</span>
-                  <span>{formatUnits(BigInt(order.filled), 6)}{opened ? ` ${sellSymbol(opened.tokenIn)}` : ""} filled in {order.fills} fill{order.fills === 1 ? "" : "s"} · {order.cancelled ? "cancelled" : opened && BigInt(order.filled) >= opened.cap ? "done" : "open"}</span>
+                  <span>{formatUnits(BigInt(order.filled), 6)} {opened ? sellSymbol(opened.tokenIn) : sellOf(order.role)} filled in {order.fills} fill{order.fills === 1 ? "" : "s"} · {order.cancelled ? "cancelled" : opened && BigInt(order.filled) >= opened.cap ? "done" : "open"}</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, ...small }}>
                   <span>Placed by {by} · role {order.role}</span>

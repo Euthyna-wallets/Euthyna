@@ -1062,6 +1062,7 @@ export function createApp({
         slippageBps: z.number().int().min(0).max(500),
         terms: z.string().max(8192).nullable(),
         approveUsdc: z.string().regex(/^\d+(\.\d{1,6})?$/).nullable(),
+        sell: z.enum(["USDC", "EURC"]).optional(),
       }));
       return context.json(await omniroles.sealedOrderProposal(orgOf(context), input));
     });

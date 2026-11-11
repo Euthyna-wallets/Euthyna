@@ -61,7 +61,7 @@ import {
   type BankPayout,
   type BankPermission,
 } from "@euthyna/sdk/roles";
-import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, sealedCancelKind, sealedOrderKind } from "@euthyna/sdk";
+import { BASE_SEPOLIA_UNISWAP, describeSealedProposal, SEALED_SELL, sealedCancelKind, sealedOrderKind, type SealedSell } from "@euthyna/sdk";
 import bs58 from "bs58";
 import { base58Encode, cardAccountIdOf, SOLANA_DEVNET, solanaRpc } from "@euthyna/sdk";
 import { vaultLogs, type VaultLog, type VaultLogStore } from "./chain-activity.js";
@@ -1074,26 +1074,43 @@ export class OmniRolesService {
     const treasury = await this.requireTreasury(organizationId);
     const sealedId = this.config.sealedOrdersId ?? null;
     const base = { vaultAccountId: treasury.vaultAccountId, daoAccountId: treasury.daoAccountId, router: BASE_SEPOLIA_UNISWAP.router, tokenIn: BASE_SEPOLIA_UNISWAP.usdc, tokenOut: BASE_SEPOLIA_UNISWAP.weth, chainId: BASE_SEPOLIA_UNISWAP.chainId };
-    if (!sealedId) return { ...base, enabled: false as const, sealedAccountId: null, roles: [], orders: [], readers: [], allowance: null };
+    if (!sealedId) return { ...base, enabled: false as const, sealedAccountId: null, roles: [], orders: [], readers: [], allowance: null, allowances: {} };
     const [{ roles }, orders, readers, wallet] = await Promise.all([
       this.roles(organizationId),
       this.view<unknown[]>(sealedId, "orders", { vault: treasury.vaultAccountId, limit: 50 }).catch(() => []),
       this.view<Array<{ account: string; public_key: string }>>(sealedId, "readers", { vault: treasury.vaultAccountId }).catch(() => []),
       this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_wallet", { chain_id: BASE_SEPOLIA_UNISWAP.chainId }).catch(() => null),
     ]);
-    let allowance: string | null = null;
-    if (wallet?.address) {
+    // What the router may take from the wallet now, for each token a sealed order may sell.
+    const allowances: Partial<Record<SealedSell, string | null>> = {};
+    for (const symbol of Object.keys(SEALED_SELL) as SealedSell[]) {
+      allowances[symbol] = null;
+      if (!wallet?.address) continue;
       try {
         const client = chainClient(rpcUrls(BASE_SEPOLIA_UNISWAP.chainId));
-        allowance = (await client.readContract({ address: BASE_SEPOLIA_UNISWAP.usdc, abi: erc20Abi, functionName: "allowance", args: [getAddress(hexOf(wallet.address)), BASE_SEPOLIA_UNISWAP.router] })).toString();
+        allowances[symbol] = (await client.readContract({ address: SEALED_SELL[symbol], abi: erc20Abi, functionName: "allowance", args: [getAddress(hexOf(wallet.address)), BASE_SEPOLIA_UNISWAP.router] })).toString();
       } catch {
-        allowance = null;
+        allowances[symbol] = null;
       }
     }
-    const sealedRoles = roles
+    const allowance = allowances.USDC ?? null;
+    const sealedRoles = await Promise.all(roles
       .filter((role) => role.enabled && role.members.some((member) => member.member === sealedId))
-      .map((role) => ({ name: role.name, budgets: role.budgets, agents: role.members.filter((member) => member.member !== sealedId).map((member) => member.member) }));
-    return { ...base, enabled: true as const, sealedAccountId: sealedId, roles: sealedRoles, orders, readers, allowance };
+      .map(async (role) => ({
+        name: role.name, budgets: role.budgets, agents: role.members.filter((member) => member.member !== sealedId).map((member) => member.member),
+        sells: await this.sealedSells(treasury.vaultAccountId, role.name),
+      })));
+    return { ...base, enabled: true as const, sealedAccountId: sealedId, roles: sealedRoles, orders, readers, allowance, allowances };
+  }
+
+  /** The tokens a role's swap rules let it sell on the Uniswap router (USDC, EURC): what its sealed orders may sell. */
+  private async sealedSells(vaultAccountId: string, role: string): Promise<SealedSell[]> {
+    const view = await this.view<{ config: { permissions: Array<{ target: number[]; conditions: Array<{ compValue: string }> }> } } | null>(vaultAccountId, "get_role", { role }).catch(() => null);
+    const router = BASE_SEPOLIA_UNISWAP.router.toLowerCase();
+    const values = (view?.config.permissions ?? [])
+      .filter((permission) => hexOf(permission.target).toLowerCase() === router)
+      .flatMap((permission) => permission.conditions.map((condition) => String(condition.compValue).toLowerCase()));
+    return (Object.keys(SEALED_SELL) as SealedSell[]).filter((symbol) => values.some((value) => value.endsWith(SEALED_SELL[symbol].slice(2).toLowerCase())));
   }
 
   /**
@@ -1101,7 +1118,7 @@ export class OmniRolesService {
    * wallet's allowance is below `approveUsdc`, then the seal (a hash, and the terms encrypted for the
    * members' keys).
    */
-  async sealedOrderProposal(organizationId: string, input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null }) {
+  async sealedOrderProposal(organizationId: string, input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null; sell?: SealedSell | undefined }) {
     const sealedId = this.requireSealed();
     const treasury = await this.requireTreasury(organizationId);
     let kind: ReturnType<typeof sealedOrderKind>;
@@ -1111,7 +1128,7 @@ export class OmniRolesService {
         sealedId,
         { vault: treasury.vaultAccountId, role: input.role, chainId: BASE_SEPOLIA_UNISWAP.chainId, commitment: input.commitment as Hex, slippageBps: input.slippageBps, terms: input.terms },
         input.approveUsdc && fees
-          ? { vault: treasury.vaultAccountId, role: input.role, chainId: BASE_SEPOLIA_UNISWAP.chainId, token: BASE_SEPOLIA_UNISWAP.usdc, router: BASE_SEPOLIA_UNISWAP.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: (fees.maxFeePerGas ?? 1_000_000_000n) * 3n }
+          ? { vault: treasury.vaultAccountId, role: input.role, chainId: BASE_SEPOLIA_UNISWAP.chainId, token: SEALED_SELL[input.sell ?? "USDC"], router: BASE_SEPOLIA_UNISWAP.router, amount: parseUnits(input.approveUsdc, 6), maxFeePerGas: (fees.maxFeePerGas ?? 1_000_000_000n) * 3n }
           : undefined,
       );
     } catch (error) {
