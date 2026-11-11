@@ -130,7 +130,7 @@ export class OnchainAgentClient {
       if (/MethodNotFound|MethodResolveError/.test(String(error))) return { allowed: false, reason: "the vault does not support euro payouts yet (upgrade by vote)" };
       throw error;
     });
-    if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    if (!check.allowed) return { outcome: "refused" as const, reason: await this.payoutRefusal(check.reason, role, beneficiary, input.amount), refusedBy: "vault" as const };
     if (await this.vault.view("get_bank_payout_by_reference", { role, reference: input.reference })) {
       return { outcome: "refused" as const, reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" as const };
     }
@@ -161,6 +161,21 @@ export class OnchainAgentClient {
       ...(settled ? { nearTransactionHash: settled.hash } : { note: "the vault holds the payout; the bank signer answers within a few minutes: follow it with bank_status" }),
       ...(await this.bankStatus(input.reference)),
     };
+  }
+  /**
+   * The vault refuses any payout while one is pending, before it looks at the beneficiary or the
+   * amount. A payout it would refuse anyway gets that reason instead (read from the same vault, in
+   * the vault's order): waiting would not change it.
+   */
+  private async payoutRefusal(reason: string | null, role: string, beneficiary: number, amount: string): Promise<string | null> {
+    if (reason !== "ERR_BANK_PAYOUT_PENDING") return reason;
+    const [beneficiaries, permission] = await Promise.all([
+      this.vault.view<Array<{ id: number }>>("list_bank_beneficiaries", {}).catch(() => null),
+      this.vault.view<{ max_per_payout: string } | null>("get_bank_permission", { role }).catch(() => null),
+    ]);
+    if (beneficiaries && !beneficiaries.some((item) => item.id === beneficiary)) return "BeneficiaryNotAllowed";
+    if (permission && BigInt(amount) > BigInt(permission.max_per_payout)) return "ERR_MAX_PER_PAYOUT";
+    return reason;
   }
   /** How long `bankPayout` waits for the vault to hold the payout, and how often it looks. */
   payoutWaitMs = 45_000;

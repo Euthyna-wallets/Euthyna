@@ -46,6 +46,21 @@ describe("bankPayout", () => {
     expect(result).toMatchObject({ outcome: "sent", nearTransactionHash: "tx-hash" });
   });
 
+  it("while a payout is pending, gives the reason the vault would give once it is not", async () => {
+    const v = vault({ actionMs: 5, recordedAfterMs: 0 });
+    const view = v.view;
+    v.view = async <T,>(method: string, args?: Record<string, unknown>): Promise<T> => {
+      if (method === "check_bank_payout") return { allowed: false, reason: "ERR_BANK_PAYOUT_PENDING" } as T;
+      if (method === "list_bank_beneficiaries") return [{ id: 1 }] as T;
+      if (method === "get_bank_permission") return { max_per_payout: "10000000" } as T;
+      return view<T>(method, args);
+    };
+    const c = client(v);
+    expect(await c.bankPayout({ beneficiary: 1, amount: "20000000", reference: "R-4" })).toMatchObject({ outcome: "refused", reason: "ERR_MAX_PER_PAYOUT" });
+    expect(await c.bankPayout({ beneficiary: 9, amount: "1000000", reference: "R-5" })).toMatchObject({ outcome: "refused", reason: "BeneficiaryNotAllowed" });
+    expect(await c.bankPayout({ beneficiary: 1, amount: "5000000", reference: "R-6" })).toMatchObject({ outcome: "refused", reason: "ERR_BANK_PAYOUT_PENDING" });
+  });
+
   it("still reports a key that cannot make the call", async () => {
     const result = await client(vault({ actionMs: 5, recordedAfterMs: 60_000, actionError: new Error("MethodNameMismatch") })).bankPayout({ beneficiary: 1, amount: "5000000", reference: "R-3" });
     expect(result).toMatchObject({ outcome: "refused", refusedBy: "key" });
