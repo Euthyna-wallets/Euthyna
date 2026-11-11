@@ -7,7 +7,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "attack:all": "node scripts/attack-all.mjs",
-    "attack:testnet": "node scripts/attack-testnet.mjs"
+    "attack:testnet": "node scripts/attack-testnet.mjs",
+    "evidence": "node scripts/evidence.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

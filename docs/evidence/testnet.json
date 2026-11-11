@@ -1,0 +1,567 @@
+{
+ "network": "testnet",
+ "company": {
+  "name": "Judge Timed 1408",
+  "dao": "judge-timed-1408.sputnikv2.testnet",
+  "vault": "judge-timed-1408.euthyna-nomos.testnet",
+  "agent": "payments-agent-78d8f2-agent.mandateos.testnet",
+  "shares": "judge-timed-1408-shares.mandateos.testnet",
+  "wallets": {
+   "base-sepolia": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "solana-devnet": "BmMdPAKrLZVDx4D4xruPwFdBC1dPb4gAZ4LSkoVWqKgz"
+  }
+ },
+ "rpc": {
+  "near": "https://archival-rpc.testnet.fastnear.com",
+  "base": "https://sepolia.base.org",
+  "solana": "https://api.devnet.solana.com"
+ },
+ "transactions": [
+  {
+   "part": "company",
+   "chain": "near",
+   "claim": "The founder proposes the company wallet on Base and approves it in the same transaction",
+   "hash": "78zG3ECx49ipA5JDQgwCe2mJHBgg5rJ6MmtdsR5hqy1f",
+   "sender": "eut-t1408-a.testnet",
+   "method": "add_proposal",
+   "expect": "success",
+   "receiver": "judge-timed-1408.sputnikv2.testnet"
+  },
+  {
+   "part": "company",
+   "chain": "near",
+   "claim": "The founder proposes the company's Solana wallet",
+   "hash": "DM9voB5yLj3m8DtwTJZL7qLnuerJz7PWhPR5CMudHbQC",
+   "sender": "eut-t1408-a.testnet",
+   "method": "add_proposal",
+   "expect": "success",
+   "receiver": "judge-timed-1408.sputnikv2.testnet"
+  },
+  {
+   "part": "role",
+   "chain": "near",
+   "claim": "One vote for the agent's whole role: USDC to one supplier, an EURC\u2192WETH Uniswap rule with sealed orders, EURC on Solana",
+   "hash": "EqKa8fwARANu57DJycykVoYjAb9khYYChBJVPKXqzsQy",
+   "sender": "eut-t1408-a.testnet",
+   "method": "add_proposal",
+   "expect": "success",
+   "receiver": "judge-timed-1408.sputnikv2.testnet"
+  },
+  {
+   "part": "role",
+   "chain": "near",
+   "claim": "After the veto window, the role is applied on the vault (anyone may run it; Euthyna's keeper did)",
+   "hash": "CzXzWTUHQbGM19Xpt5PAdgUCZaf5drfSr8siYVLDPS7U",
+   "sender": "mandateos.testnet",
+   "method": "execute_rule_change",
+   "expect": "success",
+   "receiver": "judge-timed-1408.euthyna-nomos.testnet"
+  },
+  {
+   "part": "halt",
+   "chain": "near",
+   "claim": "A founder halts every agent in one transaction, no vote",
+   "hash": "9WE28x9HNeYmvJ3ymdnYqSU6DkXPyYT9abMpRKZaQkPE",
+   "sender": "eut-t1408-a.testnet",
+   "method": "pause",
+   "expect": "success",
+   "receiver": "judge-timed-1408.euthyna-nomos.testnet"
+  },
+  {
+   "part": "gas",
+   "chain": "near",
+   "claim": "The vault delegates the company wallet to EuthynaExecutor (EIP-7702) after the members' vote",
+   "hash": "77zmcTUJi49asKi1cn43CW47fKTeMTQDGQkZDYd9gKuS",
+   "sender": "mandateos.testnet",
+   "method": "delegate_wallet",
+   "expect": "success",
+   "receiver": "judge-timed-1408.euthyna-nomos.testnet"
+  },
+  {
+   "part": "bank",
+   "chain": "near",
+   "claim": "The agent asks for a 5 EUR payout to a voted IBAN; Euthyna's relayer pays its NEAR gas (NEP-366)",
+   "hash": "3LumQxssr3Y92pzXQXYV1aokiZB1tePx7ji2auVEQHqL",
+   "sender": "mandateos.testnet",
+   "method": "request_bank_payout",
+   "expect": "success",
+   "receiver": "payments-agent-78d8f2-agent.mandateos.testnet"
+  },
+  {
+   "part": "swap",
+   "chain": "near",
+   "claim": "The agent asks for a swap with its approval (approve + swap + revoke), relayed",
+   "hash": "BQkoWD4Ue16Fhipd9N3LZ5KuHKo8YXWhLBEHaxruzVHV",
+   "sender": "mandateos.testnet",
+   "method": "prepare_with_approval",
+   "expect": "success",
+   "receiver": "payments-agent-78d8f2-agent.mandateos.testnet"
+  },
+  {
+   "part": "sealed",
+   "chain": "near",
+   "claim": "A founder registers a reading key for sealed orders",
+   "hash": "BW9oXFM5xs5fraqzfPCfgjJk5TKW7aNqAFwWPV2B16Ui",
+   "sender": "eut-t1408-a.testnet",
+   "method": "register_reader",
+   "expect": "success",
+   "receiver": "euthyna-sealed-orders-v3.testnet"
+  },
+  {
+   "part": "sealed",
+   "chain": "near",
+   "claim": "The agent seals an order: only a hash goes on chain",
+   "hash": "48UFmz8uTrXjaYZdqAwGxJtc5XjpgDAiao74grFsfd1P",
+   "sender": "mandateos.testnet",
+   "method": "seal",
+   "expect": "success",
+   "receiver": "payments-agent-78d8f2-agent.mandateos.testnet"
+  },
+  {
+   "part": "sealed",
+   "chain": "near",
+   "claim": "The agent fills it: a zero-knowledge proof that the fill meets the hidden limit, verified on NEAR",
+   "hash": "6sG7LELfHvVNMUnhitJptM58tfgQifdEkkkDjY32PQSq",
+   "sender": "mandateos.testnet",
+   "method": "fill",
+   "expect": "success",
+   "receiver": "payments-agent-78d8f2-agent.mandateos.testnet"
+  },
+  {
+   "part": "sealed",
+   "chain": "near",
+   "claim": "A founder fills a sealed order from the console, after the members voted it",
+   "hash": "YfrZxWrNx8VhLw9RzmLGVEkAsHajzgrLxmDaWmE3Ycr",
+   "sender": "eut-t1408-a.testnet",
+   "method": "fill",
+   "expect": "success",
+   "receiver": "euthyna-sealed-orders-v3.testnet"
+  },
+  {
+   "part": "solana",
+   "chain": "near",
+   "claim": "The agent pays 1 EURC on Solana: the vault has NEAR MPC sign the Solana transaction",
+   "hash": "Aj5QwKzhnfrJDFT7ytBgueSSrYAYHLMSHScCbaJtULtx",
+   "sender": "mandateos.testnet",
+   "method": "execute_solana",
+   "expect": "success",
+   "receiver": "payments-agent-78d8f2-agent.mandateos.testnet"
+  },
+  {
+   "part": "solana",
+   "chain": "near",
+   "claim": "The vault settles it once Solana finalized it (MPC-attested)",
+   "hash": "4fVwMQC9pyHc1oXTanfTx11ffaWagy5Gw5KjXW2y5XgN",
+   "sender": "mandateos.testnet",
+   "method": "settle_solana",
+   "expect": "success",
+   "receiver": "judge-timed-1408.euthyna-nomos.testnet"
+  },
+  {
+   "part": "shares",
+   "chain": "near",
+   "claim": "Shares contract deployed for the company",
+   "hash": "GMTLArs5aHoPRCMzEYZkNzJfptE7VCgcbTbuYWsy4kDG",
+   "sender": "mandateos.testnet",
+   "method": null,
+   "expect": "success",
+   "receiver": "judge-timed-1408-shares.mandateos.testnet"
+  },
+  {
+   "part": "shares",
+   "chain": "near",
+   "claim": "The founder locks 100 shares to vote",
+   "hash": "Hf2fkHd6pHVYR1DLpoU4p3g5uTjeegy8yN5MwAVnt3he",
+   "sender": "eut-t1408-a.testnet",
+   "method": "lock",
+   "expect": "success",
+   "receiver": "judge-timed-1408-shares.mandateos.testnet"
+  },
+  {
+   "part": "shares",
+   "chain": "near",
+   "claim": "The founder proposes to share 0.05 NEAR of revenue (passed by the locked shares)",
+   "hash": "2sSKMFTWZxeV9WV4dCRcbpvsnpPb9UYd4bU2nATUVTwG",
+   "sender": "eut-t1408-a.testnet",
+   "method": "add_proposal",
+   "expect": "success",
+   "receiver": "judge-timed-1408.sputnikv2.testnet"
+  },
+  {
+   "part": "shares",
+   "chain": "near",
+   "claim": "Next epoch: the founder proves the vote",
+   "hash": "Cg2EPGqmdf9TAN4GwLYidHstTd1JDLzN9MAPiTYHF1Z8",
+   "sender": "eut-t1408-a.testnet",
+   "method": "prove_vote",
+   "expect": "success",
+   "receiver": "judge-timed-1408-shares.mandateos.testnet"
+  },
+  {
+   "part": "shares",
+   "chain": "near",
+   "claim": "The epoch after: the founder claims 0.05 NEAR",
+   "hash": "H3uDaSCNPA4ZuReyWcNfw6m6neP6doZ495yPDY1AzQ2g",
+   "sender": "eut-t1408-a.testnet",
+   "method": "claim",
+   "expect": "success",
+   "receiver": "judge-timed-1408-shares.mandateos.testnet"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: pay the attacker \u2014 refused by the vault",
+   "hash": "GuaqzFDVa7ZKj5zuVqKBh99Dk3xHDPJqwpVb5qaNJGTD",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "execute_near",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.nomos.euthyna.testnet",
+   "error": "FunctionNotAllowed"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: split under the minimum \u2014 refused",
+   "hash": "4nBo9A2g8SfwN5TabDjH2ahvHq1CH6nD9XkFSs88cnrR",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "execute_near",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.nomos.euthyna.testnet",
+   "error": "ERR_MIN_PER_TRANSFER"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: an overpriced supplier \u2014 refused",
+   "hash": "AZFwRTCGnLLRgyEmrXwQyPPrWfnFNWYWyb4ojrDHcF9N",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "execute_near",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.nomos.euthyna.testnet",
+   "error": "ERR_MAX_PER_TRANSFER"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: replay a cheque \u2014 refused",
+   "hash": "39pvroS9QAvAjAsNHJi6mz7SvTNav6yyZahSaxBkVbPi",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "execute_near",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.nomos.euthyna.testnet",
+   "error": "ERR_REFERENCE_ALREADY_USED"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: crown yourself in the DAO \u2014 refused",
+   "hash": "t9Y14bKnGvNRjU14ZLnNUcXW2Z63tyVUERGH5XDmYa2",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "add_proposal",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.sputnikv2.testnet",
+   "error": "ERR_PERMISSION_DENIED"
+  },
+  {
+   "part": "refused",
+   "chain": "near",
+   "claim": "Rob the Agent: rewrite the law on the vault \u2014 refused",
+   "hash": "H79M6kJHrTLgKscpXYi9XkGuYszk9ZgTSHh7M1jLH9U1",
+   "sender": "ruggy-euthyna.testnet",
+   "method": "queue_rule_change",
+   "expect": "failure",
+   "receiver": "rob-the-agent-co.nomos.euthyna.testnet",
+   "error": "ERR_OWNER_ONLY"
+  },
+  {
+   "part": "recovery",
+   "chain": "near",
+   "claim": "ZK Email: a founder enrolls a mailbox; the proof is verified by the NEAR contract",
+   "hash": "6Cgo1kQcuqfSShZz5ohYHGhfpzLvu98WajdinoxEoFBP",
+   "sender": "eut-rec-alice.testnet",
+   "method": "enroll",
+   "expect": "success",
+   "receiver": "euthyna-recovery.testnet"
+  },
+  {
+   "part": "recovery",
+   "chain": "near",
+   "claim": "A new account asks to take the seat with a second email from that mailbox",
+   "hash": "3AGASXfh7gZjagzppF5xEqG9YZgvtw24ED7A2mjZVoFd",
+   "sender": "eut-rec-bob.testnet",
+   "method": "request",
+   "expect": "success",
+   "receiver": "euthyna-recovery.testnet"
+  },
+  {
+   "part": "recovery",
+   "chain": "near",
+   "claim": "The founder cancels it: the defence against a mailbox takeover",
+   "hash": "AzTYMheLPMcmLA5nCVUS2XqQfSDRrSiJh1ZS5NupFNri",
+   "sender": "eut-rec-alice.testnet",
+   "method": "cancel",
+   "expect": "success",
+   "receiver": "euthyna-recovery.testnet"
+  },
+  {
+   "part": "swap",
+   "chain": "base",
+   "claim": "The agent's swap: 0.05 EURC for WETH, approve + swap + revoke in one transaction, sent and paid by Euthyna's relayer",
+   "hash": "0x3869deabb9a2f23e79065a70bacc92c6fa8dd8f54d2494c3538835d67b114c2d",
+   "from": "0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982",
+   "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "expect": "success",
+   "transfers": [
+    {
+     "token": "0x623ef90571256F905B2Fde947dC33098BdD8F4d8",
+     "from": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+     "amount": "50000"
+    },
+    {
+     "token": "0x4200000000000000000000000000000000000006",
+     "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de"
+    }
+   ]
+  },
+  {
+   "part": "sealed",
+   "chain": "base",
+   "claim": "The agent's sealed order filled on Uniswap (the proof was verified on NEAR first)",
+   "hash": "0xe1b2b85024f9a9c9eacc85036b6bf65c4e934ab8909501e87af933df7e1d5466",
+   "from": "0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982",
+   "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "expect": "success",
+   "transfers": [
+    {
+     "token": "0x623ef90571256F905B2Fde947dC33098BdD8F4d8",
+     "from": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+     "amount": "50000"
+    },
+    {
+     "token": "0x4200000000000000000000000000000000000006",
+     "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de"
+    }
+   ]
+  },
+  {
+   "part": "sealed",
+   "chain": "base",
+   "claim": "A sealed order the members voted, filled from the console",
+   "hash": "0x718d9c2121644334a13f6c09f2e52687e041cc25439df375124e86ef2537abe3",
+   "from": "0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982",
+   "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "expect": "success",
+   "transfers": [
+    {
+     "token": "0x623ef90571256F905B2Fde947dC33098BdD8F4d8",
+     "from": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+     "amount": "50000"
+    },
+    {
+     "token": "0x4200000000000000000000000000000000000006",
+     "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de"
+    }
+   ]
+  },
+  {
+   "part": "bank",
+   "chain": "base",
+   "claim": "The 5 EUR payout leaves the company wallet as EURC to the bank partner's single-use deposit address",
+   "hash": "0x3df4d7efea72016c9db49345a1dd160fb8b5b4bd1f1cd8fdb9d80619d83a3d5a",
+   "from": "0x2Bf22f0C5aDDDE4f0ec41C6790EC47eB46508982",
+   "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "expect": "success",
+   "transfers": [
+    {
+     "token": "0x623ef90571256F905B2Fde947dC33098BdD8F4d8",
+     "from": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+     "amount": "5000000"
+    }
+   ]
+  },
+  {
+   "part": "bank",
+   "chain": "base",
+   "claim": "A client's SEPA transfer of 30 EUR arrives as EURC in the company wallet",
+   "hash": "0x6ea4eceab4e10404110e243fe4453cb049c49f0960cf41595b72f6eaef82ed5a",
+   "expect": "success",
+   "transfers": [
+    {
+     "token": "0x623ef90571256F905B2Fde947dC33098BdD8F4d8",
+     "to": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de"
+    }
+   ]
+  },
+  {
+   "part": "solana",
+   "chain": "solana",
+   "claim": "A SEPA transfer to the Solana IBAN arrives as EURC (Noah's Token-2022 mint) in the company's Solana wallet",
+   "hash": "4vZqKG31Evha3H7sCq5jdmS3ANpmMAPVd2JLPMsKUnRbcKHQXBTdhpj8PyAJq75avyTKReqsYZtuixxmKUossGZx",
+   "expect": "success",
+   "tokenTo": "BmMdPAKrLZVDx4D4xruPwFdBC1dPb4gAZ4LSkoVWqKgz"
+  },
+  {
+   "part": "solana",
+   "chain": "solana",
+   "claim": "The wallet held no SOL: Euthyna's fee tank tops it up with 0.01 SOL",
+   "hash": "3iBytA66pTKBLy9McMrynY11Qkprh23VS9DnjC7N1Sb11Mx5AintxVJQa4wYtq3X1oPbJNxxu9M98r6YV8tUvLk8",
+   "expect": "success",
+   "feePayer": "DEzZKGhVvLo2Sfivv64VRTqTtB2ur1h3jEuyAkrQH3C4"
+  },
+  {
+   "part": "solana",
+   "chain": "solana",
+   "claim": "The agent's 1 EURC payment, signed by NEAR MPC for the company's Solana wallet (TransferChecked, Token-2022)",
+   "hash": "4nw3AJRF8Dd1ZXAFvnYqeM1eHLdPSio9rpVc7zbBVsGXsRU14fhqdYwboHsDexCDT3sEDFt6S929UfH4sAdsAUNs",
+   "expect": "success",
+   "feePayer": "BmMdPAKrLZVDx4D4xruPwFdBC1dPb4gAZ4LSkoVWqKgz"
+  }
+ ],
+ "state": [
+  {
+   "part": "keys",
+   "check": "near-keys",
+   "account": "judge-timed-1408.euthyna-nomos.testnet",
+   "expect": {
+    "count": 0
+   },
+   "claim": "The company's vault has no access key"
+  },
+  {
+   "part": "keys",
+   "check": "near-keys",
+   "account": "judge-timed-1408.sputnikv2.testnet",
+   "expect": {
+    "count": 0
+   },
+   "claim": "The company's DAO has no access key"
+  },
+  {
+   "part": "keys",
+   "check": "near-keys",
+   "account": "euthyna-sealed-orders-v3.testnet",
+   "expect": {
+    "count": 0
+   },
+   "claim": "The sealed-orders contract has no access key"
+  },
+  {
+   "part": "keys",
+   "check": "near-keys",
+   "account": "euthyna-recovery-v6.testnet",
+   "expect": {
+    "count": 0
+   },
+   "claim": "The ZK Email recovery contract has no access key"
+  },
+  {
+   "part": "keys",
+   "check": "near-keys",
+   "account": "payments-agent-78d8f2-agent.mandateos.testnet",
+   "expect": {
+    "functionCallOnly": [
+     "judge-timed-1408.euthyna-nomos.testnet",
+     "euthyna-sealed-orders-v3.testnet"
+    ]
+   },
+   "claim": "The agent's keys are function-call keys for its vault and the sealed-orders contract only"
+  },
+  {
+   "part": "role",
+   "check": "near-view",
+   "account": "judge-timed-1408.euthyna-nomos.testnet",
+   "method": "get_role",
+   "args": {
+    "role": "payments"
+   },
+   "expect": {
+    "contains": [
+     "94cc0aac535ccdb3c01d6787d6413c739ae12bc4",
+     "623ef90571256f905b2fde947dc33098bdd8f4d8"
+    ]
+   },
+   "claim": "The agent's role names the Uniswap router and the EURC token"
+  },
+  {
+   "part": "role",
+   "check": "near-view",
+   "account": "judge-timed-1408.euthyna-nomos.testnet",
+   "method": "get_membership",
+   "args": {
+    "role": "payments",
+    "member": "euthyna-sealed-orders-v3.testnet"
+   },
+   "expect": {
+    "contains": [
+     "\"active\":true"
+    ]
+   },
+   "claim": "The sealed-orders contract fills through the role (a member of it)"
+  },
+  {
+   "part": "solana",
+   "check": "near-view",
+   "account": "judge-timed-1408.euthyna-nomos.testnet",
+   "method": "get_solana_permissions",
+   "args": {
+    "role": "payments"
+   },
+   "expect": {
+    "nonEmpty": true
+   },
+   "claim": "The role may send EURC on Solana to one recipient, within a budget"
+  },
+  {
+   "part": "bank",
+   "check": "near-view",
+   "account": "judge-timed-1408.euthyna-nomos.testnet",
+   "method": "get_bank_permission",
+   "args": {
+    "role": "payments"
+   },
+   "expect": {
+    "contains": [
+     "\"max_per_payout\":\"10000000\""
+    ]
+   },
+   "claim": "The role may pay voted IBANs, 10 EUR at most per payout"
+  },
+  {
+   "part": "gas",
+   "check": "evm-code",
+   "chainId": 84532,
+   "address": "0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de",
+   "expect": {
+    "equals": "0xef010076bb5c47b0759af0300afeea954fa837a96675ed"
+   },
+   "claim": "The company wallet's code is the EIP-7702 delegation to EuthynaExecutor (no owner, no upgrade)"
+  },
+  {
+   "part": "sealed",
+   "check": "near-view",
+   "account": "euthyna-sealed-orders-v3.testnet",
+   "method": "orders",
+   "args": {
+    "vault": "judge-timed-1408.euthyna-nomos.testnet",
+    "limit": 50
+   },
+   "expect": {
+    "minFilled": 3
+   },
+   "claim": "Sealed orders of the company: only hashes, and how much each filled"
+  },
+  {
+   "part": "shares",
+   "check": "near-view",
+   "account": "judge-timed-1408-shares.mandateos.testnet",
+   "method": "info",
+   "args": {},
+   "expect": {
+    "contains": [
+     "\"near_distributed\":\"50000000000000000000000\""
+    ]
+   },
+   "claim": "The shares contract shared 0.05 NEAR of revenue with the shareholders who voted"
+  }
+ ]
+}

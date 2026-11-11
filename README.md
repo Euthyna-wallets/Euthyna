@@ -60,6 +60,22 @@ sign; **Nomos** creates one vault per company; the **Guard** is optional off-cha
 only refuse; **euthyna-signer** keeps an agent's key away from the AI; **Atlantis** is the launchpad
 built on Euthyna (see Where it goes).
 
+## Live now
+
+One company, walked through the [judge path](./JUDGE-PATH.md) on 11 November and still there to inspect: **Judge Timed 1408**
+(testnet). Every line is re-read from the chains by `node scripts/evidence.mjs` (no install, no key):
+**48 of 48 match** ([docs/EVIDENCE.md](./docs/EVIDENCE.md), generated, never edited by hand).
+
+| | |
+| --- | --- |
+| Keyless | vault [`judge-timed-1408.euthyna-nomos.testnet`](https://testnet.nearblocks.io/address/judge-timed-1408.euthyna-nomos.testnet) and DAO: **0 access keys**; the agent's keys are function-call keys for its vault and the sealed-orders contract only |
+| Wallets with no private key | Base Sepolia [`0x0e28…57de`](https://base-sepolia.blockscout.com/address/0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de) (code: EIP-7702 delegation to `EuthynaExecutor`), Solana devnet [`BmMd…qKgz`](https://explorer.solana.com/address/BmMdPAKrLZVDx4D4xruPwFdBC1dPb4gAZ4LSkoVWqKgz?cluster=devnet), both derived by NEAR Chain Signatures |
+| Euros | SEPA in: 30 EUR → EURC on Base, 10 EUR → EURC on Solana; out: the agent paid a voted IBAN 5 EUR (the vault holds the IBAN only sealed) |
+| Swaps | the agent swapped EURC for WETH (approve + swap + revoke, one transaction, gas paid by Euthyna); **3 sealed orders filled**, each proved in zero knowledge on NEAR, price and size never on chain |
+| Solana | the agent paid 1 EURC on Solana from a wallet that held 0 SOL (Euthyna's tank funded the fee) |
+| Shares | 0.05 NEAR of revenue shared by a vote, the vote proved the next epoch, claimed the one after |
+| Refused | 6 attacks by Rob the Agent, each failed on chain with the vault's or the DAO's reason; 48 more in `pnpm attack:all` |
+
 ## Try it: do X, see Y
 
 On [euthyna.io](https://euthyna.io) with three NEAR testnet accounts (the full path, 21 minutes:
@@ -275,6 +291,7 @@ How the cheque is checked, what the worker's agent may do, and what was tested: 
 
 | What | Where |
 | --- | --- |
+| Every transaction and state of the judge-path company, re-read from NEAR, Base and Solana: 48 of 48 | `pnpm evidence`, [docs/EVIDENCE.md](./docs/EVIDENCE.md) |
 | 48 attacks refused (hacked agent, stolen Guard key, stolen server, one rogue member) | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
 | The same attacks against a live testnet vault, read-only | `pnpm attack:testnet` |
 | Shares: sale, votes, revenue only for voters, over three epochs | [docs/shares.md](./docs/shares.md) (testnet hashes) |
