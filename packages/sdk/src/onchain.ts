@@ -130,22 +130,56 @@ export class OnchainAgentClient {
       if (/MethodNotFound|MethodResolveError/.test(String(error))) return { allowed: false, reason: "the vault does not support euro payouts yet (upgrade by vote)" };
       throw error;
     });
-    if (!check.allowed) return { outcome: "refused" as const, reason: check.reason, refusedBy: "vault" as const };
+    if (!check.allowed) return { outcome: "refused" as const, reason: await this.payoutRefusal(check.reason, role, beneficiary, input.amount), refusedBy: "vault" as const };
     if (await this.vault.view("get_bank_payout_by_reference", { role, reference: input.reference })) {
       return { outcome: "refused" as const, reason: "ERR_REFERENCE_ALREADY_USED", refusedBy: "vault" as const };
     }
-    let nearTransactionHash: string;
-    try {
-      nearTransactionHash = await this.vault.action("request_bank_payout", { role, beneficiary, amount: input.amount, reference: input.reference }, BANK_PAYOUT_GAS);
-    } catch (error) {
-      if (/MethodNameMismatch|method_name/i.test(String(error))) {
+    // The transaction ends only when the bank signer (an enclave) has answered the vault, which can
+    // take a minute or more; an MCP client gives up on a tool call before that. So the answer comes
+    // as soon as the vault holds the payout; the transaction finishes in the background.
+    const sending = this.vault.action("request_bank_payout", { role, beneficiary, amount: input.amount, reference: input.reference }, BANK_PAYOUT_GAS)
+      .then((hash) => ({ hash }), (error: unknown) => ({ error }));
+    const recorded = (async () => {
+      const deadline = Date.now() + this.payoutWaitMs;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, this.payoutPollMs));
+        if (await this.vault.view("get_bank_payout_by_reference", { role, reference: input.reference }).catch(() => null)) return { recorded: true as const };
+      }
+      return { recorded: false as const };
+    })();
+    const first = await Promise.race([sending, recorded]);
+    const settled = "recorded" in first ? (first.recorded ? null : await sending) : first;
+    if (settled && "error" in settled) {
+      if (/MethodNameMismatch|method_name/i.test(String(settled.error))) {
         return { outcome: "refused" as const, reason: "this agent's key predates euro payouts: pair the agent again", refusedBy: "key" as const };
       }
-      throw error;
+      throw settled.error;
     }
     this.wake();
-    return { outcome: "sent" as const, nearTransactionHash, ...(await this.bankStatus(input.reference)) };
+    return {
+      outcome: "sent" as const,
+      ...(settled ? { nearTransactionHash: settled.hash } : { note: "the vault holds the payout; the bank signer answers within a few minutes: follow it with bank_status" }),
+      ...(await this.bankStatus(input.reference)),
+    };
   }
+  /**
+   * The vault refuses any payout while one is pending, before it looks at the beneficiary or the
+   * amount. A payout it would refuse anyway gets that reason instead (read from the same vault, in
+   * the vault's order): waiting would not change it.
+   */
+  private async payoutRefusal(reason: string | null, role: string, beneficiary: number, amount: string): Promise<string | null> {
+    if (reason !== "ERR_BANK_PAYOUT_PENDING") return reason;
+    const [beneficiaries, permission] = await Promise.all([
+      this.vault.view<Array<{ id: number }>>("list_bank_beneficiaries", {}).catch(() => null),
+      this.vault.view<{ max_per_payout: string } | null>("get_bank_permission", { role }).catch(() => null),
+    ]);
+    if (beneficiaries && !beneficiaries.some((item) => item.id === beneficiary)) return "BeneficiaryNotAllowed";
+    if (permission && BigInt(amount) > BigInt(permission.max_per_payout)) return "ERR_MAX_PER_PAYOUT";
+    return reason;
+  }
+  /** How long `bankPayout` waits for the vault to hold the payout, and how often it looks. */
+  payoutWaitMs = 45_000;
+  payoutPollMs = 2_000;
 
   /** Where a euro payout stands: the signer's answer, then the EURC transfer's state. */
   async bankStatus(reference: string): Promise<{ state: string; opId?: Hex; beneficiary?: number; amount?: string; fiatAmount?: string | null; transfer?: { opId: Hex; state: string } | null; error?: string | null }> {
