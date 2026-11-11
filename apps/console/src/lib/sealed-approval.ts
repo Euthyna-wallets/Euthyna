@@ -7,6 +7,7 @@
 import { bytesToHex, createPublicClient, http, keccak256, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
 
+import { omni } from "../omniroles-api.js";
 import { nearRpcMethod, signContractCall, viewContract } from "../wallets.js";
 
 const base = createPublicClient({ chain: baseSepolia, transport: http(import.meta.env.VITE_BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org") });
@@ -89,8 +90,11 @@ export async function sendSealedApprovals(transactionHash: string, signerId: str
   const sent: Hex[] = [];
   for (const opId of sealedApprovalsIn(outcome!.receipts_outcome.flatMap((receipt) => receipt.outcome.logs), vaultAccountId)) {
     // A company with sponsored gas: the vault signed an authorization for its executor, not a raw
-    // transaction; Euthyna's relayer sends it (the vault tells it). Nothing to send from here.
-    if (await viewContract<unknown>(vaultAccountId, "get_sponsored_operation", { op_id: opId }).catch(() => null)) continue;
+    // transaction; Euthyna's relayer sends it. Tell it now, rather than on its next round.
+    if (await viewContract<unknown>(vaultAccountId, "get_sponsored_operation", { op_id: opId }).catch(() => null)) {
+      await omni.sealedAnnounce(bytesToHex(Uint8Array.from(opId))).catch(() => undefined);
+      continue;
+    }
     // Read from the vault itself, not from the log: the bytes MPC signed.
     const operation = await viewContract<Operation | null>(vaultAccountId, "get_operation", { op_id: opId });
     if (!operation?.signed_transaction || operation.state !== "PossiblySigned") continue;

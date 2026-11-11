@@ -2895,6 +2895,11 @@ export class OmniRolesService {
     return true;
   }
 
+  /** The company's vault (the console's sealed orders announce their Base operations on it). */
+  async vaultAccountIdOf(organizationId: string): Promise<string> {
+    return (await this.requireTreasury(organizationId)).vaultAccountId;
+  }
+
   /** An agent acted on its vault (a payment, a call, a payout): the jobs of both processes read it now. */
   agentActed(vaultAccountId: string): void {
     this.publishNotice(vaultAccountId, "agent");

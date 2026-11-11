@@ -1066,6 +1066,16 @@ export function createApp({
       }));
       return context.json(await omniroles.sealedOrderProposal(orgOf(context), input));
     });
+    // A sealed order's router approval or swap, signed by the vault after a member's vote or fill in
+    // the console: the relayer sends it now (sponsored gas) instead of on its next round. Only an
+    // operation of this company's vault asked by the sealed-orders contract is accepted.
+    app.post("/v1/console/omniroles/sealed/announce", requireConsole(auth, consoleLimiter), async (context) => {
+      const input = await parseJson(context, z.object({ opId: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }));
+      const vaultAccountId = await omniroles.vaultAccountIdOf(orgOf(context));
+      const announced = await payments.announce(orgOf(context), { nearAccountId: "", vaultAccountId }, Array.from(Buffer.from(input.opId.slice(2), "hex")));
+      omniroles.agentActed(vaultAccountId);
+      return context.json(announced);
+    });
     app.post("/v1/console/omniroles/proposals/sealed-cancel", requireConsole(auth, consoleLimiter), async (context) => {
       const input = await parseJson(context, z.object({ id: z.number().int().min(0) }));
       return context.json(await omniroles.sealedCancelProposal(orgOf(context), input.id));
