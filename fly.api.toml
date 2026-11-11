@@ -1,0 +1,25 @@
+# Euthyna API and background worker: no public service, reached from the console
+# over Fly's private network (euthyna-api.internal:3000).
+app = "euthyna-api"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+  target = "runtime"
+
+[processes]
+  api = "node apps/api/dist/server.js"
+  worker = "node apps/api/dist/worker.js"
+
+[[vm]]
+  processes = ["api"]
+  size = "shared-cpu-2x"
+  memory = "1gb"
+
+[[vm]]
+  processes = ["worker"]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[deploy]
+  strategy = "rolling"

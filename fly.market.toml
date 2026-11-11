@@ -1,0 +1,13 @@
+# The Market worker: no public service, it polls the API over Fly's private network.
+app = "euthyna-market-worker"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "apps/market-worker/Dockerfile"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[deploy]
+  strategy = "immediate"
