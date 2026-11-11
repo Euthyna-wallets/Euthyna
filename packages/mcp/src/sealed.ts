@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { join } from "node:path";
 
 import type { OrderFile, SealedAgent } from "@euthyna/sdk/sealed-agent";
-import { parseOrder } from "@euthyna/sdk/sealed-orders";
+import { parseOrder, sellSymbol, type SealedSell } from "@euthyna/sdk/sealed-orders";
 import { commitmentOf } from "@euthyna/sdk/sealed-prover";
 import { formatUnits, parseUnits } from "viem";
 
@@ -39,10 +39,11 @@ export class SealedOrdersMcp {
     return path;
   }
 
-  async place(input: { maxPriceUsdc: number; capUsdc: string; days: number; approveUsdc?: string | undefined }) {
+  async place(input: { maxPriceUsdc: number; capUsdc: string; days: number; approveUsdc?: string | undefined; sell?: SealedSell | undefined }) {
     const { file, transactions } = await this.agent.place({
       vault: this.vault, role: this.role, maxPriceUsdc: input.maxPriceUsdc, capUsdc: input.capUsdc, days: input.days,
       ...(input.approveUsdc ? { approveUsdc: input.approveUsdc } : {}),
+      ...(input.sell ? { sell: input.sell } : {}),
     });
     const path = this.save(file);
     return {
@@ -82,7 +83,7 @@ export class SealedOrdersMcp {
       return {
         id: order.id, role: order.role, sealer: order.sealer, commitment: order.commitment,
         filledUsdc: formatUnits(BigInt(order.filled), 6), fills: order.fills, cancelled: order.cancelled,
-        ...(terms ? { yourTerms: { capUsdc: formatUnits(terms.cap, 6), expiresAt: new Date(terms.expiry * 1000).toISOString(), limitRate: terms.limitRate.toString() } } : {}),
+        ...(terms ? { yourTerms: { sell: sellSymbol(terms.tokenIn), capUsdc: formatUnits(terms.cap, 6), expiresAt: new Date(terms.expiry * 1000).toISOString(), limitRate: terms.limitRate.toString() } } : {}),
       };
     });
   }
@@ -98,6 +99,7 @@ export class SealedOrdersMcp {
         if (state === "PossiblySigned") still.push(opId);
       }
       const tick = await this.agent.tick(file, input.chunkUsdc ? parseUnits(input.chunkUsdc, 6) : undefined);
+      const sell = sellSymbol(parseOrder(file.order).tokenIn);
       if (tick.status === "filled") {
         await this.agent.settle(file.vault, tick.opId, 0); // broadcasts now; settles once the Base block is final
         still.push(tick.opId);
@@ -106,10 +108,10 @@ export class SealedOrdersMcp {
       results.push({
         id: file.id,
         status: tick.status,
-        ...(tick.status === "filled" ? { amountUsdc: formatUnits(tick.amountIn, 6), nearTransaction: tick.transaction } : {}),
+        ...(tick.status === "filled" ? { amountUsdc: formatUnits(tick.amountIn, 6), sell, nearTransaction: tick.transaction } : {}),
         ...(tick.status === "refused" ? { reason: tick.reason } : {}),
-        ...(tick.status === "no-funds" ? { reason: `the wallet holds ${formatUnits(tick.balance, 6)} USDC, under the ${formatUnits(tick.amountIn, 6)} to fill` } : {}),
-        ...(tick.status === "needs-approval" ? { reason: `the router may take ${formatUnits(tick.allowance, 6)} USDC, under the ${formatUnits(tick.amountIn, 6)} to fill: place an approval within the role` } : {}),
+        ...(tick.status === "no-funds" ? { reason: `the wallet holds ${formatUnits(tick.balance, 6)} ${sell}, under the ${formatUnits(tick.amountIn, 6)} to fill` } : {}),
+        ...(tick.status === "needs-approval" ? { reason: `the router may take ${formatUnits(tick.allowance, 6)} ${sell}, under the ${formatUnits(tick.amountIn, 6)} to fill: place an approval within the role` } : {}),
         swapsAwaitingSettlement: still.length,
       });
     }

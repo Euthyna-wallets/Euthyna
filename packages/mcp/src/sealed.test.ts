@@ -43,10 +43,24 @@ describe("sealed orders over MCP", () => {
     expect(listed.find((order) => order.id === 5)).not.toHaveProperty("yourTerms");
 
     const filled = await mcp.fill({});
-    expect(filled).toEqual([{ id: 4, status: "filled", amountUsdc: "2", nearTransaction: "fill-tx", swapsAwaitingSettlement: 1 }]);
+    expect(filled).toEqual([{ id: 4, status: "filled", amountUsdc: "2", sell: "USDC", nearTransaction: "fill-tx", swapsAwaitingSettlement: 1 }]);
     // The swap still waits for Base finality: the next call settles it first.
     await mcp.fill({});
     expect(settled).toEqual(["7", "7", "7"]);
+  });
+
+  it("passes the token sold to the agent and names it in what it returns (EURC)", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "sealed-")), "orders");
+    const { agent } = fake();
+    const eurc = { ...terms, tokenIn: "0x623ef90571256F905B2Fde947dC33098BdD8F4d8" };
+    let asked: unknown;
+    agent.place = async (input) => { asked = input.sell; return { file: { order: eurc, vault: VAULT, role: "desk", id: 4, sealedAccountId: "sealed.testnet", commitment: "0x01" }, transactions: ["tx1"] }; };
+    agent.tick = async () => ({ status: "no-funds", amountIn: 2_000_000n, balance: 1_000_000n });
+    const mcp = new SealedOrdersMcp(agent, VAULT, "desk", dir);
+    await mcp.place({ maxPriceUsdc: 100000, capUsdc: "0.05", days: 1, sell: "EURC" });
+    expect(asked).toBe("EURC");
+    expect((await mcp.list()).find((order) => order.id === 4)?.yourTerms?.sell).toBe("EURC");
+    expect(await mcp.fill({})).toEqual([expect.objectContaining({ status: "no-funds", reason: "the wallet holds 1 EURC, under the 2 to fill" })]);
   });
 
   it("takes over a member's order only when its terms hash to an open order of this company", async () => {

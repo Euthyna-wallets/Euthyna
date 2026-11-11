@@ -22,6 +22,7 @@ import {
   sealArgs,
   SEALED_DEPOSIT_YOCTO,
   sealedOrderKind,
+  sellSymbol,
   serializeOrder,
   type SealedOrder,
 } from "@euthyna/sdk/sealed-orders";
@@ -162,11 +163,12 @@ export function SealedOrdersCard() {
 
   const execute = (id: number, order: SealedOrder) => run(async () => {
     const result = await fillNow({ me: me!, sealedId, id, order });
+    const sell = sellSymbol(order.tokenIn);
     switch (result.status) {
-      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} USDC.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : ""}`;
-      case "waiting": return `Not yet: the market gives ${priceOf(result.marketRate)} USDC/WETH, above your limit of ${priceOf(order.limitRate)}.`;
-      case "no-funds": return `The wallet holds ${formatUnits(result.balance, 6)} USDC, under the ${formatUnits(result.amountIn, 6)} to fill: nothing was sent.`;
-      case "needs-approval": return `The router may take ${formatUnits(result.allowance, 6)} USDC, under the ${formatUnits(result.amountIn, 6)} to fill: place an approval within the role first.`;
+      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} ${sell}.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : ""}`;
+      case "waiting": return `Not yet: the market gives ${priceOf(result.marketRate)} ${sell}/WETH, above your limit of ${priceOf(order.limitRate)}.`;
+      case "no-funds": return `The wallet holds ${formatUnits(result.balance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: nothing was sent.`;
+      case "needs-approval": return `The router may take ${formatUnits(result.allowance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: place an approval within the role first.`;
       case "refused": return `Refused: ${result.reason}.`;
       default: return `Nothing to execute: the order is ${result.status}.`;
     }
@@ -286,12 +288,12 @@ export function SealedOrdersCard() {
               <div key={order.id} style={{ display: "flex", flexDirection: "column", gap: 4, borderTop: "1px solid rgba(13,23,48,.12)", padding: "8px 0", fontSize: 13 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <span className="mono">#{order.id} · {order.commitment.slice(0, 10)}…{order.commitment.slice(-4)}</span>
-                  <span>{formatUnits(BigInt(order.filled), 6)} USDC filled in {order.fills} fill{order.fills === 1 ? "" : "s"} · {order.cancelled ? "cancelled" : opened && BigInt(order.filled) >= opened.cap ? "done" : "open"}</span>
+                  <span>{formatUnits(BigInt(order.filled), 6)}{opened ? ` ${sellSymbol(opened.tokenIn)}` : ""} filled in {order.fills} fill{order.fills === 1 ? "" : "s"} · {order.cancelled ? "cancelled" : opened && BigInt(order.filled) >= opened.cap ? "done" : "open"}</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, ...small }}>
                   <span>Placed by {by} · role {order.role}</span>
                   {opened ? (
-                    <span>≤ {priceOf(opened.limitRate)} USDC/WETH · up to {formatUnits(opened.cap, 6)} USDC · until {new Date(opened.expiry * 1000).toLocaleDateString()}</span>
+                    <span>≤ {priceOf(opened.limitRate)} {sellSymbol(opened.tokenIn)}/WETH · up to {formatUnits(opened.cap, 6)} {sellSymbol(opened.tokenIn)} · until {new Date(opened.expiry * 1000).toLocaleDateString()}</span>
                   ) : <span>{order.terms ? "Terms encrypted" : "Terms only in the order file"}</span>}
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {opened && !order.cancelled && BigInt(order.filled) < opened.cap ? <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy} onClick={() => void execute(order.id, opened)}>Execute now</button> : null}

@@ -16,14 +16,25 @@ export const MAX_SLIPPAGE_BPS = 500;
 /** A proof states when it was made; the contract takes it for 10 minutes. */
 export const MAX_PROOF_AGE_S = 600;
 
-/** Base Sepolia: Uniswap v3 SwapRouter02, QuoterV2, USDC (Circle) and WETH. */
+/** Base Sepolia: Uniswap v3 SwapRouter02, QuoterV2, USDC (Circle), EURC (Noah's sandbox euro) and WETH. */
 export const BASE_SEPOLIA_UNISWAP = {
   chainId: 84532,
   router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" as Hex,
   quoter: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27" as Hex,
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as Hex,
+  eurc: "0x623ef90571256F905B2Fde947dC33098BdD8F4d8" as Hex,
   weth: "0x4200000000000000000000000000000000000006" as Hex,
 } as const;
+
+/** What a sealed order may sell for WETH (both 6 decimals). */
+export const SEALED_SELL = { USDC: BASE_SEPOLIA_UNISWAP.usdc, EURC: BASE_SEPOLIA_UNISWAP.eurc } as const;
+export type SealedSell = keyof typeof SEALED_SELL;
+
+/** The symbol of a token a sealed order sells (an address of another token shows as is). */
+export function sellSymbol(token: string): string {
+  const entry = Object.entries(SEALED_SELL).find(([, address]) => address.toLowerCase() === token.toLowerCase());
+  return entry ? entry[0] : token;
+}
 
 /** The hidden terms and the public pair. Only `commitment` (computed from all of it) goes on chain. */
 export type SealedOrder = {
@@ -204,7 +215,7 @@ export function describeSealedProposal(kind: unknown, sealedId: string | null): 
       details.push(`hash ${String(args.commitment)}, filled through the role ${String(args.role)}`);
       details.push("Price limit, size and deadline stay hidden; members read them with their key.");
     } else if (item.method_name === "approve") {
-      details.push(`Uniswap may take up to ${Number(args.amount) / 1e6} USDC from the wallet (within the role)`);
+      details.push(`Uniswap may take up to ${Number(args.amount) / 1e6} ${sellSymbol(String(args.token))} from the wallet (within the role)`);
     } else if (item.method_name === "cancel") {
       title = `Cancel sealed order #${String(args.id)}`;
     }
