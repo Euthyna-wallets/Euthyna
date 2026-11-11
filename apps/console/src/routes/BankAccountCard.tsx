@@ -179,7 +179,8 @@ export function EuroPayoutsCard() {
   const roles = data.roles;
   const chosen = roles.find((item) => item.role === role) ?? roles[0];
   const euroBudgets = chosen?.budgets.filter((item) => item.token === "EURC") ?? [];
-  const chosenBudget = euroBudgets.find((item) => item.key === budget) ?? euroBudgets[0];
+  // A budget of its own by default: payouts sharing a swap budget would spend it (and the reverse).
+  const chosenBudget = euroBudgets.find((item) => item.key === budget);
   const units = (text: string) => (/^\d{1,7}(\.\d{1,2})?$/.test(text) ? String(Math.round(Number(text) * 1_000_000)) : null);
   const ceilingUnits = units(ceiling);
   const dailyUnits = units(daily);
@@ -237,11 +238,13 @@ export function EuroPayoutsCard() {
                 <span style={{ fontSize: 13, color: "var(--ink-2)" }}>pay IBANs from</span>
                 {euroBudgets.length ? (
                   <select aria-label="Budget" value={chosenBudget?.key ?? ""} onChange={(event) => setBudget(event.target.value)} disabled={sign.isPending} style={{ padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "13px var(--font-mono)" }}>
+                    <option value="">a new euro budget</option>
                     {euroBudgets.map((item) => <option key={item.key} value={item.key}>{item.label} ({item.available ?? "?"} EURC left)</option>)}
                   </select>
-                ) : (
+                ) : null}
+                {chosenBudget ? null : (
                   <>
-                    <span style={{ fontSize: 13, color: "var(--ink-2)" }}>a new euro budget of</span>
+                    <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{euroBudgets.length ? "of" : "a new euro budget of"}</span>
                     <input aria-label="Euro budget per day" value={daily} onChange={(event) => setDaily(event.target.value)} disabled={sign.isPending}
                       style={{ width: 80, padding: "8px 10px", border: "1px solid rgba(13,23,48,.2)", font: "14px var(--font-mono)" }} />
                     <span style={{ fontSize: 13, color: "var(--ink-2)" }}>EUR a day,</span>
@@ -259,7 +262,7 @@ export function EuroPayoutsCard() {
                 </button>
               </div>
             ) : null}
-            {!euroBudgets.length && chosen ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}>The role has no EURC budget: the vote creates one, refilled daily, that only euro payouts draw on.</span> : null}
+            {chosen && !chosenBudget ? <span style={{ fontSize: 12, color: "var(--ink-3)" }}>The vote creates a EURC budget, refilled daily, that only euro payouts draw on.</span> : null}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>
