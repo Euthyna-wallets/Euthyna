@@ -296,7 +296,7 @@ export const omni = {
     api<ProposalDraft>("/v1/console/omniroles/proposals/registry", { method: "POST", body: JSON.stringify(input) }),
   revenueProposal: (amountNear: string) => api<ProposalDraft>("/v1/console/omniroles/proposals/revenue", { method: "POST", body: JSON.stringify({ amountNear }) }),
   sealed: () => api<SealedView>("/v1/console/omniroles/sealed"),
-  sealedOrder: (input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null }) =>
+  sealedOrder: (input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null; sell?: "USDC" | "EURC" }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-order", { method: "POST", body: JSON.stringify(input) }),
   sealedCancel: (id: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-cancel", { method: "POST", body: JSON.stringify({ id }) }),
 };
@@ -314,11 +314,13 @@ export type SealedView = {
   tokenIn: string;
   tokenOut: string;
   chainId: number;
-  roles: Array<{ name: string; agents: string[]; budgets: Array<{ label: string; token: string | null; available: string | null; max: string | null; periodDays: number | null }> }>;
+  roles: Array<{ name: string; agents: string[]; budgets: Array<{ label: string; token: string | null; available: string | null; max: string | null; periodDays: number | null }>; sells?: Array<"USDC" | "EURC"> }>;
   orders: SealedOrderView[];
   readers: Array<{ account: string; public_key: string }>;
   /** USDC the router may take from the wallet now (raw units), null when unknown. */
   allowance: string | null;
+  /** The same, for each token a sealed order may sell (an older API sends only `allowance`, for USDC). */
+  allowances?: Partial<Record<"USDC" | "EURC", string | null>>;
 };
 
 export function thresholdText(threshold: unknown, members: number): string {
