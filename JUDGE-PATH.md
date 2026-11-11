@@ -3,7 +3,7 @@
 About 21 minutes for the core path below, timed on 11 November. Each step says what to do, what you should see, and
 how to check it on chain without trusting our servers. Everything runs on **NEAR testnet**, **Base Sepolia** and **Solana devnet**; nothing here is audited.
 
-The console is at **[euthyna.io](https://euthyna.io)** (until 13 November 2026, 09:00 UTC it shows a countdown page).
+The console is at **[euthyna.io](https://euthyna.io)**.
 The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 
 **The core path (21 minutes): parts 3 to 6, 10, 11 and 12.** You need **three NEAR testnet accounts** (a company has
