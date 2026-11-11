@@ -1,9 +1,6 @@
 # Server-only: public HTTPS on 80/443 with Let's Encrypt certificates persisted.
 services:
   console:
-    environment:
-      # Until the reveal on 13 November: the key in https://euthyna.io/enter/<key> (docker/Caddyfile.prod).
-      PREVIEW_KEY: ${PREVIEW_KEY:?set PREVIEW_KEY in .env, a long random string}
     ports:
       - "80:80"
       - "443:443"
