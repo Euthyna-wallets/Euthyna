@@ -41,9 +41,10 @@ COPY --from=build /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=build /app/apps/market-worker/dist ./apps/market-worker/dist
 COPY apps/market-worker/skills ./apps/market-worker/skills
 COPY apps/market-worker/docker-entrypoint.sh ./apps/market-worker/docker-entrypoint.sh
-# The host umask may strip read access (package.json came out 600 once); the worker
-# runs as an unprivileged user, so make the tree readable and the script executable.
-RUN chmod 0755 /app/apps/market-worker/docker-entrypoint.sh
+# The host umask may strip read access (a 600 package.json under umask 077 made the
+# worker fail with ERR_MODULE_NOT_FOUND on @euthyna/sdk/tx-check); the worker runs as
+# an unprivileged user, so make the whole tree readable and the script executable.
+RUN chmod -R a+rX /app && chmod 0755 /app/apps/market-worker/docker-entrypoint.sh
 USER worker
 WORKDIR /app/apps/market-worker
 CMD ["node", "dist/main.js"]

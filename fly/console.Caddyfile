@@ -1,0 +1,56 @@
+{
+  email admin@euthyna.io
+}
+
+# Fly terminates TLS: Caddy serves plain HTTP and Fly's proxy adds the certificate.
+:80 {
+  encode zstd gzip
+
+  # www -> apex (Fly holds the certificates for both names)
+  @www host www.euthyna.io
+  handle @www {
+    redir https://euthyna.io{uri} permanent
+  }
+
+  handle /near-rpc {
+    rewrite * /v1/console/near-rpc
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  handle /api/* {
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  handle /v1/* {
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  handle /health {
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  # Euthyna Market: x402 discovery and A2A endpoints are served by the API.
+  handle /.well-known/* {
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  handle /a2a/* {
+    reverse_proxy euthyna-api.internal:3000
+  }
+
+  handle {
+    root * /srv
+    # Built files carry a hash in their name: cache them for good. Everything else,
+    # index.html first, is revalidated on every visit so a returning visitor never
+    # gets the previous design from cache.
+    @hashed path /assets/*
+    header @hashed Cache-Control "public, max-age=31536000, immutable"
+    # The proving setup (CRS) never changes: a prefix of Aztec's public files, pinned by hash.
+    @crs path /crs/*
+    header @crs Cache-Control "public, max-age=31536000, immutable"
+    @fresh not path /assets/* /crs/*
+    header @fresh Cache-Control "no-cache"
+    try_files {path} /index.html
+    file_server
+  }
+}
