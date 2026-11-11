@@ -1,21 +1,21 @@
 # Judge path
 
-About 18 minutes for the core path below, timed on 11 November. Each step says what to do, what you should see, and
-how to check it on chain without trusting our servers. Everything runs on **NEAR testnet** and **Base Sepolia**; nothing here is audited.
+About 21 minutes for the core path below, timed on 11 November. Each step says what to do, what you should see, and
+how to check it on chain without trusting our servers. Everything runs on **NEAR testnet**, **Base Sepolia** and **Solana devnet**; nothing here is audited.
 
 The console is at **[euthyna.io](https://euthyna.io)** (until 13 November 2026, 09:00 UTC it shows a countdown page).
 The same console runs locally with `pnpm dev` ([Run it](./README.md#run-it)).
 
-**The core path (18 minutes): parts 3 to 6, 10, 11 and 12.** You need **three NEAR testnet accounts** (a company has
+**The core path (21 minutes): parts 3 to 6, 10, 11 and 12.** You need **three NEAR testnet accounts** (a company has
 at least three founders; two of three approve, and the one who proposes approves in the same signature, so each vote
 needs one more founder). [Meteor Wallet](https://wallet.meteorwallet.app), switched to testnet, creates them.
 
 | Part | You need | Time (timed on 11 November) |
 | --- | --- | --- |
-| [3](#3-create-a-company) to [6](#6-halt-every-agent-then-resume): company, wallet, agent, role and swap rule, hijack, halt | three NEAR testnet accounts; an MCP client for part 5 | 4 min |
-| [10. A euro account](#10-a-euro-account-iban-invoices-payouts-payroll): IBAN, invoice, payouts | the company of part 3 | 7 min 15 |
-| [11. Gas paid by vote, and a swap](#11-gas-paid-by-vote-and-a-swap-that-leaves-no-approval) | the company of part 3 | 1 min 10 |
-| [12. Shares and revenue](#12-shares-and-revenue): issue, list, lock, share revenue, claim | the company of part 3 | 5 min 15 |
+| [3](#3-create-a-company) to [6](#6-halt-every-agent-then-resume): company, wallets on Base and Solana, agent, role, hijack, halt | three NEAR testnet accounts; an MCP client for part 5 | 5 min 25 |
+| [10. A euro account](#10-a-euro-account-iban-invoices-payouts-payroll): IBANs (Base and Solana), invoice, payouts | the company of part 3 | 6 min 40 |
+| [11. Gas paid by vote, a swap, a sealed order, Solana](#11-gas-paid-by-vote-a-swap-a-sealed-order-and-solana) | the company of part 3 | 2 min 45 |
+| [12. Shares and revenue](#12-shares-and-revenue): issue, list, lock, share revenue, claim | the company of part 3 | 5 min 45 |
 | *Optional* [1. Look](#1-look-no-wallet) and [2. Attack a live vault](#2-attack-a-live-vault-no-wallet) | a browser; Node 22 for part 2 | 5 min |
 | *Optional* [7. Recover a seat](#7-recover-a-founder-seat) | one more NEAR testnet account, and a mailbox | 6 min, 1 of them waiting |
 | *Optional* [8. Market](#8-market) | | 5 min |
@@ -83,8 +83,11 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
    starts at 1 of 2. Approve it with a second account (**Approve** in **Votes**; sign in with it in another browser).
    **You should see** a Base Sepolia address appear: the company wallet, derived by NEAR Chain Signatures. No private
    key exists for it.
-4. **Check on chain**: `list-keys` on the vault is empty; `get_wallet` on the vault returns the address
-   (`json-args '{"chain_id":84532}'`); the DAO's `get_proposal` shows your two approvals.
+4. **Wallet → Open the Solana wallet**, approve with a second account. **You should see** a Solana devnet address:
+   the company's Solana wallet, also derived by NEAR Chain Signatures (ed25519), with no SOL in it.
+5. **Check on chain**: `list-keys` on the vault is empty; `get_wallet` on the vault returns the address
+   (`json-args '{"chain_id":84532}'`), `get_solana_wallet` the Solana one; the DAO's `get_proposal` shows your two
+   approvals.
 
 ## 4. Hire an agent and vote its role
 
@@ -93,9 +96,10 @@ Sign in with your first NEAR account (you sign a message: free, no transaction).
    role `payments`.)
 2. **Role → Write the role**: the role `payments` opens with **Transfers** added. Token **USDC**, a budget (for
    example 10 every 1 day), one recipient (any address: **Add recipient**). In the same draft, add the swap rule
-   of part 11: **+ DeFi… → Uniswap V3**, sell **EURC** (budget 5 every 1 day, largest approval 5), buy only **WETH**.
-   Preview, submit (your approval is included), then approve with a second account in **Votes**: one vote, one veto
-   window for both. (Outside the guide: **Rules → New role → + Transfers**.)
+   of part 11: **+ DeFi… → Uniswap V3**, sell **EURC** (budget 5 every 1 day, largest approval 5), buy only **WETH**,
+   and tick **Allow sealed orders**. Then **+ Solana transfers**: token **EURC**, budget 5, one recipient (for example
+   `BD5xp8AcoNcMm81bjKw99PYAFFoEAkiJd7fBiPYq8VSC`, **Add**). Preview, submit (your approval is included), then approve
+   with a second account in **Votes**: one vote, one veto window for all of it. (Outside the guide: **Rules → New role → + Transfers**.)
    **You should see** the proposal approved, then the veto window (1 minute on testnet, where any council member can
    stop it), then the role applied by itself.
 3. **Check on chain**: `get_role` on your vault (`json-args '{"role":"payments"}'`) shows the permission tree: the
@@ -221,6 +225,9 @@ euro budget. How it works and what stays private: [docs/bank.md](./docs/bank.md)
 1. **Wallet → Euro bank account · IBAN**: the company's IBAN, holder and BIC. *Sandbox: send a SEPA transfer of…*
    simulates a client paying it. **You should see** the transfer in the list, then EURC in the company wallet
    (Base Sepolia, `0x623ef90571256F905B2Fde947dC33098BdD8F4d8`).
+   **On Solana → Open**: a second IBAN, whose euros arrive as EURC in the company's Solana wallet. Simulate a transfer
+   with **Received on: to the Solana IBAN**. **You should see**, within a minute, EURC (Noah's Token-2022 mint
+   `7D6hWbuzWmEJJmWQ7iVz3p6oxiXoQwfTCVnsqZZ4AhnF`) in the Solana wallet of part 3.
 2. **Invoices → NEW INVOICE**, open its **PDF · QR** (RF reference, SEPA QR), then **SIMULATE PAYMENT**. **You should
    see** it go from Open to Paid on its own when the transfer lands. **EXPORT CSV** lists each payment with its
    transaction, for the accountant.
@@ -231,15 +238,15 @@ euro budget. How it works and what stays private: [docs/bank.md](./docs/bank.md)
    and 10 EUR each (the swap's EURC budget is listed too; payouts drawing on it would spend it).
 5. Ask the agent (MCP `bank_payout`) to pay the beneficiary 5 EUR, then 20 EUR, then to beneficiary #9. **You should
    see** `sent` with the amount the beneficiary receives, then `refused` by the vault: `ERR_MAX_PER_PAYOUT`, then
-   `BeneficiaryNotAllowed`. A vault sends one payout at a time: asked before the first answers `sent`, the next ones
-   are refused with `ERR_BANK_PAYOUT_PENDING`.
+   `BeneficiaryNotAllowed`. A vault sends one payout at a time: another valid payout asked while the first is pending
+   is refused with `ERR_BANK_PAYOUT_PENDING`.
 6. **Payroll · standing orders**: vote "3 EUR to the beneficiary every 10 minutes, 2 times". **You should see** each
    payment made on its date, with no agent and no new vote.
 7. **Check on chain**: `list_bank_payouts` on the vault (`json-args '{}'`) lists each payout, its beneficiary
    number and its transfer; `get_operation` of the transfer shows it `Confirmed`. The transfers of one vault leave one
    at a time, settled about 5 minutes after they are mined (testnet settles on Base's `safe` head); sponsored ones leave without waiting for each other.
 
-## 11. Gas paid by vote, and a swap that leaves no approval
+## 11. Gas paid by vote, a swap, a sealed order, and Solana
 
 The company wallet needs ETH for every Base transaction, unless the members vote sponsored gas: the wallet then
 delegates its code (EIP-7702) to `EuthynaExecutor`, a contract with no owner and no upgrade, and Euthyna's relayer
@@ -265,6 +272,19 @@ deadline. Details and testnet hashes: [docs/sponsored-gas.md](./docs/sponsored-g
    please swap 0.05 EURC, so that it lasts for the judges after you.
 5. **Check on chain**: `get_sponsored_operation` on the vault shows the deadline (and the approval for a swap); the
    router's `allowance` from the wallet is 0 after the swap.
+6. **A sealed order**: a limit order whose price, size and deadline stay hidden on chain. **Wallet → Sealed orders →
+   Register my reading key** (a signature, so the members can read the terms). Then ask the agent to place a sealed
+   order (MCP `place_sealed_order`: `sell` EURC, `maxPriceUsdc` 100000, `capUsdc` 0.05, `days` 1, `approveUsdc`
+   0.05), then to fill it (`fill_sealed_orders`). **You should see** the order in **Sealed orders** with only its
+   hash on chain and its terms readable by you, then `filled`: a zero-knowledge proof that the fill meets the hidden
+   limit, verified on NEAR, and the swap on Base a few seconds later. The vault still checks the role at the fill.
+7. **Solana, with no SOL**: ask the agent to pay 1 EURC on Solana to the recipient of the role (MCP
+   `solana_transfer`, `token` EURC, `amount` 1000000). **You should see** the transfer land on Solana devnet with the
+   company's Solana wallet still at 0 SOL: Euthyna's fee tank (`DEzZKGhVvLo2Sfivv64VRTqTtB2ur1h3jEuyAkrQH3C4`)
+   paid the fee. The worker then settles it on the vault once final (`get_solana_operation`).
+8. **Check on chain**: `orders` on `euthyna-sealed-orders-v3.testnet` (`json-args '{"vault":"<vault>"}'`) shows the
+   order's commitment, `filled` and `fills`, never its price; `get_solana_permissions` on the vault
+   (`json-args '{"role":"payments"}'`) shows the EURC mint, the recipient and the budget.
 
 ## 12. Shares and revenue
 
@@ -296,38 +316,43 @@ Anyone can also buy shares on the public page, signed out, with another NEAR acc
 
 ## Timed on 11 November 2026
 
-The core path on a new company, timed in the console against testnet with fresh accounts (`eut-t1248-a`, `-b`,
-`-c`): **Judge Timed 1248**, DAO `judge-timed-1248.sputnikv2.testnet`, vault
-`judge-timed-1248.euthyna-nomos.testnet`, company wallet `0x61f0d49ff953a6b2abec7a710abbd911fc176532`, shares
-`judge-timed-1248-shares.mandateos.testnet`. Times are from click to result on chain; reading the page and typing
-are not counted. Total: **about 18 minutes**.
+The core path on a new company, timed in the console against testnet with fresh accounts (`eut-t1408-a`, `-b`,
+`-c`): **Judge Timed 1408**, DAO `judge-timed-1408.sputnikv2.testnet`, vault
+`judge-timed-1408.euthyna-nomos.testnet`, company wallets `0x0e28cb6c0b6c7b0f2a57479e0b2dfb42474357de` (Base Sepolia)
+and `BmMdPAKrLZVDx4D4xruPwFdBC1dPb4gAZ4LSkoVWqKgz` (Solana devnet), shares
+`judge-timed-1408-shares.mandateos.testnet`. Times are from click to result on chain; reading the page and typing
+are not counted. Total: **21 min 23 s** (*).
 
 | Part | Step | Time |
 | --- | --- | --- |
 | 3 | Sign in, name, two founders | 10 s |
-| 3 | Create treasury (DAO and vault) | 15 s |
-| 3 | Wallet: propose with my approval, a second founder approves, address shown | 22 s |
+| 3 | Create treasury (DAO and vault) | 17 s |
+| 3 | Base wallet: propose with my approval, a second founder approves, address shown | 23 s |
+| 3 | Solana wallet: propose, approved, address shown | 1 min 4 s |
 | 4 | Hire the payments agent (key file, MCP config) | 12 s |
-| 4 | Write the role with its Uniswap swap rule, a second founder approves, veto window, role on chain | 1 min 58 s |
+| 4 | Write the role (transfers, Uniswap swap with sealed orders, EURC on Solana), approved, veto window, on chain | 2 min 4 s |
 | 5 | The agent over MCP: `mandate`, `check`, pay `0x…dEaD`, pay 50 USDC | 4 s: `parameterNotAllowed`, `allowanceExceeded` |
-| 6 | Halt all agents, propose to resume, a second founder approves | 1 min 9 s |
-| 11 | Sponsor network fees: propose, a second founder approves | 44 s; wallet delegated in the background |
+| 6 | Halt all agents, propose to resume, a second founder approves | 1 min 10 s |
+| 11 | Sponsor network fees: propose, a second founder approves | 41 s; wallet delegated in the background |
 | 10 | Open the euro account, a client pays 30 EUR by SEPA | 37 s |
-| 10 | Enable euro payouts, approved, applied | 1 min 44 s |
-| 10 | Who may pay: a new budget of 50 EUR a day, 10 each, approved | 1 min 5 s |
-| 10 | Vote a SEPA beneficiary (reading key registered in the same flow), applied | 2 min 2 s |
+| 10 | Open the Solana IBAN, a client pays 10 EUR: 9.32 EURC in the Solana wallet | 19 s |
+| 10 | Enable euro payouts, approved, applied | 1 min 40 s |
+| 10 | Who may pay: a new budget of 50 EUR a day, 10 each, approved | 1 min 4 s |
+| 10 | Vote a SEPA beneficiary (reading key registered in the same flow), applied | 2 min 1 s |
 | 10 | Invoice 18 EUR, the client pays, Open → Paid | 45 s |
-| 10 | Agent `bank_payout` 5 EUR / 20 EUR / #9 | 1 min 4 s: sent / `ERR_MAX_PER_PAYOUT` / `BeneficiaryNotAllowed` (*) |
-| 11 | Agent swaps 0.05 EURC for WETH (approve, swap, revoke, sponsored) | mined in 27 s: [`0xd4f116c1…`](https://base-sepolia.blockscout.com/tx/0xd4f116c1a59b0fd9987d289a4d632c4dcfdba0d71971883ddcbf44bd75a69a7b) |
-| 12 | Issue 1000 shares, two proposals approved | about 1 min (**) |
+| 10 | Agent `bank_payout` 5 EUR / 20 EUR / #9 | 1 min 4 s (*) |
+| 11 | Agent swaps 0.05 EURC for WETH (approve, swap, revoke, sponsored) | mined in 35 s: [`0x3869deab…`](https://base-sepolia.blockscout.com/tx/0x3869deabb9a2f23e79065a70bacc92c6fa8dd8f54d2494c3538835d67b114c2d) |
+| 11 | Reading key; the agent seals an order (0.05 EURC for WETH) and fills it | 1 min 3 s: filled 0.05 EURC in one fill |
+| 11 | Agent pays 1 EURC on Solana, the wallet at 0 SOL | 25 s: the recipient +1 EURC |
+| 12 | Issue 1000 shares, two proposals approved | 1 min 25 s |
 | 12 | List the company in the public directory, approved | 1 min 6 s |
-| 12 | The founder locks 100 shares | 16 s |
-| 12 | Share 0.05 NEAR by a vote, prove the vote, claim | 2 min 55 s: PROVE after 1 min 27, CLAIM 0.05 NEAR after 2 min 22 |
+| 12 | The founder locks 100 shares | 17 s |
+| 12 | Share 0.05 NEAR by a vote, prove the vote, claim | 2 min 57 s: PROVE after 1 min 26, CLAIM 0.05 NEAR after 2 min 20 |
 
-(*) The 5 EUR payout answered after 1 minute this time (20 s on the run before); the two refusals, asked before
-it answered, came back `ERR_BANK_PAYOUT_PENDING`, and asked again after it, `ERR_MAX_PER_PAYOUT` and
-`BeneficiaryNotAllowed`.
-(**) From the click to the second approval on chain (the walk's own timer waited on the wrong proposal).
+(*) The agent's first payout waited for the bank enclave's answer and the MCP client gave up at 60 s; the two
+refusals, asked while it was pending, came back `ERR_BANK_PAYOUT_PENDING`. Fixed since (#214): `bank_payout` answers
+`sent` as soon as the vault holds the payout (7 s on the same company), and a payout the vault would refuse anyway
+gets that reason (`ERR_MAX_PER_PAYOUT`, `BeneficiaryNotAllowed`). With it, the path takes about 20 minutes 30.
 
 ## Walked on 9 November 2026
 
