@@ -200,6 +200,8 @@ export type BankView = {
   configured: boolean;
   sandbox?: boolean;
   account?: null | { iban: string; bic: string; bankName: string; accountHolder: string; currency: "EUR"; settlesAs: string; network: string; destinationAddress: string; createdAt: string };
+  /** A second IBAN whose euros settle as EURC in the company's Solana wallet. */
+  solana?: null | { iban: string; bic: string; bankName: string; accountHolder: string; settlesAs: string; network: string; destinationAddress: string };
   transfers?: Array<{ id: string; created: string; status: string; direction: "in" | "out"; amount: string; currency: string; network: string; txHash: string | null; explorer: string | null }>;
 };
 
@@ -253,7 +255,8 @@ export const bankApi = {
     api<ProposalDraft>("/v1/console/omniroles/proposals/standing-order", { method: "POST", body: JSON.stringify(input) }),
   view: () => api<BankView>("/v1/console/bank"),
   open: (input: BankBusiness) => api<BankView>("/v1/console/bank", { method: "POST", body: JSON.stringify(input) }),
-  simulate: (amount: string) => api<{ depositId: string }>("/v1/console/bank/simulate", { method: "POST", body: JSON.stringify({ amount }) }),
+  simulate: (amount: string, rail: "base" | "solana" = "base") => api<{ depositId: string }>("/v1/console/bank/simulate", { method: "POST", body: JSON.stringify({ amount, rail }) }),
+  openSolana: () => api<BankView>("/v1/console/bank/solana", { method: "POST", body: "{}" }),
 };
 
 export const omni = {

@@ -1150,6 +1150,14 @@ export class OmniRolesService {
     return wallet?.address ? { address: getAddress(hexOf(wallet.address)), chainId: treasury.baseChainId, vaultAccountId: treasury.vaultAccountId } : null;
   }
 
+  /** The company's Solana wallet (base58), or null before the members open it. */
+  async companySolanaWallet(organizationId: string): Promise<{ address: string; vaultAccountId: string } | null> {
+    const treasury = await this.treasury(organizationId);
+    if (!treasury) return null;
+    const wallet = await this.view<{ address: number[] | null } | null>(treasury.vaultAccountId, "get_solana_wallet", {});
+    return wallet?.address ? { address: base58Encode(wallet.address), vaultAccountId: treasury.vaultAccountId } : null;
+  }
+
   async status(organizationId: string) {
     const treasury = await this.treasury(organizationId);
     if (!treasury) return { treasury: null, checks: [], wallet: null, dao: null, paused: false };

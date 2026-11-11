@@ -205,7 +205,7 @@ const recovery = recoveryContractId
 // The company's euro account (Noah): deposits on its IBAN settle into the company wallet only.
 const noah = env.NOAH_API_KEY ? new NoahClient({ apiUrl: env.NOAH_API_URL, apiKey: env.NOAH_API_KEY }) : undefined;
 const bank = noah
-  ? new BankService({ prisma, noah, companyWallet: (organizationId) => omniroles.companyWallet(organizationId) })
+  ? new BankService({ prisma, noah, companyWallet: (organizationId) => omniroles.companyWallet(organizationId), solanaWallet: (organizationId) => omniroles.companySolanaWallet(organizationId) })
   : undefined;
 // Invoices paid to that IBAN, matched by the partner's signed FiatDeposit webhook.
 const invoices = noah ? new InvoiceService({ prisma, noah }) : undefined;
