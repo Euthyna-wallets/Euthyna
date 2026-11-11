@@ -980,6 +980,37 @@ mod solana_flow {
         drop(v.execute_solana("payments".into(), request(OK_TO, 1, "same")));
     }
 
+    /// A transfer signed at t=3 that never lands: its op id, from the vault's log.
+    fn unlanded(v: &mut Vault) -> [u8; 32] {
+        context(AGENT, 3);
+        drop(v.execute_solana("payments".into(), request(OK_TO, 1, "lost")));
+        let log = near_sdk::test_utils::get_logs()
+            .into_iter()
+            .find_map(|line| line.strip_prefix("OMNIROLES_SOLANA_OPERATION:").map(str::to_owned))
+            .expect("operation logged");
+        hex::decode(log).unwrap().try_into().unwrap()
+    }
+
+    /// A Solana transaction that has not landed is released once its blockhash has expired
+    /// (15 minutes), not after the settlement timeout (6 hours on testnet).
+    #[test]
+    fn an_unlanded_solana_transfer_frees_the_role_after_fifteen_minutes() {
+        let (mut v, _) = setup();
+        assert!(v.settlement_config.unconfirmed_after_ns.0 > crate::solana::SOLANA_EXPIRED_AFTER_NS);
+        let op_id = unlanded(&mut v);
+        context("anyone.testnet", 3 + crate::solana::SOLANA_EXPIRED_AFTER_NS);
+        v.release_solana_unconfirmed(op_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_UNCONFIRMED_TOO_EARLY")]
+    fn not_before_its_blockhash_has_expired() {
+        let (mut v, _) = setup();
+        let op_id = unlanded(&mut v);
+        context("anyone.testnet", 2 + crate::solana::SOLANA_EXPIRED_AFTER_NS);
+        v.release_solana_unconfirmed(op_id);
+    }
+
     #[test]
     #[should_panic(expected = "ERR_OWNER_ONLY")]
     fn only_the_dao_opens_the_solana_wallet() {
