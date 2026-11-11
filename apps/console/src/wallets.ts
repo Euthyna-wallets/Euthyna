@@ -319,10 +319,18 @@ export async function signDaoProposal(
   // proposal lands first, the kinds differ, the DAO refuses the vote and the whole transaction with it.
   const kind = (proposal.args as { proposal?: { kind?: unknown } }).proposal?.kind;
   const approve = kind !== undefined && await isCouncilMember(proposal.receiverId, signerId);
+  // A proposer's vote can be the deciding one (a founder whose locked shares hold the shareholders'
+  // majority), and the deciding vote runs the proposal: it then needs the proposal's gas. Proposing
+  // takes about 5 Tgas, so the inline vote gets 270 of the transaction's 300; a proposal whose calls
+  // need more (a sealed order with its router approval: 260 Tgas, plus the DAO's own) gets its vote in
+  // a transaction of its own.
+  const actionsGas = ((kind as { FunctionCall?: { actions?: Array<{ gas?: string }> } } | undefined)?.FunctionCall?.actions ?? [])
+    .reduce((total, action) => total + BigInt(action.gas ?? "0"), 0n);
+  const inline = approve && actionsGas <= INLINE_VOTE_CALLS_GAS;
   // The id is read at the chain's head, not at a final block: a final read lags a few blocks, so a
   // second proposal sent right after the first got the first one's id (ERR_ALREADY_VOTED, 9 November).
   // This tab's own last proposal counts too, in case the head read is behind it.
-  const nextId = approve
+  const nextId = inline
     ? Math.max(await daoView<number>(proposal.receiverId, "get_last_proposal_id", {}, "optimistic"), (proposedHere.get(proposal.receiverId) ?? -1) + 1)
     : null;
   const outcome = await wallet.signAndSendTransaction({
@@ -333,12 +341,12 @@ export async function signDaoProposal(
       params: {
         methodName: "add_proposal",
         args: proposal.args,
-        gas: "150000000000000",
+        gas: nextId !== null ? "30000000000000" : "150000000000000",
         deposit: proposal.deposit,
       },
     }, ...(nextId !== null ? [{
       type: "FunctionCall" as const,
-      params: { methodName: "act_proposal", args: { id: nextId, action: "VoteApprove", proposal: kind }, gas: "100000000000000", deposit: "0" },
+      params: { methodName: "act_proposal", args: { id: nextId, action: "VoteApprove", proposal: kind }, gas: "270000000000000", deposit: "0" },
     }] : [])],
   });
   const transactionHash = outcome.transaction_outcome.id;
@@ -348,9 +356,13 @@ export async function signDaoProposal(
     decodeProposalId(outcome.status?.SuccessValue) ??
     await proposalIdFromTransaction(transactionHash, signerId);
   proposedHere.set(proposal.receiverId, Math.max(proposalId, proposedHere.get(proposal.receiverId) ?? -1));
+  if (approve && !inline) await signDaoAction(signerId, proposal.receiverId, proposalId, kind, "VoteApprove");
   await refreshOmniReads();
   return { transactionHash, proposalId };
 }
+
+/** The most gas a proposal's calls may take for the proposer's vote to ride in the proposing transaction. */
+const INLINE_VOTE_CALLS_GAS = 240_000_000_000_000n;
 
 /** The last proposal id this tab created, per DAO. */
 const proposedHere = new Map<string, number>();
