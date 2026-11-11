@@ -172,7 +172,7 @@ export function SealedOrdersCard() {
     const result = await fillNow({ me: me!, sealedId, id, order });
     const sell = sellSymbol(order.tokenIn);
     switch (result.status) {
-      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} ${sell}.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : ""}`;
+      case "filled": return `Filled ${formatUnits(result.amountIn, 6)} ${sell}.${result.baseTransaction ? ` Swap sent to Base (${result.baseTransaction.slice(0, 10)}…); the vault settles it once the block is final.` : " Euthyna's relayer sends the swap to Base (sponsored gas); the vault settles it once the block is final."}`;
       case "waiting": return `Not yet: the market gives ${priceOf(result.marketRate)} ${sell}/WETH, above your limit of ${priceOf(order.limitRate)}.`;
       case "no-funds": return `The wallet holds ${formatUnits(result.balance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: nothing was sent.`;
       case "needs-approval": return `The router may take ${formatUnits(result.allowance, 6)} ${sell}, under the ${formatUnits(result.amountIn, 6)} to fill: place an approval within the role first.`;
@@ -201,12 +201,15 @@ export function SealedOrdersCard() {
     if (needsApproval !== expectedApprove) throw new Error("The server returned an unexpected proposal: nothing was signed.");
     const kind = draft.args.proposal.kind as ReturnType<typeof sealedOrderKind>;
     checkDraft(draft, view, needsApproval ? { FunctionCall: { receiver_id: sealedId, actions: [kind.FunctionCall.actions[0], sealedOrderKind(sealedId, seal).FunctionCall.actions[0]] } } : sealedOrderKind(sealedId, seal));
-    const { proposalId } = await signDaoProposal(me!, draft);
+    const { proposalId, voteHash } = await signDaoProposal(me!, draft);
+    // When the proposer's vote decided (a founder holding the shareholders' majority), the router
+    // approval is already signed: send it to Base now, as a deciding vote in Votes does.
+    const sent = needsApproval && voteHash ? await sendSealedApprovals(voteHash, me!, view.vaultAccountId).catch(() => [] as string[]) : [];
     const guessedId = view.orders.reduce((max, item) => Math.max(max, item.id + 1), 0);
     downloadOrderFile(`sealed-order-${commitment.slice(2, 10)}.json`, { order: serializeOrder(order), vault: view.vaultAccountId, role: roleName, id: guessedId, sealedAccountId: sealedId, commitment });
     setPrice("");
     setCap("");
-    return `Proposal #${proposalId}: seal hash ${commitment.slice(0, 10)}…${needsApproval ? " (with the router approval)" : ""}. `
+    return `Proposal #${proposalId}: seal hash ${commitment.slice(0, 10)}…${needsApproval ? " (with the router approval)" : ""}.${sent.length ? ` Your vote passed it: the router approval is on its way to Base (${sent[0]!.slice(0, 10)}…).` : ""} `
       + `${encrypted ? `Terms encrypted for ${view.readers.length} member key${view.readers.length === 1 ? "" : "s"}. ` : ""}`
       + "The order file was saved. Once the vote passes, execute it here or give it to the role's agent.";
   });

@@ -298,6 +298,7 @@ export const omni = {
   sealed: () => api<SealedView>("/v1/console/omniroles/sealed"),
   sealedOrder: (input: { role: string; commitment: string; slippageBps: number; terms: string | null; approveUsdc: string | null; sell?: "USDC" | "EURC" }) =>
     api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-order", { method: "POST", body: JSON.stringify(input) }),
+  sealedAnnounce: (opId: string) => api<{ opId: string; recorded: boolean }>("/v1/console/omniroles/sealed/announce", { method: "POST", body: JSON.stringify({ opId }) }),
   sealedCancel: (id: number) => api<ProposalDraft>("/v1/console/omniroles/proposals/sealed-cancel", { method: "POST", body: JSON.stringify({ id }) }),
 };
 
