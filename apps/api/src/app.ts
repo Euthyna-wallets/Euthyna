@@ -9,7 +9,7 @@ import { CardError, createCard } from "./cards.js";
 import { RecoveryError, type RecoveryService } from "./recovery/service.js";
 import { BankError, type BankService } from "./bank/service.js";
 import { verifyNoahWebhook, type InvoiceService } from "./bank/invoices.js";
-import { cardAccountIdOf } from "@euthyna/sdk";
+import { cardAccountIdOf, SOLANA_DEVNET } from "@euthyna/sdk";
 
 import { proposedAgentAccountId } from "@euthyna/sdk";
 import { Hono, type Context, type Next } from "hono";
@@ -177,7 +177,8 @@ export const roleDraftSchema = z.object({
       }),
       z.object({
         kind: z.literal("solana-transfer"),
-        token: z.enum(["USDC"]).nullable(),
+        // The SPL tokens the SDK knows on devnet (USDC, Noah's EURC); null is SOL.
+        token: z.string().refine((symbol) => SOLANA_DEVNET.tokens.some((token) => token.mint && token.symbol === symbol), "unknown Solana token").nullable(),
         recipients: z.array(z.object({ address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/), label: z.string().max(80) })).min(1).max(32),
         budget: z.object({ amount: z.string().regex(/^\d+(\.\d+)?$/), periodDays: z.number().positive().max(366) }),
       }),
