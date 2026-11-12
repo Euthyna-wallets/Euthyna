@@ -17,7 +17,7 @@ Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security
 03 Privacy & Private AI, 04 Autonomous Business, 07 Agent Economy, 08 Real-World Money, 12 Social Money).
 Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hackathon](#built-for-the-hackathon).
 
-- **Demo:** <link to the X post>
+- **Demo:** [<link to the X post>](https://x.com/Euthyna_io/status/2120831513109340588)
 - **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 21 minutes, each step checkable on chain
 - **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
 
