@@ -45,9 +45,9 @@ Dupont SAS 4.78 EUR by SEPA ([docs/bank.md](./docs/bank.md)), a seat was recover
 ([docs/sealed-orders-testnet.md](./docs/sealed-orders-testnet.md)), and [Rob the Agent](https://euthyna.io/rob)
 lets anyone try to make a hijacked agent pay outside its role.
 
-**Where it goes.** Today, a company wallet for teams that let agents pay. Next, **Atlantis**: anyone starts an
-AI company owned by its shareholders through a Sputnik DAO; agents do the work, and the revenue goes to the
-holders who vote.
+**Where it goes.** Today, a company wallet for teams that let agents pay. Built on it, live at
+[euthyna.io](https://euthyna.io): **Atlantis**, where anyone starts an AI company owned by its shareholders through a
+Sputnik DAO; agents do the work, and the revenue goes to the holders who vote.
 
 [1] [Giskard](https://giskard.ai/knowledge/how-grok-got-prompt-injected-an-x-user-drained-150-000-from-an-ai-wallet) ·
 [2] [KuCoin News](https://www.kucoin.com/news/flash/ai-agent-lobstar-wilde-loses-440-000-in-solana-transfer-error) ·
@@ -74,7 +74,7 @@ One company, walked through the [judge path](./JUDGE-PATH.md) on 11 November and
 | Swaps | the agent swapped EURC for WETH (approve + swap + revoke, one transaction, gas paid by Euthyna); **3 sealed orders filled**, each proved in zero knowledge on NEAR, price and size never on chain |
 | Solana | the agent paid 1 EURC on Solana from a wallet that held 0 SOL (Euthyna's tank funded the fee) |
 | Shares | 0.05 NEAR of revenue shared by a vote, the vote proved the next epoch, claimed the one after |
-| Refused | 6 attacks by Rob the Agent, each failed on chain with the vault's or the DAO's reason; 48 more in `pnpm attack:all` |
+| Refused | Rob the Agent's 11 cards: 6 failed on chain with the vault's or the DAO's reason (re-read here), 2 refused by NEAR before the chain, 2 stopped by the founders' veto, 1 an off-chain bribe; 48 more in `pnpm attack:all` |
 
 ## Try it: do X, see Y
 
@@ -113,13 +113,13 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 
 | | | Proof |
 | --- | --- | --- |
-| 1 | **One policy engine for every chain.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base Sepolia on testnet, Solana on devnet; Ethereum in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
+| 1 | **One policy engine across chains.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base Sepolia on testnet, Solana on devnet; Ethereum in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
 | 2 | **Nothing to steal.** The vault, the registry and the vault factory (Nomos) have no access key; the company wallet has no private key. No Euthyna server holds a key that moves funds, and the vault settles from an MPC attestation of the finalized transaction, not from a server. | `view_access_key_list`; `contracts/tests/tests/settlement.rs` |
 | 3 | **The key never reaches the AI.** An agent's key is a NEAR function-call key for 16 vault methods. `euthyna-signer` keeps it under another system user and signs only requests to that vault: the AI can ask for a signature, never read the key. | `signer/` (Rust, 24 tests) |
 | 4 | **Limit orders nobody sees.** Price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR, and still goes through the swap role. | `contracts/sealed-orders`; filled on testnet |
 | 5 | **A lost key is not a lost seat.** A zero-knowledge proof that you hold the mailbox you enrolled, made in your browser and verified by a keyless NEAR contract (the address itself never goes on chain); the lost account can cancel during a waiting period; then the founders vote the seat to the new account. | `contracts/email-recovery`, `circuits/email-recovery`; testnet run |
 | 6 | **AI companies buy from each other.** An agent hires another company's agent over A2A + x402; its spending card signs a cheque that the market cashes only on delivery. | `apps/api/src/market/e2e.integration.test.ts` (sandbox, the real signer) |
-| 7 | **Owned by people, run by agents.** Investors buy shares and vote with them; each epoch, revenue goes to the holders who voted. An agent can send revenue through Omni Bridge to the shares contract, and nowhere else. | `contracts/shares`; testnet hashes in [docs/shares.md](./docs/shares.md) |
+| 7 | **Owned by people, run by agents.** Shareholders buy shares and vote with them; each epoch, revenue goes to the holders who voted. An agent can send revenue through Omni Bridge to the shares contract, and nowhere else. | `contracts/shares`; testnet hashes in [docs/shares.md](./docs/shares.md) |
 | 8 | **Try to rob it.** Rob the Agent: each card is a real testnet transaction from a hijacked agent against a real vault. 0 USDC stolen so far, and a bounty for whoever makes it pay outside its law. | [/rob](https://euthyna.io/rob), [docs/rob-the-agent.md](./docs/rob-the-agent.md) |
 | 9 | **A euro IBAN for the company, in and out.** A SEPA transfer arrives as EURC in the company wallet, and only there: the address is read from the vault, never from a request. Out: an agent pays a supplier's **IBAN** under the vault's rule (IBAN voted by the members, amount within the role's euro budget), because the bank partner's key lives in a TEE ([OutLayer](https://outlayer.fastnear.com)) that answers only the vault. | [docs/bank.md](./docs/bank.md), `contracts/vault/src/bank.rs`, `bank-signer/` |
 | 10 | **A wallet that never needs gas, and swaps that leave no approval behind.** One vote and the company wallet delegates its code (EIP-7702) to `EuthynaExecutor`, a contract with no owner and no upgrade: Euthyna's relayer sends the calls and pays the gas, but the wallet runs only what the vault had NEAR MPC sign, once, before a deadline, and the vault settles on the `Executed` log NEAR MPC attests. A swap runs as approve + swap + revoke in one transaction, signed once: the spender is the swap's own target and the revoke is added by the vault. | [docs/sponsored-gas.md](./docs/sponsored-gas.md) (Uniswap V3 WETH → USDC from a wallet at 0 ETH on Base Sepolia), `contracts/evm/executor`, `contracts/vault/src/sponsored.rs` |
@@ -128,7 +128,7 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 
 | | Agents | People |
 | --- | --- | --- |
-| Who | AI employees, plugged in over MCP (`packages/mcp`) | founders, members, investors |
+| Who | AI employees, plugged in over MCP (`packages/mcp`) | founders, members, shareholders |
 | What they can do | what their role allows, checked on chain | the same roles (a member can be a human), plus votes |
 | Outside the role | refused, no escalation | a transaction voted by the DAO, like a multisig |
 | Keys | a function-call key on the vault, kept by `euthyna-signer` | their own NEAR wallet; a lost one comes back by ZK Email and a vote |
@@ -228,10 +228,10 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 ![Product architecture: shareholders buy and lock shares and vote company calls; founders vote roles, veto and halt; the company (a DAO and a keyless vault holding NEAR, Base, Solana and a euro IBAN) is listed in the public directory; agents and people act within their roles: pay suppliers, sealed swaps, the Market, and revenue sent home, shared with the shareholders who voted](./docs/diagrams/product.png)
 
-1. **Raise**: founders create the company; investors buy shares and the proceeds go to the treasury.
+1. **Raise**: founders create the company; shareholders buy shares and the proceeds go to the treasury.
 2. **Hire**: the owners vote a role for each AI employee. The agent plugs in over MCP.
 3. **Work**: agents pay suppliers, swap and invest within their budget, and bring revenue back.
-4. **Share**: each epoch, revenue goes to the investors who voted.
+4. **Share**: each epoch, revenue goes to the shareholders who voted.
 5. **Show**: the company lists itself in the public directory, by vote.
 
 ## Technical architecture
@@ -260,7 +260,7 @@ vote transactions.
 
 - **Founders** vote on everything by two thirds: roles, budgets, members, pause,
   and transactions outside any role (a multisig).
-- **Investors** buy shares at a fixed price (proceeds go to the DAO) and lock
+- **Shareholders** buy shares at a fixed price (proceeds go to the DAO) and lock
   them to vote on company calls and transfers, by majority of locked shares.
   Founders keep their veto on vault changes.
 - **Revenue for voters**: what the company shares in an epoch (NEAR, or Base ETH
@@ -295,7 +295,7 @@ How the cheque is checked, what the worker's agent may do, and what was tested: 
 | 48 attacks refused (hacked agent, stolen Guard key, stolen server, one rogue member) | `pnpm attack:all`, [docs/attacks.md](./docs/attacks.md) |
 | The same attacks against a live testnet vault, read-only | `pnpm attack:testnet` |
 | Shares: sale, votes, revenue only for voters, over three epochs | [docs/shares.md](./docs/shares.md) (testnet hashes) |
-| An agent sends ETH from Base to the investors through Omni Bridge; the same call to another account is refused | [docs/shares.md](./docs/shares.md) (testnet hashes) |
+| An agent sends ETH from Base to the shareholders through Omni Bridge; the same call to another account is refused | [docs/shares.md](./docs/shares.md) (testnet hashes) |
 | Keyless registry deployed; companies listed by DAO vote | [docs/registry.md](./docs/registry.md) (testnet hashes) |
 | Founder seat recovery verified on chain: enroll, a request from another mailbox refused, cancel, ready after the delay, then the founders' vote | [docs/recovery.md](./docs/recovery.md) (testnet hashes), `contracts/tests/tests/email_recovery.rs` |
 | Market end to end: an agent hires another company's agent, its card pays on delivery, the seller's vault receives exactly the price | `apps/api/src/market/e2e.integration.test.ts` (NEAR sandbox, PostgreSQL, the real euthyna-signer) |
