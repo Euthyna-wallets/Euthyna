@@ -1,16 +1,17 @@
 # Euthyna
 
-**Give AI agents money. Never the keys.**
+**A company's whole treasury, under one law its owners vote.**
+*Give AI agents money. Never the keys.*
 
-Euthyna is a company wallet on NEAR where **people and AI agents act under rules the owners vote**.
-Each member, human or agent, gets a role: which chains, contracts, functions, parameters and budget.
-A vault with no access key checks the role on chain before NEAR Chain Signatures sign anything: on
-NEAR and Base Sepolia today, Ethereum and Solana in the code. Everything outside the roles is a multisig vote of the owners.
-The company wallet needs no gas: once the owners vote it, Euthyna's relayer pays its Base transactions (EIP-7702, testnet),
-and a swap's approval is granted and revoked in the same transaction.
+Agents pay, swap, sell and send the revenue home. Owners vote the rules and how the revenue is shared.
+A NEAR vault with no access key enforces them on every wallet the company holds: NEAR, Base, Solana, and a euro IBAN.
 
-So a hijacked agent cannot pay the attacker, a stolen server cannot move funds, and one rogue member
-cannot change the rules: **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)).
+- **Wallets with no key, and no gas to buy**: the vault holds the NEAR funds itself; Base Sepolia and Solana devnet addresses are derived by NEAR Chain Signatures, signed only when a role allows it, and their gas is paid by Euthyna (on Base, once the owners vote it)
+- **A euro bank account on the same law**: SEPA in as EURC, payouts only to IBANs the members voted
+- **Owned by shareholders**: shares, votes, and revenue paid to the holders who voted
+- **Agents hire agents**: on the Market, one company's agent buys from another's; its cheque is cashed only on delivery
+- **Private by design**: sealed limit orders proven in zero knowledge; a lost seat recovered by ZK Email and a vote
+- **Built to be robbed**: we assume the agent is compromised. **48 attacks, 48 refused** ([Check it yourself](#check-it-yourself)), and a public game where anyone can try
 
 Built at the [NEAR Hackathon](https://nearhackathon.com/) (tracks 06 AI Security & Defense,
 03 Privacy & Private AI, 04 Autonomous Business, 07 Agent Economy, 08 Real-World Money, 12 Social Money).
@@ -19,7 +20,6 @@ Testnet only, unaudited. Work started on 20 October 2026: see [Built for the hac
 - **Demo:** <link to the X post>
 - **Live:** [euthyna.io](https://euthyna.io) · **Judges:** [JUDGE-PATH.md](./JUDGE-PATH.md), about 21 minutes, each step checkable on chain
 - **Every claim and its status** (testnet, code, next): [CLAIMS.md](./CLAIMS.md)
-- The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.
 
 ## Why
 
@@ -113,7 +113,7 @@ pnpm install && pnpm attack:all       # 48 attacks: 48 refused
 
 | | | Proof |
 | --- | --- | --- |
-| 1 | **One policy engine for every chain.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base on testnet; Ethereum and Solana in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
+| 1 | **One policy engine for every chain.** A role pins chain, contract, function and calldata conditions (recipient, amount read from the calldata), with refilling budgets, velocity limits, co-signature thresholds and single-use references. The vault enforces it on NEAR, then NEAR MPC signs the transaction for the target chain (Base Sepolia on testnet, Solana on devnet; Ethereum in the code). | `contracts/vault`, `contracts/omniroles-conditions`; Base Sepolia payments on testnet |
 | 2 | **Nothing to steal.** The vault, the registry and the vault factory (Nomos) have no access key; the company wallet has no private key. No Euthyna server holds a key that moves funds, and the vault settles from an MPC attestation of the finalized transaction, not from a server. | `view_access_key_list`; `contracts/tests/tests/settlement.rs` |
 | 3 | **The key never reaches the AI.** An agent's key is a NEAR function-call key for 16 vault methods. `euthyna-signer` keeps it under another system user and signs only requests to that vault: the AI can ask for a signature, never read the key. | `signer/` (Rust, 24 tests) |
 | 4 | **Limit orders nobody sees.** Price, total and deadline are one hash on chain, before and after a fill. Each fill comes with a zero-knowledge proof that it meets the hidden terms, verified on NEAR, and still goes through the swap role. | `contracts/sealed-orders`; filled on testnet |
@@ -226,7 +226,7 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 ## Product architecture
 
-![Product architecture: investors and the security council outside the AI company; roles, AI employees and treasury inside; clients, suppliers and the public directory around it](./docs/diagrams/product.png)
+![Product architecture: shareholders buy and lock shares and vote company calls; founders vote roles, veto and halt; the company (a DAO and a keyless vault holding NEAR, Base, Solana and a euro IBAN) is listed in the public directory; agents and people act within their roles: pay suppliers, sealed swaps, the Market, and revenue sent home, shared with the shareholders who voted](./docs/diagrams/product.png)
 
 1. **Raise**: founders create the company; investors buy shares and the proceeds go to the treasury.
 2. **Hire**: the owners vote a role for each AI employee. The agent plugs in over MCP.
@@ -236,7 +236,7 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 ## Technical architecture
 
-![Technical architecture: the agent calls the OmniRoles vault directly (prepare, authorize); the owners vote rules and suppliers through the Sputnik DAO; NEAR MPC signs for the company wallet, the signed transaction is relayed unchanged to Ethereum, Base, Arbitrum (Solana in the code, Bitcoin next), and NEAR MPC verifies the finalized receipt so the vault settles the budget. The Guard is optional advice.](./docs/diagrams/technical.png)
+![Technical architecture: the agent calls the OmniRoles vault directly (prepare, authorize); the owners vote rules and suppliers through the Sputnik DAO; the vault holds the NEAR itself and has NEAR MPC sign for the company wallets only what a role allows; the signed transaction is relayed unchanged to Base (testnet) and Solana (devnet), with Ethereum and Arbitrum mapped and Bitcoin next; NEAR MPC verifies the finalized receipt so the vault settles the budget. The Guard is optional advice.](./docs/diagrams/technical.png)
 
 | Layer | Holds keys that move funds? |
 | --- | --- |
@@ -394,3 +394,4 @@ From 1 November, on NEAR:
 `MandateOS`, the project's first name, survives only in testnet account names (`*.mandateos-root-20261021.testnet`),
 the local database name and the contracts' Cargo metadata (changing it would change the wasm hashes).
 
+The same author also submits **NEAR Post** ([github.com/Koploseus/near-post](https://github.com/Koploseus/near-post)), a football game on NEAR.

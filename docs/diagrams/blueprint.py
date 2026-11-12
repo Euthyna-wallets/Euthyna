@@ -111,7 +111,7 @@ def legend(y, w):
 def technical():
     out.clear()
     cx = 290
-    text(24, 40, 'MANDATEOS · TECHNICAL', 13, GOLD, 'start', 700)
+    text(24, 40, 'EUTHYNA · TECHNICAL', 13, GOLD, 'start', 700)
     legend(64, 600)
     # Off chain: the agent, and an optional advisory Guard.
     node(cx, 160, 46, 'agent', 'AI employee', 'agent over MCP|key in euthyna-signer')
@@ -124,7 +124,7 @@ def technical():
     # Agent acts directly on the vault: no visa, no backend.
     arrow(f'M{cx-54} 160 H112 V470 H{cx-62}')
     chip(112, 330, 'prepare · authorize')
-    node(cx, 470, 52, 'vault', 'OmniRoles vault', 'roles · budgets · suppliers|no access key', ring=GOLD)
+    node(cx, 470, 52, 'vault', 'OmniRoles vault', 'roles · budgets · suppliers|no access key · holds the NEAR', ring=GOLD)
     node(500, 470, 40, 'dao', 'Owners', 'Sputnik DAO|vote + veto')
     arrow(f'M453 470 H{cx+66}')
     text(398, 458, 'vote rules', 12, CYAN, weight=600)
@@ -135,19 +135,22 @@ def technical():
     chip(cx + 84, 635, 'verified receipt')
     node(cx, 726, 46, 'mpc', 'NEAR MPC', 'signs · verifies receipts')
     arrow(f'M{cx} 828 V884')
-    node(cx, 940, 46, 'wallet', 'Company wallet', 'one MPC key|EVM today · more soon', ring=GOLD)
+    node(cx, 940, 46, 'wallet', 'Company wallets', 'MPC-derived · no key|gas paid by Euthyna', ring=GOLD)
     chip(cx, 1096, 'signed tx · relayed as is', GOLD)
     xs = [70, 158, 246, 334, 422, 510]
-    for x in xs:
-        arrow(f'M{cx + (x-cx)*0.12} 1112 Q{x} 1118 {x} 1158', color=GOLD, dash=None if x < 300 else '5 6')
-    for x, n in zip(xs, ['ethereum', 'base', 'arbitrum', 'solana', 'bitcoin', None]):
-        dim = n in ('solana', 'bitcoin', None)
+    live = ('base', 'solana')
+    for x, n in zip(xs, ['base', 'solana', 'ethereum', 'arbitrum', 'bitcoin', None]):
+        arrow(f'M{cx + (x-cx)*0.12} 1112 Q{x} 1118 {x} 1158', color=GOLD, dash=None if n in live else '5 6')
+    for x, n in zip(xs, ['base', 'solana', 'ethereum', 'arbitrum', 'bitcoin', None]):
+        dim = n not in live
         if dim:
             out.append('<g opacity=".55">')
         chain_hex(x, 1198, n, None if n else '+')
         if dim:
             out.append('</g>')
-    text(422, 1262, 'coming next', 12, MUTED)
+    text(114, 1262, 'live (testnet, devnet)', 12, GOLD)
+    text(290, 1262, 'mapped', 12, MUTED)
+    text(466, 1262, 'next', 12, MUTED)
     # MPC reads the finalized receipt on the destination chain.
     arrow(f'M560 1166 V726 H{cx+58}', dash='7 6', w=2.2)
     chip(580, 1000, 'finalized receipt', anchor='end')
@@ -157,26 +160,26 @@ def technical():
 def product():
     out.clear()
     cx = 290
-    text(24, 40, 'MANDATEOS · PRODUCT', 13, GOLD, 'start', 700)
+    text(24, 40, 'EUTHYNA · PRODUCT', 13, GOLD, 'start', 700)
     legend(64, 580)
-    node(160, 160, 44, 'investors', 'Investors', 'buy · vote · earn')
-    node(420, 160, 44, 'founders', 'Security council', 'vote · veto · pause')
+    node(160, 160, 44, 'investors', 'Shareholders', 'buy · lock · vote · earn')
+    node(420, 160, 44, 'founders', 'Founders', 'vote roles · veto · halt')
     arrow('M144 262 Q150 340 236 376', color=GOLD)
     arrow('M186 262 Q200 320 258 362')
     arrow('M410 262 Q394 330 334 368')
     chip(156, 336, 'buy shares', GOLD)
-    chip(236, 300, 'vote roles')
-    chip(432, 318, 'vote · veto')
-    node(cx, 430, 52, 'company', 'AI company', 'DAO + treasury', ring=GOLD)
+    chip(236, 300, 'vote calls')
+    chip(432, 318, 'roles · veto')
+    node(cx, 430, 52, 'company', 'Company', 'DAO + keyless vault|NEAR · Base · Solana · IBAN', ring=GOLD)
     arrow(f'M{cx+62} 430 H456', dash='6 6')
     node(510, 430, 34, 'directory', 'Directory', 'public|on chain')
-    arrow(f'M{cx} 536 V610')
-    chip(cx, 573, 'roles and budgets')
-    node(cx, 666, 48, 'agents', 'AI employees', 'agents over MCP')
+    arrow(f'M{cx} 556 V610')
+    chip(cx, 583, 'roles and budgets')
+    node(cx, 666, 48, 'agents', 'Agents and people', 'act within their role')
     xs = [140, 240, 340, 440]
     for x in xs:
         arrow(f'M{cx + (x-cx)*0.2} 770 Q{x} 778 {x} 818', color=GOLD)
-    for x, ic, lab in zip(xs, ['chart', 'invoice', 'swap', 'share'], ['DeFi', 'Pay|suppliers', 'Swaps', 'Share|revenue']):
+    for x, ic, lab in zip(xs, ['invoice', 'swap', 'directory', 'share'], ['Pay|suppliers', 'Swap|sealed', 'Market|sell, hire', 'Revenue|home']):
         job(x, 856, ic, lab)
     arrow('M440 950 V986 H52 V160 H104', color=GOLD)
     chip(240, 986, 'revenue for voters', GOLD)
