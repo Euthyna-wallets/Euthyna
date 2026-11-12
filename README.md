@@ -226,7 +226,7 @@ pnpm --filter @euthyna/api sealed watch order.json --key watcher.json
 
 ## Product architecture
 
-![Product architecture: shareholders buy and lock shares and vote company calls; founders vote roles, veto and halt; the company (a DAO and a keyless vault holding NEAR, Base, Solana and a euro IBAN) is listed in the public directory; agents and people act within their roles: pay suppliers, sealed swaps, the Market, and revenue sent home, shared with the shareholders who voted](./docs/diagrams/product.png)
+![Product architecture: shareholders buy and lock shares and vote company calls; founders vote roles, budgets and members; the security council (the founders by default) vetoes and halts; the company (a DAO and a keyless vault holding NEAR, Base, Solana and a euro IBAN) is listed in the public directory; agents and people act within their roles: pay suppliers, sealed swaps, the Market, and revenue sent home, shared with the shareholders who voted](./docs/diagrams/product.png)
 
 1. **Raise**: founders create the company; shareholders buy shares and the proceeds go to the treasury.
 2. **Hire**: the owners vote a role for each AI employee. The agent plugs in over MCP.
@@ -260,6 +260,10 @@ vote transactions.
 
 - **Founders** vote on everything by two thirds: roles, budgets, members, pause,
   and transactions outside any role (a multisig).
+- **Security council**: any one member vetoes a queued rule change or a held operation during its delay,
+  and halts every agent at once (only a vote resumes them). It is the founders by default; the vault
+  takes any list of accounts the DAO votes (`SetCouncil`), for instance an outside security team that
+  can stop the company's agents but never move its money. The console keeps it equal to the founders today.
 - **Shareholders** buy shares at a fixed price (proceeds go to the DAO) and lock
   them to vote on company calls and transfers, by majority of locked shares.
   Founders keep their veto on vault changes.
