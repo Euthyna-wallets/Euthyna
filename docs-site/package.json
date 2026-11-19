@@ -1,0 +1,21 @@
+{
+  "name": "@euthyna/docs-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "dev": "node scripts/sync.mjs && astro dev",
+    "build": "node scripts/sync.mjs && astro build",
+    "preview": "astro preview",
+    "deploy": "wrangler pages deploy dist --project-name euthyna-docs --branch main"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.43.1",
+    "astro": "7.4.13",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "wrangler": "4.165.0"
+  },
+  "packageManager": "pnpm@12.15.0"
+}
