@@ -18,4 +18,3 @@ test-results
 *.log
 *.swp
 .DS_Store
-docs-site
